@@ -348,6 +348,37 @@ bool check_model_file(const std::string& path, Value& info, std::string& why) {
     return true;
 }
 
+// A kit model's file (static_models::validate_kit_glb): its own textures' rules and no game material with a texture; `p`
+// holds the declaration's kit, materials and material (the names it may not embed a texture under).
+bool check_kit_model_file(const std::string& path, const Value& p, Value& info, std::string& why) {
+    std::error_code ec;
+    const fs::path file = utf8_path(path);
+    if (!fs::is_regular_file(file, ec)) return why = "no file " + path, false;
+    const auto& kit = p.get("kit");
+    if (kit.type != Value::Object || kit.get("stage").type != Value::String || kit.get("room").type != Value::Number)
+        return why = "kit is a room of the game: {\"stage\": \"sea\", \"room\": 13}", false;
+    std::ifstream f(file, std::ios::binary);
+    std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+    std::vector<std::string> names;
+    if (p.get("material").type == Value::String) names.push_back(p.get("material").text);
+    if (p.get("materials").type == Value::Object)
+        for (const auto& [from, to] : p.get("materials").object) {
+            names.push_back(from);
+            names.push_back(to.string());
+        }
+    static_models::KitInfo k;
+    if (!static_models::validate_kit_glb(bytes, names, k, why)) return false;
+    info = Value();
+    info["kind"] = "kit";
+    info["size"] = double(bytes.size());
+    info["triangles"] = double(k.triangles);
+    info["materials"] = double(k.materials);
+    info["own_materials"] = double(k.own_materials);
+    info["own_texture_bytes"] = double(k.own_texture_bytes);
+    info["clips"] = array();
+    return true;
+}
+
 // ---------------------------------------------------------------- problems and export
 std::vector<Problem> package_problems(const std::string& mod, const Value& manifest, const std::vector<std::pair<std::string, Value>>& all,
                                       const std::string& dir) {
@@ -391,7 +422,9 @@ std::vector<Problem> package_problems(const std::string& mod, const Value& manif
         }
         Value info;
         if (!fs::is_regular_file(file, ec)) add({"model " + id + ": " + source + " is not in the package", "model", id, "source"});
-        else if (!check_model_file(file.string(), info, why)) add({"model " + id + ": " + why, "model", id, "source"});
+        else if (m.get("kind").string() == "kit") {
+            if (!check_kit_model_file(file.string(), m, info, why)) add({"model " + id + ": " + why, "model", id, "source"});
+        } else if (!check_model_file(file.string(), info, why)) add({"model " + id + ": " + why, "model", id, "source"});
         else if (m.get("kind").string("static") != info.get("kind").string())
             add({"model " + id + ": the file is a " + info.get("kind").string() + " model, the package says " + m.get("kind").string("static"), "model", id, "kind"});
     }
@@ -919,7 +952,9 @@ Value Session::dispatch_build(const std::string& command, const Value& p, std::s
         if (!pkg) return r;
         if (pkg->dir.empty()) return why = "the mod has no package folder", r;
         Value info;
-        if (!check_model_file(text(p, "file"), info, why)) return r;
+        const bool kit = p.get("kit").type != Value::Null;
+        if (!kit && (p.get("materials").type != Value::Null || p.get("material").type != Value::Null)) return why = "materials and material need kit (a room of the game)", r;
+        if (kit ? !check_kit_model_file(text(p, "file"), p, info, why) : !check_model_file(text(p, "file"), info, why)) return r;
         const fs::path from = utf8_path(text(p, "file"));
         const std::string id = p.get("id").type == Value::String ? p.get("id").text : slug(from.stem().string());
         if (!id_ok(id)) return why = "a model id is 1 to 32 lower-case letters, digits, '-', '_' or '.'", r;
@@ -943,6 +978,11 @@ Value Session::dispatch_build(const std::string& command, const Value& p, std::s
         entry["id"] = id;
         entry["source"] = source;
         entry["kind"] = info.get("kind");
+        if (kit) {
+            entry["kit"] = p.get("kit");
+            if (p.get("materials").type != Value::Null) entry["materials"] = p.get("materials");
+            if (p.get("material").type != Value::Null) entry["material"] = p.get("material");
+        }
         ok = change(*pkg, "Import model " + id, [&](Value& m, std::string&) {
             if (m.get("models").type != Value::Array) m["models"] = array();
             m["models"].array.push_back(entry);
@@ -959,6 +999,37 @@ Value Session::dispatch_build(const std::string& command, const Value& p, std::s
             if (host_->prepare_model(pkg->mod, pkg->dir, entry, note, w)) r["note"] = note;
             else r["note"] = "the model is in the package; it is prepared when the game starts (" + w + ")";
         }
+        return r;
+    }
+    if (command == "set_model_kit" || command == "reload_model") {
+        Package* pkg = package(p, why);
+        if (!pkg) return r;
+        const std::string id = text(p, "model");
+        const Value* md = by_id(pkg->manifest.get("models"), id);
+        if (!md) return why = "no model \"" + id + "\"", r;
+        if (md->get("kind").string() != "kit") return why = "only a kit model is built again while the game runs (another model takes a changed file at the next start)", r;
+        Value entry = *md;
+        if (command == "set_model_kit") {
+            if (p.get("kit").type != Value::Null) entry["kit"] = p.get("kit");
+            if (p.object.contains("materials")) { if (p.get("materials").type == Value::Null) entry.object.erase("materials"); else entry["materials"] = p.get("materials"); }
+            if (p.object.contains("material")) { if (p.get("material").string().empty()) entry.object.erase("material"); else entry["material"] = p.get("material"); }
+        }
+        Value info, check = entry;
+        if (!check_kit_model_file((fs::path(utf8_path(pkg->dir)) / utf8_path(entry.get("source").string())).string(), check, info, why)) return r;
+        if (command == "set_model_kit") {
+            ok = change(*pkg, "Model " + id + " kit", [&](Value& m, std::string&) {
+                for (auto& x : m["models"].array)
+                    if (x.get("id").string() == id) x = entry;
+                return true;
+            }, r, why);
+            if (!ok) return r;
+        }
+        r["model"] = entry;
+        r["info"] = info;
+        if (!host_) return why = "the game is not running: the model is built when it starts", r;
+        std::string note;
+        ok = host_->prepare_model(pkg->mod, pkg->dir, entry, note, why);
+        if (ok) r["note"] = note;
         return r;
     }
     if (command == "check_package") {

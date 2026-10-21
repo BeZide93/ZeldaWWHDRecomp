@@ -178,7 +178,7 @@ Manifest manifest(const fs::path& path){
         else world_declarations = !quests.empty() || !charts.empty() || !letters.empty() ||
                                   !items.empty() || !actors.empty() || !scenes.empty();
         // the game's own objects and island buildings by reference: the package holds no game data (they come from the player's game files)
-        if(m.problem.empty()&&std::any_of(actors.begin(),actors.end(),[](const story_notebook::ManifestActor& a){return a.game_object()||a.game_piece();}))
+        if(m.problem.empty()&&(std::any_of(actors.begin(),actors.end(),[](const story_notebook::ManifestActor& a){return a.game_object()||a.game_piece()||a.kit_model;})))
             if(const auto found=story_game_objects::game_data_file(path);!found.empty())
                 m.problem="Game objects: the package holds game data ("+found+"); game objects and buildings come from the player's own game files";
     }
@@ -201,7 +201,14 @@ Manifest manifest(const fs::path& path){
         auto checked=path;for(const auto& part:fs::path(model.source)){checked/=part;require(!fs::is_symlink(checked),"Model source paths may not use symlinks");}
         // a kit model (drawn with a kit room's materials, story_kit_models.h) has no pictures of its own and a mod
         // stage ground's size; its converter checks it when the game starts
-        if(model.kind=="kit"){require(fs::is_regular_file(checked)&&fs::file_size(checked)<=16u*1024*1024,"Missing kit model source or larger than 16 MiB");continue;}
+        if(model.kind=="kit"){
+            require(fs::is_regular_file(checked)&&fs::file_size(checked)<=16u*1024*1024,"Missing kit model source or larger than 16 MiB");
+            // no game textures in the package: a material named as a game material carries none (the converter checks the names)
+            std::ifstream input(checked,std::ios::binary);std::vector<uint8_t> bytes{std::istreambuf_iterator<char>(input),{}};
+            std::vector<std::string> names;if(!model.kit_material.empty())names.push_back(model.kit_material);for(const auto&[from,to]:model.kit_materials){names.push_back(from);names.push_back(to);}
+            static_models::KitInfo kit;require(static_models::validate_kit_glb(bytes,names,kit,model_error),"Model "+model.id+": "+model_error);
+            continue;
+        }
         require(fs::is_regular_file(checked)&&fs::file_size(checked)<=static_models::kMaxSourceBytes,"Missing or oversized model source");
         std::ifstream input(checked,std::ios::binary);std::vector<uint8_t> bytes{std::istreambuf_iterator<char>(input),{}};
         static_models::ModelInfo info;

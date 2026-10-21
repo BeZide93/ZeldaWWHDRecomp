@@ -1,4 +1,5 @@
 #include "mods/story_game_pieces.h"
+#include "mods/story_kit_models.h"
 #include "mods/mod_stages.h"
 #include <algorithm>
 #include <array>
@@ -240,6 +241,11 @@ std::vector<std::string> used(const std::vector<story_notebook::ManifestActor>& 
 std::string cache_directory(const std::string&){return {};}
 std::shared_ptr<const BuiltSet> build(const std::string&,const std::string&,const std::vector<std::string>&,const std::string&,const std::string&){throw std::runtime_error("no buildings in loader tests");}
 bool register_for_mod(const std::string&,const BuiltSet&,const std::string&,bool,std::string& why){return why="no buildings in loader tests",false;}
+}
+namespace story_kit_models {
+std::string cache_directory(const std::string&){return {};}
+std::shared_ptr<const story_game_pieces::BuiltSet> build(const std::string&,const story_notebook::ManifestModel&,const std::string&,const std::string&,const std::vector<std::string>&,const std::string&,const std::string&,bool){throw std::runtime_error("no kit models in loader tests");}
+bool register_for_mod(const std::string&,const std::string&,const story_game_pieces::BuiltSet&,bool,std::string& why){return why="no kit models in loader tests",false;}
 }
 namespace story_actors {
 bool placed_chest_item(uint32_t,std::string&,std::string&){return false;}

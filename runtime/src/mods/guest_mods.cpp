@@ -542,11 +542,14 @@ void load_world(const std::string& mod,const mods::json::Value& manifest,const s
         // a kit model (story_kit_models.h): built from the player's game files like a game piece, drawn with the
         // background light of its room; only static world objects place it (the manifest's rules)
         if(model.kind=="kit") {
-            if(item_uses||visual_uses)exception_report::raise("A kit model is placed as a world object; it can't be held, distant or a shoreline");
+            if(item_uses||shoreline_uses)exception_report::raise("A kit model is placed as a world object or a distant model; it can't be held or a shoreline");
             try {
                 const auto bridge=BuildBridge::installed(std::string());
                 const auto tool=std::filesystem::path(bridge.builder).parent_path().parent_path()/"story_mods"/"kit_model.py";
-                const auto set=story_kit_models::build(mod,model,package_dir,story_kit_models::cache_directory(data_dir),bridge.python,tool.string(),config::game_dir);
+                // only a distant model: its game textures at the size of the game's own distant views
+                const bool far=distant_uses&&!actor_uses&&!collision_uses;
+                const auto set=story_kit_models::build(mod,model,package_dir,story_kit_models::cache_directory(data_dir),bridge.python,tool.string(),config::game_dir,far);
+                if(distant_uses&&set->pieces[0].triangles>1024)throw std::runtime_error("a distant model may have 1 to 1024 triangles");
                 if(!story_kit_models::register_for_mod(mod,model.id,*set,false,why))throw std::runtime_error(why);
             } catch(const std::exception& e) {
                 LOG("[world] %s: model %s is not ready and its actors are left out: %s",mod.c_str(),model.id.c_str(),e.what());
@@ -1599,7 +1602,7 @@ void set_package_observer(PackageObserver observer){g_package_observer=observer;
 bool editor_prepare_model(const std::string& mod,const std::string& package_dir,const std::string& data_dir,const mods::json::Value& entry,std::string& archive,std::string& why){
     story_notebook::ManifestModel model;model.id=entry.get("id").string();model.source=entry.get("source").string();model.kind=entry.get("kind").string("static");
     if(model.id.empty()||model.source.empty())return why="the model has no id or source",false;
-    if(model.kind=="kit")return why="a kit model is built from your game files when the game starts (restart the game)",false;
+    if(model.kind=="kit")return why="a kit model is prepared with editor_build_kit_model",false;
     const bool collision=entry.get("collision").boolean;
     if(collision&&model.kind!="static")return why="collision requires a static model",false;
     // a shoreline (preparation option, never a manifest field): "foam" or a water surface's material
@@ -1611,6 +1614,16 @@ bool editor_prepare_model(const std::string& mod,const std::string& package_dir,
         archive=actor_model_cache::prepare(mod,model,package_dir,data_dir,bridge.python,tool.string(),config::game_dir,collision,shoreline,shoreline?shore.text:std::string());
         return true;
     } catch(const std::exception& e) {return why=e.what(),false;}
+}
+
+std::shared_ptr<const story_game_pieces::BuiltSet> editor_build_kit_model(const std::string& mod,const std::string& package_dir,const std::string& data_dir,const mods::json::Value& entry){
+    mods::json::Value manifest;manifest["models"].type=mods::json::Value::Array;manifest["models"].array.push_back(entry);
+    std::vector<story_notebook::ManifestModel> models;std::string why;
+    if(!story_notebook::parse_models(manifest,models,why))throw std::runtime_error(why);
+    if(models.size()!=1||models[0].kind!="kit")throw std::runtime_error("not a kit model");
+    const auto bridge=BuildBridge::installed(std::string());
+    const auto tool=std::filesystem::path(bridge.builder).parent_path().parent_path()/"story_mods"/"kit_model.py";
+    return story_kit_models::build(mod,models[0],package_dir,story_kit_models::cache_directory(data_dir),bridge.python,tool.string(),config::game_dir);
 }
 
 std::shared_ptr<const story_game_pieces::BuiltSet> editor_build_piece(const std::string& id,const std::string& cache_dir){

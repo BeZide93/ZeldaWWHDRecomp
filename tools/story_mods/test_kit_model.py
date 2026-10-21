@@ -76,6 +76,49 @@ def recipe(path, **extra):
     return r
 
 
+def with_texture(data, material, image_name='own', extras=None, size=(64, 8)):
+    """the GLB `data` with an embedded PNG base colour texture on `material` (and optional material extras)"""
+    import actor_model  # noqa: F401  (the PNG reader the converter uses)
+    jlen = struct.unpack_from('<I', data, 12)[0]
+    doc = json.loads(data[20:20 + jlen])
+    binary = bytearray(data[28 + jlen:])
+    w, h = size
+    rows = b''.join(b'\0' + bytes([200, 40, 30, 255]) * w for _ in range(h))
+    import zlib
+
+    def chunk(kind, body):
+        return struct.pack('>I', len(body)) + kind + body + struct.pack('>I', zlib.crc32(kind + body) & 0xffffffff)
+    png = b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', struct.pack('>IIBBBBB', w, h, 8, 6, 0, 0, 0)) + chunk(b'IDAT', zlib.compress(rows)) + chunk(b'IEND', b'')
+    while len(binary) % 4:
+        binary.append(0)
+    doc['bufferViews'].append({'buffer': 0, 'byteOffset': len(binary), 'byteLength': len(png)})
+    binary.extend(png)
+    while len(binary) % 4:
+        binary.append(0)
+    doc.setdefault('images', []).append({'name': image_name, 'mimeType': 'image/png', 'bufferView': len(doc['bufferViews']) - 1})
+    doc.setdefault('textures', []).append({'source': len(doc['images']) - 1})
+    doc['buffers'][0]['byteLength'] = len(binary)
+    for m in doc['materials']:
+        if m['name'] == material:
+            m['pbrMetallicRoughness'] = {'baseColorTexture': {'index': len(doc['textures']) - 1}}
+            if extras:
+                m['extras'] = extras
+    text = json.dumps(doc).encode()
+    text += b' ' * (-len(text) % 4)
+    body = struct.pack('<I4s', len(text), b'JSON') + text + struct.pack('<I4s', len(binary), b'BIN\0') + bytes(binary)
+    return struct.pack('<4sII', b'glTF', 2, 12 + len(body)) + body
+
+
+class Names:
+    """kit_materials.Names without a game: a kit room with these materials"""
+    def __init__(self, materials, mapping=None, default=None):
+        import kit_materials
+        self.materials, self.mapping, self.default = {m: None for m in materials}, dict(mapping or {}), default
+        self.stage, self.room = 'sea', 13
+        self.resolve = kit_materials.Names.resolve.__get__(self)
+        self.unknown = kit_materials.Names.unknown.__get__(self)
+
+
 class KitModelTest(unittest.TestCase):
     def setUp(self):
         self.dir = tempfile.TemporaryDirectory()
@@ -136,6 +179,139 @@ class KitModelTest(unittest.TestCase):
         with self.assertRaisesRegex(km.BuildError, 'simpler'):
             km.kit_collision(sb.read_glb(path))
 
+    def test_material_names(self):
+        """texture-free materials are game materials by name (Blender's .001 copies too); an unknown name is refused with
+        the kit room's names and where they come from; unnamed and col_* ones take the default"""
+        import stage_builder as sb
+        ground, tris = quad(-2, -2, 2, 2)
+        names = Names(['Txe_gake_v', 'Txe_hai_v'], default='Txe_gake_v')
+        path = self.write('m.glb', glb([('visible', [('Txe_hai_v', ground, tris), ('Txe_gake_v.001', ground, tris), ('', ground, tris),
+                                                     ('rock', ground, tris)])]))
+        prims = sb.read_glb(path)
+        kinds = km.classify(prims[:3], km.glb_materials(path), names, {}, {})
+        self.assertEqual(kinds, {'Txe_hai_v': ('kit', 'Txe_hai_v'), 'Txe_gake_v.001': ('kit', 'Txe_gake_v'), '': ('kit', 'Txe_gake_v')})
+        with self.assertRaises(km.BuildError) as e:
+            km.classify(prims, km.glb_materials(path), names, {}, {})
+        for words in ('"rock"', 'It has: Txe_gake_v, Txe_hai_v', 'export_glb', 'list_kit_materials', 'world-objects.md#game-materials'):
+            self.assertIn(words, str(e.exception))
+        # a mapping names it; or the model's "material" takes every other texture-free material
+        self.assertEqual(km.classify(prims, km.glb_materials(path), Names(['Txe_gake_v', 'Txe_hai_v'], {'rock': 'Txe_hai_v'}, 'Txe_gake_v'), {}, {})['rock'],
+                         ('kit', 'Txe_hai_v'))
+        self.assertEqual(km.classify(prims, km.glb_materials(path), names, {'material': 'Txe_gake_v'}, {})['rock'], ('kit', 'Txe_gake_v'))
+
+    def test_no_game_textures(self):
+        """a material with a texture of its own is the model's own; one that is a game material may not carry a texture:
+        named as one (also through the mapping), an export_glb material (its extras) renamed, or its image named as a game texture"""
+        import stage_builder as sb
+        ground, tris = quad(-2, -2, 2, 2)
+        base_glb = glb([('visible', [('Txe_hai_v', ground, tris), ('cloth', ground, tris)])])
+        names = Names(['Txe_gake_v', 'Txe_hai_v'], {'roof': 'Txe_gake_v'}, 'Txe_gake_v')
+        ok = self.write('ok.glb', with_texture(base_glb, 'cloth'))
+        kinds = km.classify(sb.read_glb(ok), km.glb_materials(ok), names, {}, {})
+        self.assertEqual(kinds['cloth'][0], 'own')
+        self.assertEqual(kinds['Txe_hai_v'], ('kit', 'Txe_hai_v'))
+        cases = {'named': with_texture(base_glb, 'Txe_hai_v'),
+                 'exported': with_texture(base_glb, 'cloth', extras={'wwhd': {'kit_material': 'Txe_hai_v', 'samplers': {}}}),
+                 'image': with_texture(base_glb, 'cloth', image_name='Txe_Edragon_hai'),
+                 'mapped': with_texture(glb([('visible', [('roof', ground, tris)])]), 'roof')}
+        for label, data in cases.items():
+            path = self.write(label + '.glb', data)
+            with self.assertRaisesRegex(km.BuildError, 'never carries the game', msg=label):
+                km.classify(sb.read_glb(path), km.glb_materials(path), names, {}, {'Txe_Edragon_hai': 0})
+
+    def test_own_textures_budget(self):
+        """the model's own textures: 1 MiB decoded together (game materials don't count), the PNG rules of mod models"""
+        import stage_builder as sb
+        ground, tris = quad(-2, -2, 2, 2)
+        data = glb([('visible', [('a', ground, tris), ('b', ground, tris), ('Txe_hai_v', ground, tris)])])
+        data = with_texture(with_texture(data, 'a', size=(512, 256)), 'b', image_name='b', size=(256, 512))
+        path = self.write('two.glb', data)
+        kinds = km.classify(sb.read_glb(path), km.glb_materials(path), Names(['Txe_hai_v']), {}, {})
+        parts, total = km.own_parts(sb.read_glb(path), kinds)
+        self.assertEqual((total, len(parts.materials), len(parts.parts)), (2 * 512 * 256 * 4, 2, 2))
+        data = with_texture(data, 'Txe_hai_v', image_name='c', size=(64, 8))  # now a third own texture: over 1 MiB
+        path = self.write('three.glb', data)
+        kinds = km.classify(sb.read_glb(path), km.glb_materials(path), Names(['Txe_gake_v']), {}, {})
+        with self.assertRaisesRegex(km.BuildError, '1 MiB'):
+            km.own_parts(sb.read_glb(path), kinds)
+        bad = self.write('odd.glb', with_texture(glb([('visible', [('a', ground, tris)])]), 'a', size=(60, 8)))
+        kinds = km.classify(sb.read_glb(bad), km.glb_materials(bad), Names(['Txe_gake_v']), {}, {})
+        with self.assertRaisesRegex(km.BuildError, 'multiples of 64'):
+            km.own_parts(sb.read_glb(bad), kinds)
+
+    def test_example_package_has_no_game_data(self):
+        """the game-materials example package: no game archive or model in any file, no texture on a game material,
+        only the roof's own picture, and the release guard passes on it"""
+        import subprocess
+        root = os.path.join(HERE, '..', '..', 'examples', 'guest-mods', 'world-objects-kit')
+        manifest = json.load(open(os.path.join(root, 'manifest.json')))
+        game_names = {'Txe_gake_v', 'Txe_hai_v', 'Txe_ita_v'}
+        for dirpath, _, files in os.walk(root):
+            for f in files:
+                with open(os.path.join(dirpath, f), 'rb') as fh:
+                    head = fh.read(4)
+                self.assertNotIn(head, (b'Yaz0', b'SARC', b'FRES', b'Gfx2'), f)  # archives, models, textures of the game
+        for model in manifest['models']:
+            self.assertEqual(model['kind'], 'kit')
+            materials = km.glb_materials(os.path.join(root, model['source']))
+            for name, entry in materials.items():
+                if name in game_names:
+                    self.assertIsNone(entry['png'], name)
+                self.assertFalse(entry['export'], name)
+            own = [n for n, e in materials.items() if e['png'] is not None]
+            self.assertEqual(own, ['cloth'] if model['id'] == 'lookout' else [])
+        # the release guard on the package's files (its empty content/ folder left out: the guard refuses any folder of
+        # that name, the name of a game file tree)
+        import shutil
+        copy = os.path.join(self.dir.name, 'package')
+        shutil.copytree(root, copy, ignore=shutil.ignore_patterns('content', '__pycache__'))
+        guard = os.path.join(HERE, '..', 'release', 'guard.py')
+        result = subprocess.run([sys.executable, guard, copy], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_example_models_reproducible(self):
+        import subprocess
+        root = os.path.join(HERE, '..', '..', 'examples', 'guest-mods', 'world-objects-kit', 'assets')
+        subprocess.run([sys.executable, os.path.join(root, 'make_models.py'), self.dir.name], check=True)
+        for name in ('rock.glb', 'rock-far.glb', 'lookout.glb'):
+            with open(os.path.join(root, name), 'rb') as a, open(os.path.join(self.dir.name, name), 'rb') as b:
+                self.assertEqual(a.read(), b.read(), name)
+
+    @unittest.skipUnless(os.environ.get('WWHD_GAME_DIR'), 'set WWHD_GAME_DIR to a game folder to build from its files')
+    def test_dragon_roost_materials(self):
+        """the example's models from Dragon Roost Island's materials: one part of game materials (rock, ash, planks) lit
+        with the room's first background light set; the mixed lookout with its own-texture part first (light 0); the
+        distant model's game textures at most 256 a side; a misspelt name, and a GLB made from export_glb, refused"""
+        game = os.environ['WWHD_GAME_DIR']
+        assets = os.path.join(HERE, '..', '..', 'examples', 'guest-mods', 'world-objects-kit', 'assets')
+        built = {}
+        for name, far in (('rock', False), ('lookout', False), ('rock-far', True)):
+            r = {'kit_model_format': 1, 'id': name, 'glb': os.path.abspath(os.path.join(assets, name + '.glb')), 'kit': {'stage': 'sea', 'room': 13}}
+            if far:
+                r['far'] = True
+            rp = self.write(name + '.json', json.dumps(r).encode())
+            built[name] = km.build(game, rp, 'gk' + ('%029x' % len(built)), os.path.join(self.dir.name, 'cache', name + '.szs'))
+        rock = built['rock']['pieces'][0]
+        self.assertEqual([(p['light'], p['kind'], sorted(p['materials'])) for p in rock['parts']], [(1, 'kit', ['Txe_gake_v', 'Txe_hai_v', 'Txe_ita_v'])])
+        self.assertEqual(built['rock']['own_texture_bytes'], 0)
+        self.assertLessEqual(built['rock']['archive_bytes'], 12 * 1024 * 1024)
+        look = built['lookout']['pieces'][0]['parts']
+        self.assertEqual([(p['light'], p['kind']) for p in look], [(0, 'own'), (1, 'kit')])
+        self.assertEqual(look[0]['materials'], ['cloth'])
+        self.assertEqual(built['lookout']['own_texture_bytes'], 128 * 128 * 4)
+        self.assertLess(built['rock-far']['texture_bytes'], built['rock']['texture_bytes'] // 8)
+        # a misspelt game material: the room's names in the message
+        doc = open(os.path.join(assets, 'rock.glb'), 'rb').read().replace(b'"Txe_hai_v"', b'"Txe_hia_v"')
+        r = {'kit_model_format': 1, 'id': 'typo', 'glb': self.write('typo.glb', doc), 'kit': {'stage': 'sea', 'room': 13}}
+        with self.assertRaisesRegex(km.BuildError, '"Txe_hia_v" is not a material of the kit room \\(sea room 13\\). It has: .*Txe_hai_v'):
+            km.build(game, self.write('typo.json', json.dumps(r).encode()), 'gk' + 'f' * 29, os.path.join(self.dir.name, 'cache', 'typo.szs'))
+        # a model made in Blender from the editor's export of Dragon Roost carries the game's textures: refused
+        import export_glb
+        body, _ = export_glb.export_room(game, 'sea', 13, max_texture=64)
+        r = {'kit_model_format': 1, 'id': 'export', 'glb': self.write('export.glb', body), 'kit': {'stage': 'sea', 'room': 13}}
+        with self.assertRaisesRegex(km.BuildError, 'never carries the game'):
+            km.build(game, self.write('export.json', json.dumps(r).encode()), 'gk' + 'e' * 29, os.path.join(self.dir.name, 'cache', 'export.szs'))
+
     @unittest.skipUnless(os.environ.get('WWHD_GAME_DIR'), 'set WWHD_GAME_DIR to a game folder to build from its files')
     def test_build_from_the_game(self):
         game = os.environ['WWHD_GAME_DIR']
@@ -162,7 +338,7 @@ class KitModelTest(unittest.TestCase):
         # a material the kit room doesn't have is refused with the kit room's names
         r['materials']['grass'] = 'no_such_material'
         rp = self.write('r2.json', json.dumps(r).encode())
-        with self.assertRaisesRegex(km.BuildError, 'it has:'):
+        with self.assertRaisesRegex(km.BuildError, 'It has: .*m_kusa_v'):
             km.build(game, rp, 'gk' + '1' * 29, out + '2')
 
 

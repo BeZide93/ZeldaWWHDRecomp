@@ -110,7 +110,9 @@ bool visual_role(uint32_t token,bool distant);
 // as <name>.btk); a piece's declaration names its first model's slot, and its second model, the light set
 // of each part (settingTevStruct BG types 1..4) and its second model's animation slot (an island's moving
 // water) are registered here. Before install or on the game thread.
-struct PieceDraw {int second_index=-1;int light[2]={1,4};int animation=-1;};
+// light 0: an object's light at the actor's place on the actors' draw lists (a kit model's own-texture part); animated: the
+// part (0, 1) the animation slot plays on.
+struct PieceDraw {int second_index=-1;int light[2]={1,4};int animation=-1;int animated=1;};
 bool register_piece_set(const std::string& archive,std::vector<std::string> models,std::vector<std::string> animations={});
 bool set_piece_draw(const std::string& archive,int index,PieceDraw);
 bool owns_visual(uint32_t actor,uint32_t token);

@@ -98,19 +98,19 @@ struct ManifestActor {
     // game pieces ("actor": "piece:<id>", story_game_pieces_catalogue.h): the piece's neutral id; the placement
     // is a static world object whose model and collision are the piece's (model and collision_mesh "piece:<id>")
     std::string piece;
+    // a composition (`"group"`): static world objects of one mod made together (an island's ground and the ruins on it)
+    std::string group;
     bool game_piece()const{return !piece.empty();}
     // a static world object whose model is a kit model (ManifestModel kind "kit"): drawn like a game piece
     bool kit_model=false;
     bool background_drawn()const{return game_piece()||kit_model;}
 };
-// Parts of one composition: two static world objects of one mod placed with the same origin (position, turn
-// and scale) were made together in one model space (an island's ground and the ruins standing on it, each with
-// materials of its own kit room). Placement never compares their collisions with each other; everything else
-// (the room, other objects, other mods) counts for each as for any world object.
+// Parts of one composition: two static world objects of one mod that name the same "group" (an island's ground and the
+// ruins standing on it, each with materials of its own kit room). Placement never compares their collisions with each
+// other; everything else (the room, other objects, other mods) counts for each as for any world object. The caller
+// checks that both are the same mod's.
 inline bool one_composition(const ManifestActor& a,const ManifestActor& b){
-    return a.world_object()&&b.world_object()&&a.behaviour=="static"&&b.behaviour=="static"&&a.stage==b.stage&&a.room==b.room&&
-           a.position.x==b.position.x&&a.position.y==b.position.y&&a.position.z==b.position.z&&a.rotation.x==b.rotation.x&&a.rotation.y==b.rotation.y&&
-           a.rotation.z==b.rotation.z&&a.scale.x==b.scale.x&&a.scale.y==b.scale.y&&a.scale.z==b.scale.z;
+    return !a.group.empty()&&a.group==b.group&&a.world_object()&&b.world_object()&&a.behaviour=="static"&&b.behaviour=="static"&&a.stage==b.stage&&a.room==b.room;
 }
 template<class Condition,class Quest,class Item,class Flag>
 inline bool condition_matches(const Condition&c,Quest quest,Item item,Flag flag,bool day){
@@ -485,7 +485,7 @@ inline bool parse_actors_impl(const mods::json::Value& m,std::vector<ManifestAct
     unsigned need=0;if(m.get("requires").type==Value::Object&&!story_game_objects::required_version(m,std::max(story_game_objects::catalogue().version,story_game_pieces::catalogue().version),need,why))return false;
     unsigned chart_marker_count=0;
     for(const auto& v:list.array){ManifestActor a;
-        if(!keys(v,{"id","actor","kind","model","animation","look_at","path","collision","behaviour","buoyancy","drift","anchor","grapple_points","distant","shoreline","chart_marker","arrival","attention","stage","room","position","rotation","scale","params","parameters","flag","broken_flag","defeated_flag","drops","carry","combat","native_drops","switch_flag","switch","defeat_switch","when","lines","then","texture","talks","variant"}))return why="unknown actor field",false;
+        if(!keys(v,{"id","actor","kind","model","animation","look_at","path","collision","behaviour","group","buoyancy","drift","anchor","grapple_points","distant","shoreline","chart_marker","arrival","attention","stage","room","position","rotation","scale","params","parameters","flag","broken_flag","defeated_flag","drops","carry","combat","native_drops","switch_flag","switch","defeat_switch","when","lines","then","texture","talks","variant"}))return why="unknown actor field",false;
         if(!id(v.get("id")))return why="invalid actor id",false;a.id=v.get("id").text;a.actor=v.get("actor").string();
         if(story_game_pieces::is_reference(a.actor)){
             if(!game_piece_fields(v,need,a,why))return false;
@@ -598,6 +598,7 @@ inline bool parse_actors_impl(const mods::json::Value& m,std::vector<ManifestAct
         if(!place(v,a.stage,a.room)||!point(v.get("position"),a.position))return why="actor "+a.id+": invalid stage, room or position",false;
         if(v.get("rotation").type!=Value::Null&&!point(v.get("rotation"),a.rotation,360))return why="invalid actor rotation",false;
         if(v.get("scale").type!=Value::Null&&(!point(v.get("scale"),a.scale,10)||a.scale.x<=0||a.scale.y<=0||a.scale.z<=0))return why="invalid actor scale",false;
+        if(v.object.contains("group")){if(!id(v.get("group"))||!a.world_object()||a.behaviour!="static")return why="actor "+a.id+": group names the composition of static world objects it belongs to (an id)",false;a.group=v.get("group").text;}
         if((v.object.contains("buoyancy")||v.object.contains("drift")||v.object.contains("anchor"))&&!a.water_object())return why="motion settings require floating or drifting behaviour",false;
         // a kit model: a static world object turned about the vertical axis only, at its own size (as game pieces)
         if(a.kit_model&&(a.behaviour!="static"||a.scale.x!=1||a.scale.y!=1||a.scale.z!=1||a.rotation.x!=0||a.rotation.z!=0))return why="actor "+a.id+": a kit model is a static world object, turned about the vertical axis only, at scale 1",false;
@@ -609,7 +610,8 @@ inline bool parse_actors_impl(const mods::json::Value& m,std::vector<ManifestAct
             if(!(shore?keys(value,{"model","material"}):keys(value,{"model"}))||!id(value.get("model")))return false;
             if(shore&&value.object.contains("material")){const auto&m=value.get("material");if(m.type!=Value::String||(m.text!="foam"&&!water_surface_material(m.text)))return false;if(m.text!="foam")out.material=m.text;}
             out.model=value.get("model").text;
-            return std::any_of(models.begin(),models.end(),[&](const auto&model){return model.id==out.model&&model.kind=="static";});
+            // a distant model may be a kit model (drawn with game materials, as the island it stands for); a shoreline may not
+            return std::any_of(models.begin(),models.end(),[&](const auto&model){return model.id==out.model&&(model.kind=="static"||(!shore&&model.kind=="kit"));});
         };
         if(!visual_model("distant",a.distant)||!visual_model("shoreline",a.shoreline))return why="distant and shoreline must name declared same-package rigid static models (a shoreline's material is foam, water, pond, river, waterfall or lava)",false;
         auto island_text=[](const Value&value,std::string&out){std::u16string decoded;if(value.type!=Value::String||value.text.empty()||value.text.size()>96||!story_mail::append_utf16(value.text,false,decoded))return false;out=value.text;return true;};

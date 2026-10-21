@@ -585,7 +585,12 @@ bool register_piece_model(const std::string& mod,const std::string& model,const 
     const float lo[]={minimum.x,minimum.y,minimum.z},hi[]={maximum.x,maximum.y,maximum.z};for(unsigned i=0;i<3;++i)if(!std::isfinite(lo[i])||!std::isfinite(hi[i])||lo[i]>hi[i])return why="invalid game piece bounds",false;
     // a set's pieces share its archive; no mod model may use it
     for(const auto& [key,entry]:g_models)if(entry.archive==archive&&key.second.rfind("piece:",0)!=0&&archive.rfind("gk",0)!=0)return why="actor model archive identity collision",false;
-    if(auto found=g_models.find({mod,model});found!=g_models.end())return found->second.archive==archive&&found->second.index==index?true:(why="the game piece changed; restart",false);
+    if(auto found=g_models.find({mod,model});found!=g_models.end()){
+        if(found->second.archive==archive&&found->second.index==index)return true;
+        // the editor: a changed kit model is a new archive (its identity follows its content); its actors take it when redeclared
+        if(editor&&archive.rfind("gk",0)==0&&found->second.archive.rfind("gk",0)==0){found->second=ModelResource{archive,index,minimum,maximum,false,{},{}};return true;}
+        return why="the game piece changed; restart",false;
+    }
     g_models.emplace(std::make_pair(mod,model),ModelResource{archive,index,minimum,maximum,false,{},{}});return true;
 }
 void set_game_calls(void(*original)(Cpu*,uint32_t),uint32_t(*call)(Cpu*,uint32_t,std::initializer_list<uint32_t>)){g_original=original;g_call=call;}

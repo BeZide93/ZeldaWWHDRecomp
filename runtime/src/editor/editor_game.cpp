@@ -38,6 +38,7 @@
 #include "../mods/packages.h"
 #include "../mods/story_actors.h"
 #include "../mods/story_game_pieces.h"
+#include "../mods/story_kit_models.h"
 #include "../mods/story_npc_catalogue.h"
 #include "../mods/story_demo.h"
 #include "../mods/story_items.h"
@@ -717,7 +718,7 @@ void story_tick() {
 }
 
 // ---------------------------------------------------------------- the host
-void reapply_mod(const std::string& mod);  // below: the live actors again (a model became ready)
+void reapply_mod(const std::string& mod, const std::string& model = {});  // below: the live actors again (a model became ready; `model`: built again)
 std::string refused_pieces(const std::string& mod, const std::string& piece);  // below: placements of a building that can't stand there
 // the game's villagers the NPC catalogue knows (list_villagers): read from the actor list on the game
 // thread (villagers_tick), for the host on any thread
@@ -1329,6 +1330,28 @@ public:
     bool prepare_model(const std::string& mod, const std::string& dir, const Value& model, std::string& note, std::string& why) override {
         (void)why;
         // the model tool runs on a thread of its own; the game takes the result at its next pass
+        if (model.get("kind").string() == "kit") {
+            // a kit model: built from the player's game files (kit_model.py), registered like a game piece; a changed
+            // model is a new archive (its identity follows its content), so the live actors take it
+            std::thread([mod, dir, model] {
+                std::shared_ptr<const story_game_pieces::BuiltSet> set;
+                try {
+                    set = guestmods::editor_build_kit_model(mod, dir, mods::packages::package_data_directory(mod), model);
+                } catch (const std::exception& e) {
+                    return set_status("Model " + model.get("id").string() + ": " + e.what());
+                }
+                post([mod, model, set](Cpu*) {
+                    std::string w;
+                    if (!story_kit_models::register_for_mod(mod, model.get("id").string(), *set, true, w))
+                        return set_status("Model " + model.get("id").string() + ": " + w + " (it is prepared when the game starts)");
+                    set_status("Model " + model.get("id").string() + " is ready: built from your game files (" +
+                               std::to_string(set->archive_bytes / 1024) + " KiB); actors can use it now");
+                    reapply_mod(mod, model.get("id").string());
+                });
+            }).detach();
+            note = "The model is being built from your game files; actors using it appear when it is ready.";
+            return true;
+        }
         std::thread([mod, dir, model] {
             std::string archive, w;
             if (!guestmods::editor_prepare_model(mod, dir, mods::packages::package_data_directory(mod), model, archive, w)) return set_status("Model " + model.get("id").string() + ": " + w);
@@ -1634,7 +1657,7 @@ std::string refused_pieces(const std::string& mod, const std::string& piece) {
     }
     return refused;
 }
-void reapply_mod(const std::string& mod) {
+void reapply_mod(const std::string& mod, const std::string& model) {
     std::vector<story_notebook::ManifestActor> actors;
     {
         std::lock_guard<std::recursive_mutex> lk(g_mu);
@@ -1642,9 +1665,14 @@ void reapply_mod(const std::string& mod) {
         std::string why;
         if (!m || !story_notebook::parse_actors(*m, actors, why)) return;
     }
+    // a model built again (a kit model's new archive): the actors that draw it are declared again with it
+    std::vector<std::string> changed;
+    if (!model.empty())
+        for (const auto& a : actors)
+            if (a.model == model || a.distant.model == model) changed.push_back(a.id);
     std::string why;
     std::vector<std::string> pending;
-    if (!story_actors::editor_update(mod, actors, {}, why, &pending)) set_status("Live update refused: " + why);
+    if (!story_actors::editor_update(mod, actors, changed, why, &pending)) set_status("Live update refused: " + why);
 }
 
 // ---------------------------------------------------------------- the handle drag

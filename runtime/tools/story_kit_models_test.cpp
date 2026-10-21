@@ -65,6 +65,9 @@ int main() {
     assert(id != story_kit_models::identity("other", "island", text) && id != story_kit_models::identity("sky-island", "ruins", text) &&
            id != story_kit_models::identity("sky-island", "island", text + " "));
     assert(story_kit_models::cache_directory("/m/Data/sky-island") == "/m/Data/.kit-models" && story_kit_models::cache_directory("").empty());
+    // a distant model's recipe says so (its game textures are drawn smaller)
+    assert(mods::json::parse(story_kit_models::recipe(model, "/g.glb", true)).get("far").boolean &&
+           mods::json::parse(story_kit_models::recipe(model, "/g.glb")).get("far").type == Value::Null);
 
     // the metadata of a built model with two parts, the second animated
     const fs::path dir = fs::temp_directory_path() / ("kit-models-test-" + std::to_string(std::hash<std::string>{}(id) & 0xFFFFFF));
@@ -94,9 +97,31 @@ int main() {
     bad = meta;
     bad["models"].array.push_back("gk0001c");
     assert(!story_kit_models::parse_built(bad, id, "island", archive_path, set, why));
-    bad = meta;
+    bad = meta;  // two animated parts
     bad["pieces"].array[0]["parts"].array[0]["animation"] = "gk0001a";
+    bad["animations"].array.insert(bad["animations"].array.begin(), Value("gk0001a"));
     assert(!story_kit_models::parse_built(bad, id, "island", archive_path, set, why));
+    {  // the first part animated alone: the animation plays on part 0
+        auto first = meta;
+        first["pieces"].array[0]["parts"].array[0]["animation"] = "gk0001a";
+        first["pieces"].array[0]["parts"].array[1].object.erase("animation");
+        first["animations"].array = {Value("gk0001a")};
+        assert(story_kit_models::parse_built(first, id, "island", archive_path, set, why) && set.pieces[0].animated_part == 0 &&
+               set.pieces[0].animation_index == 3);
+    }
+    {  // a mixed model: its own-texture part first, lit as an object (light 0); never second, never animated
+        auto mixed = meta;
+        mixed["pieces"].array[0]["parts"].array[0]["light"] = 0;
+        mixed["pieces"].array[0]["parts"].array[0]["kind"] = "own";
+        assert(story_kit_models::parse_built(mixed, id, "island", archive_path, set, why) && set.pieces[0].light[0] == 0 && set.pieces[0].animated_part == 1);
+        auto second = meta;
+        second["pieces"].array[0]["parts"].array[1]["light"] = 0;
+        second["pieces"].array[0]["parts"].array[1]["kind"] = "own";
+        assert(!story_kit_models::parse_built(second, id, "island", archive_path, set, why));
+        auto unlit = meta;
+        unlit["pieces"].array[0]["parts"].array[0]["light"] = 0;  // light 0 without being the own part
+        assert(!story_kit_models::parse_built(unlit, id, "island", archive_path, set, why));
+    }
     bad = meta;
     bad["pieces"].array[0]["parts"].array[1]["light"] = 5;
     assert(!story_kit_models::parse_built(bad, id, "island", archive_path, set, why));

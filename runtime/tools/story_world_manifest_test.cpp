@@ -515,21 +515,21 @@ int main() {
     mod["models"].array[0]["kind"]="static";assert(parse_models(mod,models,why)&&models[0].kind=="static");
     for(const auto& kind:{"animated","", "native"}){mod["models"].array[0]["kind"]=kind;assert(!parse_models(mod,models,why));}
     mod["models"].array[0]["kind"]=mods::json::Value{};assert(!parse_models(mod,models,why));
-    // parts of one composition: the same mod's static world objects with one origin; moved, turned, scaled, in
-    // another room or floating they are two
+    // parts of one composition: the same mod's static world objects that name one "group"; the same origin alone is not
+    // one, nor another group, room or a floating object; group is for static world objects only
     {
-        auto pair=mods::json::parse(R"({"actors":[{"id":"ground","kind":"mod","model":"post","behaviour":"static","collision":{"shape":"box","size":{"x":100,"y":100,"z":100}},
+        auto pair=mods::json::parse(R"({"actors":[{"id":"ground","kind":"mod","model":"post","behaviour":"static","group":"isle","collision":{"shape":"box","size":{"x":100,"y":100,"z":100}},
             "stage":"sea","room":44,"position":{"x":-200512,"y":6640,"z":301774},"rotation":{"x":0,"y":198,"z":0}},
-            {"id":"ruin","kind":"mod","model":"post","behaviour":"static","collision":{"shape":"box","size":{"x":100,"y":100,"z":100}},
-            "stage":"sea","room":44,"position":{"x":-200512,"y":6640,"z":301774},"rotation":{"x":0,"y":198,"z":0}}],
+            {"id":"ruin","kind":"mod","model":"post","behaviour":"static","group":"isle","collision":{"shape":"box","size":{"x":100,"y":100,"z":100}},
+            "stage":"sea","room":44,"position":{"x":-200000,"y":6000,"z":301000},"rotation":{"x":0,"y":0,"z":0}}],
             "models":[{"id":"post","source":"models/post.glb"}]})");
-        assert(parse_actors(pair,actors,why)&&actors.size()==2&&story_notebook::one_composition(actors[0],actors[1]));
-        auto moved=actors[1];moved.position.x+=1;assert(!story_notebook::one_composition(actors[0],moved));
-        auto turned=actors[1];turned.rotation.y=90;assert(!story_notebook::one_composition(actors[0],turned));
-        auto scaled=actors[1];scaled.scale.y=2;assert(!story_notebook::one_composition(actors[0],scaled));
+        assert(parse_actors(pair,actors,why)&&actors.size()==2&&actors[0].group=="isle"&&story_notebook::one_composition(actors[0],actors[1]));
+        auto other=actors[1];other.group="other";assert(!story_notebook::one_composition(actors[0],other));
+        auto none=actors[1];none.group.clear();none.position=actors[0].position;none.rotation=actors[0].rotation;assert(!story_notebook::one_composition(actors[0],none));
         auto elsewhere=actors[1];elsewhere.room=43;assert(!story_notebook::one_composition(actors[0],elsewhere));
         auto floating=actors[1];floating.behaviour="floating";assert(!story_notebook::one_composition(actors[0],floating));
-        auto prop=actors[1];prop.behaviour.clear();assert(!story_notebook::one_composition(actors[0],prop));
+        auto bad=pair;bad["actors"].array[0]["group"]="Not An Id";assert(!parse_actors(bad,actors,why));
+        bad=pair;bad["actors"].array[0]["behaviour"]="floating";assert(!parse_actors(bad,actors,why));
     }
     // kit models: a package's model drawn with a kit room's materials, placed only as a static world object at scale 1
     {
@@ -542,7 +542,7 @@ int main() {
         assert(parse_models(kit,models,why)&&models.size()==2&&models[0].kind=="kit"&&models[0].kit_stage=="sea"&&models[0].kit_room==41&&models[0].kit_materials.size()==2&&
                models[1].kit_material=="lambert9_v"&&models[1].kit_materials.empty());
         assert(parse_actors(kit,actors,why)&&actors.size()==2&&actors[0].kit_model&&actors[0].background_drawn()&&!actors[0].game_piece()&&actors[0].collision_mesh=="island");
-        assert(story_notebook::one_composition(actors[0],actors[1]));
+        assert(!story_notebook::one_composition(actors[0],actors[1]));  // the same origin alone: two objects
         auto bad=kit;bad["models"].array[0].object.erase("kit");assert(!parse_models(bad,models,why));
         for(const char*stage:{"","Stage_Too_Long","sea/41"}){bad=kit;bad["models"].array[0]["kit"]["stage"]=stage;assert(!parse_models(bad,models,why));}
         for(int room:{-1,64}){bad=kit;bad["models"].array[0]["kit"]["room"]=room;assert(!parse_models(bad,models,why));}

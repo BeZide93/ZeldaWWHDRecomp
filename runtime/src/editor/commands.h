@@ -516,6 +516,7 @@ Value duplicate_actor(const Value& a, const std::string& id);
 // "bones", "clips"} or false with a message that says which limit (size, triangles, texture, bones,
 // clips, material) it breaks.
 bool check_model_file(const std::string& path, Value& info, std::string& why);
+bool check_kit_model_file(const std::string& path, const Value& declaration, Value& info, std::string& why);
 // Writes the package (manifest plus the package's own files, never game files) into `dest`, a new or
 // empty folder. `written`: the files.
 bool export_package(const std::string& dir, const Value& manifest, const std::string& dest, std::vector<std::string>& written, std::string& why);

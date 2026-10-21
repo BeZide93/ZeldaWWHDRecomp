@@ -18,7 +18,8 @@
 namespace story_kit_models {
 
 // The converter's recipe for `model` (kit_model.py's format 1), with the model file's absolute path.
-std::string recipe(const story_notebook::ManifestModel& model, const std::string& glb);
+// `far`: the model is only a distant model (its game textures are drawn at most 256 texels a side).
+std::string recipe(const story_notebook::ManifestModel& model, const std::string& glb, bool far = false);
 // The built model's resource identity: "gk" and 29 hex digits of the mod, the model id and the recipe (a
 // changed model or mapping is a new archive). Kit identities never meet game piece ("gp"/"gd") or mod model ones.
 std::string identity(const std::string& mod, const std::string& model_id, const std::string& recipe);
@@ -36,7 +37,7 @@ bool parse_built(const mods::json::Value& meta, const std::string& identity, con
 std::shared_ptr<const story_game_pieces::BuiltSet> build(const std::string& mod, const story_notebook::ManifestModel& model,
                                                          const std::string& package_dir, const std::string& cache_dir,
                                                          const std::vector<std::string>& python, const std::string& tool,
-                                                         const std::string& game_dir);
+                                                         const std::string& game_dir, bool far = false);
 
 // Makes the built model usable by `mod`'s placements of model `model_id`: the archive, its parts' lights and
 // animation (mod_actor), the model resource (story_actors) and the collision. At start-up before hooks.

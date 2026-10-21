@@ -22,7 +22,7 @@ bool point(const mods::json::Value& v, story_notebook::WorldPoint& out) {
 }
 }  // namespace
 
-std::string recipe(const story_notebook::ManifestModel& model, const std::string& glb) {
+std::string recipe(const story_notebook::ManifestModel& model, const std::string& glb, bool far) {
     using mods::json::quote;
     std::string out = "{\"kit_model_format\": 1, \"id\": " + quote(model.id) + ", \"glb\": " + quote(glb) + ", \"kit\": {\"stage\": " +
                       quote(model.kit_stage) + ", \"room\": " + std::to_string(model.kit_room) + "}";
@@ -33,6 +33,7 @@ std::string recipe(const story_notebook::ManifestModel& model, const std::string
             out += (i ? ", " : "") + quote(model.kit_materials[i].first) + ": " + quote(model.kit_materials[i].second);
         out += "}";
     }
+    if (far) out += ", \"far\": true";
     return out + "}\n";
 }
 
@@ -68,7 +69,10 @@ bool parse_built(const mods::json::Value& meta, const std::string& archive, cons
     for (size_t k = 0; k < parts.size(); ++k) {
         if (parts[k].get("model").string() != out.models[k]) return why = "the built kit model's parts are out of order", false;
         const double light = parts[k].get("light").number;
-        if (parts[k].get("light").type != mods::json::Value::Number || light < 1 || light > 4 || std::floor(light) != light)
+        // a part of game materials has a background light set (1..4); the model's own-texture part (first) an object's light (0)
+        const bool own = parts[k].get("kind").string() == "own";
+        if (parts[k].get("light").type != mods::json::Value::Number || light < (own ? 0 : 1) || light > (own ? 0 : 4) || std::floor(light) != light ||
+            (own && k != 0))
             return why = "the built kit model's part has no background light set", false;
         b.light[k] = int(light);
         const double triangles = parts[k].get("triangles").number;
@@ -76,9 +80,10 @@ bool parse_built(const mods::json::Value& meta, const std::string& archive, cons
         b.triangles += unsigned(triangles);
         const std::string animation = parts[k].get("animation").string();
         if (!animation.empty()) {
-            if (k != 1 || animation != out.models[k]) return why = "only the kit model's second part may be animated", false;
+            if (own || animation != out.models[k] || !out.animations.empty()) return why = "only one part of game materials may be animated", false;
             out.animations.push_back(animation);
             b.animation_index = int(out.models.size() + out.animations.size());
+            b.animated_part = int(k);
         }
     }
     if (b.triangles > 20000) return why = "the built kit model has more than 20000 triangles", false;

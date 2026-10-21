@@ -195,6 +195,60 @@ inline bool validate_glb_strict(std::span<const uint8_t> b,ModelInfo& info,std::
     info.material_count=unsigned(materials.array.size());info.cutout_count=cutouts;info.double_sided_count=double_sided;info.texture_bytes=texture_bytes;info.images=std::move(found);return true;
 }
 
+// A kit model's GLB (ManifestModel kind "kit", tools/story_mods/kit_model.py): drawn with game materials named after a
+// kit room's materials, and maybe materials with textures of their own. Checked without the game files, for the package
+// and the editor (the converter checks the names against the kit room): no material that names a game material may embed
+// a texture (`game_names`: the manifest's "materials" keys and values and its "material"; a name with Blender's ".001"
+// copy suffix counts as the name; a material of the editor's export_glb, its "wwhd" extras, counts as a game material
+// whatever its name) — a package never carries the game's textures; own textures are embedded PNG, RGB/RGBA8, up to
+// 512 a side (width a multiple of 64, height of 8), 1 MiB decoded together. `own_materials`, `own_texture_bytes` and
+// `triangles` (visible, *_col meshes left out) describe it.
+struct KitInfo {unsigned materials=0,own_materials=0,triangles=0;size_t own_texture_bytes=0;};
+inline bool validate_kit_glb(std::span<const uint8_t> b,const std::vector<std::string>& game_names,KitInfo& info,std::string& why){
+    using mods::json::Value;info={};auto fail=[&](const std::string& s){why=s;return false;};
+    if(b.size()<28||b.size()>16u*1024*1024||std::memcmp(b.data(),"glTF",4)||le32(b.data()+4)!=2)return fail("not a GLB (glTF 2.0) file of up to 16 MiB");
+    const size_t jl=le32(b.data()+12);if(jl>b.size()-20||le32(b.data()+16)!=0x4E4F534A)return fail("invalid GLB JSON chunk");
+    Value doc;try{doc=mods::json::parse(std::string(reinterpret_cast<const char*>(b.data()+20),jl));}catch(...){return fail("invalid GLB JSON");}
+    const size_t base=28+jl;const size_t bin=b.size()>=base?b.size()-base:0;
+    if(b.size()>=base&&(le32(b.data()+20+jl)>bin||le32(b.data()+24+jl)!=0x004E4942))return fail("invalid GLB BIN chunk");
+    auto plain=[](std::string n){const auto dot=n.rfind('.');if(dot!=std::string::npos&&n.size()-dot==4&&std::all_of(n.begin()+long(dot)+1,n.end(),[](unsigned char c){return c>='0'&&c<='9';}))n.resize(dot);return n;};
+    const auto& materials=doc.get("materials");const auto& textures=doc.get("textures");const auto& images=doc.get("images");const auto& views=doc.get("bufferViews");
+    if(materials.type!=Value::Null&&materials.type!=Value::Array)return fail("invalid materials");
+    for(size_t m=0;m<materials.array.size();++m){
+        const auto& mat=materials.array[m];const std::string name=mat.get("name").string();const auto label="material "+std::to_string(m)+(name.empty()?std::string():" ("+name+")")+": ";
+        ++info.materials;const auto& colour=mat.get("pbrMetallicRoughness").get("baseColorTexture");
+        if(colour.type==Value::Null)continue;
+        const bool exported=mat.get("extras").get("wwhd").get("kit_material").type!=Value::Null;
+        const bool named=std::find(game_names.begin(),game_names.end(),name)!=game_names.end()||std::find(game_names.begin(),game_names.end(),plain(name))!=game_names.end();
+        if(exported||named)return fail(label+"a game material with an embedded texture: a package never carries the game's textures. Remove its image (the game draws its own from the player's files), or give the material a name of your own for a texture of your own");
+        if(!integer(colour.get("index"),0,textures.array.empty()?0:textures.array.size()-1)||textures.array.empty())return fail(label+"invalid base colour texture");
+        const auto& source=textures.array[size_t(colour.get("index").number)].get("source");
+        if(!integer(source,0,images.array.empty()?0:images.array.size()-1)||images.array.empty())return fail(label+"invalid texture");
+        const auto& image=images.array[size_t(source.number)];
+        if(image.get("uri").type!=Value::Null||image.get("mimeType").string()!="image/png"||!integer(image.get("bufferView"),0,views.array.empty()?0:views.array.size()-1)||views.array.empty())return fail(label+"its texture must be an embedded PNG");
+        const auto& v=views.array[size_t(image.get("bufferView").number)];
+        const size_t off=v.get("byteOffset").type==Value::Number?size_t(v.get("byteOffset").number):0,len=v.get("byteLength").type==Value::Number?size_t(v.get("byteLength").number):0;
+        if(len<33||off>bin||len>bin-off)return fail(label+"invalid embedded image");
+        const auto* png=b.data()+base+off;
+        if(std::memcmp(png,"\x89PNG\r\n\x1a\n",8)||std::memcmp(png+12,"IHDR",4)||png[24]!=8||(png[25]!=2&&png[25]!=6)||png[28])return fail(label+"texture needs a noninterlaced RGB/RGBA8 PNG");
+        const auto w=be32(png+16),h=be32(png+20);if(!w||!h||w>kMaxTextureDimension||h>kMaxTextureDimension||w%64||h%8)return fail(label+"a texture is at most 512 x 512, its width a multiple of 64 and its height of 8");
+        ++info.own_materials;info.own_texture_bytes+=size_t(w)*h*4;
+    }
+    if(info.own_texture_bytes>kMaxTextureBytes)return fail("the model's own textures take more than 1 MiB (one 512 x 512, four 256 x 256 or sixteen 128 x 128 textures); game materials do not count");
+    const auto& meshes=doc.get("meshes");const auto& accessors=doc.get("accessors");
+    for(const auto& node:doc.get("nodes").array){
+        if(!integer(node.get("mesh"),0,meshes.array.empty()?0:meshes.array.size()-1)||meshes.array.empty())continue;
+        const auto& mesh=meshes.array[size_t(node.get("mesh").number)];
+        if(node.get("name").string().ends_with("_col")||mesh.get("name").string().ends_with("_col"))continue;
+        for(const auto& p:mesh.get("primitives").array){
+            const auto& index=p.get("indices").type!=Value::Null?p.get("indices"):p.get("attributes").get("POSITION");
+            if(integer(index,0,accessors.array.empty()?0:accessors.array.size()-1)&&!accessors.array.empty())info.triangles+=unsigned(accessors.array[size_t(index.number)].get("count").number/3);
+        }
+    }
+    if(!info.triangles)return fail("the model has no visible triangles");
+    return true;
+}
+
 // Partition original collision-only meshes before reusing the strict rendering
 // validator. The projection preserves node transforms and embedded BIN offsets.
 inline bool validate_glb(std::span<const uint8_t> b,ModelInfo& info,std::string& why,bool collision_requested=false){

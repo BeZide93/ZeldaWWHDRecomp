@@ -89,11 +89,11 @@ std::string prepare(const std::string& mod,const story_notebook::ManifestModel& 
     {std::lock_guard guard(mutex);entries.emplace(identity,Entry{mod,model.id,destination.string(),info.triangle_count,minimum,maximum,std::move(clips),std::move(rig),std::move(collision_data),shoreline,material});}
     return identity;
 }
-bool register_external(const std::string& identity,const std::string& path){
+bool register_external(const std::string& identity,const std::string& path,unsigned triangles){
     if(identity.size()!=31||path.empty())return false;
     std::lock_guard guard(mutex);auto found=entries.find(identity);
     if(found!=entries.end())return found->second.path==path&&found->second.mod.empty();
-    entries.emplace(identity,Entry{"","",path});return true;
+    entries.emplace(identity,Entry{"","",path,triangles});return true;
 }
 bool shoreline_for(const std::string& archive){std::lock_guard guard(mutex);auto found=entries.find(archive);return found!=entries.end()&&found->second.shoreline;}
 bool water_for(const std::string& archive){return material_for(archive)=="water";}
