@@ -131,6 +131,33 @@ class ChunkFiles(unittest.TestCase):
         t = sb.chunk(chunks, 'RTBL')
         self.assertEqual(sb.read_rtbl(d, t[3], t[1]), [(0x28, 0, 0, [0xC0, 1]), (0x50, 0, 0, [0xC1, 0])])
 
+    def test_light_from_another_stage(self):
+        r = recipe(2, doors=True)
+        r['light'] = {'stage': 'sea', 'room': 2}
+        sb.check_recipe(r)
+        base_chunks = [c[:3] for c in sb.read_dz(template_dzs()) if c[0] != 'Pale']
+        tmpl = sb.write_dz(base_chunks[:3] + [('Colo', 1, b'c' * 0xC), ('Pale', 1, b'p' * 0x2C), ('Virt', 1, b'v' * 0x24)] + base_chunks[3:])
+        light = sb.write_dz([('EnvR', 3, bytes(8) + bytes([1] * 8) + bytes([7] * 8)), ('Colo', 2, b'C' * 0x18), ('Pale', 2, b'P' * 0x58),
+                             ('Virt', 2, b'V' * 0x48), ('LGHT', 1, b'L' * 0x1C)])
+        chunks = sb.read_dz(sb.build_dzs(tmpl, r, light))
+        got = {c[0]: (c[1], c[2]) for c in chunks}
+        # the light stage's colour sets, palettes, sky colours and lights replace the template's ...
+        self.assertEqual(got['Colo'], (2, b'C' * 0x18))
+        self.assertEqual(got['Pale'], (2, b'P' * 0x58))
+        self.assertEqual(got['Virt'], (2, b'V' * 0x48))
+        self.assertEqual(got['LGHT'], (1, b'L' * 0x1C))
+        # ... and every room takes the light stage room's environment entry
+        self.assertEqual(got['EnvR'], (2, bytes([7] * 16)))
+        # the rest of the template stays
+        self.assertIn('RCAM', got)
+        # without "light": the template's own light
+        chunks = sb.read_dz(sb.build_dzs(tmpl, recipe(2, doors=True)))
+        self.assertEqual({c[0]: c[2] for c in chunks}['Pale'], b'p' * 0x2C)
+        for bad in ({'stage': 'sea', 'room': 64}, {'stage': ''}, 'sea'):
+            r['light'] = bad
+            with self.assertRaises(sb.BuildError):
+                sb.check_recipe(r)
+
     def test_room_table_check_finds_a_missing_neighbour(self):
         d = sb.write_dz([('RTBL', 2, sb.rtbl([(0, 0, 0, [0xC0, 1]), (0, 0, 0, [0xC1])]))])
         with self.assertRaises(sb.BuildError):

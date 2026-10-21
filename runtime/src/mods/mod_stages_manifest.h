@@ -115,6 +115,8 @@ struct Warp {
 };
 struct Stage {
     std::string id, template_stage, kind = "cave", music_like;
+    std::string light_stage;  // "light": a stage of the game whose light, sky colours and clock the stage takes ("" the template's)
+    unsigned light_room = 0;  // ... as that stage's room light_room has them
     std::string shaders;  // a code-free shader template (.wwht) in the package: setup prepares its render states
     std::string save_group;  // stages of one group share their save record and dungeon switches (default: the id)
     Place entrance;
@@ -236,7 +238,7 @@ inline bool parse(const Value& m, std::vector<Stage>& out, std::string& why, boo
     if (list.type != Value::Array || list.array.size() > kMaxStagesPerMod) return why = "stages must be a list of up to " + std::to_string(kMaxStagesPerMod), false;
     for (const auto& v : list.array) {
         Stage s;
-        if (!keys(v, {"id", "template", "kind", "music_like", "save_group", "entrance", "rooms", "doors", "joins", "entries", "warps", "map", "shaders"})) return why = "unknown stage field", false;
+        if (!keys(v, {"id", "template", "kind", "music_like", "light", "save_group", "entrance", "rooms", "doors", "joins", "entries", "warps", "map", "shaders"})) return why = "unknown stage field", false;
         if (!id(v.get("id"))) return why = "invalid stage id", false;
         s.id = v.get("id").text;
         const std::string at = "stage " + s.id + ": ";
@@ -265,6 +267,13 @@ inline bool parse(const Value& m, std::vector<Stage>& out, std::string& why, boo
             const bool ok = s.shaders.size() > 5 && s.shaders.size() <= 200 && s.shaders.substr(s.shaders.size() - 5) == ".wwht" &&
                             s.shaders.front() != '/' && s.shaders.find('\\') == std::string::npos && s.shaders.find("..") == std::string::npos;
             if (!ok) return why = at + "\"shaders\" is a .wwht file in the package (assets/stage.wwht)", false;
+        }
+        if (v.get("light").type != Value::Null) {
+            const Value& lv = v.get("light");
+            if (!keys(lv, {"stage", "room"}) || lv.get("stage").type != Value::String || !game_stage_name(lv.get("stage").text) ||
+                (lv.get("room").type != Value::Null && !integer(lv.get("room"), 0, 63, s.light_room)))
+                return why = at + "light is {\"stage\": a stage of the game, \"room\": its room (default 0)}", false;
+            s.light_stage = lv.get("stage").text;
         }
         if (v.get("music_like").type != Value::Null) {
             s.music_like = v.get("music_like").string();
@@ -622,6 +631,10 @@ inline Value recipe(const Stage& s, const std::string& name, const std::map<std:
     r["format"] = Value(1);
     r["name"] = name;
     r["template"] = s.template_stage;
+    if (!s.light_stage.empty()) {
+        r["light"]["stage"] = s.light_stage;
+        r["light"]["room"] = Value(double(s.light_room));
+    }
     r["kind"] = s.kind;
     r["entrance"] = place(s.entrance);
     r["keys"] = Value(s.keys);

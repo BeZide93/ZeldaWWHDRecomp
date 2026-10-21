@@ -80,6 +80,7 @@ A package with stages needs no other package: stages are not story content.
 | `template` | A stage of the game the new stage takes its lighting, sky, camera, door models and room kits from. Its rooms are not part of the new stage. See [Choosing a template](#choosing-a-template). |
 | `kind` | `cave` (the default) or `dungeon`. |
 | `save_group` | Optional: stages with the same `save_group` share their save flags, keys and dungeon items (a dungeon and its boss stage, say). Default: the stage's own id. |
+| `light` | Optional: `{"stage": "sea", "room": 44}` lights the stage as that place of the game is lit: its colours through the day, its sky colours and its lights, following the game's clock (see [Light](#light)). Without it the stage has the template's light. |
 | `music_like` | Optional: a stage of the game whose music and ambient sounds the stage plays. The boss rooms' music follows the story and can't be borrowed. Without it the stage is silent apart from battle music. |
 | `entrance` | A place of the game: `stage`, `room` and spawn `point`. A save made in the stage continues here when the package is not installed (see [Saves](#saves)). Usually the spot in front of the way in. |
 | `rooms` | 1 to 16 rooms, numbered 0, 1, 2, ... in order. |
@@ -103,12 +104,26 @@ of your own game files: their rooms, whether they have a **sky**, the kinds of d
 open-air ones; `"door": "boss"` the ones with a boss door.
 
 - **A stage in the open** (an island in the sky, a mountain top) needs a template with a sky. Its rooms show
-  the sky wherever the ground model leaves it open. The Tower of the Gods' outside stage (`GTower`) has a day
+  the sky wherever the ground model leaves it open. For the light of a place of the game (the sea's, through
+  the day), add `"light"` (see [Light](#light)). The Tower of the Gods' outside stage (`GTower`) has a day
   sky and the knob and boss doors; Dragon Roost's mountain path (`Adanmae`) follows the time of day; the
   Forsaken Fortress tower (`M2tower`) is always night. Twenty-one stages have both a sky and a boss door.
 - **A cave or dungeon** needs a template with the doors it uses: Cave01, M_NewD2, kindan and Siren have all
   four.
 - A room's `kit` can be a room of any stage; the template's own rooms keep the template's lighting best.
+
+### Light
+
+A stage is lit as its template is: the template's colour sets for each time of day, its palettes and its sky
+colours. Some templates have a light of their own whatever the hour (the Tower of the Gods' outside stage is
+always a dusky blue). `"light"` takes the light from another place of the game instead: the stage's colour sets,
+palettes, sky colours and lights are that stage's, and every room is lit as that stage's room `room` (a square
+of the Great Sea: `{"stage": "sea", "room": 44}` is Outset Island's). The stage then follows the game's clock as
+that place does: bright at noon, golden in the evening, dark at night. The template still gives the sky's models,
+the camera and the doors.
+
+The sky island example uses `"light": {"stage": "sea", "room": 44}`, so the island in the sky has the same light
+as the sea round Outset that the bird scene flies over.
 
 ### Rooms
 
@@ -445,7 +460,7 @@ prepared yet.
 
 - The dungeon map shows only the floor Link is on, and the map can't be zoomed or moved by touch.
 - Only the actors listed under [Actors](#actors); no boss actor yet, and no actors of a kit room's own.
-- The stage's rooms are lit by the template; a sky only comes with a template that has one.
+- The stage's rooms are lit by the template (or by the stage `light` names); a sky only comes with a template that has one.
 - A return warp has no light of its own; mark its spot in the ground model.
 - Ballad of Gales and the blue warp don't lead to or from a mod stage.
 

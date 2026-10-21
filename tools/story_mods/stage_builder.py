@@ -53,7 +53,7 @@ import notebook_model as base  # noqa: E402  (Bfres, sarc, yaz0_stored, BuildErr
 import game_piece_model as gp  # noqa: E402  (room_files, read_model, Writer, write_model, ATTRIBUTE_CLASS)
 from skinned_actor_model import append_dictionary, append_string  # noqa: E402
 
-VERSION = 3
+VERSION = 4
 FORMAT = 1
 BuildError = base.BuildError
 MAX_ROOMS = 16
@@ -169,8 +169,22 @@ def room_entries(room, neighbours, drawn=()):
 
 # ---- the stage file (stage.dzs) ----------------------------------------------------------------------------
 
-def build_dzs(template_dzs, recipe):
+LIGHT_CHUNKS = ('Colo', 'Pale', 'Virt', 'LGHT')  # the light: colour sets (one per time of day), palettes, sky colours, lights
+
+
+def build_dzs(template_dzs, recipe, light_dzs=None):
+    """the stage file. With light_dzs (recipe "light": another stage's stage.dzs) the stage's light comes from that stage:
+    its colour sets, palettes and sky colours replace the template's, and every room takes the environment entry of the
+    light stage's room (on the sea: the square's), so the stage is lit as that place, through the day as it is"""
     chunks = read_dz(template_dzs)
+    light_env = None
+    if light_dzs is not None:
+        lchunks = read_dz(light_dzs)
+        le = chunk(lchunks, 'EnvR')
+        require(le and chunk(lchunks, 'Colo') and chunk(lchunks, 'Pale') and chunk(lchunks, 'Virt'), 'the light stage has no light of its own')
+        lroom = recipe['light'].get('room', 0)
+        light_env = le[2][8 * lroom:8 * lroom + 8] if lroom < le[1] else le[2][:8]
+        chunks = [c for c in chunks if c[0] not in LIGHT_CHUNKS] + [c for c in lchunks if c[0] in LIGHT_CHUNKS]
     stag = chunk(chunks, 'STAG')
     require(stag and stag[1] == 1 and len(stag[2]) >= 0x14, 'the template stage has no stage settings')
     s = bytearray(stag[2][:0x14])
@@ -202,6 +216,8 @@ def build_dzs(template_dzs, recipe):
     for r in rooms:  # a kit room of another stage is lit by the template's first environment
         kit = r['kit']['room'] if r['kit']['stage'] == recipe['template'] else 0
         e = envr_old[2][8 * kit:8 * kit + 8] if envr_old and kit < envr_old[1] else b''
+        if light_env is not None:
+            e = light_env
         envr += e if len(e) == 8 else bytes(8)
     e = recipe['entrance']
     scls = scls_entry(e['stage'], e['point'], e['room'])
@@ -955,6 +971,9 @@ def check_recipe(r):
     require(isinstance(r.get('name'), str) and NAME.fullmatch(r['name']), 'invalid stage name')
     require(isinstance(r.get('template'), str) and STAGE.fullmatch(r['template']), 'invalid template stage')
     require(r.get('kind') in KINDS, 'kind is cave or dungeon')
+    light = r.get('light')
+    require(light is None or (isinstance(light, dict) and isinstance(light.get('stage'), str) and STAGE.fullmatch(light['stage']) and
+                              isinstance(light.get('room', 0), int) and 0 <= light.get('room', 0) <= 63), 'light is a stage of the game and its room')
     require(_place(r.get('entrance'), r['name']) and r['entrance']['stage'] != r['name'], 'the entrance is a stage, room and point of the game')
     rooms = r.get('rooms')
     require(isinstance(rooms, list) and 0 < len(rooms) <= MAX_ROOMS, 'a stage has 1 to %d rooms' % MAX_ROOMS)
@@ -1026,12 +1045,13 @@ def build(game, recipe_path, out_dir):
             digest.update(f.read())
     digest.update(recipe_bytes)
     stage_files = gp.room_files(game, '%s_Stage.szs' % recipe['template'])
+    light_files = gp.room_files(game, '%s_Stage.szs' % recipe['light']['stage']) if recipe.get('light') else {}
     kits = {}
     for r in recipe['rooms']:
         k = (r['kit']['stage'], r['kit']['room'])
         if k not in kits:
             kits[k] = gp.room_files(game, '%s_Room%d.szs' % k)
-    for label, files in [('stage', stage_files)] + [('kit/%s/%d' % k, v) for k, v in sorted(kits.items())]:
+    for label, files in [('stage', stage_files), ('light', light_files)] + [('kit/%s/%d' % k, v) for k, v in sorted(kits.items())]:
         for n in sorted(files):
             digest.update(label.encode() + b'/' + n.encode() + b'\0' + hashlib.sha256(files[n]).digest())
     for r in recipe['rooms']:
@@ -1057,7 +1077,13 @@ def build(game, recipe_path, out_dir):
         for m in need:
             require(m in stage_models, 'the template %s has no %s model (%s): pick a template with that kind of door' % (
                 recipe['template'], m, {'door10': 'the knob door', 'door20': 'the boss door', 'key10': 'the small-key lock', 'stop10': 'the shutter bars'}[m]))
-    dzs = build_dzs(stage_embedded['stage.dzs'], recipe)
+    light_dzs = None
+    if light_files:
+        lb = [n for n in light_files if n.endswith('.bfres')]
+        require(len(lb) == 1, 'the light stage archive has no stage model file')
+        light_dzs = embedded_files(base.Bfres(light_files[lb[0]])).get('stage.dzs')
+        require(light_dzs is not None, 'the light stage has no stage.dzs')
+    dzs = build_dzs(stage_embedded['stage.dzs'], recipe, light_dzs)
     check_room_table(dzs, recipe.get('doors', []), recipe.get('joins', []))
     stage_members = dict(stage_files)
     stage_members[stage_bfres[0]] = replace_embedded(stage_files[stage_bfres[0]], 'stage.dzs', dzs)

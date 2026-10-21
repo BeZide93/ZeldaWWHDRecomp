@@ -230,6 +230,23 @@ int main() {
         assert(!bad2);
     }
 
+    // the stage's light from another stage ("light"): parsed, into the recipe, and refused when malformed
+    {
+        std::string text = kValid;
+        text.replace(text.find("\"music_like\": \"Cave01\","), 0, "\"light\": {\"stage\": \"sea\", \"room\": 44}, ");
+        std::vector<Stage> m;
+        assert(parse(parse_json(text), m, why) && m[0].light_stage == "sea" && m[0].light_room == 44);
+        const Value lr = recipe(m[0], "Zaaaaaa", {{"chamber", "Zaaaaaa"}, {"other", "Zbbbbbb"}}, [](const std::string& p) { return p; });
+        assert(lr.get("light").get("stage").string() == "sea" && lr.get("light").get("room").number == 44);
+        assert(recipe(s, "Zaaaaaa", names, [](const std::string& p) { return p; }).get("light").type == Value::Null);  // the template's light
+        for (const char* bad : {"\"light\": {\"stage\": \"sea\", \"room\": 64}, ", "\"light\": {\"stage\": \"\"}, ", "\"light\": \"sea\", ",
+                                "\"light\": {\"stage\": \"sea\", \"hour\": 12}, "}) {
+            std::string t = kValid;
+            t.replace(t.find("\"music_like\": \"Cave01\","), 0, bad);
+            assert(!parse(parse_json(t), m, why) && why.find("light") != std::string::npos);
+        }
+    }
+
     // phase 3: the dungeon map's title and the rooms' floors
     {
         std::string text = kValid;
