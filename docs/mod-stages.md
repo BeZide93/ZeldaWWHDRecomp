@@ -229,12 +229,19 @@ content and need the Story Notebook.
 
 The sky island example's scene `bird` starts when Link walks along Outset's pier towards the lookout: the
 Helmaroc King swoops down over the pier (Link startled), opens its talons and closes them around him with
-the game's own grab animation, and carries him up in a curve over the sea while he struggles and then
-hangs; over the open sea it lets go and he falls; a camera step holds the view of the sky, a fade step darkens it, and the stage action takes him to
-the island (a scene whose end changes the stage stays dark until the new stage fades in). Its bird is `{"actor": "Dk", "spawn": "always",
+the game's own grab animation (the attach's `blend` lifts him off the planks without a jump), and climbs
+with him struggling and then hanging. Above the clouds the island comes into view far ahead, the bird flies
+over it, its talons open and Link falls towards it; the fade takes him into the stage's spawn 2, a
+`"start": "fall"` spawn, so he drops onto the island. Its bird is `{"actor": "Dk", "spawn": "always",
 "params": 2}`: the demo's own Helmaroc King, without ground collision. Outset has a Helmaroc King of its
 own, waiting hidden for its story event; without `"spawn": "always"` the demo would move that one, which
 doesn't show.
+
+The island in Outset's sky is a world object of the package ([world objects](world-objects.md)): a
+low-detail model of the island and its arena (`models/island-distant.glb`) placed high above the sea north
+of Outset, shown until the scene has dropped Link on the island (`"when": {"not_flag": "sky.landed"}`, a
+flag the scene's end sets, with the quest's step 2). World objects are story content, so the package needs
+the Story Notebook.
 
 ### Boss rooms
 
@@ -283,7 +290,8 @@ the package's stages and its wordless scenes play just the same, its quest and l
 story actions are skipped (a line in the game's log says so); `stage` and `scene` actions still run. Only
 the Story Notebook can be an optional dependency.
 
-The sky island example does this. Its quest "The island in the sky" starts with a letter (from a Rito
+The sky island example needs the Story Notebook (a plain dependency, `set_package_info` `"value":
+"required"`): its scene shows the island in Outset's sky as a world object, which is story content. Its quest "The island in the sky" starts with a letter (from a Rito
 postbox) that sends Link to Outset's pier; the Helmaroc King's scene (or the updraft) takes him to the
 island (step 2), the boss key's chest moves it to the guardian (3), the darknut's defeat to the heart
 container (4), the big chest to the way home (5), and the return warp finishes it: the reward, 100 rupees,

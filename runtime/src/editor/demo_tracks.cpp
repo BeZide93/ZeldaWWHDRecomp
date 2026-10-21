@@ -153,7 +153,8 @@ std::string event_label(const std::string& list, const Value& e) {
     if (list == "messages") return e.get("text").string();
     if (list == "sounds") return "sound " + std::to_string(long(e.get("id").number));
     if (list == "particles") return "particle " + std::to_string(long(e.get("id").number));
-    if (list == "attach") return e.get("actor").string() + " on " + e.get("to").string() + (e.get("joint").type == Value::String ? ":" + e.get("joint").text : "");
+    if (list == "attach") return e.get("actor").string() + " on " + e.get("to").string() + (e.get("joint").type == Value::String ? ":" + e.get("joint").text : "") +
+                                 (e.get("blend").type == Value::Number && e.get("blend").number > 0 ? " blend " + std::to_string(int(e.get("blend").number)) : "");
     if (list == "detach") return e.get("actor").string() + " off";
     if (list == "time") { char t[32]; std::snprintf(t, sizeof t, "%.2f h", e.get("hour").number); return t; }
     if (list == "weather") { char t[32]; std::snprintf(t, sizeof t, "rain %.2f", e.get("rain").number); return t; }

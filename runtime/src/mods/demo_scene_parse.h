@@ -93,7 +93,7 @@ inline bool attachments(const Value& st, Demo& d, std::string& why) {
     auto actor = [&](const std::string& id) -> const Actor* { for (const auto& a : d.actors) if (a.id == id) return &a; return nullptr; };
     for (const auto& v : attach.array) {
         Attach a;
-        if (!keys_only(v, {"frame", "actor", "to", "joint", "offset", "rotation", "upright"}) || !integer(v.get("frame"), 0, d.frames, a.frame)) return fail(why, "attach needs a frame inside the demo");
+        if (!keys_only(v, {"frame", "actor", "to", "joint", "offset", "rotation", "upright", "blend"}) || !integer(v.get("frame"), 0, d.frames, a.frame)) return fail(why, "attach needs a frame inside the demo");
         a.actor = v.get("actor").string(); a.to = v.get("to").string(); a.joint = v.get("joint").string();
         const Actor* carried = actor(a.actor);
         const Actor* carrier = actor(a.to);
@@ -104,6 +104,7 @@ inline bool attachments(const Value& st, Demo& d, std::string& why) {
         if (v.object.contains("offset") && !vec(v.get("offset"), a.offset)) return fail(why, "attach offset must be {x,y,z}");
         if (v.object.contains("rotation") && !vec(v.get("rotation"), a.rotation)) return fail(why, "attach rotation must be {x,y,z} degrees");
         if (v.object.contains("upright")) { if (v.get("upright").type != Value::Bool) return fail(why, "attach upright must be true or false"); a.upright = v.get("upright").boolean; }
+        if (v.object.contains("blend") && !integer(v.get("blend"), 0, 60, a.blend)) return fail(why, "attach blend must be 0..60 frames");
         d.attach.push_back(a);
     }
     if (!frame_order(d.attach)) return fail(why, "attach entries must be in frame order");

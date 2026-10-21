@@ -1579,6 +1579,9 @@ someone in its beak or claws.
   carried actor relative to the joint. A joint's axes rarely point the way the
   world does, so try a few offsets. `"upright": true` keeps only the joint's
   heading, so the carried actor stays upright.
+- `blend` (0–60 frames) moves the carried actor smoothly from where it is onto
+  the joint over that many frames instead of putting it there at once: a grab
+  that lifts Link off the ground without a jump (`"blend": 8`).
 - While it is carried, an actor ignores its own position and rotation tracks.
   After `detach` it stays where it was let go. With `"fall": true` it falls
   from there to the ground below it. It stays there until its next position
@@ -1592,7 +1595,8 @@ someone in its beak or claws.
   bringing the claws down to the actor; then the carrier's loop. The carried
   actor's own clips do the rest (Link: startled, struggling, then hanging). The
   sky island example (`examples/guest-mods/sky-island`, scene `bird`) does this
-  with the Helmaroc King's `04_dk_cut08_hokaku.bck` and Link's Outset clips.
+  with the Helmaroc King's `04_dk_cut08_hokaku.bck`, Link's Outset clips and
+  an attach `blend`.
   When an offset is hard to find, attach to the joint with no offset first and
   run with `WWHD_DEMO_TRACE=1`: the log gives the carried actor's place, the
   carrier's and the joint's every second.

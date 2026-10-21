@@ -274,9 +274,155 @@ def glb(parts):
         struct.pack('<I4s', len(binary), b'BIN\0') + bytes(binary)
 
 
+# ---- the island far off (models/island-distant.glb) ----------------------------------------------------------------
+# The island and its arena as the bird scene shows them in Outset's sky: a low-detail model of both with small
+# pictures of its own (the kit textures belong to the stage build, not to a world object), placed as a world
+# object of the package. Same metres and origin as island.glb, the arena north of it as in room 1.
+
+def png(w, h, pixel):
+    """a PNG (8-bit RGB) of pixel(x, y) -> (r, g, b)"""
+    import zlib
+    rows = b''.join(b'\0' + bytes(c for x in range(w) for c in pixel(x, y)) for y in range(h))
+
+    def chunk(kind, body):
+        return struct.pack('>I', len(body)) + kind + body + struct.pack('>I', zlib.crc32(kind + body) & 0xFFFFFFFF)
+    return b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', struct.pack('>IIBBBBB', w, h, 8, 2, 0, 0, 0)) + chunk(b'IDAT', zlib.compress(rows, 9)) + chunk(b'IEND', b'')
+
+
+def noise(x, y, seed):
+    """a fixed texture wobble in -1..1 that tiles every 64 texels"""
+    t = 2 * math.pi / 64
+    return 0.5 * math.sin(t * (3 * x + 2 * y) + seed) + 0.3 * math.sin(t * (5 * y - 4 * x) + 2 * seed) + 0.2 * math.sin(t * (11 * x + 7 * y))
+
+
+def shade(base, f):
+    return tuple(max(0, min(255, int(c * f))) for c in base)
+
+
+def cliff_texel(x, y):
+    if y < 6 + 2 * math.sin(x * 2 * math.pi / 16):  # grass hanging over the top rows
+        return shade((96, 178, 64), 0.9 + 0.1 * noise(x, y, 2.0))
+    return shade((150, 128, 104), (0.95 - 0.15 * ((y // 10) % 2)) * (1.0 + 0.07 * noise(x, y, 0.7)))
+
+
+PICTURES = {
+    'grass': lambda x, y: shade((96, 178, 64), 1.0 + 0.10 * noise(x, y, 0.4)),
+    'earth': lambda x, y: shade((182, 146, 98), 1.0 + 0.08 * noise(x, y, 1.1)),
+    'cliff': cliff_texel,
+    'rock': lambda x, y: shade((104, 92, 84), 1.0 + 0.12 * noise(x, y, 3.3)),
+    'stone': lambda x, y: shade((196, 188, 170), (0.85 if x % 16 == 0 or y % 16 == 0 else 1.0) * (1.0 + 0.05 * noise(x, y, 4.1))),
+}
+
+
+def distant():
+    parts = {}
+    seg = 40
+
+    def rim(a):
+        return R_TOP * wobble(a, 1.3)
+    under = [(1.0, 0.0), (1.02, -3.0), (0.85, -8.0), (0.55, -15.0), (0.25, -21.0)]
+
+    def side(j, a):
+        f, y = under[j]
+        r = rim(a) * f
+        return (r * math.cos(a), y, r * math.sin(a))
+    for i in range(seg):
+        a0, a1 = 2 * math.pi * i / seg, 2 * math.pi * (i + 1) / seg
+        ring = [0.0, 0.3, 0.65, 1.0]
+        for k in range(len(ring) - 1):
+            pts = []
+            for f, a in ((ring[k], a0), (ring[k], a1), (ring[k + 1], a1), (ring[k + 1], a0)):
+                r = rim(a) * f
+                x, z = r * math.cos(a), r * math.sin(a)
+                pts.append(((x, height(x, z), z), (x / 4.0, z / 4.0), 1.0))
+            if k == 0:
+                tri(parts, 'grass', pts[0], pts[2], pts[3])
+            else:
+                quad(parts, 'grass', *pts)
+        u0, u1 = 2 * math.pi * R_TOP * i / seg / 7.0, 2 * math.pi * R_TOP * (i + 1) / seg / 7.0
+        for j in range(len(under) - 1):
+            y0, y1 = under[j][1], under[j + 1][1]
+            quad(parts, 'cliff' if j == 0 else 'rock', (side(j, a1), (u1, -y0 / 6), 1.0), (side(j + 1, a1), (u1, -y1 / 6), 1.0),
+                 (side(j + 1, a0), (u0, -y1 / 6), 1.0), (side(j, a0), (u0, -y0 / 6), 1.0))
+        last = len(under) - 1
+        tri(parts, 'rock', (side(last, a1), (u1, 3.5), 1.0), ((0.0, -26.0, 0.0), ((u0 + u1) / 2, 4.3), 1.0), (side(last, a0), (u0, 3.5), 1.0))
+    # the clearing and the path, a little above the grass
+    top = height(0, 0) + 0.05
+    for i in range(16):
+        a0, a1 = 2 * math.pi * i / 16, 2 * math.pi * (i + 1) / 16
+        tri(parts, 'earth', ((0.0, top, 0.0), (0.0, 0.0), 1.0), ((CLEARING_R * math.cos(a1), top, CLEARING_R * math.sin(a1)), (math.cos(a1), math.sin(a1)), 1.0),
+            ((CLEARING_R * math.cos(a0), top, CLEARING_R * math.sin(a0)), (math.cos(a0), math.sin(a0)), 1.0))
+    z = CLEARING_R - 0.5
+    while z < GATE_Z - 1e-6:
+        z1 = min(z + 3.0, GATE_Z)
+        h0, h1 = path_height(z) + 0.05, path_height(z1) + 0.05
+        quad(parts, 'earth', ((-PATH_HALF, h0, z), (0, z / 3), 1.0), ((-PATH_HALF, h1, z1), (0, z1 / 3), 1.0),
+             ((PATH_HALF, h1, z1), (1, z1 / 3), 1.0), ((PATH_HALF, h0, z), (1, z / 3), 1.0))
+        z = z1
+    # the arena: its floor, its wall (both faces, open at the gateway) and the rock below it
+
+    def at(r, a, y):
+        return (r * math.cos(a), y, ARENA_Z + r * math.sin(a))
+    aseg = 32
+    for i in range(aseg):
+        a0, a1 = 2 * math.pi * i / aseg, 2 * math.pi * (i + 1) / aseg
+        tri(parts, 'stone', (at(0, 0, ARENA_Y), (0, 0), 1.0), (at(ARENA_R, a1, ARENA_Y), (math.cos(a1) * 3, math.sin(a1) * 3), 1.0),
+            (at(ARENA_R, a0, ARENA_Y), (math.cos(a0) * 3, math.sin(a0) * 3), 1.0))
+        mid = (a0 + a1) / 2
+        gap = abs(math.atan2(math.sin(mid + math.pi / 2), math.cos(mid + math.pi / 2))) * ARENA_R < GATE_HALF
+        lo, high = ARENA_Y + (GATE_TOP if gap else 0.0), ARENA_Y + WALL_H
+        u0, u1 = ARENA_R * a0 / 4, ARENA_R * a1 / 4
+        quad(parts, 'stone', (at(ARENA_R, a1, lo), (u1, 1), 1.0), (at(ARENA_R, a1, high), (u1, 0), 1.0), (at(ARENA_R, a0, high), (u0, 0), 1.0), (at(ARENA_R, a0, lo), (u0, 1), 1.0))
+        quad(parts, 'stone', (at(ARENA_R + 0.8, a0, lo), (u0, 1), 1.0), (at(ARENA_R + 0.8, a0, high), (u0, 0), 1.0),
+             (at(ARENA_R + 0.8, a1, high), (u1, 0), 1.0), (at(ARENA_R + 0.8, a1, lo), (u1, 1), 1.0))
+        quad(parts, 'rock', (at(ARENA_R + 0.8, a0, ARENA_Y - 8), (u0, 1.3), 1.0), (at(ARENA_R + 0.8, a0, ARENA_Y), (u0, 0), 1.0),
+             (at(ARENA_R + 0.8, a1, ARENA_Y), (u1, 0), 1.0), (at(ARENA_R + 0.8, a1, ARENA_Y - 8), (u1, 1.3), 1.0))
+        tri(parts, 'rock', (at(ARENA_R + 0.8, a1, ARENA_Y - 8), (u1, 1.3), 1.0), ((0.0, ARENA_Y - 14, ARENA_Z), ((u0 + u1) / 2, 2.0), 1.0),
+            (at(ARENA_R + 0.8, a0, ARENA_Y - 8), (u0, 1.3), 1.0))
+    return parts
+
+
+def textured_glb(parts):
+    """a world object's .glb: one mesh, a material per part with its own embedded 64 x 64 PNG picture"""
+    binary = bytearray()
+    views, accessors, primitives, materials, images, textures = [], [], [], [], [], []
+
+    def view(body):
+        binary.extend(b'\0' * (-len(binary) % 4))
+        views.append({'buffer': 0, 'byteOffset': len(binary), 'byteLength': len(body)})
+        binary.extend(body)
+        return len(views) - 1
+
+    def floats(rows, width):
+        accessors.append({'bufferView': view(struct.pack('<%df' % (len(rows) * width), *(x for r in rows for x in r))), 'componentType': 5126,
+                          'count': len(rows), 'type': 'VEC%d' % width, 'min': [min(r[k] for r in rows) for k in range(width)],
+                          'max': [max(r[k] for r in rows) for k in range(width)]})
+        return len(accessors) - 1
+    for name, (pos, nrm, uv, col, idx) in sorted(parts.items()):
+        images.append({'bufferView': view(png(64, 64, PICTURES[name])), 'mimeType': 'image/png'})
+        textures.append({'source': len(images) - 1, 'sampler': 0})
+        materials.append({'name': name, 'pbrMetallicRoughness': {'baseColorTexture': {'index': len(textures) - 1}, 'metallicFactor': 0.0}})
+        p, n, t = floats(pos, 3), floats(nrm, 3), floats(uv, 2)
+        accessors.append({'bufferView': view(struct.pack('<%dH' % len(idx), *idx)), 'componentType': 5123, 'count': len(idx), 'type': 'SCALAR'})
+        primitives.append({'attributes': {'POSITION': p, 'NORMAL': n, 'TEXCOORD_0': t}, 'indices': len(accessors) - 1, 'material': len(materials) - 1})
+    doc = {'asset': {'version': '2.0', 'generator': 'Original sky island example, MPL-2.0'}, 'scene': 0, 'scenes': [{'nodes': [0]}],
+           'nodes': [{'mesh': 0, 'name': 'island-distant'}], 'meshes': [{'name': 'island-distant', 'primitives': primitives}],
+           'materials': materials, 'images': images, 'textures': textures, 'samplers': [{'wrapS': 10497, 'wrapT': 10497}],
+           'buffers': [{'byteLength': len(binary)}], 'bufferViews': views, 'accessors': accessors}
+    text = json.dumps(doc, separators=(',', ':')).encode()
+    text += b' ' * (-len(text) % 4)
+    binary.extend(b'\0' * (-len(binary) % 4))
+    return b'glTF' + struct.pack('<II', 2, 12 + 8 + len(text) + 8 + len(binary)) + struct.pack('<I4s', len(text), b'JSON') + text + \
+        struct.pack('<I4s', len(binary), b'BIN\0') + bytes(binary)
+
+
 if __name__ == '__main__':
     here = Path(__file__).resolve().parent
     for name, make in (('island', island), ('arena', arena)):
         parts = make()  # in metres, as a .glb is (the game's units are centimetres)
         (here / (name + '.glb')).write_bytes(glb(parts))
         print(name, sum(len(p[4]) // 3 for p in parts.values()), 'triangles', sorted(parts))
+    parts = distant()  # a world object's model: the package's models folder, where the editor's import_model puts models
+    (here.parent / 'models').mkdir(exist_ok=True)
+    (here.parent / 'models' / 'island-distant.glb').write_bytes(textured_glb(parts))
+    print('island-distant', sum(len(p[4]) // 3 for p in parts.values()), 'triangles,', sum(len(p[0]) for p in parts.values()), 'vertices', sorted(parts))

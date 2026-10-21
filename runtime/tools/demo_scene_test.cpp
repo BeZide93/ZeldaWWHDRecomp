@@ -234,6 +234,27 @@ int main() {
         assert(demo_attach_math::pose(rolled, {}, {}, p, r, false) && near(r[2], 90));
         demo_attach_math::M34 broken = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
         assert(!demo_attach_math::pose(broken, {}, {}, p, r));
+        // an attach's blend: eased from where the actor was, angles the short way round (170 -> -170 passes 180)
+        {
+            const float from[3] = {0, 0, 0};
+            const int16_t from_a[3] = {0, int16_t(30947), 0};  // 170 degrees
+            float q[3] = {100, 50, -20};
+            int16_t qa[3] = {0, int16_t(-30947), 0};            // -170 degrees
+            demo_attach_math::blend(from, from_a, 0.5f, q, qa);
+            assert(std::fabs(q[0] - 50) < 1e-3f && std::fabs(q[1] - 25) < 1e-3f && qa[1] == -32768);
+            float z[3] = {100, 50, -20};
+            int16_t za[3] = {0, 0, 0};
+            demo_attach_math::blend(from, from_a, 0.f, z, za);
+            assert(z[0] == 0 && za[1] == 30947);
+            float o[3] = {100, 50, -20};
+            int16_t oa[3] = {0, 0, 0};
+            demo_attach_math::blend(from, from_a, 1.f, o, oa);
+            assert(o[0] == 100 && oa[1] == 0);
+        }
+        assert(parsed(R"({"type":"demo","frames":90,"actors":[{"id":"bird","actor":"Dk"},{"id":"hero","actor":"Link","modes":[{"frame":0,"clip":"a.bck"}]}],
+          "attach":[{"frame":10,"actor":"hero","to":"bird","joint":"j","blend":8}]})").attach[0].blend == 8);
+        assert(has(refused(R"({"type":"demo","frames":90,"actors":[{"id":"bird","actor":"Dk"},{"id":"hero","actor":"Link","modes":[{"frame":0,"clip":"a.bck"}]}],
+          "attach":[{"frame":10,"actor":"hero","to":"bird","joint":"j","blend":61}]})"), "attach blend must be 0..60"));
     }
 
     // phase 5: time and weather through the event's LIGHT staff

@@ -74,6 +74,7 @@ struct Attach {
     std::string actor, to, joint;
     Vec offset, rotation;
     bool upright = false;
+    uint32_t blend = 0;    // frames over which the carried actor moves from where it is onto the joint (0: at once)
     bool fall = false;     // detach: the released actor falls to the ground (else it stays where it was let go)  // keep only the joint's heading (the carried actor stays upright, as in the game's Demo07)
     bool operator==(const Attach&) const = default;
 };

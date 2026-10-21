@@ -1,20 +1,55 @@
 {
+  "actors": [
+    {
+      "behaviour": "static",
+      "collision": {
+        "height": 60,
+        "radius": 2100,
+        "shape": "cylinder",
+        "surface": "grass"
+      },
+      "id": "far-island",
+      "kind": "mod",
+      "model": "island-distant",
+      "position": {
+        "x": -200852,
+        "y": 6640,
+        "z": 300728
+      },
+      "room": 44,
+      "rotation": {
+        "x": 0,
+        "y": 198,
+        "z": 0
+      },
+      "stage": "sea",
+      "when": {
+        "not_flag": "sky.landed"
+      }
+    }
+  ],
   "author": "Lukas S",
   "content_dir": "content",
   "dependencies": [
     {
       "id": "story-notebook",
-      "minimum_version": "0.0.0",
-      "optional": true
+      "minimum_version": "0.0.0"
     }
   ],
-  "description": "An island floating above the sea. On the pier of Outset Island, by the lookout, the Helmaroc King swoops down and carries Link there; an updraft off Outset is a second way up. Its boss arena holds a heart container; the warp out opens once it is taken. With the Story Notebook it is a quest in the notebook, \"The island in the sky\", that starts with a letter and ends with a reward of 100 rupees.",
+  "description": "An island floating above the sea. On the pier of Outset Island, by the lookout, the Helmaroc King swoops down and carries Link there; an updraft off Outset is a second way up. Its boss arena holds a heart container; the warp out opens once it is taken. It is a quest in the Story Notebook, \"The island in the sky\", that starts with a letter and ends with a reward of 100 rupees.",
   "experimental": true,
   "format_version": 1,
   "game_id": "wwhd",
   "id": "sky-island",
   "kind": "content",
   "minimum_manager_version": "1.5.0",
+  "models": [
+    {
+      "id": "island-distant",
+      "kind": "static",
+      "source": "models/island-distant.glb"
+    }
+  ],
   "name": "The sky island",
   "quests": [
     {
@@ -138,8 +173,14 @@
                 },
                 {
                   "archive": "Demo04",
-                  "file": "04_dk_cut09_esc.bck",
-                  "frame": 285
+                  "file": "04_dk_cut08_hokaku.bck",
+                  "frame": 440,
+                  "loop": false
+                },
+                {
+                  "archive": "Demo04",
+                  "file": "04_dk_cut08_esc.bck",
+                  "frame": 471
                 }
               ],
               "id": "bird",
@@ -214,17 +255,41 @@
                   {
                     "frame": 270,
                     "value": {
-                      "x": 500,
-                      "y": 3300,
-                      "z": -4500
+                      "x": 900,
+                      "y": 3500,
+                      "z": -5500
                     }
                   },
                   {
                     "frame": 330,
                     "value": {
-                      "x": -1300,
-                      "y": 4100,
-                      "z": -5300
+                      "x": 0,
+                      "y": 4700,
+                      "z": -8000
+                    }
+                  },
+                  {
+                    "frame": 390,
+                    "value": {
+                      "x": -900,
+                      "y": 6000,
+                      "z": -10500
+                    }
+                  },
+                  {
+                    "frame": 450,
+                    "value": {
+                      "x": -1500,
+                      "y": 7530,
+                      "z": -13250
+                    }
+                  },
+                  {
+                    "frame": 480,
+                    "value": {
+                      "x": -1800,
+                      "y": 7900,
+                      "z": -15500
                     }
                   }
                 ]
@@ -300,7 +365,7 @@
                     "frame": 270,
                     "value": {
                       "x": 0,
-                      "y": 220,
+                      "y": 200,
                       "z": 0
                     }
                   },
@@ -308,7 +373,31 @@
                     "frame": 330,
                     "value": {
                       "x": 0,
-                      "y": 250,
+                      "y": 196,
+                      "z": 0
+                    }
+                  },
+                  {
+                    "frame": 390,
+                    "value": {
+                      "x": 0,
+                      "y": 190,
+                      "z": 0
+                    }
+                  },
+                  {
+                    "frame": 450,
+                    "value": {
+                      "x": 0,
+                      "y": 180,
+                      "z": 0
+                    }
+                  },
+                  {
+                    "frame": 480,
+                    "value": {
+                      "x": 0,
+                      "y": 180,
                       "z": 0
                     }
                   }
@@ -336,7 +425,7 @@
                   "btk": "04_cl_cut14_abareru.btk",
                   "btp": "04_cl_cut14_abareru.btp",
                   "clip": "04_cl_cut14_abareru.bck",
-                  "frame": 67
+                  "frame": 64
                 },
                 {
                   "blend": 10,
@@ -348,7 +437,7 @@
                 {
                   "blend": 6,
                   "clip": "06_cl_rakkatyuu_o.bck",
-                  "frame": 296,
+                  "frame": 450,
                   "loop": false
                 }
               ]
@@ -358,7 +447,8 @@
           "attach": [
             {
               "actor": "link",
-              "frame": 67,
+              "blend": 8,
+              "frame": 64,
               "joint": "j_dk_ashi_r3",
               "offset": {
                 "x": 170,
@@ -390,76 +480,165 @@
                   }
                 },
                 {
-                  "frame": 70,
+                  "frame": 64,
                   "value": {
                     "x": 700,
-                    "y": 200,
+                    "y": 190,
                     "z": -450
+                  }
+                },
+                {
+                  "frame": 75,
+                  "value": {
+                    "x": 800,
+                    "y": 60,
+                    "z": -800
                   }
                 },
                 {
                   "frame": 84,
                   "value": {
-                    "x": 1100,
-                    "y": 320,
-                    "z": -900
+                    "x": 450,
+                    "y": -80,
+                    "z": -550
                   }
                 },
                 {
-                  "frame": 105,
+                  "frame": 90,
                   "value": {
-                    "x": 1750,
-                    "y": 850,
-                    "z": -1150
+                    "x": 969,
+                    "y": 132,
+                    "z": -1258
                   }
                 },
                 {
-                  "frame": 130,
+                  "frame": 120,
                   "value": {
-                    "x": 2200,
-                    "y": 1150,
-                    "z": -1550
+                    "x": 2178,
+                    "y": 852,
+                    "z": -1271
                   }
                 },
                 {
-                  "frame": 160,
+                  "frame": 150,
                   "value": {
-                    "x": 2600,
-                    "y": 1450,
-                    "z": -1900
+                    "x": 2274,
+                    "y": 1304,
+                    "z": -2315
+                  }
+                },
+                {
+                  "frame": 180,
+                  "value": {
+                    "x": 2065,
+                    "y": 1773,
+                    "z": -3296
                   }
                 },
                 {
                   "frame": 210,
                   "value": {
-                    "x": 3300,
-                    "y": 2400,
-                    "z": -2500
+                    "x": 1552,
+                    "y": 2225,
+                    "z": -4205
                   }
                 },
                 {
-                  "frame": 270,
+                  "frame": 240,
                   "value": {
-                    "x": 1700,
-                    "y": 3000,
-                    "z": -3500
+                    "x": 1800,
+                    "y": 2600,
+                    "z": -2900
                   }
                 },
                 {
                   "frame": 300,
                   "value": {
-                    "x": 900,
-                    "y": 3300,
-                    "z": -4200
+                    "x": 850,
+                    "y": 3700,
+                    "z": -5450
                   }
                 },
                 {
-                  "frame": 330,
+                  "frame": 360,
+                  "value": {
+                    "x": 1500,
+                    "y": 5000,
+                    "z": -6500
+                  }
+                },
+                {
+                  "frame": 420,
                   "value": {
                     "x": 200,
-                    "y": 3600,
-                    "z": -4400
+                    "y": 7400,
+                    "z": -11500
                   }
+                },
+                {
+                  "frame": 450,
+                  "value": {
+                    "x": -500,
+                    "y": 7650,
+                    "z": -12450
+                  }
+                },
+                {
+                  "frame": 480,
+                  "value": {
+                    "x": -450,
+                    "y": 7500,
+                    "z": -12400
+                  }
+                }
+              ]
+            },
+            "fovy": {
+              "curve": "smooth",
+              "keys": [
+                {
+                  "frame": 0,
+                  "value": 55
+                },
+                {
+                  "frame": 64,
+                  "value": 55
+                },
+                {
+                  "frame": 84,
+                  "value": 50
+                },
+                {
+                  "frame": 105,
+                  "value": 17
+                },
+                {
+                  "frame": 210,
+                  "value": 17
+                },
+                {
+                  "frame": 240,
+                  "value": 60
+                },
+                {
+                  "frame": 300,
+                  "value": 55
+                },
+                {
+                  "frame": 360,
+                  "value": 48
+                },
+                {
+                  "frame": 420,
+                  "value": 45
+                },
+                {
+                  "frame": 450,
+                  "value": 34
+                },
+                {
+                  "frame": 480,
+                  "value": 40
                 }
               ]
             },
@@ -483,75 +662,115 @@
                   }
                 },
                 {
-                  "frame": 70,
+                  "frame": 64,
                   "value": {
-                    "x": -30,
-                    "y": 220,
-                    "z": -60
+                    "x": -40,
+                    "y": 180,
+                    "z": -80
+                  }
+                },
+                {
+                  "frame": 75,
+                  "value": {
+                    "x": -50,
+                    "y": 100,
+                    "z": -170
                   }
                 },
                 {
                   "frame": 84,
                   "value": {
-                    "x": 50,
-                    "y": 330,
-                    "z": -200
+                    "x": 120,
+                    "y": 230,
+                    "z": -210
                   }
                 },
                 {
-                  "frame": 105,
+                  "frame": 90,
                   "value": {
-                    "x": 900,
-                    "y": 760,
-                    "z": -200
+                    "x": 219,
+                    "y": 372,
+                    "z": 41
                   }
                 },
                 {
-                  "frame": 130,
+                  "frame": 120,
                   "value": {
-                    "x": 1300,
-                    "y": 1100,
-                    "z": -600
+                    "x": 1087,
+                    "y": 1092,
+                    "z": -242
                   }
                 },
                 {
-                  "frame": 160,
+                  "frame": 150,
                   "value": {
-                    "x": 1850,
-                    "y": 1550,
-                    "z": -1400
+                    "x": 1761,
+                    "y": 1544,
+                    "z": -905
+                  }
+                },
+                {
+                  "frame": 180,
+                  "value": {
+                    "x": 1934,
+                    "y": 2013,
+                    "z": -1801
                   }
                 },
                 {
                   "frame": 210,
                   "value": {
-                    "x": 1700,
-                    "y": 2450,
-                    "z": -3000
+                    "x": 1813,
+                    "y": 2465,
+                    "z": -2727
                   }
                 },
                 {
-                  "frame": 270,
+                  "frame": 240,
                   "value": {
-                    "x": 500,
-                    "y": 3200,
-                    "z": -4500
+                    "x": -800,
+                    "y": 5000,
+                    "z": -12000
                   }
                 },
                 {
                   "frame": 300,
                   "value": {
-                    "x": -400,
-                    "y": 3500,
-                    "z": -4900
+                    "x": -900,
+                    "y": 5600,
+                    "z": -12500
                   }
                 },
                 {
-                  "frame": 330,
+                  "frame": 360,
+                  "value": {
+                    "x": -900,
+                    "y": 6300,
+                    "z": -12000
+                  }
+                },
+                {
+                  "frame": 420,
                   "value": {
                     "x": -1300,
-                    "y": 3600,
-                    "z": -5300
+                    "y": 7100,
+                    "z": -12500
+                  }
+                },
+                {
+                  "frame": 450,
+                  "value": {
+                    "x": -1500,
+                    "y": 7400,
+                    "z": -13350
+                  }
+                },
+                {
+                  "frame": 480,
+                  "value": {
+                    "x": -1500,
+                    "y": 6650,
+                    "z": -13450
                   }
                 }
               ]
@@ -561,25 +780,25 @@
             {
               "actor": "link",
               "fall": true,
-              "frame": 300
+              "frame": 450
             }
           ],
-          "frames": 330,
+          "frames": 480,
           "id": "flight",
           "origin": "link",
           "type": "demo"
         },
         {
           "eye": {
-            "x": -194823,
-            "y": 3940,
-            "z": 310545
+            "x": -199050,
+            "y": 7640,
+            "z": 302876
           },
           "frames": 6,
           "target": {
-            "x": -197664,
-            "y": 6140,
-            "z": 309891
+            "x": -200373,
+            "y": 6790,
+            "z": 302202
           },
           "type": "camera"
         },
@@ -591,9 +810,14 @@
         {
           "then": [
             {
+              "action": "flag",
+              "id": "sky.landed",
+              "value": true
+            },
+            {
               "action": "stage",
               "id": "sky",
-              "point": 0,
+              "point": 2,
               "room": 0
             },
             {
@@ -629,7 +853,10 @@
             "y": 200,
             "z": 2400
           },
-          "rooms": [0, 1]
+          "rooms": [
+            0,
+            1
+          ]
         }
       ],
       "entrance": {
@@ -755,6 +982,16 @@
                 "y": 30,
                 "z": -1500
               }
+            },
+            {
+              "angle": 0,
+              "point": 2,
+              "position": {
+                "x": 0,
+                "y": 30,
+                "z": -1500
+              },
+              "start": "fall"
             }
           ]
         },

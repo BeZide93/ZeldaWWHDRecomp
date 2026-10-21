@@ -80,6 +80,7 @@ struct SceneUi {
     std::string e_query, e_actor, e_to, e_joint, e_text = "...", e_archive, e_file, e_mode = "walk", e_clip;
     bool e_once = false, e_face = false;  // a clip played once (held at its end); Link's clip with his face animations
     int e_blend = -1;                     // Link's clip: blend frames (-1: the game's default)
+    int e_attach_blend = 0;               // attach: frames onto the joint (0: at once)
     uint32_t e_sound = 0, e_particle = 0;
     int e_hour = 12;
     float e_rain = 1;
@@ -1317,6 +1318,11 @@ void demo_inspector(int n, const Value& m, const Value& st) {
             joint_pick("##attach_joint", C.e_to.empty() ? std::string() : actor_archive(st, C.e_to), C.e_joint, "(choose a joint)");
             ev["to"] = C.e_to;
             ev["joint"] = C.e_joint;
+            field_label("Blend", 70);
+            ImGui::SetNextItemWidth(-help_width());
+            ImGui::SliderInt("##attach_blend", &C.e_attach_blend, 0, 30, C.e_attach_blend ? "%d frames" : "at once");
+            help_mark("Frames over which the carried actor moves from where it is onto the joint (a smooth grab).");
+            if (C.e_attach_blend) ev["blend"] = C.e_attach_blend;
         }
     } else if (list == "clips" && !C.d_new_actor.empty()) {
         // a game actor or model: an animation of an archive (its own first); a mod character: its model's clips
