@@ -253,7 +253,9 @@ the material's image before you export, and the game draws its own from the play
   visible triangles when it has none; a game material's surface is then stone). `collision.mesh` names the model
   itself.
 - **Its place.** A static world object, turned about the vertical axis only, at scale 1 (as island buildings).
-  Its placement is checked as any world object's. Parts made together can form one
+  It is drawn to the sea's far distance, so a large island stays in view across its square, fading into the sea's
+  fog far off as the game's own islands do (island grounds of the game pieces too). Its placement is checked as any
+  world object's. Parts made together can form one
   [composition](#limits-and-placement).
 - **Its distant model** may be a kit model too: `"distant": {"model": "rock-far"}`. That model has up to 1,024
   triangles and draws in the eight squares around. Its game textures larger than 256 × 256 are drawn at 128 × 128
