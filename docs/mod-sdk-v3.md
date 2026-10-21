@@ -376,6 +376,8 @@ room it stands in.
 | `piece:sea-rock-spire` | a tall, slim rock standing in the sea | 1000 units under the sea: place it at y -1000 |
 | `piece:sea-rock-pillar` | a rock pillar rising from the sea | 1000 units under the sea |
 | `piece:sea-rock-stack` | a narrow rock stack in the sea | 1000 units under the sea |
+| `piece:sea-rock-broad`, `piece:sea-rock-low`, `piece:sea-rock-small`, `piece:sea-rock-mid` | more of Dragon Roost's sea rocks: a broad one with a flat top Link can stand on, a low one, a small stack and one half as tall as the spire (catalogue version 6) | 1000 units under the sea |
+| `piece:fire-mountain-rock`, `piece:fire-mountain-rock-small` | the two dark volcanic rocks from beside Fire Mountain (catalogue version 6) | 500 units under the sea: place it at y -500 |
 | `piece:windfall-windmill-cap` | the top of Windfall's windmill: its pointed roof, the gallery ring and posts | at its gallery floor |
 | `piece:shipwreck-hull` | the hull of a wrecked ship, upright in the sea with its broken mast | about 370 units under the sea |
 | `piece:shipwreck-bow` | the bow of a wrecked ship lying in the sea | about 1050 units under the sea |
