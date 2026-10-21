@@ -44,6 +44,7 @@
 
 #include "guest_addr.h"
 #include "interp_pacing.h"
+#include "interp_slots.h"
 #include "runtime.h"
 #include "true60.h"
 
@@ -354,23 +355,42 @@ bool plausible(float v) { return v == 0.0f || (std::fabs(v) > 1e-12f && std::fab
 // ---------------------------------------------------------------------------------------------
 // Grass, trees and flowers (and other drawing effects: cloth, hookshot chain, Link's sparkles) use
 // g_Counter.mTimer (101FF560) as their clock; dScnPly_Draw increments it in its world-system
-// block, which true60.cpp (site_025B00B0) runs on full passes only. The sway of each kind is 8
-// shared animation slots written by its calc (in that block) as a function of mTimer: grass s16 +4
-// (slots at +0x18F0C, 0x38 apart), trees s16 +4/+6 (+0x2A9C, 0x84 apart), flowers s16 +4
-// (+0x35BC, 0x38 apart). On logic passes the slots are drawn blended between the previous step's
-// and this step's values (blended hold passes re-apply them); the exact ones are back for the record
-// pass.
+// block, which true60.cpp (site_025B00B0) runs on full passes only. Each kind keeps animation slots
+// (interp_slots.h) written by its calc (in that block): 8 shared wind sway slots as a function of
+// mTimer, and slots of their own for plants that are hit, cut or walked through (bent grass and
+// flowers, shaking trees, the falling top of a cut tree). Layout per kind: slot array (packet
+// offset, stride, count); the s16 and f32 fields its update/draw reads (shared slots: the sway
+// angles only); the data array (offset, stride, count) with each plant's state byte and slot index.
+//   grass  dGrass_anm_c  +0x18F0C, 0x38 x 104: +2 rot Y, +4 rot X;          data +0x9C, 0x44 x 1500 (+0 state, +2 slot)
+//   tree   dTree_anm_c   +0x2A9C, 0x84 x 72:   +2..+0xA angles, +0x18..+0x20 the cut top's offset;
+//                                                                           data +0x9C, 0xA8 x 64 (+0 state, +2 slot)
+//   flower dFlower_anm_c +0x35BC, 0x38 x 72:   +2 angle Y, +4 bend;         data +0x9C, 0x44 x 200 (+0 flags, +1 slot)
+// On logic passes the slots are drawn blended between the previous step's and this step's values
+// (blended hold passes re-apply them); the exact ones are back for the record pass.
 const uint32_t kCounterTimer = GD(0x101FF560);
 struct SwayKind {
     uint32_t base, stride;
-    int fields;
-    uint32_t field[2];
+    int slots;
+    int shared_fields;  // the first fields of `s16` are the shared slots' sway angles
+    int s16_fields, f32_fields;
+    uint32_t s16[5], f32[3];
+    uint32_t data, data_stride;
+    int data_count;
+    uint32_t data_slot;  // offset of the plant's slot index (s8) in its data entry
 };
-constexpr SwayKind kSway[3] = {{0x18F0C, 0x38, 1, {4, 0}}, {0x2A9C, 0x84, 2, {4, 6}}, {0x35BC, 0x38, 1, {4, 0}}};
+constexpr SwayKind kSway[3] = {
+    {0x18F0C, 0x38, 104, 1, 2, 0, {4, 2}, {}, 0x9C, 0x44, 1500, 2},
+    {0x2A9C, 0x84, 72, 2, 5, 3, {4, 6, 2, 8, 0xA}, {0x18, 0x1C, 0x20}, 0x9C, 0xA8, 64, 2},
+    {0x35BC, 0x38, 72, 1, 2, 0, {4, 2}, {}, 0x9C, 0x44, 200, 1},
+};
+constexpr int kMaxSlots = 104;
 struct SwayRec {
     uint32_t pkt = 0;
     uint64_t step = 0;  // logic pass it was recorded on (hold pass count)
-    int16_t v[8][2];
+    int16_t v[kMaxSlots][5];
+    uint32_t f[kMaxSlots][3];  // host-order float words
+    uint8_t state[kMaxSlots];
+    std::vector<int32_t> owner;
 } g_sway[3];
 
 void sway_calc(Cpu* c, int k, void (*orig)(Cpu*)) {
@@ -379,21 +399,47 @@ void sway_calc(Cpu* c, int k, void (*orig)(Cpu*)) {
     orig(c);
     if (!on(16) || !halfway()) return;
     SwayRec& r = g_sway[k];
-    bool valid = r.pkt == pk && r.step + 1 == interp::hold_pass_count();
+    const bool valid = r.pkt == pk && r.step + 1 == interp::hold_pass_count();
+    std::vector<int32_t> owner;
+    interp::slots::owners(
+        sk.data_count, sk.slots, [&](int i) { return ld8(pk + sk.data + sk.data_stride * i) != 0; },
+        [&](int i) { return (int)(int8_t)ld8(pk + sk.data + sk.data_stride * i + sk.data_slot); }, owner);
     static int tr = trace_left(4);
-    for (int i = 0; i < 8; i++)
-        for (int f = 0; f < sk.fields; f++) {
-            uint32_t a = pk + sk.base + sk.stride * i + sk.field[f];
-            int16_t cur = (int16_t)ld16(a);
-            if (valid) {
-                temp_blend_s16(a, r.v[i][f], interp::pass_t());
+    static int tr_own = trace_left(4);
+    const float t = interp::pass_t();
+    for (int i = 0; i < sk.slots; i++) {
+        const uint32_t slot = pk + sk.base + sk.stride * i;
+        const uint8_t state = ld8(slot);
+        const bool blend = interp::slots::blend_slot(i, valid, r.state[i], state, r.owner.size() == (size_t)sk.slots ? r.owner[i] : -1, owner[i]);
+        const int s16_fields = i < interp::slots::kShared ? sk.shared_fields : sk.s16_fields;
+        const int f32_fields = i < interp::slots::kShared ? 0 : sk.f32_fields;
+        for (int f = 0; f < s16_fields; f++) {
+            const uint32_t a = slot + sk.s16[f];
+            const int16_t cur = (int16_t)ld16(a);
+            if (blend && r.v[i][f] != cur) {
+                temp_blend_s16(a, r.v[i][f], t);
                 if (tr && i == 0 && f == 0) {
                     tr--;
                     LOG("[interp-fx] %s sway slot 0: %d -> %d, drawn %d", k == 0 ? "grass" : k == 1 ? "tree" : "flower", r.v[i][f], cur, (int16_t)ld16(a));
                 }
+                if (tr_own && i >= interp::slots::kShared && f == 0) {
+                    tr_own--;
+                    LOG("[interp-fx] %s slot %d (plant %d): %d -> %d, drawn %d", k == 0 ? "grass" : k == 1 ? "tree" : "flower", i, owner[i], r.v[i][f], cur,
+                        (int16_t)ld16(a));
+                }
             }
             r.v[i][f] = cur;
         }
+        for (int f = 0; f < f32_fields; f++) {
+            const uint32_t a = slot + sk.f32[f];
+            const uint32_t cur = ld32(a);
+            if (blend && r.f[i][f] != cur && plausible(u32_as_f32(r.f[i][f])) && plausible(u32_as_f32(cur)))
+                temp_blend_f32(a, r.f[i][f], t);
+            r.f[i][f] = cur;
+        }
+        r.state[i] = state;
+    }
+    r.owner = std::move(owner);
     r.pkt = pk;
     r.step = interp::hold_pass_count();
 }
