@@ -405,7 +405,7 @@ std::vector<BuildResult> rebuild(const std::string& mod, const Value& manifest, 
     std::vector<std::string> python;
     std::string tool;
     try {
-        const auto bridge = guestmods::BuildBridge::installed(std::string());
+        const auto bridge = guestmods::BuildBridge::installed(std::string(),false);
         python = bridge.python;
         tool = (std::filesystem::path(bridge.builder).parent_path().parent_path() / "story_mods" / "stage_builder.py").string();
     } catch (const std::exception& e) {
@@ -598,7 +598,7 @@ Value templates(const std::string& game_dir, std::string& why) {
     if (cached.type == Value::Array) return cached;
     std::vector<std::string> command;
     try {
-        const auto bridge = guestmods::BuildBridge::installed(std::string());
+        const auto bridge = guestmods::BuildBridge::installed(std::string(),false);
         command = bridge.python;
         command.push_back((std::filesystem::path(bridge.builder).parent_path().parent_path() / "story_mods" / "stage_builder.py").string());
     } catch (const std::exception& e) {
@@ -623,7 +623,7 @@ Value kit_materials(const std::string& game_dir, const std::string& stage, unsig
         return why = "a kit room is a stage of the game and a room number", Value();
     std::vector<std::string> command;
     try {
-        const auto bridge = guestmods::BuildBridge::installed(std::string());
+        const auto bridge = guestmods::BuildBridge::installed(std::string(),false);
         command = bridge.python;
         command.push_back((std::filesystem::path(bridge.builder).parent_path().parent_path() / "story_mods" / "stage_builder.py").string());
     } catch (const std::exception& e) {
@@ -645,7 +645,7 @@ Value kit_materials(const std::string& game_dir, const std::string& stage, unsig
 Value export_glb(const std::string& game_dir, const std::string& out, const std::vector<std::string>& what, std::string& why) {
     std::vector<std::string> command;
     try {
-        const auto bridge = guestmods::BuildBridge::installed(std::string());
+        const auto bridge = guestmods::BuildBridge::installed(std::string(),false);
         command = bridge.python;
         command.push_back((std::filesystem::path(bridge.builder).parent_path().parent_path() / "story_mods" / "export_glb.py").string());
     } catch (const std::exception& e) {

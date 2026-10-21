@@ -473,7 +473,7 @@ void load_world(const std::string& mod,const mods::json::Value& manifest,const s
     // served to the game; a stage the player's files can't make is left out with a line in the log
     if(manifest.get("stages").type!=mods::json::Value::Null){
         std::vector<std::string> python;std::string tool;
-        try{const auto bridge=BuildBridge::installed(std::string());python=bridge.python;tool=(std::filesystem::path(bridge.builder).parent_path().parent_path()/"story_mods"/"stage_builder.py").string();}
+        try{const auto bridge=BuildBridge::installed(std::string(),false);python=bridge.python;tool=(std::filesystem::path(bridge.builder).parent_path().parent_path()/"story_mods"/"stage_builder.py").string();}
         catch(const std::exception& e){LOG("[mod-stages] %s: the stage builder is unavailable: %s",mod.c_str(),e.what());}
         mod_stages::declare(mod,manifest,package_dir,data_dir,python,tool,config::game_dir);
     }
@@ -513,7 +513,7 @@ void load_world(const std::string& mod,const mods::json::Value& manifest,const s
     for(const auto& id:story_game_pieces::used(actors)) {
         std::string failure;
         try {
-            const auto bridge=BuildBridge::installed(std::string());
+            const auto bridge=BuildBridge::installed(std::string(),false);
             const auto tool=std::filesystem::path(bridge.builder).parent_path().parent_path()/"story_mods"/"game_piece_model.py";
             const auto set=story_game_pieces::build(id,story_game_pieces::cache_directory(data_dir),bridge.python,tool.string(),config::game_dir);
             if(!story_game_pieces::register_for_mod(mod,*set,id,false,why))failure=why;
@@ -561,7 +561,7 @@ void load_world(const std::string& mod,const mods::json::Value& manifest,const s
         if(visual_uses&&model.kind!="static")exception_report::raise("Distant and shoreline models require static kind");
         if(item_uses&&model.kind!="static")exception_report::raise("Held item models currently require static kind; skinned needs a separate Morf lifetime");
         try {
-            const auto bridge=BuildBridge::installed(std::string());
+            const auto bridge=BuildBridge::installed(std::string(),false);
             const auto tool=std::filesystem::path(bridge.builder).parent_path().parent_path()/"story_mods"/(model.kind=="skinned"?"skinned_actor_model.py":"actor_model.py");
             const auto archive=actor_model_cache::prepare(mod,model,package_dir,data_dir,bridge.python,tool.string(),config::game_dir,collision_uses,shoreline_uses,shoreline_material);
             if(visual_uses&&(actor_model_cache::triangles_for(archive)==0||actor_model_cache::triangles_for(archive)>1024))exception_report::raise("Distant and shoreline models must contain 1..1024 render triangles");
@@ -989,7 +989,7 @@ void prepare_npc_catalogue() {
     std::error_code ec;
     if(!std::filesystem::is_regular_file(file,ec)) {
         try {
-            const auto bridge=BuildBridge::installed(std::string());
+            const auto bridge=BuildBridge::installed(std::string(),false);
             const auto tool=std::filesystem::path(bridge.builder).parent_path().parent_path()/"story_mods"/"npc_catalogue.py";
             std::filesystem::create_directories(dir/"recipes",ec);
             auto command=bridge.python;command.push_back(tool.string());command.insert(command.end(),{"--game",config::game_dir,"--out",file.string(),"--json"});
@@ -1018,7 +1018,7 @@ std::string notebook_model(const std::filesystem::path& glb,const std::string& d
     const auto out=std::filesystem::path(data_dir)/("notebook_model-"+std::string(tag)+".szs");
     if(std::filesystem::is_regular_file(out,ec))return out.string();
     try {
-        const auto bridge=BuildBridge::installed(std::string());
+        const auto bridge=BuildBridge::installed(std::string(),false);
         const auto tool=std::filesystem::path(bridge.builder).parent_path().parent_path()/"story_mods"/"notebook_model.py";
         std::filesystem::create_directories(data_dir,ec);
         auto command=bridge.python;command.push_back(tool.string());
@@ -1242,6 +1242,9 @@ void init() {
         if(result.module.empty()||!load_one(result.module,error,pkg,base,result.allocation_size))
             exception_report::raise(error.empty()?"Guest builder returned no module":error);
     });
+    // code mods the missing compiler stopped (issue #266): the Mods tab says it next to each, and shows this
+    // line once over the game (overlay/mods_tab.h startup_notice)
+    if(const auto notice=compiler_notice_for(packages::list());!notice.empty())LOG("[code mods] %s",notice.c_str());
     // Content packages have no ELF; their enabled startup snapshot still declares world data.
     for(const auto& pkg:packages::list()) if(pkg.kind=="content"&&pkg.active&&pkg.compatible) {
         std::ifstream file(std::filesystem::path(packages::directory())/pkg.id/"manifest.json",std::ios::binary);
@@ -1609,7 +1612,7 @@ bool editor_prepare_model(const std::string& mod,const std::string& package_dir,
     const auto& shore=entry.get("shoreline");const bool shoreline=shore.type==mods::json::Value::String;
     if(shoreline&&(collision||model.kind!="static"||(shore.text!="foam"&&!story_notebook::water_surface_material(shore.text))))return why="a shoreline is a collision-free static model with the material foam, water, pond, river, waterfall or lava",false;
     try {
-        const auto bridge=BuildBridge::installed(std::string());
+        const auto bridge=BuildBridge::installed(std::string(),false);
         const auto tool=std::filesystem::path(bridge.builder).parent_path().parent_path()/"story_mods"/(model.kind=="skinned"?"skinned_actor_model.py":"actor_model.py");
         archive=actor_model_cache::prepare(mod,model,package_dir,data_dir,bridge.python,tool.string(),config::game_dir,collision,shoreline,shoreline?shore.text:std::string());
         return true;
@@ -1627,7 +1630,7 @@ std::shared_ptr<const story_game_pieces::BuiltSet> editor_build_kit_model(const 
 }
 
 std::shared_ptr<const story_game_pieces::BuiltSet> editor_build_piece(const std::string& id,const std::string& cache_dir){
-    const auto bridge=BuildBridge::installed(std::string());
+    const auto bridge=BuildBridge::installed(std::string(),false);
     const auto tool=std::filesystem::path(bridge.builder).parent_path().parent_path()/"story_mods"/"game_piece_model.py";
     return story_game_pieces::build(id,cache_dir,bridge.python,tool.string(),config::game_dir);
 }

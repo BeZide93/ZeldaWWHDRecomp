@@ -2974,7 +2974,7 @@ ImDrawData* frame(float pw, float ph, void (*renderer_init)()) {
         ;
     U.linearized = false;
     // a mod install keeps running (and shows its progress) while the menu is closed
-    const bool mods_busy = !setup_run.id.empty() || (U.init && modsui::wants_background());
+    const bool mods_busy = !setup_run.id.empty() || (U.init && modsui::wants_background()) || modsui::startup_notice_pending();
     if (!open) gfx::g_pip_preview=false;
     if (!open && !perf && !text && toast.empty() && !guesthud::active() && !mods_busy && !stereoPointer && drawn_layers.empty()) {
         if (U.init) {  // forget events and pressed keys while nothing is shown
