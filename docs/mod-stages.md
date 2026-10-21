@@ -122,8 +122,6 @@ of the Great Sea: `{"stage": "sea", "room": 44}` is Outset Island's). The stage 
 that place does: bright at noon, golden in the evening, dark at night. The template still gives the sky's models,
 the camera and the doors.
 
-The sky island example uses `"light": {"stage": "sea", "room": 44}`, so the island in the sky has the same light
-as the sea round Outset that the bird scene flies over.
 
 ### Rooms
 
