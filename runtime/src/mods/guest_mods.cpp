@@ -531,7 +531,7 @@ void load_world(const std::string& mod,const mods::json::Value& manifest,const s
         const bool collision_uses=std::any_of(actors.begin(),actors.end(),[&](const auto& actor){return actor.collision_mesh==model.id;});
         const bool visual_uses=std::any_of(actors.begin(),actors.end(),[&](const auto& actor){return actor.distant.model==model.id||actor.shoreline.model==model.id;});
         const bool shoreline_uses=std::any_of(actors.begin(),actors.end(),[&](const auto& actor){return actor.shoreline.model==model.id;});
-        // the shoreline's material: coast foam ("") or a water, river or waterfall surface; one per model
+        // the shoreline's material: coast foam ("") or a water, river, waterfall or lava surface; one per model
         std::string shoreline_material;
         for(const auto& actor:actors)if(actor.shoreline.model==model.id){shoreline_material=actor.shoreline.material;break;}
         if(std::any_of(actors.begin(),actors.end(),[&](const auto& actor){return actor.shoreline.model==model.id&&actor.shoreline.material!=shoreline_material;}))exception_report::raise("A shoreline model is either coast foam or one kind of water surface");
@@ -1586,7 +1586,7 @@ bool editor_prepare_model(const std::string& mod,const std::string& package_dir,
     if(collision&&model.kind!="static")return why="collision requires a static model",false;
     // a shoreline (preparation option, never a manifest field): "foam" or a water surface's material
     const auto& shore=entry.get("shoreline");const bool shoreline=shore.type==mods::json::Value::String;
-    if(shoreline&&(collision||model.kind!="static"||(shore.text!="foam"&&!story_notebook::water_surface_material(shore.text))))return why="a shoreline is a collision-free static model with the material foam, water, pond, river or waterfall",false;
+    if(shoreline&&(collision||model.kind!="static"||(shore.text!="foam"&&!story_notebook::water_surface_material(shore.text))))return why="a shoreline is a collision-free static model with the material foam, water, pond, river, waterfall or lava",false;
     try {
         const auto bridge=BuildBridge::installed(std::string());
         const auto tool=std::filesystem::path(bridge.builder).parent_path().parent_path()/"story_mods"/(model.kind=="skinned"?"skinned_actor_model.py":"actor_model.py");

@@ -748,7 +748,7 @@ story_actors::identity::Fingerprint declaration_fingerprint(const Decl&d,bool fi
     if(available)*available=!first_layout;
     if(d.collision){std::vector<uint8_t> bytes;std::string why;bool built=false;
         if(first_layout){std::array<uint8_t,9> raw{0,1,2,3,4,5,6,7,8};built=story_world_collision::mesh::build_native_v1(*d.collision,raw,uint16_t(d.spec.room),bytes,why);if(available)*available=built;}
-        else{std::array<uint8_t,story_world_collision::mesh::Surfaces> raw{0,1,2,3,4,5,6,7,8,9,10,11,12,13};built=story_world_collision::mesh::build_native(*d.collision,raw,uint16_t(d.spec.room),bytes,why);}
+        else{std::array<uint8_t,story_world_collision::mesh::Surfaces> raw{0,1,2,3,4,5,6,7,8,9,10,11,12,13,14};built=story_world_collision::mesh::build_native(*d.collision,raw,uint16_t(d.spec.room),bytes,why);}
         if(built)identity+=mods::hash::sha256_text(std::string(bytes.begin(),bytes.end()));}
     return story_actors::identity::fingerprint(identity,d.spec);
 }
@@ -787,10 +787,11 @@ story_world_placement::Solid placed_solid(const story_world_collision::mesh::Mes
     // the geometry is already scaled (collision_geometry): placed with the actor's position and turn only
     return story_world_placement::place_solid(v,t,{a.position.x,a.position.y,a.position.z},{a.rotation.x,a.rotation.y,a.rotation.z},{1,1,1});
 }
-// a body of water's open water: where Link swims, wades or stands under a fall
-bool open_water(uint16_t s){return s==story_world_collision::mesh::SurfaceWater||s==10||s==11;}
-// ground Link and the game's ground check stand on (not water, which he passes through, nor a void)
-bool standing_ground(uint16_t s){return s!=story_world_collision::mesh::SurfaceWater&&s!=story_world_collision::mesh::SurfaceVoid;}
+// a body of water's open water: where Link swims, wades or stands under a fall (a lava pool's lava alike)
+bool open_water(uint16_t s){return s==story_world_collision::mesh::SurfaceWater||s==10||s==11||s==story_world_collision::mesh::SurfaceLava;}
+// ground Link and the game's ground check stand on (not water, which he passes through, nor a void, nor lava's
+// surface: he burns in it, and things placed on it would sink)
+bool standing_ground(uint16_t s){return s!=story_world_collision::mesh::SurfaceWater&&s!=story_world_collision::mesh::SurfaceVoid&&s!=story_world_collision::mesh::SurfaceLava;}
 }
 bool object_grounds(const std::string&stage,const std::vector<story_notebook::WorldPoint>&above,std::vector<float>&heights,std::vector<bool>&found){
     std::lock_guard guard(world_mutex);heights.assign(above.size(),0);found.assign(above.size(),false);bool any=false;

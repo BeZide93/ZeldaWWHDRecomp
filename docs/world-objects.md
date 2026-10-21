@@ -74,6 +74,7 @@ are optional; they do not control collision. Assign one of these material names:
 | `col_waterfall` | The ground of a waterfall, as the game's own waterfalls |
 | `col_ice` | Ice: Link slides on it |
 | `col_void` | A drop: landing on it sends Link back to the room's restart point, as a bottomless pit does |
+| `col_lava` | Lava: Link burns, jumps out, loses half a heart and is sent back to the room's restart point, as on the game's lava (see "Lava") |
 
 Use separate material slots for different ground types. Triangle direction
 matters: orient ground faces upward and obstacle faces outward. The converter
@@ -291,7 +292,8 @@ where the game stores them (world coordinates, on the sea as in dungeons). An ob
 
 - the room's walls and ground. Ground wholly below the object may touch its base; going into it is refused.
   The sea's surface (the water plane of an island's square) and lava are not ground: a floating object or a
-  pier may reach into them;
+  pier may reach into them (the same goes for the lava of a mod's own objects: nothing stands on a `col_lava`
+  surface);
 - what the island needs, each by its real size: villagers where they stand (a radius of 100 units, in every
   story stage), their walking routes (a corridor 60 units to each side), chests (120), doors (250), a piece
   of heart or heart container lying about (80), switches (150), the places where Link arrives (100), and
@@ -534,6 +536,29 @@ found: Link walks on its floor as if it were dry. In a square of open sea the hi
 low (about 1,200 units in the square of the examples below), so keep raised ponds below the top of the
 square's island. A pond at sea level is always found.
 
+### Lava
+
+A `col_lava` surface is lava, as the game's own lava floors are (Dragon Roost Cavern, the lava caves, the inside
+of Fire Mountain). Author it as upward-facing faces at the lava's level. Like water, the surface is no ground:
+Link sinks into it, burns, jumps out with a cry, loses half a heart and starts again at the room's restart point
+(where he came in), exactly as on the game's lava. A bomb that falls into it explodes, a pot thrown into it
+breaks with a splash of lava, and other things dropped into it are gone. The lava gets a bottom of its own,
+1 metre (100 units) below the surface, where things sink to: keep that space free of other ground. Lava's
+triangles count twice towards the collision limits (the surface and its bottom).
+
+The sounds, effects and camera are the game's own lava handling: Link's cry and the sound of falling into lava,
+the flames on him, the bomb's lava burst, and the camera, which passes through the surface as on the game's
+lava. Unlike a pond, lava is found at any height (no need to stay below the top of the square's island). The
+boat doesn't burn: the game has no lava where its boat sails, and the boat treats lava like solid ground (its
+bottom), not like water. Keep lava pools out of the boat's way, above the sea or inland.
+
+The surface is invisible by itself. Show it with a lava surface model: a separate model declared as the
+actor's `shoreline` with `"material": "lava"` gets Dragon Roost's lava glow (the lava of the mountain path below
+the Rito aerie), moving as on the island. Its texture is a mask: the lava glows where V is small (up to about
+0.24), a wavy edge lies between about 0.25 and 0.36 and beyond it the surface is clear. Give the inside of the
+pool V 0.12 and run V up to 0.36 at the shore, with U along the shore (one repeat every 4 metres), and the pool
+glows with the game's wavy edge along its shore. The water tool makes a lava pool with both models (below).
+
 ### Rivers and waterfalls
 
 A shoreline can also carry flowing water: `"material": "river"` gives the model the flowing water of Forest
@@ -553,6 +578,7 @@ itself, required), `waves` (lines on it), `edge` (the foam along a shore or over
 | `"material"` | `surface` | `waves` | `edge` | `splash` |
 | --- | --- | --- | --- | --- |
 | `pond` | Outset's shallows | Outset's wave lines | Outset's coast foam | |
+| `lava` | Dragon Roost's lava | | | |
 | `water` | the spring pools' water | | | |
 | `river`, `waterfall` | Forest Haven's stream | | Forest Haven's bank foam | Forest Haven's spray |
 
@@ -571,6 +597,7 @@ waterfalls from points clicked on an island's ground. Each is one static object 
 | Body | Its model (drawn, and its collision) | Its shoreline |
 | --- | --- | --- |
 | Pond | a bowl under the water (`col_sand`), a rim a little above the water that slopes down to the island's ground (`col_grass`, `col_stone` where it can't reach); `col_water` at the level | `pond`: the water, wave lines and (with `foam`) coast foam at the shore |
+| Lava pool (a pond with `lava`) | the same bowl and rim in rock (`col_stone`, dark rock unless you choose a floor colour); `col_lava` at the level | `lava`: Dragon Roost's lava |
 | River | its bed, a few units above the ground, and banks on both sides that slope down to the ground; `col_water` at the level in deep sections, `col_shallow` on the bed in shallow ones | `river`: the stream, foam along both banks, over each step's lip and where the water lands |
 | Waterfall | rock behind the fall (`col_wall`) and a splash pad below it (`col_waterfall`) | `waterfall`: a thin sheet curling over the lip, foam over the lip and a ring of foam round its foot |
 

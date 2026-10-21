@@ -32,7 +32,7 @@ inline uint32_t be32(const uint8_t* p){return uint32_t(p[3])|(uint32_t(p[2])<<8)
 inline int collision_surface(const std::string& name){
     int i=0;
     for(const char* m:{"col_stone","col_grass","col_wood","col_sand","col_metal","col_wall","col_objects","col_climb","col_hookshot",
-                       "col_water","col_shallow","col_waterfall","col_ice","col_void"}){if(name==m)return i;++i;}
+                       "col_water","col_shallow","col_waterfall","col_ice","col_void","col_lava"}){if(name==m)return i;++i;}
     return -1;
 }
 inline bool collision_material(const std::string& name){return collision_surface(name)>=0;}

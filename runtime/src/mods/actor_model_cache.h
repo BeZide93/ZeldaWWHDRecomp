@@ -16,7 +16,7 @@ unsigned triangles_for(const std::string& archive);
 bool shoreline_for(const std::string& archive);
 // a shoreline prepared with the still-water material ("material": "water")
 bool water_for(const std::string& archive);
-// a shoreline's material as prepared: "" (foam), "water", "river" or "waterfall"; "" for anything else
+// a shoreline's material as prepared: "" (foam), "water", "pond", "river", "waterfall" or "lava"; "" for anything else
 std::string material_for(const std::string& archive);
 std::string archive_for(const std::string& guest_path);
 // A game piece set (story_game_pieces.h): its archive, built elsewhere into the player's model cache, is

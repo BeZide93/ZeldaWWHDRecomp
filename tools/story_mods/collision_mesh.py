@@ -17,7 +17,15 @@ MAX_EXTENT = 20000
 SEMANTICS = {'col_stone': 0, 'col_grass': 1, 'col_wood': 2,
              'col_sand': 3, 'col_metal': 4, 'col_wall': 5, 'col_objects': 6,
              'col_climb': 7, 'col_hookshot': 8, 'col_water': 9, 'col_shallow': 10,
-             'col_waterfall': 11, 'col_ice': 12, 'col_void': 13}
+             'col_waterfall': 11, 'col_ice': 12, 'col_void': 13, 'col_lava': 14}
+LAVA = SEMANTICS['col_lava']
+
+
+def native_size(vertices, triangles):
+    """(vertices, triangles) of the game's collision: lava counts twice, its surface and its bottom (a copy of each lava
+    triangle and its points, below it: story_world_collision_mesh.h LavaDepth)"""
+    lava = [t for t in triangles if t[3] == LAVA]
+    return len(vertices) + len({v for t in lava for v in t[:3]}), len(triangles) + len(lava)
 
 
 def _document(path, api):
@@ -75,6 +83,8 @@ def _accessor(doc, binary, index, position, api):
 def encode(vertices, triangles, api):
     require = api.require
     require(0 < len(vertices) <= MAX_VERTICES and 0 < len(triangles) <= MAX_TRIANGLES, 'collision exceeds vertex/triangle limits')
+    nv, nt = native_size(vertices, triangles)
+    require(nv <= MAX_VERTICES and nt <= MAX_TRIANGLES, 'collision exceeds vertex/triangle limits (lava counts twice: its surface and its bottom)')
     # Round once to the exact float32 coordinates consumed by native collision.
     vertices = [struct.unpack('>3f', struct.pack('>3f', *p)) for p in vertices]
     require(all(math.isfinite(x) and abs(x) <= 20000 for p in vertices for x in p), 'collision coordinate exceeds 20000 game units')

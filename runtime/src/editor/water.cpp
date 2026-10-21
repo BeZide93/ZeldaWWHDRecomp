@@ -626,6 +626,10 @@ bool build_pond(const Params& p, const XZ& origin, int origin_y, Out& o, std::ve
     for (size_t k = 0; k < arcs; k++) banks[k].material = "bank" + std::to_string(k + 1), banks[k].visible = true, banks[k].smooth = true;
     bed.material = "bed", bed.visible = true, bed.smooth = true;
     water.material = "col_water", sand.material = "col_sand", grass.material = "col_grass", stone.material = "col_stone";
+    // a lava pool: the lava at the level (Link burns in it, as on the game's lava), rock under it and round it
+    if (p.lava) water.material = "col_lava";
+    Prim* const under = p.lava ? &stone : &sand;
+    Prim* const banked = p.lava ? &stone : &grass;
     auto band = [&](Prim& visible, Prim* col, V3 a, V3 b, V3 c, V3 e) {
         double ta[2], tb[2], tc[2], te[2];
         uv_of(a, ta), uv_of(b, tb), uv_of(c, tc), uv_of(e, te);
@@ -639,14 +643,14 @@ bool build_pond(const Params& p, const XZ& origin, int origin_y, Out& o, std::ve
         const V3 ei = at(q[i], 0), ej = at(q[j], 0);
         Prim& bank = banks[arc_of(i)];
         // under water: the bowl from the floor's edge up to the water's edge
-        band(bed, &sand, fi, fj, ej, ei);
+        band(bed, under, fi, fj, ej, ei);
         // the lip above the water, the rounded top, the slope down to the island's ground (and a skirt where it can't reach)
         const V3 ci = at_out(i, si.crest_out, si.crest), cj = at_out(j, sj.crest_out, sj.crest);
-        band(bank, &grass, ei, ej, cj, ci);
+        band(bank, banked, ei, ej, cj, ci);
         const V3 hi = at_out(i, si.shoulder_out, si.shoulder), hj = at_out(j, sj.shoulder_out, sj.shoulder);
-        band(bank, &grass, ci, cj, hj, hi);
+        band(bank, banked, ci, cj, hj, hi);
         const V3 ti = at_out(i, si.toe_out, si.toe), tj = at_out(j, sj.toe_out, sj.toe);
-        band(bank, &grass, hi, hj, tj, ti);
+        band(bank, banked, hi, hj, tj, ti);
         if (si.skirt != 0 || sj.skirt != 0) {
             const V3 ki = at_out(i, si.toe_out + 6, si.skirt != 0 ? si.skirt : si.toe - 10), kj = at_out(j, sj.toe_out + 6, sj.skirt != 0 ? sj.skirt : sj.toe - 10);
             band(bank, &stone, ti, tj, kj, ki);
@@ -657,7 +661,7 @@ bool build_pond(const Params& p, const XZ& origin, int origin_y, Out& o, std::ve
         double ta[2], tb[2], tc[2];
         uv_of(a, ta), uv_of(b, tb), uv_of(c, tc);
         bed.triangle(a, b, c, up, ta, tb, tc);
-        sand.triangle(a, b, c, up);
+        under->triangle(a, b, c, up);
     }
     for (size_t t = 0; t < tris.size(); t += 3) water.triangle(at(q[tris[t]], 0), at(q[tris[t + 1]], 0), at(q[tris[t + 2]], 0), up);
     // the water (the blue of the island's shallows, a little under the level), the wave lines on it (fading out
@@ -713,12 +717,37 @@ bool build_pond(const Params& p, const XZ& origin, int origin_y, Out& o, std::ve
         o.main_materials.push_back({banks[k].material, 0, false, island_extras(p.room, toes[k])});
         visible.prims.push_back(std::move(banks[k]));
     }
-    for (const char* m : {"col_water", "col_sand", "col_grass", "col_stone"}) o.main_materials.push_back({m});
+    if (p.lava)  // the lava pool: the lava and rock (the bowl and the banks are one ground)
+        for (const char* m : {"col_lava", "col_stone"}) o.main_materials.push_back({m});
+    else
+        for (const char* m : {"col_water", "col_sand", "col_grass", "col_stone"}) o.main_materials.push_back({m});
     o.main_meshes.push_back(std::move(visible));
     Mesh col{"pond_col", {}};
     for (Prim* c : {&water, &sand, &grass, &stone})
         if (!c->idx.empty()) col.prims.push_back(std::move(*c));
     o.main_meshes.push_back(std::move(col));
+    if (p.lava) {
+        // the lava: one surface just under the level, Dragon Roost's lava glow (its texture is a mask: glowing where V is
+        // small, a wavy edge at V 0.25..0.36 that the game's animation moves, clear beyond). The glow fills the pool
+        // (V kLavaInside) and its wavy edge runs along the shore (V kLavaShore there), U along the shore (one repeat every
+        // 4 m); no wave lines, no foam
+        Prim lava;
+        lava.material = "surface", lava.visible = true;
+        for (size_t i = 0; i < n; i++) {
+            const size_t j = (i + 1) % n;
+            const double u0 = ring.along[i] / 400, u1 = ring.along[i + 1] / 400;
+            const double a[2] = {u0, kLavaShore}, b[2] = {u1, kLavaShore}, c[2] = {u1, kLavaInside}, e[2] = {u0, kLavaInside};
+            lava.quad(at(q[i], -2), at(q[j], -2), at(inner[j], -2), at(inner[i], -2), up, a, b, c, e);
+        }
+        for (size_t t = 0; t < inner_tris.size(); t += 3) {
+            const XZ &x = inner[inner_tris[t]], &y = inner[inner_tris[t + 1]], &z = inner[inner_tris[t + 2]];
+            const double a[2] = {x.x / 400.0, kLavaInside}, b[2] = {y.x / 400.0, kLavaInside}, c[2] = {z.x / 400.0, kLavaInside};
+            lava.triangle(at(x, -2), at(y, -2), at(z, -2), up, a, b, c);
+        }
+        o.surface_materials = {{"surface", 0}};
+        o.surface_meshes.push_back(Mesh{"pond_surface", {std::move(lava)}});
+        return true;
+    }
     Mesh water_mesh{"pond_surface", {std::move(surface), std::move(waves)}};
     o.surface_materials = {{"surface", 0}, {"waves", 0}};
     if (p.foam) water_mesh.prims.push_back(std::move(foam)), o.surface_materials.push_back({"edge", 0});  // the coast foam along the shore
@@ -1139,6 +1168,11 @@ bool parse(const std::string& kind, const Value& p, const XZ& origin, int origin
     if (!number("depth", kMinDepth, kMaxDepth, r.depth) || !number("rim", 0, kMaxRim, r.rim) || !number("width", kMinWidth, kMaxWidth, r.width)) return false;
     if (p.get("foam").type == Value::Bool) r.foam = p.get("foam").boolean;
     else if (p.get("foam").type != Value::Null) return why = "\"foam\" is true or false", false;
+    if (p.get("lava").type == Value::Bool) r.lava = p.get("lava").boolean;
+    else if (p.get("lava").type != Value::Null) return why = "\"lava\" is true or false", false;
+    if (r.lava && kind != "pond") return why = "only a pond can be lava", false;
+    if (r.lava && r.foam) return why = "a lava pool has no foam", false;
+    if (r.lava && p.get("floor").type == Value::Null) r.floor = kLavaFloor;
     if (p.get("floor").type == Value::String) {
         if (!colour_of(p.get("floor").text, r.floor)) return why = "\"floor\" is a colour \"#rrggbb\"", false;
     } else if (p.get("floor").type != Value::Null)
@@ -1179,7 +1213,7 @@ Value to_value(const Params& p, const XZ& origin, int origin_y) {
         v["points"].array.push_back(pt);
     }
     v["floor"] = hex(p.floor);
-    if (p.kind == "pond") v["level"] = double(origin_y), v["depth"] = double(p.depth), v["rim"] = double(p.rim), v["foam"] = p.foam;
+    if (p.kind == "pond") v["level"] = double(origin_y), v["depth"] = double(p.depth), v["rim"] = double(p.rim), v["foam"] = p.foam, v["lava"] = p.lava;
     if (p.kind == "river") {
         v["width"] = double(p.width), v["depth"] = double(p.depth);
         v["shallow"].type = Value::Array;
@@ -1192,7 +1226,7 @@ std::string params_text(const Params& p) {
     std::string s = "{\"version\":1,\"kind\":" + quoted(p.kind) + ",\"points\":[";
     for (size_t i = 0; i < p.points.size(); i++) s += (i ? ",[" : "[") + std::to_string(p.points[i].x) + "," + std::to_string(p.points[i].z) + "]";
     s += "],\"depth\":" + std::to_string(p.depth) + ",\"rim\":" + std::to_string(p.rim) + ",\"width\":" + std::to_string(p.width) + ",\"top\":" + std::to_string(p.top) +
-         ",\"bottom\":" + std::to_string(p.bottom) + ",\"side\":" + std::to_string(p.side) + ",\"foam\":" + (p.foam ? "true" : "false") + ",\"floor\":" + quoted(hex(p.floor)) + ",\"shallow\":[";
+         ",\"bottom\":" + std::to_string(p.bottom) + ",\"side\":" + std::to_string(p.side) + ",\"foam\":" + (p.foam ? "true" : "false") + (p.lava ? ",\"lava\":true" : "") + ",\"floor\":" + quoted(hex(p.floor)) + ",\"shallow\":[";
     for (size_t i = 0; i < p.shallow.size(); i++) s += std::string(i ? "," : "") + (p.shallow[i] ? "true" : "false");
     s += "],\"ground\":[";
     for (size_t i = 0; i < p.ground.size(); i++) s += (i ? ",[" : "[") + std::to_string(p.ground[i].x) + "," + std::to_string(p.ground[i].z) + "," + std::to_string(p.ground[i].h) + "]";
@@ -1317,7 +1351,7 @@ bool build(const Params& p, const XZ& origin, int origin_y, Built& b, std::vecto
     Out o;
     bool ok = p.kind == "pond" ? build_pond(p, origin, origin_y, o, problems) : p.kind == "river" ? build_river(p, origin, origin_y, o, b, problems) : build_waterfall(p, origin, o);
     if (!ok) return false;
-    b.material = p.kind == "pond" ? kPondMaterial : p.kind;
+    b.material = p.kind == "pond" ? (p.lava ? kLavaMaterial : kPondMaterial) : p.kind;
     // counts and bounds
     int64_t lo[3] = {INT64_MAX, INT64_MAX, INT64_MAX}, hi[3] = {INT64_MIN, INT64_MIN, INT64_MIN};
     for (size_t m = 0; m < o.main_meshes.size(); m++)

@@ -272,6 +272,9 @@ The points show in the picture, numbered; click one to select it and drag its ha
   **Depth** (the floor below the water), **Banks above the water** (how high its rim rises above the water
   before it slopes down to the ground), **Foam at the shore** and the **Floor colour** (used where your game
   files don't give the island's own ground texture). The outline's corners are rounded off.
+  **Lava** makes it a lava pool instead: the game's lava (Dragon Roost's) at the level, where Link burns as on
+  the game's lava, with a rock floor and banks (see [Lava](world-objects.md#lava)). A lava pool has no foam,
+  and it may stand higher than the square's island, for example in Fire Mountain's crater.
 - **River:** click its middle from where it starts to where it flows (2 to 32 points): the order is the flow,
   and white arrows along the band show it (**Reverse flow** turns it round). It follows the ground and steps
   down where the ground drops; set its **Width**, its **Depth** (the water above its bed where Link swims)
@@ -788,8 +791,8 @@ separated by `;`, or `@file` with one such line per row. Results go to the log.
 | `set_world_object` | `id`, `collision`?, `behaviour`?, `buoyancy`?, `drift`?, `anchor`?, `grapple_points`?, `distant`?, `shoreline`?, `chart_marker`?, `arrival`?, `mod`? | change a world object's collision, behaviour and motion together (`null` removes one) |
 | `preview_collision`, `placement_conflicts` | `id`, `mod`? | a world object's collision as a wireframe, and what its place conflicts with |
 | `prepare_collision` | `model`, `mod`? | prepare a static model's collision for placing world objects while the game runs |
-| `check_water` | `kind` (`pond`, `river`, `waterfall`), `points`?, `level`?, `depth`?, `rim`?, `foam`?, `floor`?, `width`?, `shallow`?, `top`?, `bottom`?, `side`?, `river`?, `step`?, `id`?, `mod`? | what a body of water would be and every problem with it (errors and warnings), without changing anything: its place, triangles, file size, a river's levels and steps; `id` a body being changed |
-| `add_pond` | `points`, `level`?, `depth`?, `rim`?, `foam`?, `floor`?, `id`?, `mod`? | a pond: its outline (world `{x, z}` points), its water's height (default: `depth` above the lowest ground along its shore, deep enough to swim in), the floor `depth` below (20–480, default 200), its rim `rim` above the water (0–300), coast foam at the shore, the floor colour `"#rrggbb"` (one Undo step) |
+| `check_water` | `kind` (`pond`, `river`, `waterfall`), `points`?, `level`?, `depth`?, `rim`?, `foam`?, `lava`?, `floor`?, `width`?, `shallow`?, `top`?, `bottom`?, `side`?, `river`?, `step`?, `id`?, `mod`? | what a body of water would be and every problem with it (errors and warnings), without changing anything: its place, triangles, file size, a river's levels and steps; `id` a body being changed |
+| `add_pond` | `points`, `level`?, `depth`?, `rim`?, `foam`?, `lava`?, `floor`?, `id`?, `mod`? | a pond: its outline (world `{x, z}` points), its water's height (default: `depth` above the lowest ground along its shore, deep enough to swim in), the floor `depth` below (20–480, default 200), its rim `rim` above the water (0–300), coast foam at the shore, `"lava": true` for a lava pool, the floor colour `"#rrggbb"` (one Undo step) |
 | `add_river` | `points`, `width`?, `depth`?, `shallow`?, `floor`?, `id`?, `mod`? | a river: its centre line in the flow's order, `width` 100–2000 (default 400), deep water `depth` above the bed, `shallow` per section (or one for all) |
 | `add_waterfall` | `points` or `river` and `step`?, `top`?, `bottom`?, `side`?, `floor`?, `id`?, `mod`? | a waterfall: its top edge (two points; or a river's step), the top's and the ground's height (default: the ground there), `side` 1 or -1 (default: the lower side) |
 | `edit_water` | `id`, and what changes of the above, `mod`? | build a body of water made with the tool again with those changes (one Undo step) |

@@ -63,6 +63,7 @@ struct Exit {
 struct RoomActor {
     std::string id, actor, variant, item;
     Point position;
+    Point size;  // lava: the area of its surface (x and z, game units)
     double angle = 0;
     double scale = 1;   // a large tree's size (0.5 to 1.5)
     unsigned flag = 0;  // a chest's flag (0..31)
@@ -355,7 +356,7 @@ inline bool parse(const Value& m, std::vector<Stage>& out, std::string& why, boo
                 return why = rat + "actors must be a list of up to " + std::to_string(kMaxRoomActors), false;
             for (const auto& av : actors.array) {
                 RoomActor a;
-                if (!keys(av, {"id", "actor", "variant", "item", "position", "angle", "scale", "then"}) || !id(av.get("id")) || av.get("actor").type != Value::String ||
+                if (!keys(av, {"id", "actor", "variant", "item", "position", "angle", "scale", "then", "size"}) || !id(av.get("id")) || av.get("actor").type != Value::String ||
                     !point(av.get("position"), kMaxCoordinate, a.position))
                     return why = rat + "an actor has an id, an actor kind and a position", false;
                 a.id = av.get("id").text;
@@ -371,6 +372,12 @@ inline bool parse(const Value& m, std::vector<Stage>& out, std::string& why, boo
                     a.item = av.get("item").text;
                 }
                 if (av.get("angle").type != Value::Null && !number(av.get("angle"), -360, 360, a.angle)) return why = rat + "actor " + a.id + ": invalid angle", false;
+                if (av.get("size").type != Value::Null) {
+                    const Value& sv = av.get("size");
+                    if (a.actor != "lava") return why = rat + "actor " + a.id + ": only lava has a size", false;
+                    if (!keys(sv, {"x", "z"}) || !number(sv.get("x"), kLavaStep, 255 * kLavaStep, a.size.x) || !number(sv.get("z"), kLavaStep, 255 * kLavaStep, a.size.z))
+                        return why = rat + "actor " + a.id + ": lava's size is {\"x\", \"z\"}, " + std::to_string(int(kLavaStep)) + " to " + std::to_string(int(255 * kLavaStep)) + " game units each", false;
+                }
                 if (av.get("then").type != Value::Null) {
                     if (a.actor != "chest" && a.actor != "darknut")
                         return why = rat + "actor " + a.id + ": \"then\" is for a chest (when it is opened) or a darknut (when it is defeated)", false;
@@ -379,7 +386,7 @@ inline bool parse(const Value& m, std::vector<Stage>& out, std::string& why, boo
                 }
                 NativeActor n;
                 std::string reason;
-                if (!native_actor(a.actor, a.variant, a.item, 0, n, reason)) return why = rat + "actor " + a.id + ": " + reason, false;
+                if (!native_actor(a.actor, a.variant, a.item, 0, n, reason, a.size.x, a.size.z)) return why = rat + "actor " + a.id + ": " + reason, false;
                 if (av.get("scale").type != Value::Null &&
                     (!n.scalable || !number(av.get("scale"), kTreeScaleMin, kTreeScaleMax, a.scale)))
                     return why = rat + "actor " + a.id + ": \"scale\" (0.5 to 1.5) is for a large tree", false;
@@ -682,7 +689,7 @@ inline Value recipe(const Stage& s, const std::string& name, const std::map<std:
         for (const auto& a : room.actors) {
             NativeActor n;
             std::string why;
-            if (!native_actor(a.actor, a.variant, a.item, a.flag, n, why)) continue;  // parse checked it
+            if (!native_actor(a.actor, a.variant, a.item, a.flag, n, why, a.size.x, a.size.z)) continue;  // parse checked it
             if (a.defeat_switch) n.angle_z = uint16_t((n.angle_z & 0xFF00u) | a.defeat_switch);  // the darknut's defeat switch
             Value e;
             e["tag"] = n.tag;
@@ -695,6 +702,10 @@ inline Value recipe(const Stage& s, const std::string& name, const std::map<std:
             if (n.scalable) {  // the scaled-actor table, with its size
                 e["tag"] = "SCOB";
                 e["scale"] = Value(a.scale);
+            } else if (n.scaled) {  // the game's lava floor: its own three scale steps
+                Value& sc = e["scale"];
+                sc.type = Value::Array;
+                for (uint8_t b : n.scale) sc.array.push_back(Value(double(b)));
             }
             actors.array.push_back(e);
         }

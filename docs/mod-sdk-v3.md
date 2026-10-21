@@ -380,7 +380,7 @@ at `"y": 0` on the sea (the editor does this for you). Like a building, an islan
 | `piece:two-eye-reef` | Two-Eye Reef: a ring of stepped grey rock walls around a lagoon with two islets (no cannons) |
 | `piece:diamond-steppe-island` | Diamond Steppe Island: grassy terraces with ponds on three levels, joined by waterfalls, and a pit on top |
 | `piece:mother-and-child-isles` | Mother & Child Isles: a great tree-topped rock with its spring pool, and a small islet beside it |
-| `piece:fire-mountain` | Fire Mountain: a volcano of dark rock, without its lava; its crater is a pit |
+| `piece:fire-mountain` | Fire Mountain: a volcano of dark rock, without its eruption; its crater is a pit that can hold a lava pool |
 
 Bird's Peak Rock is not available: its textures alone are larger than the 12 MiB an island's archive may
 have. Islands that exist several times in the game (the Triangle Islands, the fairy islands, the reefs,
@@ -393,11 +393,24 @@ Watcher, Cliff Plateau and Diamond Steppe's pits, the fairy islands' holes, Fire
 the doorways of Gale Isle and Headstone Island are drops that send Link back to the room's restart point,
 as a bottomless pit does.
 
+Its ground keeps the island's own ground types, the same ones your own models' collision uses
+(world-objects.md, "Author collision in the GLB"):
+
+| Ground | On an island of the game |
+| --- | --- |
+| grass, sand, stone, wood, metal, ice | the island's ground: Link walks (or slides) and his steps sound as on the island |
+| wall | its cliffs and walls |
+| water, shallow water, waterfall | the ponds, pools and falls of the islands that have them |
+| void | the pits, holes and doorways that lead nowhere |
+| lava | (no island has lava of its own: add a lava pool, for example in Fire Mountain's crater) |
+
 Diamond Steppe Island and Mother & Child Isles bring their own water: the ponds, the spring pool and the
 waterfalls with the island's own moving water, and the water's collision, so Link wades and swims in it as
 on the island. The splash and spring effects and the sound of the falls are the game's actors and don't come
-along. Fire Mountain comes without its lava and eruption (they are actors and effects of the game, not part
-of the ground); a lava floor may follow later.
+along. Fire Mountain comes without its eruption (an actor and effects of the game, not part of the ground).
+Its crater can be filled with lava: the editor's water tool makes a lava pool there (a pond with **Lava**,
+`add_pond` with `"lava": true`; its outline round the crater's mouth, its level a little below the rim), drawn
+with the game's lava and burning Link as the game's lava does (see world-objects.md, "Lava").
 An island also brings its own distant view: from the eight squares around its own, the island's
 low-detail model (the one the game shows for it from afar) stands where you placed it. Only Link's own
 square has the island's collision.

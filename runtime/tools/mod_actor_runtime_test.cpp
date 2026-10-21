@@ -177,6 +177,17 @@ if(argc==2&&std::strcmp(argv[1],"--world-ground")==0){
     assert(mod_actor::object_grounds("sea",{{1000,5000,2000},{1000+1200,5000,2000},{1000+2100,5000,2000},{1000-1400,5000,2000-1400},{1000,450,2000},{1780,5000,2330}},heights,found));
     assert(found[0]&&heights[0]==500&&found[1]&&heights[1]==1500&&!found[2]&&found[3]&&heights[3]==500&&!found[4]&&found[5]&&heights[5]==1100);
     assert(!mod_actor::object_grounds("M_NewD2",{{1000,5000,2000}},heights,found)&&!found[0]);
+    // lava: its surface is no ground (Link and dropped things sink into it): over a static object's lava the ground is
+    // what lies below it (here a stone floor 150 lower), beside the lava its own top
+    {mesh::Mesh lava;const float o=300;lava.vertices={{-o,150,-o},{o,150,-o},{o,150,o},{-o,150,o},{-o,0,-o},{o,0,-o},{o,0,o},{-o,0,o},{o,150,-o},{o+200,150,-o},{o+200,150,o},{o,150,o}};
+     lava.triangles={{{0,2,1},mesh::SurfaceLava},{{0,3,2},mesh::SurfaceLava},{{4,6,5},0},{{4,7,6},0},{{8,10,9},0},{{8,11,10},0}};lava.minimum={-o,0,-o};lava.maximum={o+200,150,o};
+     assert(mesh::validate(lava,why)&&mesh::native_size(lava).triangles==8);
+     assert(mod_actor::register_collision("test","lava-col",std::make_shared<const mesh::Mesh>(lava)));
+     auto floor=isle;floor.id="lava-floor";floor.collision_mesh="lava-col";floor.position={1000+3500,500,2000+3500};assert(mod_actor::declare("test",floor,"mod_unique",1,{})>0);
+     assert(mod_actor::object_grounds("sea",{{1000+3500,5000,2000+3500},{1000+3500+400,5000,2000+3500}},heights,found));
+     assert(found[0]&&heights[0]==500&&found[1]&&heights[1]==650);
+     // a lava pool (a pond with lava: its shoreline is the game's lava) is a body like a pond
+     auto pool=spring;pool.id="lava-pool";pool.shoreline.material="lava";assert(pool.water_body()&&story_notebook::water_surface_material("lava"));}
     std::puts("world ground placement ok");return 0;
 }
 if(argc==2&&(std::strcmp(argv[1],"--world-static")==0||std::strcmp(argv[1],"--world-floating")==0)){

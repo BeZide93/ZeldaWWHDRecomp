@@ -109,6 +109,7 @@ struct WaterDraft {
     bool level_set = false;
     int depth = 200, rim = 0, width = 400, top = 0, bottom = 0, side = 0;  // side 0: the lower side
     bool top_set = false, bottom_set = false, foam = false;
+    bool lava = false;  // pond: a lava pool instead of water
     float floor[3] = {0.48f, 0.55f, 0.36f};
     std::vector<bool> shallow;  // river: per section
     std::string editing;        // the body of water being changed ("" a new one)

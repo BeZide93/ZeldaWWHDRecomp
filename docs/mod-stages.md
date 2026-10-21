@@ -148,7 +148,7 @@ A place `to` is:
 - a spawn of the same stage: `{"room": 1, "point": 3}` (no `stage`);
 - a spawn of another of the package's stages: `{"stage": "stage:<id>", "room": 0, "point": 0}`.
 
-A kit room used as it is (`"ground": "kit"`) keeps its floors, walls and its surfaces (lava hurts, water
+A kit room used as it is (`"ground": "kit"`) keeps its floors, walls and its surfaces (lava burns, water
 is swimmable); its own ways out of its stage are removed, and the room's `exits` boxes work on its floor as
 on a model's. Its actors are not taken over: place the ones you want with `actors`. A kit room of another
 stage than the template is lit by the template's first room's light.
@@ -189,6 +189,8 @@ A room's `actors` are the game's own actors, created by the game when the room l
 | `darknut` | `variant` `darknut` (default), `shield`, `helmet` or `mighty`. |
 | `pot`, `big_pot` | A pot Link can lift and throw. |
 | `tree` | The game's own trees, with their own collision, sway and cutting: `variant` `small` (default; one small tree), `small_3` or `small_5` (a group), `bushy`, `large` (the big leafy tree; `"scale"` 0.5 to 1.5 sizes it) or `palm`. |
+| `lava` | The game's lava: its glowing, moving surface, drawn at the actor's height over an area `size` (`{"x": ..., "z": ...}`, game units, 100 to 25500 each, centred on its position, turned by `angle`). It is only the picture: give the room's model a `col_lava` surface at the same height (see [Lava](#lava)). |
+| `heat_shimmer` | The heat haze over the game's lava (Dragon Roost's): the picture shimmers while Link is in the room. One per room is enough. |
 
 A heart container from a mod's chest raises Link's maximum hearts in the player's real save file, as the
 game's own do, and turning the mod off does not take it back. Give one deliberately: one per boss room at
@@ -309,7 +311,7 @@ want it around the origin, and make the spawns, exits and doors fit it.
 - **Collision**: meshes or nodes whose name ends in `_col` are the room's collision and are not drawn. Their
   material names choose the surface, as for world objects: `col_stone`, `col_grass`, `col_wood`, `col_sand`,
   `col_metal`, `col_wall`, `col_objects`, `col_climb`, `col_hookshot`, `col_water` (swimmable), `col_shallow`,
-  `col_waterfall`, `col_ice`, `col_void`. Without a `_col` mesh, the visible triangles are the collision, on
+  `col_waterfall`, `col_ice`, `col_void`, `col_lava` (see [Lava](#lava)). Without a `_col` mesh, the visible triangles are the collision, on
   stone (or on the surface a `col_` material name gives). Up to 20000 collision triangles per room.
 - Faces are seen from the side their normal points to; for a room seen from inside, the walls and ceiling
   face inwards.
@@ -318,6 +320,39 @@ want it around the origin, and make the spawns, exits and doors fit it.
   the same.
 - **Unwrap every visible mesh** (UVs; in Blender **UV → Smart UV Project** or **Cube Projection**). A surface
   without texture coordinates shows a single colour of its texture. The editor's `check_stage` reports both.
+
+### Lava
+
+A `col_lava` surface in the room's collision is lava, as in the game's lava rooms: Link burns, jumps out, loses
+half a heart and starts again where he came into the room; a bomb that falls in explodes, a pot breaks, other
+things are gone. Model it as upward-facing faces at the lava's level, lower than the floor around it, so that
+Link walks off the edge into it. The surface is no ground: the lava gets a bottom 1 metre (100 units) below it,
+where things sink to. Keep that space free, and count lava's triangles twice towards the room's 20000.
+
+The game draws its lava with an actor of its own, not with the room's model. Place a `lava` actor at the
+surface's height, as large as the pool (it may be larger: the room's floors and walls hide what reaches under
+them), and add `heat_shimmer` for the heat haze:
+
+```json
+"actors": [
+  {"id": "lava", "actor": "lava", "position": {"x": 0, "y": -50, "z": 400}, "size": {"x": 2000, "z": 1200}},
+  {"id": "heat", "actor": "heat_shimmer", "position": {"x": 0, "y": 0, "z": 0}}
+]
+```
+
+For the lava's glowing edge, the room's lava faces can also be drawn with a lava material of a kit room. These
+are the kit materials of the game's lava (the material name, and kit rooms that have it):
+
+| Material | Kit rooms | |
+|---|---|---|
+| `E3mYOGAN_v` | `M_NewD2` rooms 2, 7, 8, 10, 11, 12, 13 and 15 (Dragon Roost Cavern), `Adanmae` room 0 (Dragon Roost's mountain path), `M_DragB` room 0, `M_Dra09` room 9 | the glowing edge of the lava, its two layers drifting |
+| `E3mYOGAN_v` | `Cave01` rooms 0 and 1 (the lava cave) | the lava cave's lava, still |
+| `R00_1015_3_lambert6_v` | `MiniKaz` room 0 (inside Fire Mountain) | Fire Mountain's lava, still |
+
+Map them with `materials`, for example `"materials": {"col_lava": "E3mYOGAN_v"}` for faces whose material is
+`col_lava` (they are then drawn and are the lava's collision). A kit room used as it is (`"ground": "kit"`) keeps
+its own lava; place `lava` and `heat_shimmer` actors in it as you would in a room of your own (its own are not
+taken over).
 
 ### Kit materials
 

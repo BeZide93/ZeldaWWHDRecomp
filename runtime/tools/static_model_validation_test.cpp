@@ -92,6 +92,7 @@ int main(){static_models::ModelInfo info;std::string why;auto doc=document();aut
     // collision from visible triangles checks every visible material's col_* name
     doc=cube_document();{auto p=doc["meshes"].array[0]["primitives"].array[0];p["material"]=1;doc["meshes"].array[0]["primitives"].array.push_back(p);auto m=doc["materials"].array[0];m["name"]="col_wood";doc["materials"].array.push_back(m);doc["materials"].array[0]["name"]="col_sand";}
     assert(static_models::validate_glb(glb(doc,cube),info,why,true)&&info.material_count==2);
-    doc["materials"].array[1]["name"]="col_lava";assert(!static_models::validate_glb(glb(doc,cube),info,why,true));
+    doc["materials"].array[1]["name"]="col_lava";assert(static_models::validate_glb(glb(doc,cube),info,why,true)&&static_models::collision_surface("col_lava")==14);
+    doc["materials"].array[1]["name"]="col_magma";assert(!static_models::validate_glb(glb(doc,cube),info,why,true));
     std::cout<<"static model validation tests passed\n";
 }
