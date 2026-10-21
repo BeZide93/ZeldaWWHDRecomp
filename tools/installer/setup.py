@@ -32,6 +32,9 @@ the game itself is still built from the USA game. Its languages then appear in t
 (Language). Tested with the European game; untested with the Japanese game so far.
 Keys can also come from the WIIU_COMMON_KEY environment variable / IMAGE.key next to the image.
 Keys are never printed, logged or stored.
+
+Game options: --editor, --trace, --warm-shaders, --renderer NAME and everything after "--" are not for
+setup. Setup passes them on to the game when it starts it (setup.py --editor, setup.py -- --user-dir DIR).
 """
 import argparse
 import getpass
@@ -1975,21 +1978,57 @@ def windows_shortcuts(data_dir, exe):
             LOG.write("shortcut not created (folder 0x%x): %s" % (csidl, e))
 
 
-def launch(state, data_dir, decomp=None):
-    """decomp: start the decomp version (docs/decomp-build.md); None: as chosen in setup (start_decomp)"""
+# Game options (issue #266): the launcher (Wind Waker HD.exe, Wind Waker HD.app, wind-waker-hd) and setup pass
+# them on to the game; setup's own argparse never sees them. The same rule is in tools/installer/gui/game_args.h.
+GAME_FLAGS = ("--editor", "--trace", "--warm-shaders")
+GAME_VALUE_OPTIONS = ("--renderer",)  # --renderer NAME or --renderer=NAME
+GAME_ARGS = []  # this run's game options (main)
+
+
+def split_game_args(argv):
+    """(setup's own arguments, the game options): GAME_FLAGS, GAME_VALUE_OPTIONS with their value and
+    everything after "--" go to the game, in their order"""
+    own, game = [], []
+    i = 0
+    while i < len(argv):
+        a = argv[i]
+        if a == "--":
+            game += argv[i + 1:]
+            break
+        if a in GAME_FLAGS or any(a.startswith(o + "=") for o in GAME_VALUE_OPTIONS):
+            game.append(a)
+        elif a in GAME_VALUE_OPTIONS and i + 1 < len(argv):
+            game += [a, argv[i + 1]]
+            i += 1
+        else:
+            own.append(a)
+        i += 1
+    return own, game
+
+
+def with_options(game_args):
+    return " with " + " ".join(game_args) if game_args else ""
+
+
+def launch(state, data_dir, decomp=None, game_args=None):
+    """decomp: start the decomp version (docs/decomp-build.md); None: as chosen in setup (start_decomp).
+    game_args: options for the game (None: this run's GAME_ARGS)"""
+    game_args = list(GAME_ARGS if game_args is None else game_args)
     say("")
     if decomp is None:
         decomp = bool(state.get("start_decomp"))
     exe = state["exe"]
     if decomp and state.get("decomp_exe") and os.path.isfile(state["decomp_exe"]):
         exe = state["decomp_exe"]
-        say("Starting the decomp version of the game...")
+        say("Starting the decomp version of the game%s..." % with_options(game_args))
     else:
-        say("Starting the game...")
+        say("Starting the game%s..." % with_options(game_args))
         if IS_MAC and state.get("app") and os.path.isdir(state["app"]):
-            subprocess.Popen(["open", state["app"]])
+            # the app's launcher passes its arguments on ("$@", mac_app)
+            subprocess.Popen(["open", state["app"]] + (["--args"] + game_args if game_args else []))
             return
     args = [exe, "--game", state.get("game_dir") or os.path.join(data_dir, "game"), "--save", os.path.join(data_dir, "save")]
+    args += game_args
     if IS_WIN:
         subprocess.Popen(args, cwd=data_dir, creationflags=0x00000008 | 0x00000200)  # DETACHED_PROCESS | NEW_GROUP
     else:
@@ -2750,7 +2789,8 @@ def main():
     ap.add_argument("--remove-language-source", metavar="EU|JP", help="remove a language source")
     ap.add_argument("--gui-protocol", action="store_true",
                     help="machine interface for the graphical installer (JSON lines; see tools/installer/README.md)")
-    args = ap.parse_args()
+    own, GAME_ARGS[:] = split_game_args(sys.argv[1:])
+    args = ap.parse_args(own)
     try:
         sys.stdout.reconfigure(errors="replace")
     except AttributeError:

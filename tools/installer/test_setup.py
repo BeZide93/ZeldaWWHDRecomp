@@ -3,6 +3,7 @@
 import hashlib
 import json
 import os
+import re
 import sys
 import tempfile
 import unittest
@@ -1859,6 +1860,95 @@ class DecompOption(unittest.TestCase):
                 os.remove(dexe)
                 setup.launch(dict(st, start_decomp=True), d)  # not built (any more): the normal game
             self.assertEqual(started, [exe, dexe, dexe, exe])
+
+
+class GameOptions(unittest.TestCase):
+    """issue #266: Wind Waker HD.exe --editor (and the other launchers) pass game options on to the game"""
+    SPACED = 'C:\\Users\\Jo Doe\\my "mods" dir\\'
+
+    def test_split(self):
+        own, game = setup.split_game_args(["--yes", "--editor", "--data-dir", "D", "--renderer", "vulkan",
+                                           "--gui-protocol", "--trace", "--renderer=metal", "--decomp"])
+        self.assertEqual(own, ["--yes", "--data-dir", "D", "--gui-protocol", "--decomp"])
+        self.assertEqual(game, ["--editor", "--renderer", "vulkan", "--trace", "--renderer=metal"])
+        # everything after "--" is the game's, as it is (a setup option there too)
+        own, game = setup.split_game_args(["--data-dir", "D", "--", "--user-dir", self.SPACED, "--yes"])
+        self.assertEqual(own, ["--data-dir", "D"])
+        self.assertEqual(game, ["--user-dir", self.SPACED, "--yes"])
+        self.assertEqual(setup.split_game_args(["--yes"]), (["--yes"], []))
+
+    def test_main_parses_with_game_options(self):
+        """setup's argparse never sees game options (it stopped with "unrecognized arguments")"""
+        seen = {}
+
+        def run(args, ui):
+            seen["args"], seen["game"] = args, list(setup.GAME_ARGS)
+            return 0
+        argv = ["setup.py", "--yes", "--editor", "--data-dir", "D", "--", "--user-dir", self.SPACED]
+        try:
+            with mock.patch.object(sys, "argv", argv), mock.patch.object(setup, "run", run):
+                self.assertEqual(setup.main(), 0)
+        finally:
+            setup.GAME_ARGS[:] = []
+        self.assertEqual(seen["args"].data_dir, "D")
+        self.assertTrue(seen["args"].yes)
+        self.assertEqual(seen["game"], ["--editor", "--user-dir", self.SPACED])
+
+    def started(self, state, d, game_args=None, mac=False, win=False):
+        calls = []
+        with mock.patch.object(setup.subprocess, "Popen", lambda args, **kw: calls.append(args)), \
+                mock.patch.object(setup, "say", lambda *a: None), mock.patch.object(setup, "IS_MAC", mac), \
+                mock.patch.object(setup, "IS_WIN", win):
+            setup.launch(state, d, game_args=game_args)
+        self.assertEqual(len(calls), 1)
+        return calls[0]
+
+    def test_launch_on_each_platform(self):
+        with tempfile.TemporaryDirectory() as d:
+            exe, app = os.path.join(d, "wwhd"), os.path.join(d, "Wind Waker HD.app")
+            os.mkdir(app)
+            opts = ["--editor", "--user-dir", self.SPACED]
+            fixed = [exe, "--game", os.path.join(d, "game"), "--save", os.path.join(d, "save")]
+            # Windows and Linux (and macOS without an app): appended to the game's own arguments, one list
+            # item each, so spaces and quotes survive (subprocess quotes them for CreateProcess on Windows)
+            self.assertEqual(self.started({"exe": exe}, d, opts, win=True), fixed + opts)
+            self.assertEqual(self.started({"exe": exe}, d, opts), fixed + opts)
+            self.assertEqual(self.started({"exe": exe, "app": app}, d, opts, mac=False), fixed + opts)
+            # macOS app (non-portable install): open --args; the app's launcher passes "$@" on
+            self.assertEqual(self.started({"exe": exe, "app": app}, d, opts, mac=True), ["open", app, "--args"] + opts)
+            self.assertEqual(self.started({"exe": exe, "app": app}, d, [], mac=True), ["open", app])
+            self.assertEqual(self.started({"exe": exe}, d, []), fixed)
+            # the decomp version gets them too
+            dexe = os.path.join(d, "wwhd-decomp")
+            open(dexe, "w").close()
+            args = self.started({"exe": exe, "decomp_exe": dexe, "start_decomp": True, "app": app}, d, ["--editor"], mac=True)
+            self.assertEqual((args[0], args[-1]), (dexe, "--editor"))
+
+    def test_launch_uses_this_runs_options(self):
+        """the GUI's launch request and the terminal menu call launch(state, data_dir): main's GAME_ARGS"""
+        with tempfile.TemporaryDirectory() as d:
+            own, setup.GAME_ARGS[:] = setup.split_game_args(["--gui-protocol", "--data-dir", d, "--editor"])
+            try:
+                args = self.started({"exe": "wwhd"}, d)
+            finally:
+                setup.GAME_ARGS[:] = []
+            self.assertEqual(args[-1], "--editor")
+            self.assertNotIn("--gui-protocol", args)
+            self.assertNotIn("--data-dir", args)
+
+    def test_windows_quoting(self):
+        # what CreateProcess gets for the list (CommandLineToArgvW / the C runtime read it back as one argument)
+        self.assertEqual(setup.subprocess.list2cmdline(["--user-dir", self.SPACED]),
+                         '--user-dir "C:\\Users\\Jo Doe\\my \\"mods\\" dir\\\\"')
+
+    def test_same_rule_as_the_launcher(self):
+        """tools/installer/gui/game_args.h (the launcher program) lists the same options"""
+        with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "gui", "game_args.h")) as f:
+            text = f.read()
+        lists = {m.group(1): re.findall(r'"([^"]+)"', m.group(2))
+                 for m in re.finditer(r"(kGameFlags|kGameValueOptions)\[\] = \{([^}]*)\}", text)}
+        self.assertEqual(tuple(lists["kGameFlags"]), setup.GAME_FLAGS)
+        self.assertEqual(tuple(lists["kGameValueOptions"]), setup.GAME_VALUE_OPTIONS)
 
 
 
