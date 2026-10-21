@@ -40,11 +40,19 @@ rate. In that case choose 30 or 60 fps.
 ### Dynamic resolution
 
 **Settings → Graphics → Dynamic resolution** lowers the resolution by itself while the phone's
-graphics chip can't keep up with the frame rate, and raises it again when there is room: **Down to
-75%** or **Down to 50%** of the internal resolution. The picture gets softer while it is lower; the
-layout on the screen stays the same. It only helps when the graphics chip is what slows the game
-down. When the processor is the limit, the resolution stays where it is. It is off by default.
-The current resolution is shown in the performance overlay and in the copied performance report.
+graphics chip can't keep up with the frame rate, and raises it again when there is room. Choose
+**Down to 75%** or **Down to 50%**: the lowest share of the internal resolution it may use. It is
+**off** by default.
+
+- It helps on phones whose graphics chip is what slows the game down. When the processor is the
+  limit, the resolution stays where it is.
+- It changes in small steps, one at a time, and waits before going back up. A change does not cause
+  a stutter.
+- The picture gets softer while the resolution is lower; it stays the same size on the screen and is
+  scaled smoothly.
+- It needs about 35 MB more graphics memory at 1× (for the neighbouring steps).
+- The current resolution is shown in the performance overlay and in the copied performance report.
+
 (The idea comes from GreenNaugahyde's Android fork.)
 
 ## Tested phones

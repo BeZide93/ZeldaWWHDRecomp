@@ -978,6 +978,25 @@ exclude retired, non-cache and driver allocations. Use an aggregate heap summary
 a repeatable scene when investigating retention, and disable diagnostics for performance
 comparisons.
 
+## Dynamic resolution
+
+**Settings → Graphics → Dynamic resolution** lowers the internal resolution by itself while the
+graphics card can't keep up with the frame rate, and raises it again when there is room. Choose
+**Down to 75%** or **Down to 50%**: the lowest share of the chosen internal resolution it may use.
+It is **off** by default.
+
+- It helps when the graphics card is what holds the game back: a weaker GPU, or a high internal
+  resolution. When the processor is the limit, the resolution stays where it is.
+- It changes in small steps (1×, ⅞, ¾, ⅝, ½ of the internal resolution), one step at a time, and
+  waits before going back up, so it does not swing back and forth. A change does not cause a stutter.
+- The picture gets softer while the resolution is lower. Its size and place in the window stay the
+  same, and it is always scaled smoothly while lowered (also with sharp or integer scaling).
+- It uses some extra graphics memory for the neighbouring steps: about 35–55 MB at 1×, more at
+  higher internal resolutions.
+- The current resolution is shown in the performance overlay and in the copied performance report.
+
+Both renderers (Metal and Vulkan) support it. The idea comes from GreenNaugahyde's Android fork.
+
 ## Choosing the GPU
 
 In Settings → Graphics → GPU (Vulkan), choose Automatic or a graphics card. The choice applies after restarting. Automatic keeps the driver's order, preferring cards with Vulkan 1.3. Unavailable cards show the reason; if a saved card is missing or unusable, the game uses Automatic and shows a notice.
