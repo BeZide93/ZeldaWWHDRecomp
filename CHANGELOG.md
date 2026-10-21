@@ -7,6 +7,8 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+## v0.4.0
+
 - **Fixed: switches and doors waited for a restart in the world editor.** With all of the editor's live kinds
   installed, the table for the port's own actor types was full, so switches and doors fell back to "after a restart".
   They now appear at once like the other actors, and a failure names its cause in the log.
