@@ -335,6 +335,8 @@ frames over 100 ms. With warm caches Safe changed nothing; Fast still left out 9
 change (`[shaders] shader compile off|safe|fast`). **Copy performance report** has a line with the
 level, the draws left out, the waits, and why the other draws waited.
 `WWHD_TEST_BG_SHADERS=fast@<frame>` (or `safe@`, `0@`) sets it at a TV frame in a scripted test.
+`WWHD_BG_SHADERS_DUMP=<n>` (Vulkan) writes the TV image of the first n frames that left a draw out,
+and of the two frames after each, to see what was missing.
 
 Fast is close to Cemu's **Async shader compile**: Cemu leaves a draw out while its pipeline
 compiles and draws it once ready, at once (no wait), keeping only very small draws without a depth

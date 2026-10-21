@@ -2977,6 +2977,18 @@ void request_capture() { captureRequested = true; }
 static void frame_dumps(uint64_t frame) {
   static const auto frames = gfx::capture_schedule::parse(getenv("WWHD_DUMP_FRAMES"));
   const uint64_t dumpFrame = fixed_seed::script_frame(frame);  // (TV frame unless WWHD_TEST_FIXED_SEED)
+  // test aid: WWHD_BG_SHADERS_DUMP=n writes the TV image of the first n frames that left a draw out
+  // (Shader compile Safe / Fast) and of the two frames after each, to check what went missing
+  static const uint64_t leftOutDumps = getenv("WWHD_BG_SHADERS_DUMP") ? strtoull(getenv("WWHD_BG_SHADERS_DUMP"), nullptr, 10) : 0;
+  if (leftOutDumps) {
+    static uint64_t until = 0, count = 0;
+    const bool leftOut = bgshaders::skipped_in_frame(frame - 1);  // the frame just drawn
+    if (leftOut && count < leftOutDumps) { until = dumpFrame + 2; ++count; }
+    if (dumpFrame <= until) {
+      LOG("[shaders] dump of %s frame %llu", leftOut ? "a left-out" : "the next", (unsigned long long)dumpFrame);
+      dump_scan(R.tv, "frame_" + std::to_string(dumpFrame) + ".png");
+    }
+  }
   if (gfx::capture_schedule::contains(frames, dumpFrame)) {
     dump_scan(R.tv, "frame_" + std::to_string(dumpFrame) + ".png");
     dump_scan(R.drc, "frame_" + std::to_string(dumpFrame) + "_drc.png");
