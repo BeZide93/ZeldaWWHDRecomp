@@ -14,7 +14,14 @@ scenes and quests ([SDK v2](mod-sdk-v2.md)). The examples
 ## Starting it
 
 Start the game with `--editor`, for example from a terminal (`wwhd --editor`, on Windows `wwhd.exe --editor`)
-or from a shortcut with that option added. A normal start has no editor at all: nothing that players see.
+or from a shortcut with that option added. The program in the release folder passes it on to the game, so this
+works too:
+
+- Windows: `"Wind Waker HD.exe" --editor`
+- macOS: `open "Wind Waker HD.app" --args --editor`
+- Linux: `./wind-waker-hd --editor`
+
+A normal start has no editor at all: nothing that players see.
 
 The game starts as usual: the title screen, then your file. As soon as Link is in the world, the
 **editor view** begins: the camera flies freely, Link stands still, and the editor's own panels are over

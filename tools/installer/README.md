@@ -71,6 +71,12 @@ shows no window of its own (macOS, Linux: `exec`, so the Dock keeps "Wind Waker 
 the game without a console window and exits). Otherwise, or with Shift held at start (macOS,
 Windows) or `--setup`, it shows the setup.
 
+Game options given to the program are passed on to the game: `--editor` (the [world
+editor](../../docs/mod-editor.md)), `--trace`, `--warm-shaders`, `--renderer NAME`, and everything after
+`--`. For example `"Wind Waker HD.exe" --editor`, `open "Wind Waker HD.app" --args --editor` or
+`./wind-waker-hd --editor`. All other options are for the setup. The terminal setup (`setup.py`) passes game
+options on in the same way when it starts the game.
+
 The setup is only a front end: it runs the release's terminal setup with `--gui-protocol` as a child
 process (so Python is found or fetched exactly as in the terminal setup; on Windows it starts
 `setup.py` directly with the Python the release ships, see below) and talks to `setup.py`
