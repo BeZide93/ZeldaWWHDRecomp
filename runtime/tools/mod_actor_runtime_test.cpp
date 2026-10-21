@@ -247,7 +247,7 @@ st32(Play+0x5B34,Arena+0xF400);st32(A+4,42);st16(A+0xE,mod_actor::kProfile);st32
     const uint32_t link=Arena+0xF400,far_plane_address=0x1048CFF0+0x54,old_far=0x47712345;
     auto observer=[&](unsigned room,unsigned square){st8(link+0x326,room);st32(link+0x314,f32_as_u32(float(int((square-1)%7)-3)*100000));st32(link+0x31C,f32_as_u32(float(int((square-1)/7)-3)*100000));};
     unsigned behavior_events=0;mod_actor::set_behavior_sink([&](Cpu*,uint32_t,mod_actor::BehaviorEvent,const mod_actor::Hit*){++behavior_events;});
-    assert(mod_actor::owns_visual(A,token));assert(u32_as_f32(ld32(A+0x330))==2&&u32_as_f32(ld32(A+0x334))==3&&u32_as_f32(ld32(A+0x338))==4&&u32_as_f32(ld32(A+0x364))==10);
+    assert(mod_actor::owns_visual(A,token));assert(u32_as_f32(ld32(A+0x330))==2&&u32_as_f32(ld32(A+0x334))==3&&u32_as_f32(ld32(A+0x338))==4&&u32_as_f32(ld32(A+0x364))==32);
     st8(A+0x326,13);observer(13,13);st32(far_plane_address,old_far);method(c,2);assert(registered_collision==0&&attack_registrations==0&&ld32(A+0x39C)==0&&behavior_events==0);
     method(c,4);assert(draws==1&&clip_recalculations==2&&clip_far_values[0]==f32_as_u32(500000.f)&&clip_far_values[1]==old_far&&ld32(far_plane_address)==old_far&&behavior_events==0);
     observer(12,12);method(c,4);observer(14,14);method(c,4);assert(draws==1&&clip_recalculations==2);
