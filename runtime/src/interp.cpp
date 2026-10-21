@@ -1795,14 +1795,18 @@ extern "C" void hook_020315CC(Cpu* c) {
 // as it is at that moment: the exact step, as camera_draw put it back. The pass was drawn with the
 // blended camera, so on blended frames the stars sat around another eye than the one they were seen
 // from and jumped back and forth while the camera moved (issue #68, "stars on the sky at night").
-// They are placed with the camera as the pass drew it.
-extern "C" void f_02574144_orig(Cpu* c);
-extern "C" void hook_02574144(Cpu* c) {
+// They are placed with the camera as the pass drew it. The same for the other sky sprites placed
+// around the eye at paint time: the sun and moon (dKyr_drawSun 0256F1C4), the lens flare
+// (dKyr_drawLenzflare 02570210, dKy_set_eyevect_calc2 from the eye) and the sea spray in the rain
+// (dKyr_drawSibuki 02571B1C): they moved at 30 fps against the blended view.
+static void with_drawn_camera(Cpu* c, void (*orig)(Cpu*), const char* what) {
     using namespace interp;
     if (!enabled()) {
-        f_02574144_orig(c);
+        orig(c);
         return;
     }
+    // debug: WWHD_INTERP_SKY_TRACE=n logs n draws whose camera was swapped (eye drawn vs exact)
+    static int trace = getenv("WWHD_INTERP_SKY_TRACE") ? atoi(getenv("WWHD_INTERP_SKY_TRACE")) : 0;
     CamState exact[4];
     bool swapped[4] = {};
     for (int i = 0; i < 4; i++) {
@@ -1811,11 +1815,25 @@ extern "C" void hook_02574144(Cpu* c) {
         exact[i] = read_cam(p.cam);
         write_cam(p.cam, p.drawn);
         swapped[i] = true;
+        if (trace > 0 && camera::dist(exact[i].eye, p.drawn.eye) > 1.0f) {
+            trace--;
+            LOG("[interp] %s: pass %llu drawn with eye %.1f %.1f %.1f (exact %.1f %.1f %.1f)", what, (unsigned long long)g_passes, p.drawn.eye[0],
+                p.drawn.eye[1], p.drawn.eye[2], exact[i].eye[0], exact[i].eye[1], exact[i].eye[2]);
+        }
     }
-    f_02574144_orig(c);
+    orig(c);
     for (int i = 3; i >= 0; i--)
         if (swapped[i]) write_cam(g_prev[i].cam, exact[i]);
 }
+extern "C" void f_02574144_orig(Cpu* c);
+extern "C" void f_0256F1C4_orig(Cpu* c);
+extern "C" void f_02570210_orig(Cpu* c);
+extern "C" void f_02571B1C_orig(Cpu* c);
+extern "C" void hook_02574144(Cpu* c) { with_drawn_camera(c, f_02574144_orig, "stars"); }
+extern "C" void hook_0256F1C4(Cpu* c) { with_drawn_camera(c, f_0256F1C4_orig, "sun/moon"); }
+extern "C" void hook_02570210(Cpu* c) { with_drawn_camera(c, f_02570210_orig, "lens flare"); }
+extern "C" void hook_02571B1C(Cpu* c) { with_drawn_camera(c, f_02571B1C_orig, "sea spray"); }
+
 // Screen fade (mDoGph_calcFade 025F06A8): called once per drawn frame, so every fade (stage entry,
 // scene changes) ran 2x/4x/8x too fast with frame interpolation. Advanced once per logic step and
 // shown at the drawn pass's fraction (interp_fade.h). l_graphics (101F4808): +8 mFadeRate, +0xC

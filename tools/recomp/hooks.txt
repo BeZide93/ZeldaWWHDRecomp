@@ -219,6 +219,9 @@
 0232B984  # buoy pole: attachment placement at the same fraction as the flag
 021BBC34  # mantles/capes: custom cloth vertices and placement, at upload
 02574144  # dKyr_drawStar: stars placed around the eye the pass was drawn with (interp.cpp)
+0256F1C4  # dKyr_drawSun: sun and moon placed around the eye the pass was drawn with (interp.cpp)
+02570210  # dKyr_drawLenzflare: lens flare from the eye the pass was drawn with (interp.cpp)
+02571B1C  # dKyr_drawSibuki: sea spray in the rain around the eye the pass was drawn with (interp.cpp)
 025F06A8  # mDoGph_calcFade: the screen fade advances once per logic step, shown at the pass fraction (interp.cpp)
 025F0840  # mDoGph_calcMonotone: trace only (WWHD_INTERP_FADE_TRACE)
 024142F0  # daPy_swBlur_c::draw: sword trail drawn at the pass fraction (interp_fx.cpp)
