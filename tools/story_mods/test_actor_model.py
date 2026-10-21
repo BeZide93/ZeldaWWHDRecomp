@@ -225,7 +225,7 @@ class CollisionMeshTests(unittest.TestCase):
             doc,binary=self.original();change(doc)
             with self.subTest(change=change),self.assertRaises(model.BuildError):self.parse(doc,binary)
         with self.assertRaises(model.BuildError):collision_mesh.encode([(0,0,0),(1,0,0),(2,0,0)],[(0,1,2,0)],model)
-        with self.assertRaises(model.BuildError):collision_mesh.encode([(0,0,0),(1,0,0),(0,1,0)],[(0,1,2,0)]*4097,model)
+        with self.assertRaises(model.BuildError):collision_mesh.encode([(0,0,0),(1,0,0),(0,1,0)],[(0,1,2,0)]*8193,model)
 
     def test_original_island_reproducible_and_known_collision(self):
         path=ROOT/'examples/guest-mods/world-objects-w1/assets/make_fixtures.py'

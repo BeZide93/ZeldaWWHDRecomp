@@ -273,7 +273,9 @@ side walls illustrate collision for both Link and the ship.
 
 ## Limits and placement
 
-Each collision mesh is limited to 4,096 vertices and 4,096 triangles. Every local
+Each collision mesh is limited to 8,192 vertices and 8,192 triangles. The storage budget below is the closer
+limit for a large mesh: a body of about 6,000 welded triangles fits in its 512 KiB, a mesh at the full 8,192 of
+each does not. Every local
 coordinate must stay within ±20,000 game units, and the extent along each axis
 must be at most 20,000 units. These bounds are checked again after actor scale
 is applied. Smaller meshes make collision checks cheaper.

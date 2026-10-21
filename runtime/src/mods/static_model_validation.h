@@ -16,6 +16,8 @@
 namespace static_models {
 inline constexpr size_t kMaxSourceBytes=8*1024*1024;
 inline constexpr unsigned kMaxVertices=4096,kMaxTriangles=8192,kMaxTextureDimension=512;
+// a collision mesh (story_world_collision_mesh.h MaxVertices/MaxTriangles)
+inline constexpr unsigned kMaxCollisionVertices=8192,kMaxCollisionTriangles=8192;
 // Several materials (tools/story_mods/multi_material.py): up to 16 materials with one embedded PNG each and up to 32
 // triangle primitives; vertex and triangle limits count all primitives together; all colour textures of one model
 // take at most 1 MiB decoded (one 512 x 512 RGBA8 texture, the single-material maximum).
@@ -86,7 +88,7 @@ inline bool validate_glb_strict(std::span<const uint8_t> b,ModelInfo& info,std::
         size_t sides=1;
         if(const auto& all=doc.get("materials");!collision&&all.type==Value::Array&&!all.array.empty()&&integer(p.get("material"),0,all.array.size()-1)){const auto& d=all.array[size_t(p.get("material").number)].get("doubleSided");if(d.type==Value::Bool&&d.boolean)sides=2;}
         drawn_vertices+=sides*q.pos.count;drawn_triangles+=sides*(q.idx.count/3);
-        if(collision&&(vertices>4096||triangles>4096))return fail("collision exceeds vertex/triangle limits");
+        if(collision&&(vertices>kMaxCollisionVertices||triangles>kMaxCollisionTriangles))return fail("collision exceeds vertex/triangle limits");
         if(!collision&&(drawn_vertices>kMaxVertices||drawn_triangles>kMaxTriangles))return fail("the visible mesh has more than 4096 vertices or 8192 triangles (all primitives together, double-sided faces twice); indices exceed the limit");
         for(const auto& pair:{std::pair{q.pos,size_t(3)},std::pair{q.nrm,size_t(3)},std::pair{q.uv,size_t(2)}})for(size_t i=0;i<pair.first.count;++i)for(size_t k=0;k<pair.second;++k){const auto& a=pair.first;const uint32_t bits=le32(b.data()+a.offset+i*a.stride+k*4);float f;std::memcpy(&f,&bits,4);if(!std::isfinite(f))return fail("nonfinite model coordinate");}
         for(size_t i=0;i<q.idx.count;++i){const auto* r=b.data()+q.idx.offset+i*q.idx.stride;const uint32_t n=q.idx.component==5121?uint32_t(r[0]):q.idx.component==5123?uint32_t(r[0])|(uint32_t(r[1])<<8):le32(r);if(n>=q.pos.count)return fail("model index outside vertex buffer");}
@@ -230,7 +232,7 @@ inline bool validate_glb(std::span<const uint8_t> b,ModelInfo& info,std::string&
     size_t vertices=0,triangles=0;std::array<float,3> low,high;low.fill(std::numeric_limits<float>::infinity());high.fill(-std::numeric_limits<float>::infinity());
     for(auto [ni,mi]:collision){const auto& mesh=meshes.array[mi];const auto& ps=mesh.get("primitives");if(mesh.get("weights").type!=Value::Null||ps.type!=Value::Array||ps.array.empty()||ps.array.size()>64)return fail("invalid collision mesh");
         for(const auto& p:ps.array){const auto& material_index=p.get("material");if(!integer(material_index,0,materials.array.size()-1))return fail("collision material outside input");const auto name=materials.array[size_t(material_index.number)].get("name").string();if(!collision_material(name))return fail("unknown or unsupported collision material");
-            auto one=mesh;one["primitives"].array={p};const auto geometry=packed(project(ni,one));ModelInfo part;if(!validate_glb_strict(geometry,part,why,true))return false;vertices+=part.vertex_count;triangles+=part.triangle_count;if(vertices>4096||triangles>4096)return fail("collision exceeds vertex/triangle limits");for(size_t k=0;k<3;++k){low[k]=std::min(low[k],part.minimum[k]);high[k]=std::max(high[k],part.maximum[k]);}}
+            auto one=mesh;one["primitives"].array={p};const auto geometry=packed(project(ni,one));ModelInfo part;if(!validate_glb_strict(geometry,part,why,true))return false;vertices+=part.vertex_count;triangles+=part.triangle_count;if(vertices>kMaxCollisionVertices||triangles>kMaxCollisionTriangles)return fail("collision exceeds vertex/triangle limits");for(size_t k=0;k<3;++k){low[k]=std::min(low[k],part.minimum[k]);high[k]=std::max(high[k],part.maximum[k]);}}
     }
     for(size_t k=0;k<3;++k)if(double(high[k])-low[k]>20000)return fail("collision extent exceeds 20000 game units");info=result;return true;
 }

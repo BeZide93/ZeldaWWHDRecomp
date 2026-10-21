@@ -7,7 +7,9 @@
 #include <string>
 #include <vector>
 namespace story_world_collision::mesh {
-inline constexpr uint32_t MaxVertices=4096,MaxTriangles=4096,LeafTriangles=32;
+// A body's triangles and vertices (each at most 8192; the 512 KiB storage budget of a body, mod_actor's
+// collision_geometry, is the closer limit for a large mesh: about 6000 welded triangles).
+inline constexpr uint32_t MaxVertices=8192,MaxTriangles=8192,LeafTriangles=32;
 inline constexpr float MaxExtent=20000;
 // WCOL surfaces (semantic): 0 stone, 1 grass, 2 wood, 3 sand, 4 metal, 5 wall, 6 objects, 7 climb,
 // 8 hookshot, 9 water (a swimmable surface: its own depth-two group with the game's water bit 0x100, which
