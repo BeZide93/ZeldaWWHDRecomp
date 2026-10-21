@@ -214,6 +214,7 @@ struct Renderer {
   bool retainedUnsubmitted=false;
   DeferredCommands* deferredOwner=nullptr;
   uint64_t serial=0; // Submission order on the single graphics queue.
+  uint64_t recordedFrame=0; // R.frame when sealed: frames in flight (WWHD_VK_STATS)
   uint64_t recordWorkerSerial=0; // CPU acknowledgment before ANY fence query or pool reuse.
   std::vector<UploadBlock> uploadBlocks;
   std::vector<std::function<void()>> completions;
@@ -222,6 +223,7 @@ struct Renderer {
   std::vector<RetiredImage> garbageImages;
   std::vector<bufcache::Region> garbageCacheRegions;
  };
+ // The submission ring (submission_pool.h): sized at device creation, WWHD_VK_SUBMISSION_POOL.
  std::deque<Submission> submissions=std::deque<Submission>(4);
  size_t activeSubmission=0;
  Screen tv,drc;

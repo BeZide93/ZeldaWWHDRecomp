@@ -38,6 +38,7 @@
 #include "deferred_commands.h"
 #include "record_worker.h"
 #include "submission_cpu_ack.h"
+#include "submission_pool.h"
 #include "worker_present_policy.h"
 #include "handoff_trace.h"
 #include <optional>
@@ -248,6 +249,12 @@ bool cpu_only_stats_enabled() {
 struct WaitTiming { uint64_t count = 0, ns = 0; };
 struct PresentTiming { WaitTiming acquire, compose, present, idle; };
 WaitTiming submitWait, presentSubmitWait, queueSubmitTiming;
+// activate_submission(): the render thread waits for the next ring slot's fence (submission_pool.h)
+WaitTiming slotReuseWait;
+// sampled at each swap with WWHD_VK_STATS: submissions/frames the GPU has not finished
+struct InFlightStats { uint64_t samples=0,submissions=0,frames=0; unsigned maxSubmissions=0,maxFrames=0; };
+InFlightStats inFlight;
+unsigned submissionPoolSlots=0;
 WaitTiming fenceStatusTiming, fenceResetTiming, retirementCleanupTiming;
 WaitTiming commandEndTiming;
 std::array<WaitTiming,5> swapPhaseTiming;
@@ -1272,7 +1279,7 @@ static void retire_submission(Renderer::Submission& slot, WaitTiming& timing=sub
 }
 static void activate_submission(size_t index) {
   auto& slot=R.submissions[index];
-  retire_submission(slot);
+  retire_submission(slot,slotReuseWait);
   R.activeSubmission=index;
   slot.gpuScopeCount=0;slot.activeRenderScope=UINT32_MAX;
   ++R.submissionGeneration;
@@ -1300,10 +1307,11 @@ static void drain_submissions() {
 // Overflow is allocated only when a captured tail prevents ring reuse. Slot
 // addresses and screenshot indices stay stable; the total is strictly bounded.
 static size_t next_submission_slot() {
+  const auto choice=subpool::next_slot(R.activeSubmission,R.submissions.size(),
+      R.submissions[(R.activeSubmission+1)%R.submissions.size()].retainedUnsubmitted);
   const size_t next=(R.activeSubmission+1)%R.submissions.size();
-  if(!R.submissions[next].retainedUnsubmitted)return next;
-  constexpr size_t maxRetainedSlots=16;
-  if(R.submissions.size()<maxRetainedSlots) {
+  if(choice.step==subpool::Step::Reuse)return choice.index;
+  if(choice.step==subpool::Step::Grow) {
     bool appended=false;
     try {
       R.submissions.emplace_back();appended=true;
@@ -1358,6 +1366,7 @@ static void submit(VkSemaphore wait = VK_NULL_HANDLE,
   static uint64_t nextSubmissionSerial=0;
   const auto seal=[&slot,owner]() noexcept {
     slot.serial=++nextSubmissionSerial;
+    slot.recordedFrame=R.frame;
     slot.uploadBlocks=std::move(R.uploadBlocks);
     slot.completions=std::move(R.completions);
     slot.garbageBuffers=std::move(R.garbageBuffers);
@@ -1436,6 +1445,7 @@ static void submit(VkSemaphore wait = VK_NULL_HANDLE,
     activate_submission(R.activeSubmission);
   }
 }
+unsigned submission_pool_slots() { return submissionPoolSlots; }
 void flush_async() {
   // Deferred objects may reference earlier queued work even if this slot has
   // no draw commands. Submit an empty command buffer to retire them in order.
@@ -1822,7 +1832,7 @@ static bool SDLCALL lifecycle_watch(void *, SDL_Event *event) {
 }
 #endif
 // Asynchronous presentation (the default on every platform since 2026-10-07; WWHD_VK_ASYNC_PRESENT=0
-// restores the waiting path): the presentation submission goes into the four-slot ring like GX2Flush
+// restores the waiting path): the presentation submission goes into the submission ring (submission_pool.h) like GX2Flush
 // work instead of waiting for the GPU, and swap() does not drain the queue, so the render thread
 // records frame N+1 while the GPU draws frame N. Each frame in flight has its own acquire semaphore
 // (reused only after the submission that waited on it retired) and each swapchain image its own
@@ -3396,6 +3406,21 @@ void swap() {
   }
 #endif
   const auto swapBookkeepingStarted=std::chrono::steady_clock::now();
+  if (perf_enabled()) {
+    // Work the GPU has not finished at this swap: a fence query only after the record worker's
+    // CPU acknowledgment (a slot still queued on the worker counts as in flight)
+    unsigned submissions=0;uint64_t oldest=R.frame;
+    for (auto& slot:R.submissions) {
+      if (!slot.pending) continue;
+      const bool queued=slot.recordWorkerSerial && !record_commands_emitted(slot.recordWorkerSerial);
+      if (!queued && vkGetFenceStatus(R.device,slot.fence)!=VK_NOT_READY) continue;
+      ++submissions;oldest=std::min(oldest,slot.recordedFrame);
+    }
+    const unsigned frames=submissions ? unsigned(R.frame-oldest+1) : 0;
+    ++inFlight.samples;inFlight.submissions+=submissions;inFlight.frames+=frames;
+    inFlight.maxSubmissions=std::max(inFlight.maxSubmissions,submissions);
+    inFlight.maxFrames=std::max(inFlight.maxFrames,frames);
+  }
   completedPresentPlan = plan;
   completedPresentPlanValid = tvScan != nullptr;
   lastNewPresentNs = stutter::now();
@@ -3681,6 +3706,11 @@ void swap() {
       LOG("[vulkan waits] submit %.2f/frame %.2f ms/frame; present submit %.2f/frame %.2f ms/frame",
           submitWait.count/frames, submitWait.ns/1e6/frames,
           presentSubmitWait.count/frames, presentSubmitWait.ns/1e6/frames);
+      LOG("[vulkan submission ring] %zu slots (%u at start); slot reuse waits %.2f/frame %.3f ms/frame; in flight at swap: submissions %.2f avg %u max, frames %.2f avg %u max",
+          R.submissions.size(),submissionPoolSlots,slotReuseWait.count/frames,slotReuseWait.ns/1e6/frames,
+          inFlight.samples ? double(inFlight.submissions)/inFlight.samples : 0.0,inFlight.maxSubmissions,
+          inFlight.samples ? double(inFlight.frames)/inFlight.samples : 0.0,inFlight.maxFrames);
+      slotReuseWait={};inFlight={};
       LOG("[vulkan queue submit] %.2f/frame %.2f ms/frame",
           queueSubmitTiming.count/frames, queueSubmitTiming.ns/1e6/frames);
       LOG("[vulkan swap phases] setup %.2f ms/frame; primary %.2f; secondary %.2f; flush %.2f; bookkeeping %.2f",
@@ -4443,6 +4473,15 @@ static void init_device(std::vector<const char *> extensions,
       R.queueFamily,R.secondaryQueueFamily);
 #endif
   init_pipeline_cache();
+  {
+    // WWHD_VK_SUBMISSION_POOL (submission_pool.h): slots created now; overflow adds more up to 16 only
+    // while a captured tail holds the next slot
+    const auto pool=subpool::choose(std::getenv("WWHD_VK_SUBMISSION_POOL"),std::getenv("WWHD_VK_SUBMISSION_POOL8"));
+    R.submissions.resize(pool.slots);
+    submissionPoolSlots=pool.slots;
+    LOG("[vulkan] submission pool %u slots (%s%s); overflow up to %u",pool.slots,pool.source,
+        pool.adjusted ? "; invalid or out-of-range value adjusted" : "",subpool::kMaxSlots);
+  }
   for (auto& slot:R.submissions) {
   VkCommandPoolCreateInfo pool{VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
   pool.queueFamilyIndex = R.queueFamily;

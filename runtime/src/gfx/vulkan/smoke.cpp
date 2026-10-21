@@ -233,9 +233,11 @@ void buffer_cache_check() {
  fprintf(stderr,"[renderer smoke] buffer cache hit, write fault, GX2Invalidate, reset and index readback passed\n");
 }
 void asynchronous_submission_check() {
- constexpr uint32_t submissions=10, payloadSize=16, regionSize=payloadSize*3;
+ // every ring size (WWHD_VK_SUBMISSION_POOL): each slot is used at least twice
+ const uint32_t ring=uint32_t(R.submissions.size()), submissions=ring+6;
+ constexpr uint32_t payloadSize=16, regionSize=payloadSize*3;
  Buffer out=create_readback_buffer(submissions*regionSize);
- std::array<UploadSlice,4> firstSlices{};
+ std::vector<UploadSlice> firstSlices(ring);
  for(uint32_t submission=0;submission<submissions;++submission) {
   auto a=allocate_upload(payloadSize,256),b=allocate_upload(payloadSize,256);
   require(a.buffer==b.buffer&&a.offset!=b.offset,"async submission slices alias");
@@ -287,7 +289,7 @@ void asynchronous_submission_check() {
  for(const auto& slot:R.submissions)
   require(!slot.pending&&slot.garbageBuffers.empty()&&slot.garbageImages.empty()&&slot.garbageFramebuffers.empty(),"async drain left pending resources");
  defer_buffer(out);flush();
- fprintf(stderr,"[renderer smoke] ten async submissions, immutable snapshots, slot wrap and deferred retirement passed\n");
+ fprintf(stderr,"[renderer smoke] %u async submissions on %u slots, immutable snapshots, slot wrap and deferred retirement passed\n",submissions,ring);
 }
 // The fallback must resolve framebuffer handles before capture, then invalidate
 // them at view deferral even though their native begin commands are not emitted.

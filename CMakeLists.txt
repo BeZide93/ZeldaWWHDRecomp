@@ -803,6 +803,11 @@ if(WWHD_HAS_VULKAN)
   target_include_directories(vulkan_fallback_stats_test PRIVATE runtime/src)
   target_compile_options(vulkan_fallback_stats_test PRIVATE -UNDEBUG)
   add_test(NAME vulkan_fallback_stats_bounded_storage COMMAND vulkan_fallback_stats_test)
+  # submission ring size switch and slot choice (runtime/src/gfx/vulkan/submission_pool.h)
+  add_executable(vulkan_submission_pool_test runtime/tools/vulkan_submission_pool_test.cpp)
+  target_include_directories(vulkan_submission_pool_test PRIVATE runtime/src)
+  target_compile_options(vulkan_submission_pool_test PRIVATE -UNDEBUG)
+  add_test(NAME vulkan_submission_pool COMMAND vulkan_submission_pool_test)
   set_tests_properties(vulkan_fallback_stats_bounded_storage PROPERTIES TIMEOUT 30)
   add_executable(vulkan_record_worker_test runtime/tools/vulkan_record_worker_test.cpp
       runtime/src/gfx/vulkan/deferred_commands.cpp runtime/src/gfx/vulkan/pod_commands.cpp
