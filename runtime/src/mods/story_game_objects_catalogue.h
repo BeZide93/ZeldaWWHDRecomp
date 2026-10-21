@@ -38,6 +38,7 @@ struct Variant {
     std::string id, label;
     uint32_t params = 0;  // the fixed parameter word written at creation and read back
     unsigned units = 0;   // a shared batch: how many units of the stage's batch it takes
+    int angle_z = -1;     // a fixed home angle z word written at creation (a block's "no path": 0xFFFF); -1: none
 };
 // Grass, flowers and small trees are shared batches ("packets"), not actors: the game's placement actor
 // adds units to the stage's batch and is gone at once; the units go when their room unloads. A batch has
@@ -168,6 +169,13 @@ inline bool Catalogue::add_table(const std::string& table, std::string& why) {
             if (!neutral_id(x.id) || x.label.empty() || x.label.size() > 48) return why = e.id + ": invalid variant", false;
             if (word > 0xFFFFFFFFull || !end || *end) return why = e.id + ": a variant's params must be 0x and 8 hex digits", false;
             x.params = uint32_t(word);
+            if (v.get("angle_z").type != Value::Null) {
+                const std::string az = text(v.get("angle_z"));
+                char* az_end = nullptr;
+                const unsigned long long z = az.size() == 6 && az.rfind("0x", 0) == 0 ? strtoull(az.c_str() + 2, &az_end, 16) : ~0ull;
+                if (z > 0xFFFFull || !az_end || *az_end) return why = e.id + ": a variant's angle_z must be 0x and 4 hex digits", false;
+                x.angle_z = int(z);
+            }
             if (v.get("units").type != Value::Null) {
                 if (!whole(v.get("units"), 1, 64)) return why = e.id + ": a variant's units must be 1..64", false;
                 x.units = unsigned(v.get("units").number);

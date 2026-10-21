@@ -1,0 +1,44 @@
+{
+  "game_objects_format": 1,
+  "group": "blocks",
+  "about": "A recipe, not game data: neutral ids, our own words, and references into the game (the stage actor name, its process, the archive it loads, the fixed parameter word and home angle). The objects themselves load from the player's own game files; tools/story_mods/game_objects.py --game <dir> --list shows which ones the player's game has.",
+  "objects": [
+    {
+      "id": "push-block",
+      "since": 2,
+      "category": "Blocks",
+      "label": "Stone block",
+      "description": "a heavy stone block of the dungeons that Link pushes and pulls; it is back in its place when the room loads again",
+      "native": {
+        "name": "osiBLK0",
+        "process": "Obj_Movebox",
+        "source": "d_a_obj_movebox",
+        "subtype": 0,
+        "archive": "Osiblk"
+      },
+      "variants": [
+        {
+          "id": "stone",
+          "label": "Stone block",
+          "params": "0x8100FF00",
+          "angle_z": "0xFFFF"
+        }
+      ],
+      "transform": {
+        "rotation": "yaw",
+        "scale": [
+          1,
+          1
+        ],
+        "why": "its collision and its push steps keep the unscaled block"
+      },
+      "collision": true,
+      "memory": {
+        "instance_bytes": 16384,
+        "archive_bytes": 0,
+        "measured": "solid heap 12284 bytes (WWHD_MOD_ACTOR_HEAPS=1, US game, 2026-10-21); the archive is in a permanent pack, already in memory"
+      },
+      "notes": "the game's own stone block word (no switch, no save, no path: 0x8100FF00 is the word of 57 of the game's placements) with home angle z 0xFFFF (no path, no second switch); without a switch the block starts at its placement whenever its room loads"
+    }
+  ]
+}

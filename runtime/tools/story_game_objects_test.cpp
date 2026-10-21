@@ -32,8 +32,8 @@ int main() {
     std::string why;
     // ---- the port's recipes
     const auto& c = story_game_objects::catalogue();
-    assert(c.version == 6);  // the volcanic kit (fire and lava, bomb flowers) came with version 6
-    for (const auto& e : c.entries) assert(e.since == 1 || (e.group == "volcanic" && e.since == 6));
+    assert(c.version == 6);  // the volcanic kit and the blocks came with version 6
+    for (const auto& e : c.entries) assert(e.since == 1 || ((e.group == "volcanic" || e.group == "blocks") && e.since == 6));
     {
         // the volcanic kit: always lit, no switch (0xFF fields), each the game's own stage actor name
         const auto* torch = c.find("torch");
@@ -191,6 +191,21 @@ int main() {
         std::string bad = good;
         bad.replace(bad.find(R"("params": "0x00000000"})"), std::strlen(R"("params": "0x00000000"})"), R"("params": "0x00000000", "units": 3})");
         assert(!t.add_table(bad, why) && why.find("units") != std::string::npos);  // units only on a batch
+    }
+    // the stone block: the game's own block word and its home angle z "no path" (0xFFFF), catalogue version 2
+    {
+        const auto* block = c.find("push-block");
+        assert(block && block->native_name == "osiBLK0" && block->archive == "Osiblk" && block->since == 2 && block->collision && !block->batch());
+        assert(block->variant("")->params == 0x8100FF00u && block->variant("stone")->angle_z == 0xFFFF && ((block->variant("")->params >> 8) & 0xFF) == 0xFF);  // no switch
+        assert(c.version >= 2 && c.find("palm")->variant("")->angle_z == -1);
+        assert(!parses(manifest(R"({"id": "b", "actor": "game:push-block", "stage": "sea", "room": 44, "position": {"x": 0, "y": 0, "z": 0}})"), why));  // needs version 2
+        assert(parses(manifest(R"({"id": "b", "actor": "game:push-block", "stage": "sea", "room": 44, "position": {"x": 0, "y": 0, "z": 0}})", R"({"game_objects": 2})"), why));
+        story_game_objects::Catalogue t;
+        for (const char* bad_z : {"0xFFFFF", "65535", "0xZZZZ"}) {
+            std::string bad = good;
+            bad.replace(bad.find(R"("params": "0x00000000"})"), std::strlen(R"("params": "0x00000000"})"), std::string(R"("params": "0x00000000", "angle_z": ")") + bad_z + "\"}");
+            assert(!t.add_table(bad, why) && why.find("angle_z") != std::string::npos);
+        }
     }
     // a manifest without game objects never builds anything new: "requires" stays optional
     assert(parses(mods::json::parse(R"({"actors": [{"id": "s", "actor": "sign", "flag": "read", "stage": "sea", "room": 1, "position": {"x": 0, "y": 0, "z": 0}}]})"), why));

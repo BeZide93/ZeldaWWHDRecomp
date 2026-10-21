@@ -808,6 +808,8 @@ void room_loaded(Cpu* c,int room) {
         if(a.enemy_token)st16(g_scratch+0x10,story_enemies::home_z(a.enemy_token));
         if(a.enemy_token&&(enemy==story_enemies::Kind::Darknut||story_enemies::home_x(a.enemy_token)))st16(g_scratch+0xC,story_enemies::home_x(a.enemy_token));  // its equipment; a table kind's home x (the warship's)
         if(a.spec.actor=="chest")st16(g_scratch+0x10,uint16_t((uint32_t(a.spec.item_game)<<8)|255));
+        // a game object variant's fixed home angle z (a block's "no path, no second switch")
+        if(a.game)if(const auto*e=story_game_objects::catalogue().find(story_game_objects::reference(a.spec.actor)))if(const auto*v=e->variant(a.spec.variant);v&&v->angle_z>=0)st16(g_scratch+0x10,uint16_t(v->angle_z));
         uint32_t params=a.game?a.game_native.params:a.enemy_token?story_enemies::parameters(a.enemy_token):a.switch_token?story_switches::parameters(a.spec.actor=="switch"?story_switches::Kind::Switch:story_switches::Kind::Door):a.prop_token?story_props::parameters(a.spec):a.spec.kind=="mod"?a.mod_token:a.spec.actor=="sign"?kCarrier:a.spec.actor=="resident"?story_resident_types::params(uint8_t(a.spec.resident)):0;
         // a walking resident: its route record, and the route marker as its route number; a patrolling
         // Bokoblin's word already names the port's route (it is never created without its record)

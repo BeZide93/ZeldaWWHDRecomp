@@ -253,6 +253,7 @@ the mod manager refuses it.
 | `game:nest` | A large bird's nest Link can stand in | `nest` | 1 |
 | `game:flag-rito`, `game:flag-sea` | Flags on poles that flutter in the wind | one each | 1 |
 | `game:lookout-tower` | A tall wooden lookout platform that stands in the sea | `tower-ladder` (Link climbs its ladder), `tower` | 1 |
+| `game:push-block` | The dungeons' heavy stone block: Link pushes and pulls it (catalogue version 2) | `stone` | 1 |
 
 **The volcanic kit** (catalogue version 6, `"requires": {"game_objects": 6}`; the palette's "Fire and
 lava" and "Trees and plants"): torches, flames, fire jets, lava bubbles and Dragon Roost's bomb flowers, the game's own actors with their own effects, sounds and behaviour.
@@ -291,6 +292,13 @@ moved batch goes from the game only when its room loads again.
 
 Objects whose collision keeps the game's size stay at scale 1, so what you see and what Link
 bumps into always match.
+
+The stone block (`game:push-block`, `"requires": {"game_objects": 2}`) slides on the ground Link pushes it
+over, the islands' or a world object's, and falls when it leaves it. It has no switch, so it starts at its
+placement whenever its room loads again, as the game's own blocks without one do: a block pushed into a
+corner, or off a cliff, is back after the next visit. It stands on its highest ground under it, so it can
+cover a hole narrower than itself (about 140 units across for its 150) and Link pushes it aside to open the
+way; leave room around such a spot, so it can be pushed off in more than one direction.
 
 Game objects count toward the 16 actors per room (all packages together). The game objects of a
 room also share a memory budget of 3 MiB (each object about 15–20 KiB; their archives are already
