@@ -580,10 +580,11 @@ bool editor_register_model(const std::string& mod,const std::string& model,const
 bool has_model(const std::string& mod,const std::string& model){return g_models.contains({mod,model});}
 bool register_piece_model(const std::string& mod,const std::string& model,const std::string& archive,int index,story_notebook::WorldPoint minimum,story_notebook::WorldPoint maximum,bool editor,std::string& why){
     if(g_installed&&!editor)return why="actor models must be registered before hooks are installed",false;
-    if(mod.empty()||model.rfind("piece:",0)!=0||archive.size()!=31||index<1||index>16)return why="invalid game piece model resource",false;
+    // a game piece ("piece:<id>", a "gp" set) or a mod's kit model (its own model id, a "gk" archive, story_kit_models.h)
+    if(mod.empty()||(model.rfind("piece:",0)!=0&&archive.rfind("gk",0)!=0)||archive.size()!=31||index<1||index>16)return why="invalid game piece model resource",false;
     const float lo[]={minimum.x,minimum.y,minimum.z},hi[]={maximum.x,maximum.y,maximum.z};for(unsigned i=0;i<3;++i)if(!std::isfinite(lo[i])||!std::isfinite(hi[i])||lo[i]>hi[i])return why="invalid game piece bounds",false;
     // a set's pieces share its archive; no mod model may use it
-    for(const auto& [key,entry]:g_models)if(entry.archive==archive&&key.second.rfind("piece:",0)!=0)return why="actor model archive identity collision",false;
+    for(const auto& [key,entry]:g_models)if(entry.archive==archive&&key.second.rfind("piece:",0)!=0&&archive.rfind("gk",0)!=0)return why="actor model archive identity collision",false;
     if(auto found=g_models.find({mod,model});found!=g_models.end())return found->second.archive==archive&&found->second.index==index?true:(why="the game piece changed; restart",false);
     g_models.emplace(std::make_pair(mod,model),ModelResource{archive,index,minimum,maximum,false,{},{}});return true;
 }

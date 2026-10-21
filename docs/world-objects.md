@@ -166,6 +166,63 @@ the waist, where its idle clip bends it. Its
 [`assets/make_reed_walker.py`](../examples/guest-mods/sdk-v3-skinned-materials/assets/make_reed_walker.py)
 reproduces the model, its textures and its idle and walk clips.
 
+## Kit models
+
+A kit model is drawn with the materials of a room of the game instead of pictures of its own, as a mod
+stage's ground is ([Kit materials](mod-stages.md#kit-materials)): grass, rock and falling water of Forest
+Haven, the stone of Hyrule Castle. It is meant for large pieces of land and buildings in the open world, an
+island in the sky, a ruin on a sea square:
+
+```json
+{
+  "models": [
+    {"id": "island", "kind": "kit", "source": "assets/island.glb", "kit": {"stage": "sea", "room": 41},
+     "materials": {"grass": "m_kusa_v", "cliff": "m_iwa_v", "waterfall": "SC_00_m_v_x", "spray": "SC_00_m_2_"}}
+  ],
+  "actors": [
+    {"id": "island", "kind": "mod", "model": "island", "behaviour": "static", "collision": {"mesh": "island"},
+     "stage": "sea", "room": 44, "position": {"x": -200512, "y": 6640, "z": 301774}, "rotation": {"x": 0, "y": 198, "z": 0}}
+  ]
+}
+```
+
+| Model field | |
+|---|---|
+| `kind` | `kit` |
+| `kit` | A room of the game: `{"stage": "sea", "room": 41}` (Forest Haven's square), `{"stage": "Hyroom", "room": 0}`, any stage's room. |
+| `materials` | The model's material names mapped to the kit room's materials (up to 16). A model material that is itself a kit material's name is drawn with that one. |
+| `material` | Optional: the kit material for the model's other materials. Default: the kit room's main material, the one most of its triangles use. |
+
+The editor's `list_kit_materials` lists a kit room's materials and their textures. The model brings texture
+coordinates and vertex colours (`COLOR_0`, which the kit materials multiply their texture by, as the game's
+rooms shade their corners and undersides) and no pictures; when the game starts, the port builds it from the
+player's own game files into the player's model cache (`Data/.kit-models`), as it builds island buildings.
+Nothing of the game is in the package.
+
+- **Its light.** A kit model is drawn like the islands' own buildings: with the background light of the room
+  it stands in, so it has that place's colours through the day, at dusk and at night, its fog and its
+  weather. An island in the sky over the sea has the sea's light.
+- **Its parts.** The materials may come from two of the kit room's models (Forest Haven's ground model and
+  its water model, say). The first is drawn with the room's first background light set, the second with the
+  second; when the kit room moves the second model's textures (falling water, foam, spray), the kit model's
+  water moves the same way.
+- **Its collision** is the model's own `*_col` meshes with `col_*` materials, as for any world object (the
+  visible triangles when it has none). `collision.mesh` names the model itself.
+- **Its place.** A static world object, turned about the vertical axis only, at scale 1 (as island
+  buildings). Its
+  placement is checked as any world object's; parts made together are [one composition](#limits-and-placement).
+- **Limits.** Up to 20,000 visible triangles, materials of two kit models, a GLB of up to 16 MiB, every point
+  within 20,000 units of the origin. The built model (its kit textures, shader archives and models) may have up
+  to 12 MiB; it counts toward the room's 24 MiB for island buildings and grounds
+  ([game pieces](mod-sdk-v3.md#island-buildings-game-pieces)). A model that can't be built (a kit material the
+  room doesn't have, another game version) is left out with the reason in the log, and its placements with it.
+- A kit model can't be held, used as a distant or shoreline model, or placed as an actor that isn't a
+  static world object. Changing its file takes effect when the game starts again.
+
+The sky island package (`sky-island` in the mod repository) is built this way: its island is drawn with
+Forest Haven's materials and its ruins with Hyrule Castle's, two kit models placed with the same origin high
+above the sea north of Outset.
+
 ## Simple collision shapes
 
 Use a shape instead of a collision mesh for a small obstacle. All shapes are
@@ -317,7 +374,7 @@ objects keep their whole motion range clear.
 
 **Parts of one composition.** Static world objects of one mod placed with the same origin (the same
 `position`, `rotation` and `scale`) were made together in one model space: an island's ground and the ruins
-standing on it, say, each with materials of its own. Their collisions are not compared
+standing on it, say, each with materials of its own [kit room](#kit-models). Their collisions are not compared
 with each other, so the ruins' foundations may reach into the ground as the model has them. Everything else
 counts for each part as for any world object: the room, the island's own things, other world objects and
 other mods' objects.

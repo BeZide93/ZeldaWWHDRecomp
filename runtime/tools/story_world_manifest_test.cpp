@@ -510,6 +510,11 @@ int main() {
         auto extra=many;extra["actors"].array.resize(1);extra["actors"].array[0]["room"]=4;selected.push_back({"fifth",extra});assert(!world_manifest::validate_world_packages(selected,why));
     }
 
+    std::vector<ManifestModel> models;assert(parse_models(valid_mod,models,why)&&models[0].kind=="static");
+    mod=valid_mod;mod["models"].array[0]["kind"]="skinned";assert(parse_models(mod,models,why)&&models[0].kind=="skinned");
+    mod["models"].array[0]["kind"]="static";assert(parse_models(mod,models,why)&&models[0].kind=="static");
+    for(const auto& kind:{"animated","", "native"}){mod["models"].array[0]["kind"]=kind;assert(!parse_models(mod,models,why));}
+    mod["models"].array[0]["kind"]=mods::json::Value{};assert(!parse_models(mod,models,why));
     // parts of one composition: the same mod's static world objects with one origin; moved, turned, scaled, in
     // another room or floating they are two
     {
@@ -526,11 +531,35 @@ int main() {
         auto floating=actors[1];floating.behaviour="floating";assert(!story_notebook::one_composition(actors[0],floating));
         auto prop=actors[1];prop.behaviour.clear();assert(!story_notebook::one_composition(actors[0],prop));
     }
-    std::vector<ManifestModel> models;assert(parse_models(valid_mod,models,why)&&models[0].kind=="static");
-    mod=valid_mod;mod["models"].array[0]["kind"]="skinned";assert(parse_models(mod,models,why)&&models[0].kind=="skinned");
-    mod["models"].array[0]["kind"]="static";assert(parse_models(mod,models,why)&&models[0].kind=="static");
-    for(const auto& kind:{"animated","", "native"}){mod["models"].array[0]["kind"]=kind;assert(!parse_models(mod,models,why));}
-    mod["models"].array[0]["kind"]=mods::json::Value{};assert(!parse_models(mod,models,why));
+    // kit models: a package's model drawn with a kit room's materials, placed only as a static world object at scale 1
+    {
+        auto kit=mods::json::parse(R"({"actors":[{"id":"ground","kind":"mod","model":"island","behaviour":"static","collision":{"mesh":"island"},"stage":"sea","room":44,
+            "position":{"x":-200512,"y":6640,"z":301774},"rotation":{"x":0,"y":198,"z":0}},
+            {"id":"ruins","kind":"mod","model":"ruins","behaviour":"static","collision":{"mesh":"ruins"},"stage":"sea","room":44,
+            "position":{"x":-200512,"y":6640,"z":301774},"rotation":{"x":0,"y":198,"z":0}}],
+            "models":[{"id":"island","kind":"kit","source":"assets/island.glb","kit":{"stage":"sea","room":41},"materials":{"grass":"m_kusa_v","spray":"SC_00_m_2_"}},
+            {"id":"ruins","kind":"kit","source":"assets/ruins.glb","kit":{"stage":"Hyroom","room":0},"material":"lambert9_v"}]})");
+        assert(parse_models(kit,models,why)&&models.size()==2&&models[0].kind=="kit"&&models[0].kit_stage=="sea"&&models[0].kit_room==41&&models[0].kit_materials.size()==2&&
+               models[1].kit_material=="lambert9_v"&&models[1].kit_materials.empty());
+        assert(parse_actors(kit,actors,why)&&actors.size()==2&&actors[0].kit_model&&actors[0].background_drawn()&&!actors[0].game_piece()&&actors[0].collision_mesh=="island");
+        assert(story_notebook::one_composition(actors[0],actors[1]));
+        auto bad=kit;bad["models"].array[0].object.erase("kit");assert(!parse_models(bad,models,why));
+        for(const char*stage:{"","Stage_Too_Long","sea/41"}){bad=kit;bad["models"].array[0]["kit"]["stage"]=stage;assert(!parse_models(bad,models,why));}
+        for(int room:{-1,64}){bad=kit;bad["models"].array[0]["kit"]["room"]=room;assert(!parse_models(bad,models,why));}
+        bad=kit;bad["models"].array[0]["kit"]["extra"]=1;assert(!parse_models(bad,models,why));
+        bad=kit;bad["models"].array[0]["materials"]["grass"]="has space";assert(!parse_models(bad,models,why));
+        bad=kit;bad["models"].array[0]["materials"]["grass"]=std::string(65,'m');assert(!parse_models(bad,models,why));
+        bad=kit;bad["models"].array[1]["kind"]="static";assert(!parse_models(bad,models,why));  // kit fields belong to kind kit
+        // the placement: static only, its own collision, turned about the vertical axis at scale 1
+        bad=kit;bad["actors"].array[0]["behaviour"]="floating";assert(!parse_actors(bad,actors,why));
+        bad=kit;bad["actors"].array[0]["collision"]["mesh"]="ruins";assert(!parse_actors(bad,actors,why));
+        bad=kit;bad["actors"].array[0]["scale"]=mods::json::parse(R"({"x":2,"y":2,"z":2})");assert(!parse_actors(bad,actors,why));
+        bad=kit;bad["actors"].array[0]["rotation"]["x"]=10;assert(!parse_actors(bad,actors,why));
+        bad=kit;bad["actors"].array[0].object.erase("behaviour");bad["actors"].array[0].object.erase("collision");assert(!parse_actors(bad,actors,why));
+        // a static model's collision can't name a kit model
+        auto other=valid_mod;other["models"].array.push_back(kit["models"].array[0]);other["actors"].array[0]["behaviour"]="static";
+        other["actors"].array[0]["collision"]=mods::json::parse(R"({"mesh":"island"})");assert(!parse_actors(other,actors,why));
+    }
     for(const auto& source:{"../post.glb","/post.glb","models//post.glb","models/./post.glb","models/post.bfres","C:post.glb"}){mod=valid_mod;mod["models"].array[0]["source"]=source;assert(!parse_actors(mod,actors,why));}
     mod=valid_mod;mod["actors"].array[0]["animation"]="wave";assert(!parse_actors(mod,actors,why));mod["models"].array[0]["kind"]="skinned";assert(parse_actors(mod,actors,why)&&actors[0].animation=="wave");mod["actors"].array[0]["animation"]="";assert(!parse_actors(mod,actors,why));
     mod=valid_mod;mod["actors"].array[0]["actor"]="sign";assert(!parse_actors(mod,actors,why));

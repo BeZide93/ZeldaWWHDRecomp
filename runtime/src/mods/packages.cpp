@@ -199,6 +199,9 @@ Manifest manifest(const fs::path& path){
     }
     for(const auto& model:models){
         auto checked=path;for(const auto& part:fs::path(model.source)){checked/=part;require(!fs::is_symlink(checked),"Model source paths may not use symlinks");}
+        // a kit model (drawn with a kit room's materials, story_kit_models.h) has no pictures of its own and a mod
+        // stage ground's size; its converter checks it when the game starts
+        if(model.kind=="kit"){require(fs::is_regular_file(checked)&&fs::file_size(checked)<=16u*1024*1024,"Missing kit model source or larger than 16 MiB");continue;}
         require(fs::is_regular_file(checked)&&fs::file_size(checked)<=static_models::kMaxSourceBytes,"Missing or oversized model source");
         std::ifstream input(checked,std::ios::binary);std::vector<uint8_t> bytes{std::istreambuf_iterator<char>(input),{}};
         static_models::ModelInfo info;

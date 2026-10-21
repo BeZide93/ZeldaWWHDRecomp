@@ -60,6 +60,7 @@
 #include "story_resident_routes.h"
 #include "story_resident_walk_files.h"
 #include "story_game_pieces.h"
+#include "story_kit_models.h"
 #include "mod_stages.h"
 #include "mod_actor.h"
 #include "mod_actor_behavior_core.h"
@@ -538,6 +539,22 @@ void load_world(const std::string& mod,const mods::json::Value& manifest,const s
         const bool distant_uses=std::any_of(actors.begin(),actors.end(),[&](const auto& actor){return actor.distant.model==model.id;});
         if(shoreline_uses&&(actor_uses||item_uses||collision_uses||distant_uses))exception_report::raise("A shoreline model must be dedicated to shoreline use");
         if(!actor_uses&&!item_uses&&!collision_uses&&!visual_uses)continue;
+        // a kit model (story_kit_models.h): built from the player's game files like a game piece, drawn with the
+        // background light of its room; only static world objects place it (the manifest's rules)
+        if(model.kind=="kit") {
+            if(item_uses||visual_uses)exception_report::raise("A kit model is placed as a world object; it can't be held, distant or a shoreline");
+            try {
+                const auto bridge=BuildBridge::installed(std::string());
+                const auto tool=std::filesystem::path(bridge.builder).parent_path().parent_path()/"story_mods"/"kit_model.py";
+                const auto set=story_kit_models::build(mod,model,package_dir,story_kit_models::cache_directory(data_dir),bridge.python,tool.string(),config::game_dir);
+                if(!story_kit_models::register_for_mod(mod,model.id,*set,false,why))throw std::runtime_error(why);
+            } catch(const std::exception& e) {
+                LOG("[world] %s: model %s is not ready and its actors are left out: %s",mod.c_str(),model.id.c_str(),e.what());
+                {std::lock_guard guard(g_world_model_notes_mutex);g_world_model_notes.push_back({mod,"Model "+model.id+" is not ready: "+e.what()});}
+                failed_models.push_back(model.id);
+            }
+            continue;
+        }
         if(visual_uses&&model.kind!="static")exception_report::raise("Distant and shoreline models require static kind");
         if(item_uses&&model.kind!="static")exception_report::raise("Held item models currently require static kind; skinned needs a separate Morf lifetime");
         try {
@@ -1582,6 +1599,7 @@ void set_package_observer(PackageObserver observer){g_package_observer=observer;
 bool editor_prepare_model(const std::string& mod,const std::string& package_dir,const std::string& data_dir,const mods::json::Value& entry,std::string& archive,std::string& why){
     story_notebook::ManifestModel model;model.id=entry.get("id").string();model.source=entry.get("source").string();model.kind=entry.get("kind").string("static");
     if(model.id.empty()||model.source.empty())return why="the model has no id or source",false;
+    if(model.kind=="kit")return why="a kit model is built from your game files when the game starts (restart the game)",false;
     const bool collision=entry.get("collision").boolean;
     if(collision&&model.kind!="static")return why="collision requires a static model",false;
     // a shoreline (preparation option, never a manifest field): "foam" or a water surface's material
