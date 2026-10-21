@@ -122,6 +122,8 @@ of the Great Sea: `{"stage": "sea", "room": 44}` is Outset Island's). The stage 
 that place does: bright at noon, golden in the evening, dark at night. The template still gives the sky's models,
 the camera and the doors.
 
+A stage in the open reached from the sea (a hall under an island, a mountain top) can take `"light": {"stage":
+"sea", "room": 44}`, so it has the same light as the sea round Outset that Link came from.
 
 ### Rooms
 
@@ -276,6 +278,10 @@ A boss room is a room behind the boss door, with something to beat, a reward and
 3. **The reward**: a chest with `heart_container` (see the note under [Actors](#actors)).
 4. **The way out**: a return warp with `"after"` naming that chest, so it opens once the reward is taken.
 
+Rooms can take materials from different kit rooms: a hall drawn with Hyrule Castle's stone and an open-air
+arena with the Tower of the Gods' paving, say. Two rooms drawn as one place (a ground and the ruins on it, each
+with its own kit) can be joined with `joins`, so both are drawn together; one of them can leave the collision
+to the other (a small floor far below) so Link never leaves the first room there.
 
 ### A quest through the stage
 
@@ -310,6 +316,12 @@ notebook installed, the quest, its letter and every story action work as in any 
 the package's stages and its wordless scenes play just the same, its quest and letters stay out, and its
 story actions are skipped (a line in the game's log says so); `stage` and `scene` actions still run. Only
 the Story Notebook can be an optional dependency.
+
+A package whose scene or quest uses world objects or story actions needs the Story Notebook (a plain
+dependency, `set_package_info` `"value": "required"`). A quest through a stage might go: a letter sends Link
+to a pier, a scene or a hole takes him into the stage, the boss key's chest moves the quest to the guardian,
+the darknut's defeat to the heart container, the big chest to the way home, and the return warp finishes it
+with its reward, given once.
 
 ## The ground model
 
@@ -392,7 +404,8 @@ A kit material keeps the game's drawing of it: an opaque one stays opaque, a cut
 one stays see-through (`list_kit_materials` does not show which is which; the export tool's GLB marks it in each
 material's `alphaMode`). The game's falling water (Forest Haven's, the castle's, the sea's islands') is a cut-out,
 drawn white with moving streaks; for water that shows the sky through it, use a blended water material of the kit,
-such as Forest Haven's spray (`SC_00_m_2_`) or coast foam (`SC_00_m`).
+such as Forest Haven's spray (`SC_00_m_2_`) or coast foam (`SC_00_m`). A waterfall can be a thin stream of the falling water
+with a curtain of the spray over it.
 
 Give the model **vertex colours** (glTF `COLOR_0`) to shade it as the game's rooms are: the kit materials
 multiply their texture by them, and the game's own rooms darken corners, the foot of cliffs and the
