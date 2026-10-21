@@ -11,6 +11,15 @@
 #include <string>
 #include <vector>
 
+// portable environment edits (no setenv/unsetenv on Windows)
+static void set_env(const char* key, const char* value) {
+#ifdef _WIN32
+    _putenv_s(key, value ? value : "");
+#else
+    if (value) setenv(key, value, 1); else unsetenv(key);
+#endif
+}
+
 static std::vector<std::string> logs;
 void log_msg(const char* fmt, ...) {
     char buf[1024];
@@ -40,7 +49,7 @@ static void frame() {
 }
 
 static void setting() {
-    unsetenv("WWHD_PROFILE");
+    set_env("WWHD_PROFILE", nullptr);
     // default: off (no saved value)
     rprof::start(false);
     assert(!rprof::enabled() && !rprof::requested() && !rprof::env_override());
@@ -78,7 +87,7 @@ static void setting() {
 }
 
 static void env(bool on) {
-    setenv("WWHD_PROFILE", on ? "1" : "0", 1);
+    set_env("WWHD_PROFILE", on ? "1" : "0");
     rprof::start(!on);  // the saved setting says the opposite: WWHD_PROFILE wins
     assert(rprof::env_override() && rprof::enabled() == on && rprof::requested() == on);
     assert(logged(on ? "profiling on (WWHD_PROFILE=1)" : "profiling off (WWHD_PROFILE=0)"));
