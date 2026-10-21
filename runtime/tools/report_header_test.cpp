@@ -133,6 +133,12 @@ int main() {
            "performance report: renderer Vulkan, host SDL, 120 fps interpolation, keep game speed off, internal scale 2.0x, "
            "buffer cache on\n",
            "keep game speed off at 120 fps");
+    in.submissionPool = 8;  // the Vulkan submission ring's size at start (submission_pool.h)
+    expect(format(in).substr(format(in).find('\n') + 1),
+           "performance report: renderer Vulkan, host SDL, 120 fps interpolation, keep game speed off, internal scale 2.0x, "
+           "buffer cache on, submission pool 8\n",
+           "submission pool size");
+    in.submissionPool = -1;
     Info m;
     m.version = "v0.2.5+3";
     m.commit = "abcdef0-dirty";

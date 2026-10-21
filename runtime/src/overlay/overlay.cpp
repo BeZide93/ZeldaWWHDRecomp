@@ -69,7 +69,7 @@
 #endif
 #ifdef WWHD_HAS_VULKAN
 #include "../gfx/vulkan/settings.h"
-namespace gfxvk { bool buffer_cache_enabled(); }  // gfx/vulkan/buffer_cache.h
+namespace gfxvk { bool buffer_cache_enabled(); unsigned submission_pool_slots(); }  // buffer_cache.h, submission_pool.h
 #endif
 #include "../input.h"
 #include "../input_map.h"
@@ -760,6 +760,7 @@ std::string performance_report() {
 #ifdef WWHD_HAS_VULKAN
     if (render::vulkan()) {
         h.bufferCache = gfxvk::buffer_cache_enabled();
+        h.submissionPool = int(gfxvk::submission_pool_slots());
         h.overrides = reporthdr::vulkan_overrides([](const char* n) -> const char* { return getenv(n); });
     }
 #endif

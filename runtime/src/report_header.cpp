@@ -187,6 +187,7 @@ std::string format(const Info& in) {
     if (in.keepGameSpeed >= 0) s += in.keepGameSpeed ? ", keep game speed on" : ", keep game speed off";
     s += std::string(", internal scale ") + scale;
     if (in.bufferCache >= 0) s += in.bufferCache ? ", buffer cache on" : ", buffer cache off";
+    if (in.submissionPool > 0) s += ", submission pool " + std::to_string(in.submissionPool);
     if (!in.gyro.empty()) s += ", gyro " + in.gyro;
     for (size_t i = 0; i < in.overrides.size(); i++) s += (i ? ", " : "; overrides: ") + in.overrides[i];
     return s + "\n";
