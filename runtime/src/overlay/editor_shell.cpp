@@ -25,6 +25,7 @@
 #include "editor_resident.h"
 #include "../mods/guest_mods.h"
 #include "../mods/story_enemy_variants.h"
+#include "../mods/story_world_calm.h"
 #include "extensions.h"
 #include "hostui.h"
 #include "imgui.h"
@@ -1037,6 +1038,43 @@ bool paths_overlay(ImDrawList* dl, const View& v, const Value& m, const std::str
 // arrows along the flow), a waterfall's edge and sheet. Red where the check found an error. The selected point
 // has the move handle; letting go of a handle checks the draft again. True while the draft shows (the selected
 // actor's handle waits).
+// The open mod's calm-water zones on this stage (docs/world-objects.md "Calm water"), drawn as the water tool draws
+// a pond: at the sea's still level, the still water filled in and outlined, a thinner ring where the waves are back
+// in full. The selected object's zone is the bright one.
+void calm_overlay(ImDrawList* dl, const View& v, const Value& manifest, const std::string& stage, const std::string& selected) {
+    constexpr int kSeg = 64;
+    constexpr float kLevel = 1;  // the sea's still level (the sea actor's height + 1)
+    for (const auto& a : manifest.get("actors").array) {
+        const Value& cw = a.get("calm_water");
+        float p[3];
+        if (cw.type != Value::Object || a.get("stage").string() != stage || !position_of(a, p)) continue;
+        story_world_calm::Settings s;
+        s.radius = num(cw, "radius", 0), s.falloff = num(cw, "falloff", story_world_calm::kGameFalloff);
+        s.offset_x = num(cw.get("offset"), "x", 0), s.offset_z = num(cw.get("offset"), "z", 0);
+        if (!(s.radius > 0)) continue;
+        const auto zone = story_world_calm::zone_of(s, p[0], p[2], num(a.get("rotation"), "y", 0));
+        const bool sel = a.get("id").string() == selected;
+        const ImU32 line = sel ? IM_COL32(90, 200, 255, 240) : IM_COL32(90, 200, 255, 130), fill = sel ? IM_COL32(70, 160, 255, 70) : IM_COL32(70, 160, 255, 30),
+                    ring = sel ? IM_COL32(90, 200, 255, 160) : IM_COL32(90, 200, 255, 70);
+        const float centre[3] = {zone.x, kLevel, zone.z};
+        ImVec2 c2;
+        const bool centre_seen = project(v, centre, c2);
+        for (int i = 0; i < kSeg; i++) {
+            const double t0 = 2 * kPi * i / kSeg, t1 = 2 * kPi * (i + 1) / kSeg;
+            const float a0[3] = {zone.x + float(std::sin(t0)) * zone.radius, kLevel, zone.z + float(std::cos(t0)) * zone.radius};
+            const float a1[3] = {zone.x + float(std::sin(t1)) * zone.radius, kLevel, zone.z + float(std::cos(t1)) * zone.radius};
+            const float r = zone.radius + zone.falloff;
+            const float b0[3] = {zone.x + float(std::sin(t0)) * r, kLevel, zone.z + float(std::cos(t0)) * r};
+            const float b1[3] = {zone.x + float(std::sin(t1)) * r, kLevel, zone.z + float(std::cos(t1)) * r};
+            ImVec2 p0, p1;
+            if (project(v, a0, p0) && project(v, a1, p1)) {
+                if (centre_seen) dl->AddTriangleFilled(c2, p0, p1, fill);
+                dl->AddLine(p0, p1, line, 3);
+            }
+            if (i % 2 == 0) line3(dl, v, b0, b1, ring, 1.5f);  // dashed: the waves are back in full here
+        }
+    }
+}
 bool water_overlay(ImDrawList* dl, const View& v, bool& handle_busy) {
     handle_busy = false;
     auto& d = editor_ui::water_draft();
@@ -1374,6 +1412,8 @@ void world(float w, float h) {
     bool stage_handle_busy = false;
     if (stages_overlay(dl, v, snap.manifest, stage, int(num(snap.state.get("link"), "room", -1)), stage_handle_busy) && !point_handle)
         point_handle = true, point_handle_busy = point_handle_busy || stage_handle_busy;
+    // the open mod's calm-water zones
+    calm_overlay(dl, v, snap.manifest, stage, selected);
     // the selected actor: its cylinder and handles
     float model[16] = {};
     bool gizmo = false;

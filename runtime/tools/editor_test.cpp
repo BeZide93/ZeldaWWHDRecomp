@@ -743,6 +743,40 @@ void island_world_object_commands() {
     auto empty=place;empty["id"]="island-b";for(const char*key:{"distant","shoreline","chart_marker","arrival"})empty[key]=Value{};CHECK(ok(session.run("place_world_object",empty))&&actor_of(session,"island-b")->get("arrival").type==Value::Null);
 }
 
+// Calm water (docs/world-objects.md "Calm water"): set, changed and removed on a sea island with set_world_object or
+// set_actor, one undo step each; bad zones are refused and change nothing; the help (and so the MCP tool list) says it.
+void calm_water_commands() {
+    FakeHost host;editor::Session session(&host);auto manifest=json(kManifest);manifest["models"]=json(R"([{"id":"island","source":"assets/island.glb"}])");session.add_package("editor-test","Editor test","",manifest);
+    auto place=json(R"({"id":"island-c","model":"island","collision":{"shape":"box","size":{"x":100,"y":100,"z":100}},"stage":"sea","room":18,"position":{"x":0,"y":0,"z":-100000},"calm_water":{"radius":3000}})");
+    CHECK(ok(session.run("place_world_object",place)));CHECK(actor_of(session,"island-c")->get("calm_water").get("radius").number==3000);
+    const auto placed=*session.manifest("editor-test");const auto depth=session.undo_depth();
+    CHECK(ok(session.run("set_world_object",json(R"({"id":"island-c","calm_water":{"radius":4500,"falloff":2000,"offset":{"x":500,"z":-250}}})")))&&session.undo_depth()==depth+1);
+    {const auto&cw=actor_of(session,"island-c")->get("calm_water");CHECK(cw.get("radius").number==4500&&cw.get("falloff").number==2000&&cw.get("offset").get("z").number==-250);}
+    CHECK(ok(session.run("undo"))&&*session.manifest("editor-test")==placed);
+    CHECK(ok(session.run("redo"))&&actor_of(session,"island-c")->get("calm_water").get("falloff").number==2000);
+    CHECK(ok(session.run("undo")));
+    // refused: out of bounds, unknown fields, not a sea island; nothing changes, no undo step
+    for(const char*bad:{R"({"id":"island-c","calm_water":{"radius":50}})",R"({"id":"island-c","calm_water":{"radius":3000,"falloff":30000}})",R"({"id":"island-c","calm_water":{"radius":3000,"depth":2}})",R"({"id":"island-c","calm_water":{}})"}){
+        CHECK(!ok(session.run("set_world_object",json(bad)))&&*session.manifest("editor-test")==placed&&session.undo_depth()==depth);}
+    CHECK(!ok(session.run("set_world_object",json(R"({"id":"island-c","calm_water":{"radius":3000},"behaviour":"floating"})")))&&*session.manifest("editor-test")==placed);
+    CHECK(!ok(session.run("set_actor",json(R"({"id":"sign-a","property":"calm_water","value":{"radius":3000}})")))&&*session.manifest("editor-test")==placed);
+    // set_actor sets it too; null removes it (an undo step that brings it back)
+    CHECK(ok(session.run("set_actor",json(R"({"id":"island-c","property":"calm_water","value":{"radius":6000}})")))&&actor_of(session,"island-c")->get("calm_water").get("radius").number==6000);
+    CHECK(ok(session.run("set_world_object",json(R"({"id":"island-c","calm_water":null})")))&&actor_of(session,"island-c")->get("calm_water").type==Value::Null);
+    CHECK(ok(session.run("undo"))&&actor_of(session,"island-c")->get("calm_water").get("radius").number==6000);
+    // the change reaches the game as a changed actor
+    CHECK(ok(session.run("set_world_object",json(R"({"id":"island-c","calm_water":{"radius":6500}})"))));
+    CHECK(host.last_changed==std::vector<std::string>{"island-c"});
+    {bool seen=false;for(const auto&a:host.last_actors)if(a.id=="island-c")seen=a.calm_water.enabled&&a.calm_water.radius==6500;CHECK(seen);}
+    // the help: set_actor, place_world_object and set_world_object name it (the MCP tool list is the help)
+    unsigned named=0;
+    for(const auto&c:editor::command_list()){
+        if(c.name=="set_actor"&&c.help.find("calm_water")!=std::string::npos)named++;
+        if(c.name=="place_world_object"||c.name=="set_world_object")for(const auto&q:c.params)if(q.name=="calm_water")named++;
+    }
+    CHECK(named==3);
+}
+
 // The Inspector's restart note: enemies (with variants), the Miniblin and residents count as live when the
 // game installed its live kinds; the answer is read from a reply kept alive (a destroyed temporary read all
 // types as unknown and showed the note on every live enemy).
@@ -1851,6 +1885,7 @@ int main(int argc, char** argv) {
     floating_world_object_commands();
     grapple_world_object_commands();
     island_world_object_commands();
+    calm_water_commands();
     command_layer();
     handle_drag();
     locations();

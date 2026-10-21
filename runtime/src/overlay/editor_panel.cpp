@@ -21,6 +21,7 @@
 #include "editor_live_kinds.h"
 #include "editor_resident.h"
 #include "../mods/story_enemy_variants.h"
+#include "../mods/story_world_calm.h"
 #include "editor_shell.h"
 #include "extensions.h"
 #include "game_objects_palette.h"
@@ -199,6 +200,56 @@ void edit_property(const Value& p, const Value& a, const char* label, const char
         s["property"] = property;
         s["value"] = t.empty() ? Value() : Value(t);
         command("set_actor", s);
+    }
+}
+// A sea island's calm water (docs/world-objects.md "Calm water"): on or off, its radius, fade and centre; the
+// zone shows in the picture (editor_shell.cpp calm_overlay). Each change is one command (set_world_object).
+void calm_section(const Value& p, const Value& a) {
+    if (a.get("kind").string() != "mod" || a.get("behaviour").string() != "static" || a.get("stage").string() != "sea") return;
+    ImGui::Separator();
+    ImGui::TextColored(kHead, "Calm water");
+    mark("calm_water");
+    const Value& cw = a.get("calm_water");
+    bool on = cw.type == Value::Object;
+    auto set = [&](const Value& value) {
+        Value q = p;
+        q["calm_water"] = value;
+        command("set_world_object", q);
+    };
+    if (ImGui::Checkbox("Still sea around it##calm_on", &on)) {
+        Value z;
+        if (on) z["radius"] = 3000.0, z["falloff"] = double(story_world_calm::kGameFalloff);
+        set(z);  // off: null removes it
+    }
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("The waves die down as Link comes near, as at the game's own islands, so a boat can land at a low pier");
+    if (!on) return;
+    muted("Still water within the radius; the waves come back over the fade (the game's islands: 12800).");
+    double radius = 0, falloff = 0, ox = 0, oz = 0;
+    ImGui::TextUnformatted("Radius / fade");
+    const bool r = edit_number("##calm_radius", num(cw, "radius", 3000), radius, 120);
+    ImGui::SameLine();
+    const bool f = edit_number("##calm_falloff", num(cw, "falloff", story_world_calm::kGameFalloff), falloff, 120);
+    ImGui::TextUnformatted("Centre from the object (x, z)");
+    const bool x = edit_number("##calm_x", num(cw.get("offset"), "x", 0), ox, 120);
+    ImGui::SameLine();
+    const bool z = edit_number("##calm_z", num(cw.get("offset"), "z", 0), oz, 120);
+    if (r || f || x || z) {
+        Value q = cw;
+        if (r) q["radius"] = radius;
+        if (f) q["falloff"] = falloff;
+        if (x || z) {
+            Value o = cw.get("offset").type == Value::Object ? cw.get("offset") : Value();
+            if (x) o["x"] = ox;
+            if (z) o["z"] = oz;
+            if (num(o, "x", 0) == 0 && num(o, "z", 0) == 0) q.object.erase("offset");
+            else {
+                if (o.get("x").type != Value::Number) o["x"] = 0.0;
+                if (o.get("z").type != Value::Number) o["z"] = 0.0;
+                q["offset"] = o;
+            }
+        }
+        set(q);
     }
 }
 bool confirm_popup(const char* id, const std::string& question, const char* yes) {
@@ -671,6 +722,7 @@ void actor_inspector(const Value& m) {
     if (actor == "resident" || ((actor == "bokoblin" || actor == "moblin") && !is_mod) || (is_mod && !combat && !carry && a->get("behaviour").type == Value::Null)) route_section(m, *a);
     path_section(m, *a);  // only for an actor that uses one of the mod's room paths
     water_section(m, *a);
+    calm_section(p, *a);
     if (is_enemy(actor) || combat) edit_property(p, *a, "Defeated flag (set when it is beaten)", "defeated_flag");
     if (is_enemy(actor) || combat) {  // a mod switch set when every enemy naming it is defeated (doors follow it)
         ImGui::TextUnformatted("Sets switch when defeated");
