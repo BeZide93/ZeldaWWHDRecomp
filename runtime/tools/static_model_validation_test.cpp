@@ -60,11 +60,18 @@ int main(){static_models::ModelInfo info;std::string why;auto doc=document();aut
     doc=with_collision();doc["materials"].array[1]["name"]="col_hookshot";assert(static_models::validate_glb(glb(doc,cube),info,why));
     doc=with_collision();doc["materials"].array[1]["name"]="col_unknown";bad(doc,cube);
     doc=with_collision();doc["nodes"].array[2]["scale"]=mods::json::parse("[0,1,1]");bad(doc,cube);
-    doc=with_collision();doc["nodes"].array[2]["scale"]=mods::json::parse("[1000,1,1]");bad(doc,cube);
-    doc=with_collision();doc["nodes"].array[1]["translation"]=mods::json::parse("[201,0,0]");bad(doc,cube);
+    // a body's size: one sea square (100000 units = 1 km) along each axis and every coordinate within +/-100000
+    static_assert(static_models::kMaxCollisionExtent==100000);
+    doc=with_collision();doc["nodes"].array[2]["scale"]=mods::json::parse("[1000,1,1]");assert(static_models::validate_glb(glb(doc,cube),info,why));  // exactly 1 km wide
+    doc=with_collision();doc["nodes"].array[2]["scale"]=mods::json::parse("[1000.001,1,1]");bad(doc,cube);  // 0.1 unit wider
+    doc=with_collision();doc["nodes"].array[2]["scale"]=mods::json::parse("[1,1,1000.001]");bad(doc,cube);
+    doc=with_collision();doc["nodes"].array[1]["translation"]=mods::json::parse("[201,0,0]");assert(static_models::validate_glb(glb(doc,cube),info,why));  // past the old 200 m
+    doc=with_collision();doc["nodes"].array[1]["translation"]=mods::json::parse("[997.5,0,0]");assert(static_models::validate_glb(glb(doc,cube),info,why));  // up to 99800 units
+    doc=with_collision();doc["nodes"].array[1]["translation"]=mods::json::parse("[999.501,0,0]");bad(doc,cube);  // a coordinate past 100000
+    doc=with_collision();doc["nodes"].array[1]["translation"]=mods::json::parse("[0,0,-999]");bad(doc,cube);
     doc=with_collision();doc["scenes"].array[0]["nodes"].array.pop_back();bad(doc,cube);
     doc=with_collision();doc["meshes"].array[1]["primitives"].array[0]["mode"]=1;bad(doc,cube);
-    doc=cube_document();assert(static_models::validate_glb(glb(doc,cube),info,why,true));doc["nodes"].array[0]["translation"]=mods::json::parse("[201,0,0]");assert(!static_models::validate_glb(glb(doc,cube),info,why,true)&&info.vertex_count==0);
+    doc=cube_document();assert(static_models::validate_glb(glb(doc,cube),info,why,true));doc["nodes"].array[0]["translation"]=mods::json::parse("[201,0,0]");assert(static_models::validate_glb(glb(doc,cube),info,why,true));doc["nodes"].array[0]["translation"]=mods::json::parse("[1000,0,0]");assert(!static_models::validate_glb(glb(doc,cube),info,why,true)&&info.vertex_count==0);
     doc=with_collision();auto flat=cube;for(size_t n=0;n<96;++n)flat[n]=0;bad(doc,flat);
     // 11 copies of 64 cube primitives: 8448 collision triangles, past the 8192 of a body
     doc=with_collision();auto many=doc["meshes"].array[1]["primitives"].array[0];doc["meshes"].array[1]["primitives"].array.assign(64,many);doc["nodes"].array.push_back(mods::json::parse("{\"mesh\":1}"));doc["scenes"].array[0]["nodes"].array.push_back(3);for(unsigned n=0;n<9;++n){doc["nodes"].array.push_back(mods::json::parse("{\"mesh\":1}"));doc["scenes"].array[0]["nodes"].array.push_back(int(4+n));}bad(doc,cube);

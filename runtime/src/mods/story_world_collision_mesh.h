@@ -10,7 +10,12 @@ namespace story_world_collision::mesh {
 // A body's triangles and vertices (each at most 8192; the 512 KiB storage budget of a body, mod_actor's
 // collision_geometry, is the closer limit for a large mesh: about 6000 welded triangles).
 inline constexpr uint32_t MaxVertices=8192,MaxTriangles=8192,LeafTriangles=32;
-inline constexpr float MaxExtent=20000;
+// A body's size: every collision-local coordinate within +/-MaxExtent and its extent along each axis at most
+// MaxExtent, one sea square (100000 units, 1 km). The game's own collision has no size limit below that: cBgW
+// keeps no grid, only per-node boxes it computes from the vertices (bounds start at +/-1e9, 1 unit margin),
+// and the sea rooms' own bodies span a whole square (100000 x 100000, up to 45639 tall). Placement keeps a
+// body inside its room's square (story_world_placement: room-boundary).
+inline constexpr float MaxExtent=100000;
 // WCOL surfaces (semantic): 0 stone, 1 grass, 2 wood, 3 sand, 4 metal, 5 wall, 6 objects, 7 climb,
 // 8 hookshot, 9 water (a swimmable surface: its own depth-two group with the game's water bit 0x100, which
 // only the game's water queries see; Link and the ship pass through it), 10 shallow water (wading),

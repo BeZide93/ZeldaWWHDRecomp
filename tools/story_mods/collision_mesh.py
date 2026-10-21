@@ -13,7 +13,7 @@ import struct
 import tempfile
 
 MAX_VERTICES = MAX_TRIANGLES = 8192  # story_world_collision_mesh.h; the 512 KiB body budget is checked at placement
-MAX_EXTENT = 20000
+MAX_EXTENT = 100000  # story_world_collision_mesh.h MaxExtent: one sea square, per axis and per coordinate
 SEMANTICS = {'col_stone': 0, 'col_grass': 1, 'col_wood': 2,
              'col_sand': 3, 'col_metal': 4, 'col_wall': 5, 'col_objects': 6,
              'col_climb': 7, 'col_hookshot': 8, 'col_water': 9, 'col_shallow': 10,
@@ -87,10 +87,10 @@ def encode(vertices, triangles, api):
     require(nv <= MAX_VERTICES and nt <= MAX_TRIANGLES, 'collision exceeds vertex/triangle limits (lava counts twice: its surface and its bottom)')
     # Round once to the exact float32 coordinates consumed by native collision.
     vertices = [struct.unpack('>3f', struct.pack('>3f', *p)) for p in vertices]
-    require(all(math.isfinite(x) and abs(x) <= 20000 for p in vertices for x in p), 'collision coordinate exceeds 20000 game units')
+    require(all(math.isfinite(x) and abs(x) <= MAX_EXTENT for p in vertices for x in p), 'collision coordinate exceeds %d game units' % MAX_EXTENT)
     low = [min(p[k] for p in vertices) for k in range(3)]
     high = [max(p[k] for p in vertices) for k in range(3)]
-    require(all(high[k]-low[k] <= MAX_EXTENT for k in range(3)), 'collision extent exceeds 20000 game units')
+    require(all(high[k]-low[k] <= MAX_EXTENT for k in range(3)), 'collision extent exceeds %d game units' % MAX_EXTENT)
     for a, b, c, semantic in triangles:
         require(max(a, b, c) < len(vertices) and min(a, b, c) >= 0 and semantic in SEMANTICS.values(), 'invalid collision triangle')
         u = [vertices[b][k]-vertices[a][k] for k in range(3)]

@@ -179,6 +179,19 @@ class KitModelTest(unittest.TestCase):
         with self.assertRaisesRegex(km.BuildError, 'simpler'):
             km.kit_collision(sb.read_glb(path))
 
+    def test_collision_extent_one_sea_square(self):
+        # a kit model's collision may be as large as a world object's: one sea square (1 km, 100000 units)
+        import stage_builder as sb
+        self.assertEqual(km.MAX_EXTENT, collision_mesh.MAX_EXTENT)
+        self.assertEqual(km.MAX_EXTENT, 100000)
+        for half in (200, 500):  # a 400 m island (past the old 200 m) and a whole square
+            path = self.write('wide%d.glb' % half, glb([('visible', [('grass', *quad(0, 0, 1, 1))]), ('g_col', [('col_grass', *quad(-half, -half, half, half))])]))
+            _, info = km.kit_collision(sb.read_glb(path))
+            self.assertEqual((info['collision_minimum'][0], info['collision_maximum'][0]), (-half * 100.0, half * 100.0))
+        path = self.write('wider.glb', glb([('visible', [('grass', *quad(0, 0, 1, 1))]), ('g_col', [('col_grass', *quad(-500, -500, 500.01, 500))])]))
+        with self.assertRaisesRegex(km.BuildError, 'extent'):
+            km.kit_collision(sb.read_glb(path))
+
     def test_material_names(self):
         """texture-free materials are game materials by name (Blender's .001 copies too); an unknown name is refused with
         the kit room's names and where they come from; unnamed and col_* ones take the default"""

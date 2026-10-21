@@ -1,5 +1,6 @@
 // SDK v3 preview: bounded declarative world content. No game save bits are accepted here.
 #pragma once
+#include "story_world_collision_mesh.h"
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -549,10 +550,10 @@ inline bool parse_actors_impl(const mods::json::Value& m,std::vector<ManifestAct
                     if(a.collision_surface!="stone"&&a.collision_surface!="grass"&&a.collision_surface!="wood"&&a.collision_surface!="sand"&&a.collision_surface!="metal"&&a.collision_surface!="wall")return why="unknown collision surface",false;
                     if(a.collision_shape=="box"){
                         const auto& size=collision.get("size");
-                        if(collision.object.contains("radius")||collision.object.contains("height")||!keys(size,{"x","y","z"})||!number(size.get("x"),0,20000,a.collision_size.x,true)||!number(size.get("y"),0,20000,a.collision_size.y,true)||!number(size.get("z"),0,20000,a.collision_size.z,true))return why="box collision needs positive size x/y/z up to 20000",false;
+                        if(collision.object.contains("radius")||collision.object.contains("height")||!keys(size,{"x","y","z"})||!number(size.get("x"),0,double(story_world_collision::mesh::MaxExtent),a.collision_size.x,true)||!number(size.get("y"),0,double(story_world_collision::mesh::MaxExtent),a.collision_size.y,true)||!number(size.get("z"),0,double(story_world_collision::mesh::MaxExtent),a.collision_size.z,true))return why="box collision needs positive size x/y/z up to 100000",false;
                     }else if(a.collision_shape=="cylinder"||a.collision_shape=="sphere"){
-                        if(collision.object.contains("size")||!number(collision.get("radius"),0,10000,a.collision_radius,true))return why="shape radius must be positive and at most 10000",false;
-                        if(a.collision_shape=="cylinder"){if(!number(collision.get("height"),0,20000,a.collision_height,true))return why="cylinder height must be positive and at most 20000",false;}
+                        if(collision.object.contains("size")||!number(collision.get("radius"),0,double(story_world_collision::mesh::MaxExtent)/2,a.collision_radius,true))return why="shape radius must be positive and at most 50000",false;
+                        if(a.collision_shape=="cylinder"){if(!number(collision.get("height"),0,double(story_world_collision::mesh::MaxExtent),a.collision_height,true))return why="cylinder height must be positive and at most 100000",false;}
                         else if(collision.object.contains("height"))return why="sphere collision does not take height",false;
                     }else return why="collision requires mesh or box, cylinder or sphere shape",false;
                 }
@@ -617,7 +618,7 @@ inline bool parse_actors_impl(const mods::json::Value& m,std::vector<ManifestAct
         auto island_text=[](const Value&value,std::string&out){std::u16string decoded;if(value.type!=Value::String||value.text.empty()||value.text.size()>96||!story_mail::append_utf16(value.text,false,decoded))return false;out=value.text;return true;};
         if(v.object.contains("arrival")){
             const auto&value=v.get("arrival");
-            if(!keys(value,{"name","radius","flag"})||!island_text(value.get("name"),a.arrival.name)||!number(value.get("radius"),100,20000,a.arrival.radius)||!flag_id(value.get("flag")))return why="arrival requires a single-line name up to 96 bytes, radius 100..20000 and a mod-owned flag",false;
+            if(!keys(value,{"name","radius","flag"})||!island_text(value.get("name"),a.arrival.name)||!number(value.get("radius"),100,double(story_world_collision::mesh::MaxExtent),a.arrival.radius)||!flag_id(value.get("flag")))return why="arrival requires a single-line name up to 96 bytes, radius 100..100000 and a mod-owned flag",false;
             a.arrival.enabled=true;a.arrival.flag=value.get("flag").text;
         }
         if(v.object.contains("chart_marker")){
@@ -631,7 +632,7 @@ inline bool parse_actors_impl(const mods::json::Value& m,std::vector<ManifestAct
             const auto&points=v.get("grapple_points");
             if(!a.world_object()||points.type!=Value::Array||points.array.size()>8)return why="grapple_points requires a world object and at most eight points",false;
             for(const auto&value:points.array){ManifestGrapplePoint p;
-                if(!keys(value,{"id","position","yaw"})||!id(value.get("id"))||!keys(value.get("position"),{"x","y","z"})||!point(value.get("position"),p.position,20000))return why="grapple point needs an id and bounded local position",false;
+                if(!keys(value,{"id","position","yaw"})||!id(value.get("id"))||!keys(value.get("position"),{"x","y","z"})||!point(value.get("position"),p.position,story_world_collision::mesh::MaxExtent))return why="grapple point needs an id and bounded local position",false;
                 p.id=value.get("id").text;
                 if(value.object.contains("yaw")&&!number(value.get("yaw"),-360,360,p.yaw))return why="grapple point yaw must be within -360 to 360 degrees",false;
                 if(std::any_of(a.grapple_points.begin(),a.grapple_points.end(),[&](const auto&old){return old.id==p.id;}))return why="grapple point ids must be unique within an object",false;

@@ -18,6 +18,8 @@ inline constexpr size_t kMaxSourceBytes=8*1024*1024;
 inline constexpr unsigned kMaxVertices=4096,kMaxTriangles=8192,kMaxTextureDimension=512;
 // a collision mesh (story_world_collision_mesh.h MaxVertices/MaxTriangles)
 inline constexpr unsigned kMaxCollisionVertices=8192,kMaxCollisionTriangles=8192;
+// and its size (MaxExtent): every coordinate within +/- this and the extent along each axis at most this
+inline constexpr double kMaxCollisionExtent=100000;
 // Several materials (tools/story_mods/multi_material.py): up to 16 materials with one embedded PNG each and up to 32
 // triangle primitives; vertex and triangle limits count all primitives together; all colour textures of one model
 // take at most 1 MiB decoded (one 512 x 512 RGBA8 texture, the single-material maximum).
@@ -130,9 +132,9 @@ inline bool validate_glb_strict(std::span<const uint8_t> b,ModelInfo& info,std::
     const double det=world[0]*cof[0]+world[1]*cof[1]+world[2]*cof[2];if(!std::isfinite(det)||std::fabs(det)<=1e-12)return fail("singular model transform");
     auto number=[&](const Access& a,size_t i,size_t k){const uint32_t bits=le32(b.data()+a.offset+i*a.stride+k*4);float f;std::memcpy(&f,&bits,4);return double(f);};
     std::array<float,3> minimum,maximum;minimum.fill(std::numeric_limits<float>::infinity());maximum.fill(-std::numeric_limits<float>::infinity());
-    for(const auto& q:prims)for(size_t v=0;v<q.pos.count;++v){double normal_length=0;for(size_t r=0;r<3;++r){double coordinate=world[r*4+3],normal=0;for(size_t k=0;k<3;++k){coordinate+=world[r*4+k]*number(q.pos,v,k);if(!collision)normal+=cof[r*3+k]*number(q.nrm,v,k)/det;}coordinate*=100;if(!std::isfinite(coordinate)||std::fabs(coordinate)>(collision?20000:1000000))return fail("baked model exceeds coordinate range");minimum[r]=std::min(minimum[r],float(coordinate));maximum[r]=std::max(maximum[r],float(coordinate));normal_length+=normal*normal;}if(!collision&&(!std::isfinite(normal_length)||normal_length<=1e-24))return fail("invalid model normal");}
+    for(const auto& q:prims)for(size_t v=0;v<q.pos.count;++v){double normal_length=0;for(size_t r=0;r<3;++r){double coordinate=world[r*4+3],normal=0;for(size_t k=0;k<3;++k){coordinate+=world[r*4+k]*number(q.pos,v,k);if(!collision)normal+=cof[r*3+k]*number(q.nrm,v,k)/det;}coordinate*=100;if(!std::isfinite(coordinate)||std::fabs(coordinate)>(collision?kMaxCollisionExtent:1000000))return fail("baked model exceeds coordinate range");minimum[r]=std::min(minimum[r],float(coordinate));maximum[r]=std::max(maximum[r],float(coordinate));normal_length+=normal*normal;}if(!collision&&(!std::isfinite(normal_length)||normal_length<=1e-24))return fail("invalid model normal");}
     if(collision){
-        for(size_t k=0;k<3;++k)if(double(maximum[k])-minimum[k]>20000)return fail("collision extent exceeds 20000 game units");
+        for(size_t k=0;k<3;++k)if(double(maximum[k])-minimum[k]>kMaxCollisionExtent)return fail("collision extent exceeds 100000 game units");
         for(const auto& q:prims){
             auto point=[&](size_t i){std::array<float,3> c{};for(size_t r=0;r<3;++r){double value=world[r*4+3];for(size_t k=0;k<3;++k)value+=world[r*4+k]*number(q.pos,i,k);c[r]=float(value*100);}return c;};
             auto index=[&](size_t i){const auto* r=b.data()+q.idx.offset+i*q.idx.stride;return q.idx.component==5121?uint32_t(r[0]):q.idx.component==5123?uint32_t(r[0])|(uint32_t(r[1])<<8):le32(r);};
@@ -288,6 +290,6 @@ inline bool validate_glb(std::span<const uint8_t> b,ModelInfo& info,std::string&
         for(const auto& p:ps.array){const auto& material_index=p.get("material");if(!integer(material_index,0,materials.array.size()-1))return fail("collision material outside input");const auto name=materials.array[size_t(material_index.number)].get("name").string();if(!collision_material(name))return fail("unknown or unsupported collision material");
             auto one=mesh;one["primitives"].array={p};const auto geometry=packed(project(ni,one));ModelInfo part;if(!validate_glb_strict(geometry,part,why,true))return false;vertices+=part.vertex_count;triangles+=part.triangle_count;if(vertices>kMaxCollisionVertices||triangles>kMaxCollisionTriangles)return fail("collision exceeds vertex/triangle limits");for(size_t k=0;k<3;++k){low[k]=std::min(low[k],part.minimum[k]);high[k]=std::max(high[k],part.maximum[k]);}}
     }
-    for(size_t k=0;k<3;++k)if(double(high[k])-low[k]>20000)return fail("collision extent exceeds 20000 game units");info=result;return true;
+    for(size_t k=0;k<3;++k)if(double(high[k])-low[k]>kMaxCollisionExtent)return fail("collision extent exceeds 100000 game units");info=result;return true;
 }
 }

@@ -749,7 +749,7 @@ bool collision_geometry(const std::string&mod,const story_notebook::ManifestActo
     if(spec.grapple_points.size()>8)return false;
     std::set<std::string> targets;float radius=0;for(const auto&p:geometry.vertices)radius=std::max(radius,std::sqrt(p.x*p.x+p.y*p.y+p.z*p.z));
     for(const auto&target:spec.grapple_points){const auto&p=target.position;const float x=p.x*spec.scale.x,y=p.y*spec.scale.y,z=p.z*spec.scale.z;
-        if(!story_mail::valid_id(target.id)||!targets.insert(target.id).second||!std::isfinite(target.yaw)||std::fabs(target.yaw)>360||std::max({std::fabs(p.x),std::fabs(p.y),std::fabs(p.z)})>20000||!std::isfinite(x)||!std::isfinite(y)||!std::isfinite(z)||x<geometry.minimum.x||x>geometry.maximum.x||y<geometry.minimum.y||y>geometry.maximum.y||z<geometry.minimum.z||z>geometry.maximum.z||(spec.water_object()&&std::sqrt(x*x+y*y+z*z)>radius))return false;}
+        if(!story_mail::valid_id(target.id)||!targets.insert(target.id).second||!std::isfinite(target.yaw)||std::fabs(target.yaw)>360||std::max({std::fabs(p.x),std::fabs(p.y),std::fabs(p.z)})>mesh::MaxExtent||!std::isfinite(x)||!std::isfinite(y)||!std::isfinite(z)||x<geometry.minimum.x||x>geometry.maximum.x||y<geometry.minimum.y||y>geometry.maximum.y||z<geometry.minimum.z||z>geometry.maximum.z||(spec.water_object()&&std::sqrt(x*x+y*y+z*z)>radius))return false;}
     out=std::make_shared<const mesh::Mesh>(std::move(geometry));return true;
 }
 story_actors::identity::Fingerprint declaration_fingerprint(const Decl&d,bool first_layout=false,bool*available=nullptr){
