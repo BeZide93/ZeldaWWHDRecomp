@@ -295,6 +295,7 @@ bool g_logic_pass = false;  // logic pass with interpolation on: camera drawn bl
 bool g_blend_draw = false;  // inside the loop body of a blended pass (logic pass or blended hold pass)
 bool g_hold_next = false;   // the next pass is a hold pass
 bool g_hold_frame = false;  // inside the per-frame function on a hold pass
+bool g_in_frame = false;  // inside the per-frame function (pass_t() is the current pass's)
 // The step's pass structure: in-between frames planned for this step (N; fewer when paced
 // interpolation sees that they do not fit, 1 on an exact step) and the current pass (0 logic pass,
 // k = hold pass k). Hold pass N is the record pass (exact, recorded for the next step).
@@ -1301,7 +1302,9 @@ extern "C" void hook_0203593C(Cpu* c) {
         g_step_n = 1;
         {
             PassTimer timer(0);
+            g_in_frame = true;
             f_0203593C_orig(c);
+            g_in_frame = false;
         }
         static unsigned stats_steps = 0;
         if (pass_stats() && ++stats_steps % 300 == 0) LOG("[interp]%s", pass_cpu_report().c_str());
@@ -1326,7 +1329,9 @@ extern "C" void hook_0203593C(Cpu* c) {
         } else {
             fx_hold_blend(pass_t());  // the effects blended at logic time, at this pass's fraction
         }
+        g_in_frame = true;
         f_0203593C_orig(c);
+        g_in_frame = false;
         g_hold_frame = false;
         after_pass(g_phase);
         g_hold = false;
@@ -1342,7 +1347,9 @@ extern "C" void hook_0203593C(Cpu* c) {
     }
     {
         PassTimer timer(0);
+        g_in_frame = true;
         f_0203593C_orig(c);  // logic pass (the loop body hook marks it)
+        g_in_frame = false;
     }
     g_record_logic = false;
     after_pass(0);  // g_hold_next: an in-between pass follows (always, unless paced)
@@ -1361,6 +1368,28 @@ extern "C" void hook_0203593C(Cpu* c) {
     }
 }
 
+// The pass whose draw lists are painted. The painter draws a pass's lists (J3DPacket draws: trails,
+// sky sprites) after the per-frame function, before the next pass starts (g_passes is still the
+// pass's): their hooks take the fraction the pass was drawn at from here.
+namespace interp {
+namespace {
+struct Drawn { uint64_t pass = ~0ull; float t = 1.0f; bool record = false; } g_drawn;
+void note_drawn() { g_drawn = Drawn{g_passes, pass_t(), record_pass()}; }
+}  // namespace
+// blend fraction of the pass being drawn or painted (1: exact, or interpolation off)
+float display_t() {
+    if (!enabled()) return 1.0f;
+    if (g_in_frame) return pass_t();
+    return g_drawn.pass == g_passes ? g_drawn.t : 1.0f;
+}
+// the pass being drawn or painted is the step's record pass (exact, the next step's "before")
+bool display_record() {
+    if (!enabled()) return false;
+    if (g_in_frame) return record_pass();
+    return g_drawn.pass == g_passes && g_drawn.record;
+}
+}  // namespace interp
+
 // main loop body (inside the per-frame function): logic pass -> camera drawn blended;
 // hold pass -> only fapGm_Execute, whose logic parts are skipped (hooks below); blended hold
 // passes draw the camera blended too
@@ -1369,12 +1398,14 @@ extern "C" void hook_025F172C(Cpu* c) {
     if (g_hold_frame) {
         g_blend_draw = blended_hold();
         f_025D42EC(c);
+        note_drawn();
         g_blend_draw = false;
         return;
     }
     g_logic_pass = enabled() && !g_exact_step;  // (an exact step draws like interpolation off)
     g_blend_draw = g_logic_pass;
     f_025F172C_orig(c);
+    note_drawn();
     g_logic_pass = false;
     g_blend_draw = false;
 }

@@ -45,6 +45,7 @@
 #include "guest_addr.h"
 #include "interp_pacing.h"
 #include "interp_slots.h"
+#include "interp_trail.h"
 #include "runtime.h"
 #include "true60.h"
 
@@ -60,6 +61,8 @@ uint64_t hold_pass_count();  // record passes so far (step stamp of the historie
 uint64_t pass_count();       // every pass
 void blend_world_matrix(const float* a, const float* b, float* out, float t);
 uint64_t logic_steps();   // logic steps run so far
+float display_t();        // blend fraction of the pass being drawn or painted (interp.cpp)
+bool display_record();    // the pass being drawn or painted is the record pass
 }  // namespace interp
 
 extern "C" {
@@ -1510,6 +1513,75 @@ extern "C" void hook_024EC1C8(Cpu* c) {
     stf32(fc + 4, frame);
 }
 
+// ---------------------------------------------------------------------------------------------
+// Swing trails (interp_trail.h): the sword (daPy_swBlur_c::draw 024142F0: segments +0x9C, blade
+// tips +0xBC and bases +0x38C, 60 points each) and the boomerang (daBoomerang_blur_c::draw
+// 020CDF78: segments +0x98, two rings of tips and roots at +0xA8, +0x378, +0x648, +0x918). Both are
+// J3DPacket draws, painted after the pass: the record pass's history is kept, blended passes draw
+// the history at their fraction (the head following the blended blade), then the exact one is put
+// back.
+namespace {
+struct TrailRec { uint64_t record; interp::trail::Frame f; };
+std::unordered_map<uint32_t, TrailRec> g_trails;
+interp::trail::Frame read_trail(uint32_t pkt, uint32_t count, std::initializer_list<uint32_t> lanes) {
+    interp::trail::Frame f;
+    f.lanes = 0;
+    f.count = (int32_t)ld32(pkt + count);
+    for (uint32_t lane : lanes) {
+        for (int i = 0; i < interp::trail::kPoints; i++)
+            for (int x = 0; x < 3; x++) f.p[f.lanes][i][x] = (float)ldf32(pkt + lane + 12 * i + 4 * x);
+        f.lanes++;
+    }
+    return f;
+}
+void trail_draw(Cpu* c, void (*orig)(Cpu*), uint32_t count, std::initializer_list<uint32_t> lanes) {
+    static const bool off = getenv("WWHD_INTERP_TRAILS") && !atoi(getenv("WWHD_INTERP_TRAILS"));  // diagnostic ablation
+    if (!on(16) || off) { orig(c); return; }
+    const uint32_t pkt = c->r[3];
+    const interp::trail::Frame b = read_trail(pkt, count, lanes);
+    if (interp::display_record()) {
+        if (g_trails.size() > 64) g_trails.clear();
+        g_trails[pkt] = TrailRec{interp::hold_pass_count(), b};
+        orig(c);
+        return;
+    }
+    const float t = interp::display_t();
+    auto it = g_trails.find(pkt);
+    static interp::trail::Frame m;
+    if (t >= 1.0f || it == g_trails.end() || it->second.record != interp::hold_pass_count() || !interp::trail::at(it->second.f, b, t, m)) {
+        orig(c);
+        return;
+    }
+    static int tr = trace_left(7);
+    if (tr) {
+        tr--;
+        LOG("[interp-fx] trail %08X t %.3f: %d -> %d segments, head %.1f %.1f %.1f (new %.1f %.1f %.1f), drawn %d", pkt, t, it->second.f.count, b.count,
+            it->second.f.p[0][0][0], it->second.f.p[0][0][1], it->second.f.p[0][0][2], b.p[0][0][0], b.p[0][0][1], b.p[0][0][2], m.count);
+    }
+    std::vector<uint32_t> saved;
+    saved.push_back(ld32(pkt + count));
+    int l = 0;
+    for (uint32_t lane : lanes) {
+        for (int i = 0; i < interp::trail::kPoints; i++)
+            for (int x = 0; x < 3; x++) {
+                const uint32_t a = pkt + lane + 12 * i + 4 * x;
+                saved.push_back(ld32(a));
+                stf32(a, m.p[l][i][x]);
+            }
+        l++;
+    }
+    st32(pkt + count, (uint32_t)m.count);
+    orig(c);
+    size_t k = 0;
+    st32(pkt + count, saved[k++]);
+    for (uint32_t lane : lanes)
+        for (int i = 0; i < interp::trail::kPoints; i++)
+            for (int x = 0; x < 3; x++) st32(pkt + lane + 12 * i + 4 * x, saved[k++]);
+}
+}  // namespace
+extern "C" void f_024142F0_orig(Cpu*);
+extern "C" void hook_024142F0(Cpu* c) { trail_draw(c, f_024142F0_orig, 0x9C, {0xBC, 0x38C}); }
+
 // save state loaded: forget every effect history (the guest state jumped); interp.cpp also bumps the
 // hold pass count, which invalidates the step-stamped records
 namespace interp {
@@ -1528,6 +1600,7 @@ void fx_ss_reset() {
     g_packet_poses.clear();
     g_line_layouts.clear();
     g_att.clear();
+    g_trails.clear();
     for (auto& s : g_sway) s = SwayRec{};
     g_wood = WoodRec{};
     g_sea.packet = 0;

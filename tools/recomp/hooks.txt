@@ -219,6 +219,7 @@
 0232B984  # buoy pole: attachment placement at the same fraction as the flag
 021BBC34  # mantles/capes: custom cloth vertices and placement, at upload
 02574144  # dKyr_drawStar: stars placed around the eye the pass was drawn with (interp.cpp)
+024142F0  # daPy_swBlur_c::draw: sword trail drawn at the pass fraction (interp_fx.cpp)
 024EC1C8  # dAttDraw_c::draw: in true 60, the attention arrow is built from halfway values and the current camera
 025615B8  # dScnKy_env_light_c::settingTevStruct_plightcol_plus: candle flicker held on frames without logic (interp_fx.cpp)
 020198D8  # cM_rndF: the flicker random value inside it
