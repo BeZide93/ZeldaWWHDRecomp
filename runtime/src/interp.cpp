@@ -37,6 +37,7 @@ namespace interp {class NativeResumeBoundaryIssuer {public:static void after_ser
 #include <unordered_map>
 #include <vector>
 
+#include "interp_camera.h"
 #include "interp_joints.h"
 #include "interp_nodraw.h"
 #include "interp_pacing.h"
@@ -224,10 +225,7 @@ uint64_t step_ticks(uint32_t game) {
 namespace {
 constexpr uint32_t kEye = 0xDC, kCenter = 0xE8, kUp = 0xF4, kFovy = 0xD4, kBank = 0x100;
 
-struct CamState {
-    float eye[3], center[3], up[3], fovy;
-    int16_t bank;
-};
+using camera::CamState;
 
 CamState read_cam(uint32_t cam) {
     CamState s;
@@ -251,12 +249,6 @@ void write_cam(uint32_t cam, const CamState& s) {
     st16(cam + kBank, (uint16_t)s.bank);
 }
 
-float dist(const float* a, const float* b) {
-    float d = 0;
-    for (int i = 0; i < 3; i++) d += (a[i] - b[i]) * (a[i] - b[i]);
-    return std::sqrt(d);
-}
-
 // The blend fraction t of a pass: 1/(N+1) on the logic pass, (k+1)/(N+1) on blended hold pass k;
 // 1 = exact. The blends (interp_pacing.h) keep the original halfway arithmetic at t = 1/2, so 60 fps
 // draws bit-identical frames to the halfway-only code (0.5f * (a + b), nlerp, integer halving).
@@ -274,69 +266,24 @@ float g_last_step = 0;  // camera eye movement over the previous step
 
 bool cam_snap(const CamState& a, const CamState& b) {
     static const float kCut = getenv("WWHD_INTERP_CUT") ? (float)atof(getenv("WWHD_INTERP_CUT")) : 800.0f;
-    float step = std::max(dist(a.eye, b.eye), dist(a.center, b.center));
-    float prev = g_last_step;
-    g_last_step = step;
-    return step > kCut || std::fabs(a.fovy - b.fovy) > 20.0f || (step > 60.0f && step > 4.0f * prev + 20.0f);
+    return camera::cam_snap(a, b, g_last_step, kCut);
 }
-
-CamState blend(const CamState& a, const CamState& b, float t) {
-    CamState m;
-    for (int i = 0; i < 3; i++) {
-        m.center[i] = lerp_f(a.center[i], b.center[i], t);
-        m.up[i] = lerp_f(a.up[i], b.up[i], t);
-    }
-    // eye = center + direction * distance, each blended on its own
-    float da[3], db[3], la = 0, lb = 0;
-    for (int i = 0; i < 3; i++) {
-        da[i] = a.eye[i] - a.center[i];
-        db[i] = b.eye[i] - b.center[i];
-        la += da[i] * da[i];
-        lb += db[i] * db[i];
-    }
-    la = std::sqrt(la);
-    lb = std::sqrt(lb);
-    if (la > 1e-3f && lb > 1e-3f) {
-        float cosang = 0;
-        for (int i = 0; i < 3; i++) cosang += (da[i] / la) * (db[i] / lb);
-        if (cosang < 0.7071f) return b;  // view turned more than 45 degrees in one step: a snap
-        // the camera's collision (trees, walls, bushes) pulls it in abruptly; a blended distance could put
-        // the in-between frame inside the obstacle, so abrupt distance changes are not blended
-        if (std::fabs(la - lb) > 0.1f * std::max(la, lb)) return b;
-        float dir[3], ld = 0;
-        // direction: halfway = normalised sum; other fractions slerp (constant angular speed over
-        // the step's frames; nlerp would bunch them towards the middle)
-        float wa, wb;
-        pacing::slerp_weights(cosang, t, wa, wb);
-        for (int i = 0; i < 3; i++) {
-            dir[i] = wa * da[i] / la + wb * db[i] / lb;  // blended direction (normalised below)
-            ld += dir[i] * dir[i];
-        }
-        ld = std::sqrt(ld);
-        float len = lerp_f(la, lb, t);
-        for (int i = 0; i < 3; i++) m.eye[i] = m.center[i] + (ld > 1e-3f ? dir[i] / ld : db[i] / lb) * len;
-    } else {
-        for (int i = 0; i < 3; i++) m.eye[i] = lerp_f(a.eye[i], b.eye[i], t);
-    }
-    // up: normalised and made perpendicular to the blended view direction, so the in-between frame
-    // gets no extra roll (matters most when looking down from above, where small differences in up
-    // turn into large twists)
-    float fwd[3], lf = 0, lu = 0, d = 0;
-    for (int i = 0; i < 3; i++) { fwd[i] = m.center[i] - m.eye[i]; lf += fwd[i] * fwd[i]; }
-    lf = std::sqrt(lf);
-    if (lf > 1e-3f) {
-        for (int i = 0; i < 3; i++) { fwd[i] /= lf; d += m.up[i] * fwd[i]; }
-        for (int i = 0; i < 3; i++) { m.up[i] -= d * fwd[i]; lu += m.up[i] * m.up[i]; }
-        lu = std::sqrt(lu);
-        if (lu > 0.1f) {
-            for (int i = 0; i < 3; i++) m.up[i] /= lu;
-        } else {
-            for (int i = 0; i < 3; i++) m.up[i] = b.up[i];  // degenerate: keep the exact up vector
-        }
-    }
-    m.fovy = lerp_f(a.fovy, b.fovy, t);
-    m.bank = lerp_s16(a.bank, b.bank, t);  // shortest way round
+// the 10 % distance rule (interp_camera.h): debug WWHD_INTERP_CAM_DIST_RULE=0 off, 2 on every step
+int dist_rule_mode() {
+    static const int m = getenv("WWHD_INTERP_CAM_DIST_RULE") ? atoi(getenv("WWHD_INTERP_CAM_DIST_RULE")) : camera::kDistCollision;
     return m;
+}
+// what the camera's logic did this step (bumpCheck hook), per camera process
+struct CamStep {
+    uint32_t cam = 0;
+    uint64_t step = ~0ull;
+    camera::StepInfo info;
+};
+CamStep g_cam_step[4];
+camera::StepInfo step_info(uint32_t cam, uint64_t step) {
+    for (const auto& s : g_cam_step)
+        if (s.cam == cam && s.step == step) return s.info;
+    return {};
 }
 
 std::atomic<uint64_t> g_executed_steps{0};
@@ -364,6 +311,7 @@ bool blended_hold() { return g_hold && g_phase < g_step_n; }
 // last camera state that was drawn normally, per camera process; the snap decision of the step
 struct Prev {
     uint32_t cam = 0; CamState s{}; bool valid = false; bool snap = true; uint64_t snap_step = ~0ull;
+    bool dist_rule = true;     // the step's 10 % distance rule applies (decided with the snap)
     CamState drawn{};          // the camera as camera_draw drew it on pass drawn_pass (blended or exact)
     uint64_t drawn_pass = ~0ull;
     uint32_t projection[16]{}; // raw projection-view words before true60's actor rollback
@@ -460,8 +408,9 @@ static void camera_draw(Cpu* c) {
             if (!g_hold) {  // logic pass: the step's snap decision
                 p->snap = cam_snap(p->s, cur);
                 p->snap_step = g_logic_steps;
+                p->dist_rule = camera::distance_rule_applies(step_info(cam, g_logic_steps), dist_rule_mode());
             }
-            if (p->snap_step == g_logic_steps && !p->snap) write_cam(cam, blend(p->s, cur, pass_t()));
+            if (p->snap_step == g_logic_steps && !p->snap) write_cam(cam, camera::blend(p->s, cur, pass_t(), p->dist_rule));
         }
         p->drawn = read_cam(cam);
         p->drawn_pass = g_passes;
@@ -516,6 +465,45 @@ static void camera_draw(Cpu* c) {
     }
     f_024FFC40_orig(c);
     capture_projection(*p);
+}
+
+// dCamera_c::bumpCheck (024FD11C, from dCamera_c::Run in the camera's execute): the collision check
+// that pulls the eye in front of walls, trees and bushes. dCamera_c +0 is its camera process (the
+// one camera_draw draws), +0x510 mEventFlags: Run clears 0x80 and 0x80000 just before the call, and
+// bumpCheck sets 0x80 (wall hit, eye placed in front of it) or 0x80000 (corner). The step's
+// camera_draw applies the 10 % distance rule (interp_camera.h) only on such steps, and for event and
+// demo cameras (style algorithm 11: mCamParam +4 -> +4; the demo object's active camera,
+// dDemo_object_c +0x84).
+extern "C" void f_024FD11C_orig(Cpu* c);
+extern "C" void hook_024FD11C(Cpu* c) {
+    using namespace interp;
+    const uint32_t dcam = c->r[3];
+    f_024FD11C_orig(c);
+    if (!enabled()) return;
+    const uint32_t cam = ld32(dcam);
+    camera::StepInfo info;
+    info.pulled = (ld32(dcam + 0x510) & 0x80080u) != 0;
+    const uint32_t param = ld32(dcam + 0x8A8);
+    info.event = param && ld32(param + 4) == 11;
+    const uint32_t demo = ld32(GD(0x101D5FFC));
+    info.event = info.event || (demo && ld32(demo + 0x84) != 0);
+    CamStep* slot = nullptr;
+    for (auto& s : g_cam_step)
+        if (s.cam == cam) slot = &s;
+    if (!slot) {  // a new camera process: the slot used longest ago
+        slot = &g_cam_step[0];
+        for (auto& s : g_cam_step)
+            if (s.step == ~0ull || (slot->step != ~0ull && s.step < slot->step)) slot = &s;
+    }
+    slot->cam = cam;
+    slot->step = g_logic_steps;
+    slot->info = info;
+    static int trace = getenv("WWHD_INTERP_CAM_TRACE") ? atoi(getenv("WWHD_INTERP_CAM_TRACE")) : 0;
+    if (trace > 0 && (info.pulled || info.event)) {
+        trace--;
+        LOG("[interp] camera %08X step %llu: %s%s", cam, (unsigned long long)g_logic_steps, info.pulled ? "collision pull-in " : "",
+            info.event ? "event/demo camera" : "");
+    }
 }
 
 // Models. J3DModel::calc (027F4D5C, actor Execute or Draw) writes the world (joint) matrices:

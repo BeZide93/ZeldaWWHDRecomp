@@ -14,6 +14,7 @@
 @026277A8 # Boat-race timer formatting: presentation-only fractional milliseconds
 @026E9C24 # Shared HUD timer formatting: presentation-only fractional milliseconds
 024FFC40  # camera_draw: blended camera on logic passes
+024FD11C  # dCamera_c::bumpCheck: steps where the collision check pulled the eye in (camera distance rule)
 # children of the per-frame function; on hold passes each runs or is skipped (interp.cpp kHoldRun)
 02032FE8  # per-frame child 0
 020357CC  # per-frame child 1
