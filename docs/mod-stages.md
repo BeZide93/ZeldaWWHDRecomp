@@ -450,6 +450,11 @@ The editor's **Stages** tab (in the Outliner and under **Settings → Editor**) 
   copies the model into the mod, adds the stage, builds it and takes Link to its first spawn.
 - Each stage's rooms, **Add room** (another model), **Rebuild**, **Warp in** and **Check** (the problems, as
   a list).
+- **Lava**: **Lava floor here** puts the game's lava floor at Link's feet (its size in the fields next to the
+  button) and **Heat shimmer here** the heat haze. In the picture a lava floor shows as an orange outline with
+  two round marks: the middle one moves it, the corner one sizes it (letting go is one undo step). Selecting it
+  shows its size in the Stages tab, and **Remove this lava floor**. Give the room's model a `col_lava` surface at
+  the same height and **Rebuild**.
 - **Where Link stands**: inside the stage, a spawn, a return warp, an exit (to the sea outside the lava cave
   or to a spawn of the stage), a door to another room with its lock, a chest with its item, an enemy or a
   pot. In a room of the game, the stage's entry.

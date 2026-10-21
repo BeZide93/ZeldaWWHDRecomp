@@ -47,6 +47,7 @@ void models_area(const Value& m);
 void scenes_area(const Value& m);
 void quests_area(const Value& m);
 void warp_area();
+bool stage_item(std::string& stage, std::string& field);  // the stage item whose handle shows in the picture (stage id, its field)
 void stages_area(const Value& m);      // the Stages tab (editor_stages.cpp): new stages, rooms, rebuild, warp, check, place here
 void camera_test_area();
 void log_area();

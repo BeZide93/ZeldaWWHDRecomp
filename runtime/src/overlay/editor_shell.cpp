@@ -785,6 +785,9 @@ bool stages_overlay(ImDrawList* dl, const View& v, const Value& m, const std::st
         std::string stage, field;  // set_stage_field's
         float p[3];
         Value box;  // an exit's: its box, moved with it
+        bool size = false;  // a lava floor's size: the corner handle; letting go sets {x, z} (its centre and turn)
+        float centre[3] = {0, 0, 0};
+        double angle = 0;
     };
     std::vector<Handle> handles;
     auto handle = [&](const std::string& st, const std::string& field, const float p[3], const Value& box = Value()) {
@@ -835,6 +838,31 @@ bool stages_overlay(ImDrawList* dl, const View& v, const Value& m, const std::st
             for (const auto& a : r.get("actors").array) {
                 float p[3];
                 if (!point3(a.get("position"), p)) continue;
+                const std::string af = rf + "actors/" + std::to_string(&a - r.get("actors").array.data());
+                if (a.get("actor").string() == "lava") {  // the lava floor's area, turned by its angle, and its size handle
+                    const double an = num(a, "angle") * kPi / 180, ca = std::cos(an), sa = std::sin(an);
+                    const float hx = float(num(a.get("size"), "x")) / 2, hz = float(num(a.get("size"), "z")) / 2;
+                    auto corner = [&](float lx, float lz, float out[3]) {
+                        out[0] = p[0] + float(lx * ca + lz * sa), out[1] = p[1], out[2] = p[2] + float(-lx * sa + lz * ca);
+                    };
+                    float c[4][3];
+                    corner(-hx, -hz, c[0]), corner(hx, -hz, c[1]), corner(hx, hz, c[2]), corner(-hx, hz, c[3]);
+                    for (int k = 0; k < 4; ++k) line3(dl, v, c[k], c[(k + 1) % 4], IM_COL32(255, 120, 40, 230), 2.5f);
+                    label3(dl, v, p, IM_COL32(255, 160, 90, 230), a.get("id").string() + " (lava " + std::to_string(int(2 * hx)) + " x " + std::to_string(int(2 * hz)) + ")");
+                    handle(sid, af + "/position", p);
+                    Handle sz{sid, af + "/size", {c[2][0], c[2][1], c[2][2]}, Value()};
+                    sz.size = true, sz.angle = an;
+                    std::memcpy(sz.centre, p, sizeof sz.centre);
+                    handles.push_back(sz);
+                    continue;
+                }
+                if (a.get("actor").string() == "heat_shimmer") {
+                    const float lo[3] = {p[0] - 40, p[1], p[2] - 40}, hi[3] = {p[0] + 40, p[1] + 80, p[2] + 40};
+                    box3(dl, v, lo, hi, IM_COL32(255, 200, 120, 200), 1.5f);
+                    label3(dl, v, hi, IM_COL32(255, 210, 150, 230), a.get("id").string() + " (heat shimmer)");
+                    handle(sid, af + "/position", p);
+                    continue;
+                }
                 const bool chest = a.get("actor").string() == "chest";
                 const float lo[3] = {p[0] - 50, p[1], p[2] - 40}, hi[3] = {p[0] + 50, p[1] + 70, p[2] + 40};
                 box3(dl, v, lo, hi, chest ? IM_COL32(255, 210, 80, 230) : IM_COL32(230, 230, 230, 200), 1.5f);
@@ -907,7 +935,14 @@ bool stages_overlay(ImDrawList* dl, const View& v, const Value& m, const std::st
         Value prm;
         prm["stage"] = chosen->stage;
         prm["field"] = chosen->field;
-        if (chosen->box.type == Value::Object) {  // an exit: its box moves by the handle's way
+        if (chosen->size) {  // a lava floor's corner: its size from the centre, in the floor's own turn
+            const double dx = S.stage_drag[12] - chosen->centre[0], dz = S.stage_drag[14] - chosen->centre[2];
+            const double lx = dx * std::cos(chosen->angle) - dz * std::sin(chosen->angle), lz = dx * std::sin(chosen->angle) + dz * std::cos(chosen->angle);
+            auto side = [](double h) { return std::clamp(std::round(2 * std::fabs(h) / 10) * 10, 100.0, 25500.0); };
+            prm["value"]["x"] = side(lx);
+            prm["value"]["z"] = side(lz);
+            editor_ui::command("set_stage_field", prm);
+        } else if (chosen->box.type == Value::Object) {  // an exit: its box moves by the handle's way
             const float d[3] = {S.stage_drag[12] - chosen->p[0], S.stage_drag[13] - chosen->p[1], S.stage_drag[14] - chosen->p[2]};
             float lo[3], hi[3];
             if (point3(chosen->box.get("min"), lo) && point3(chosen->box.get("max"), hi)) {
@@ -2111,3 +2146,11 @@ void show_story() {
 }
 
 }  // namespace editor_shell
+
+namespace editor_ui {
+// the stage item whose handle shows in the picture (editor_panel.h)
+bool stage_item(std::string& stage, std::string& field) {
+    stage = editor_shell::S.stage_item_stage, field = editor_shell::S.stage_item_field;
+    return !field.empty();
+}
+}  // namespace editor_ui
