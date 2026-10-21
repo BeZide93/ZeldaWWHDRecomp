@@ -921,7 +921,7 @@ void service(Cpu* c){
             LOG("[game_objects] %s:%s quarantined: the game made process %04X params %08X subtype %u (wanted %04X %08X %u)",a.mod.c_str(),a.spec.id.c_str(),unsigned(ld16(actor+0xE)),ld32(actor+0xB0),unsigned(ld8(actor+0x2DD)),unsigned(a.game_native.process),a.game_native.params,unsigned(a.game_native.subtype));
             probe=*c;if(g_call(&probe,kDelete,{actor}))a.deleting=true;a.restore_quarantined=a.game_mismatch=a.game_checked=true;continue;
         }
-        if(!ld32(actor+0xF4))continue;  // its create phase hasn't made the object's own heap yet
+        if(a.game_native.own_heap&&!ld32(actor+0xF4))continue;  // its create phase hasn't made the object's own heap yet
         a.game_checked=true;
         LOG("[game_objects] %s:%s %s: %s process %04X params %08X at %.1f %.1f %.1f",a.mod.c_str(),a.spec.id.c_str(),a.game_attempts?"made":"read back after a state load",a.spec.actor.c_str(),unsigned(a.game_native.process),a.game_native.params,double(ldf32(actor+0x314)),double(ldf32(actor+0x318)),double(ldf32(actor+0x31C)));
         story_game_objects::trace_created(c,g_call,a.mod,a.spec.id,actor);a.game_attempts=0;

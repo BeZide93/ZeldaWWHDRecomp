@@ -62,6 +62,7 @@ struct Entry {
     bool yaw_only = true;     // rotation: a turn about the vertical axis only
     float scale_min = 1, scale_max = 1;  // uniform scale
     bool collision = false;
+    bool own_heap = true;  // false: the object makes no heap of its own (particles only, a steam vent)
     uint64_t instance_bytes = 0, archive_bytes = 0;
     Packet packet;
     bool batch() const { return !packet.kind.empty(); }
@@ -78,6 +79,13 @@ inline bool neutral_id(const std::string& s) {
     return s.find_first_not_of("abcdefghijklmnopqrstuvwxyz0123456789-") == std::string::npos;
 }
 // a stage actor name: up to 7 characters (the game's names are 8 bytes with the terminator)
+// an object archive's name: the game's are up to 8 characters ("Yfire_00"); 15 with the terminator in 16
+inline bool archive_name_ok(const std::string& s) {
+    if (s.empty() || s.size() > 15) return false;
+    for (char c : s)
+        if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_')) return false;
+    return true;
+}
 inline bool native_name_ok(const std::string& s) {
     if (s.empty() || s.size() > 7) return false;
     for (char c : s)
@@ -137,11 +145,11 @@ inline bool Catalogue::add_table(const std::string& table, std::string& why) {
         e.process = text(n.get("process"));
         e.archive = text(n.get("archive"));
         if (!native_name_ok(e.native_name)) return why = e.id + ": invalid native name", false;
-        if (!native_name_ok(e.archive)) return why = e.id + ": invalid archive", false;
+        if (!archive_name_ok(e.archive)) return why = e.id + ": invalid archive", false;
         if (n.get("also_archives").type != Value::Null) {
             if (n.get("also_archives").type != Value::Array || n.get("also_archives").array.size() > 4) return why = e.id + ": also_archives must be a list of up to 4", false;
             for (const Value& a : n.get("also_archives").array) {
-                if (a.type != Value::String || !native_name_ok(a.text)) return why = e.id + ": invalid archive in also_archives", false;
+                if (a.type != Value::String || !archive_name_ok(a.text)) return why = e.id + ": invalid archive in also_archives", false;
                 e.also_archives.push_back(a.text);
             }
         }
@@ -181,6 +189,10 @@ inline bool Catalogue::add_table(const std::string& table, std::string& why) {
             return why = e.id + ": scale limits must lie within 0.5..2 and include 1", false;
         if (o.get("collision").type != Value::Bool) return why = e.id + ": collision must be true or false", false;
         e.collision = o.get("collision").boolean;
+        if (o.get("own_heap").type != Value::Null) {
+            if (o.get("own_heap").type != Value::Bool) return why = e.id + ": own_heap must be true or false", false;
+            e.own_heap = o.get("own_heap").boolean;
+        }
         const Value& mem = o.get("memory");
         if (!whole(mem.get("instance_bytes"), 1, 4 << 20) || !whole(mem.get("archive_bytes"), 0, 8 << 20))
             return why = e.id + ": memory needs instance_bytes and archive_bytes", false;

@@ -32,7 +32,26 @@ int main() {
     std::string why;
     // ---- the port's recipes
     const auto& c = story_game_objects::catalogue();
-    assert(c.version == 1);
+    assert(c.version == 6);  // the volcanic kit (fire and lava) came with version 6
+    for (const auto& e : c.entries) assert(e.since == 1 || (e.group == "volcanic" && e.since == 6));
+    {
+        // the volcanic kit: always lit, no switch (0xFF fields), each the game's own stage actor name
+        const auto* torch = c.find("torch");
+        assert(torch && torch->native_name == "bonbori" && torch->archive == "Ep" && torch->variant("")->params == 0xFFFFFF03 && torch->variant("torch-stand")->params == 0xFFFFFF83 && torch->own_heap);
+        const auto* flame = c.find("flame");
+        assert(flame && flame->native_name == "bonbori" && flame->variant("")->params == 0xFFFFFF01 && !flame->own_heap && !flame->collision);
+        const auto* jet = c.find("fire-jet");
+        assert(jet && jet->native_name == "Yfire00" && jet->archive == "Yfire_00" && ((jet->variant("")->params >> 16) & 0xFF) == 0xFF && (jet->variant("")->params & 0xFF) == 0);
+        assert(!c.find("steam-vent"));  // the game's steam vents use their own stage's particles: nothing shows elsewhere
+        const auto* bubbles = c.find("lava-bubbles");
+        assert(bubbles && bubbles->native_name == "Yboil00" && ((bubbles->variant("")->params >> 8) & 0xFF) == 0xFF);
+        // an archive name of eight characters (the game's "Yfire_00") is accepted, a longer name than 15 is not
+        // a manifest names them with catalogue version 6
+        const std::string flower_actor = R"({"id": "f", "actor": "game:fire-jet", "stage": "sea", "room": 44, "position": {"x": 1, "y": 2, "z": 3}})";
+        assert(parses(manifest(flower_actor, R"({"game_objects": 6})"), why));
+        assert(!parses(manifest(flower_actor, R"({"game_objects": 5})"), why) && why.find("6") != std::string::npos);
+        assert(story_game_objects::archive_name_ok("Yfire_00") && !story_game_objects::archive_name_ok("ABCDEFGHIJKLMNOP") && !story_game_objects::native_name_ok("Yfire_00"));
+    }
     for (const char* id : {"palm", "tree-large", "table"}) assert(c.find(id));
     const auto* table = c.find("table");
     assert(table->native_name == "Table" && table->archive == "Table" && table->subtype == 255 && table->variants.size() == 3);
