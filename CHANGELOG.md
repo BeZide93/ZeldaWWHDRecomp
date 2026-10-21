@@ -7,6 +7,11 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Dynamic resolution** (all platforms, off by default; idea from the GreenNaugahyde Android fork). Settings →
+  Graphics → Dynamic resolution lowers the internal resolution in small steps (down to 75% or 50%) while the
+  graphics chip holds the game back, and raises it again when there is room. The picture keeps its size and is scaled
+  smoothly, and a change of level causes no stutter. It helps on devices where the graphics chip, not the processor,
+  is the limit; it costs some extra graphics memory (about 35 MB on a phone). See the Android and Vulkan docs.
 - **Fewer shader variants on Metal (macOS)** (idea from the GreenNaugahyde Android fork). Metal now keys shaders on
   the same narrow state as the Vulkan renderer, so the same scenes need far fewer shaders and pipelines (in our Outset
   test about 500 instead of 3,500 shaders); existing shader caches keep working. Pictures are unchanged.
