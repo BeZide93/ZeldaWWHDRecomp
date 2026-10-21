@@ -23,6 +23,9 @@ public:
     ShaderCompileTicket(const ShaderCompileTicket&) = delete;
     ShaderCompileTicket& operator=(const ShaderCompileTicket&) = delete;
     bool ready() const;
+    // Move a still queued job to the front: something now waits for it (Shader compile Safe / Fast
+    // queue draws that were left out ahead of the ones that must wait).
+    void prioritize() const;
     std::optional<ShaderCompileResult> wait_for(uint64_t budgetNs);
     ShaderCompileResult consume();
 private:

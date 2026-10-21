@@ -1687,7 +1687,7 @@ void copy_surface_impl(uint32_t srcAddr,uint32_t srcMip,uint32_t srcSlice,uint32
             if(better(image.get())){gpuSrc=image.get();gpuLevel=srcMip;}
     }
     if(gpuSrc&&gpuLevel==0)gpuSrc=adopt_newer_alias(gpuSrc);
-    // Compile shaders in the background: a target copied from now and then keeps its draws exact
+    // Shader compile (background_shaders.h): a target copied from now and then keeps its draws exact
     if(gpuSrc&&bgshaders::enabled())bgshaders::tracker().copied(gpuSrc->addr,R.frame);
     if(gpuSrc) {
         if(gpuSrc->imageType==VK_IMAGE_TYPE_3D)exception_report::raise("Vulkan GPU GX2CopySurface volume slices are unsupported");
