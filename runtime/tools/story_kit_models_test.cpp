@@ -64,7 +64,7 @@ int main() {
     assert(id.size() == 31 && id.rfind("gk", 0) == 0 && id == story_kit_models::identity("my-mod", "island", text));
     assert(id != story_kit_models::identity("other", "island", text) && id != story_kit_models::identity("my-mod", "ruins", text) &&
            id != story_kit_models::identity("my-mod", "island", text + " "));
-    assert(story_kit_models::cache_directory("/m/Data/my-mod") == "/m/Data/.kit-models" && story_kit_models::cache_directory("").empty());
+    assert(std::filesystem::path(story_kit_models::cache_directory("/m/Data/my-mod")) == std::filesystem::path("/m/Data/.kit-models") && story_kit_models::cache_directory("").empty());
     // a distant model's recipe says so (its game textures are drawn smaller)
     assert(mods::json::parse(story_kit_models::recipe(model, "/g.glb", true)).get("far").boolean &&
            mods::json::parse(story_kit_models::recipe(model, "/g.glb")).get("far").type == Value::Null);
