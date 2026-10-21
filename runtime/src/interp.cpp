@@ -38,6 +38,7 @@ namespace interp {class NativeResumeBoundaryIssuer {public:static void after_ser
 #include <vector>
 
 #include "interp_camera.h"
+#include "interp_fade.h"
 #include "interp_joints.h"
 #include "interp_nodraw.h"
 #include "interp_pacing.h"
@@ -1226,6 +1227,7 @@ std::string pass_cpu_report() {
 }  // namespace
 }  // namespace interp
 
+static void fader_between_passes();  // debug (WWHD_INTERP_FADER_TRACE), below
 extern "C" void hook_0203593C(Cpu* c) {
     using namespace interp;
     // Opt-in countdown trace: scalar timing measurements only, no save or asset data.
@@ -1260,6 +1262,7 @@ extern "C" void hook_0203593C(Cpu* c) {
             }
         }
     } countdown_trace{enabled() && g_hold_next};
+    fader_between_passes();
     perf::game_frame();
     fx_pass_start();
     ss::service(c);  // save states: exact values are back in guest memory, all other threads idle
@@ -1434,14 +1437,54 @@ static bool hold_skip_child(int i) {
     static const uint32_t run = (getenv("WWHD_HOLD_RUN") ? (uint32_t)strtoul(getenv("WWHD_HOLD_RUN"), nullptr, 0) : 0x7FCC) | 1;
     return interp::g_hold_frame && !(run & (1u << i)) && called_from_frame_function();
 }
-extern "C" void hook_02032FE8(Cpu* c) { g_hold_child_cpu = c; if (!hold_skip_child(0)) f_02032FE8_orig(c); }
-extern "C" void hook_020357CC(Cpu* c) { g_hold_child_cpu = c; if (!hold_skip_child(1)) f_020357CC_orig(c); }
-extern "C" void hook_025EE048(Cpu* c) { g_hold_child_cpu = c; if (!hold_skip_child(2)) f_025EE048_orig(c); }
-extern "C" void hook_02756170(Cpu* c) { g_hold_child_cpu = c; if (!hold_skip_child(3)) f_02756170_orig(c); }
-extern "C" void hook_02617AF4(Cpu* c) { g_hold_child_cpu = c; if (!hold_skip_child(4)) f_02617AF4_orig(c); }
-extern "C" void hook_02614F74(Cpu* c) { g_hold_child_cpu = c; if (!hold_skip_child(5)) f_02614F74_orig(c); }
-extern "C" void hook_0273841C(Cpu* c) { g_hold_child_cpu = c; if (!hold_skip_child(6)) f_0273841C_orig(c); }
-extern "C" void hook_0270870C(Cpu* c) { g_hold_child_cpu = c; if (!hold_skip_child(7)) f_0270870C_orig(c); }
+// debug: WWHD_INTERP_FADER_TRACE=n logs n changes of the HD display's fader object (*101F86B4 +0x440,
+// the stage fade dOvlpFd_startFadeInHD starts): which per-frame child, or the time between passes
+// (painter), changed which words
+namespace {
+int g_fader_trace = getenv("WWHD_INTERP_FADER_TRACE") ? atoi(getenv("WWHD_INTERP_FADER_TRACE")) : 0;
+uint32_t g_fader_words[64];
+uint32_t fader_object() {
+    const uint32_t d = ld32(GD(0x101F86B4));
+    return d >= 0x10000000 && d < 0x50000000 ? ld32(d + 0x440) : 0;
+}
+void fader_snap() {
+    const uint32_t f = fader_object();
+    for (int i = 0; i < 64; i++) g_fader_words[i] = f >= 0x10000000 && f < 0x50000000 ? ld32(f + 4 * i) : 0;
+}
+void fader_diff(const char* who) {
+    const uint32_t f = fader_object();
+    if (f >= 0x10000000 && f < 0x50000000 && g_fader_trace > 0) {
+        std::string o;
+        for (int i = 0; i < 64; i++) {
+            const uint32_t w = ld32(f + 4 * i);
+            if (w == g_fader_words[i]) continue;
+            char b[48];
+            snprintf(b, sizeof b, " +%02X:%08X->%08X", 4 * i, g_fader_words[i], w);
+            o += b;
+        }
+        if (!o.empty()) {
+            g_fader_trace--;
+            LOG("[fader] step %llu pass %llu %s %s (%08X):%s", (unsigned long long)interp::g_logic_steps, (unsigned long long)interp::g_passes,
+                interp::g_hold ? "hold" : "logic", who, f, o.c_str());
+        }
+    }
+    fader_snap();
+}
+struct FaderWatch {
+    const char* who;
+    explicit FaderWatch(const char* w) : who(w) { if (g_fader_trace > 0) fader_diff("before"); }
+    ~FaderWatch() { if (g_fader_trace > 0) fader_diff(who); }
+};
+}  // namespace
+static void fader_between_passes() { if (g_fader_trace > 0) fader_diff("between passes (painter)"); }
+extern "C" void hook_02032FE8(Cpu* c) { FaderWatch fw("child 0"); g_hold_child_cpu = c; if (!hold_skip_child(0)) f_02032FE8_orig(c); }
+extern "C" void hook_020357CC(Cpu* c) { FaderWatch fw("child 1"); g_hold_child_cpu = c; if (!hold_skip_child(1)) f_020357CC_orig(c); }
+extern "C" void hook_025EE048(Cpu* c) { FaderWatch fw("child 2"); g_hold_child_cpu = c; if (!hold_skip_child(2)) f_025EE048_orig(c); }
+extern "C" void hook_02756170(Cpu* c) { FaderWatch fw("child 3"); g_hold_child_cpu = c; if (!hold_skip_child(3)) f_02756170_orig(c); }
+extern "C" void hook_02617AF4(Cpu* c) { FaderWatch fw("child 4"); g_hold_child_cpu = c; if (!hold_skip_child(4)) f_02617AF4_orig(c); }
+extern "C" void hook_02614F74(Cpu* c) { FaderWatch fw("child 5"); g_hold_child_cpu = c; if (!hold_skip_child(5)) f_02614F74_orig(c); }
+extern "C" void hook_0273841C(Cpu* c) { FaderWatch fw("child 6"); g_hold_child_cpu = c; if (!hold_skip_child(6)) f_0273841C_orig(c); }
+extern "C" void hook_0270870C(Cpu* c) { FaderWatch fw("child 7"); g_hold_child_cpu = c; if (!hold_skip_child(7)) f_0270870C_orig(c); }
 namespace interp { void light_trace_add(const char* fmt, ...); }
 // dKy_setLight (child 8, every pass) keeps state across calls: the candle flicker target (static,
 // smoothed with cLib_addCalc2 toward a random value per call), the eflight target and the main
@@ -1457,6 +1500,7 @@ struct SetLightState {
 } g_setlight;
 }  // namespace
 extern "C" void hook_0255E854(Cpu* c) {
+    FaderWatch fw("child 8");
     g_hold_child_cpu = c;
     if (hold_skip_child(8)) return;
     if (interp::enabled() && called_from_frame_function()) {
@@ -1499,17 +1543,43 @@ extern "C" void hook_0255E854(Cpu* c) {
                             st ? ldf32(st + 4) : 0.0, st ? ldf32(st + 8) : 0.0);
 }
 extern "C" void hook_02738438(Cpu* c) {
+    FaderWatch fw("child 9");
     g_hold_child_cpu = c;
     if (hold_skip_child(9)) return;
     uint32_t o = c->r[3];
     interp::light_trace_add(" hdl[%08X %08X %08X %08X]", ld32(o + 0x10), ld32(o + 0x14), ld32(o + 0x18), ld32(o + 0x1C));
     f_02738438_orig(c);
 }
-extern "C" void hook_0278FEBC(Cpu* c) { g_hold_child_cpu = c; if (!hold_skip_child(10)) f_0278FEBC_orig(c); }
-extern "C" void hook_027199C0(Cpu* c) { g_hold_child_cpu = c; if (!hold_skip_child(11)) f_027199C0_orig(c); }
-extern "C" void hook_02618940(Cpu* c) { g_hold_child_cpu = c; if (!hold_skip_child(12)) f_02618940_orig(c); }
-extern "C" void hook_02728A74(Cpu* c) { g_hold_child_cpu = c; if (!hold_skip_child(13)) f_02728A74_orig(c); }
-extern "C" void hook_02039834(Cpu* c) { g_hold_child_cpu = c; if (!hold_skip_child(14)) f_02039834_orig(c); }
+extern "C" void hook_0278FEBC(Cpu* c) { FaderWatch fw("child 10"); g_hold_child_cpu = c; if (!hold_skip_child(10)) f_0278FEBC_orig(c); }
+extern "C" void hook_027199C0(Cpu* c) { FaderWatch fw("child 11"); g_hold_child_cpu = c; if (!hold_skip_child(11)) f_027199C0_orig(c); }
+extern "C" void hook_02618940(Cpu* c) { FaderWatch fw("child 12"); g_hold_child_cpu = c; if (!hold_skip_child(12)) f_02618940_orig(c); }
+// Child 13 (02728A74) advances the HD display's fader (the stage fades) on every pass it runs, so
+// they ran 2x/4x/8x too fast with frame interpolation (a 26-frame stage fade-in: 0.22 s at 120 fps
+// instead of 0.87 s). Gated (interp_fade.h fader_call): advanced once per logic step, shown at the
+// pass's fraction. Fader object: *101F86B4 (the display) +0x440.
+// debug: WWHD_INTERP_FADER=0 turns the gate off
+extern "C" void hook_02728A74(Cpu* c) {
+    FaderWatch fw("child 13");
+    g_hold_child_cpu = c;
+    if (hold_skip_child(13)) return;
+    static const bool off = getenv("WWHD_INTERP_FADER") && !atoi(getenv("WWHD_INTERP_FADER"));
+    const uint32_t f = fader_object();
+    if (!interp::enabled() || off || !called_from_frame_function() || f < 0x10000000 || f >= 0x50000000) {
+        f_02728A74_orig(c);
+        return;
+    }
+    static interp::fade::FaderGate gate;
+    interp::fade::Fader v;
+    for (int i = 0; i < 3; i++) v.w[i] = ld32(f + 4 * i);
+    auto put = [&](const interp::fade::Fader& x) { for (int i = 0; i < 3; i++) st32(f + 4 * i, x.w[i]); };
+    interp::fade::fader_call(gate, interp::g_logic_steps, !interp::g_hold_frame, interp::pass_t(), v, [&](interp::fade::Fader& x) {
+        put(x);
+        f_02728A74_orig(c);
+        for (int i = 0; i < 3; i++) x.w[i] = ld32(f + 4 * i);
+    });
+    put(v);
+}
+extern "C" void hook_02039834(Cpu* c) { FaderWatch fw("child 14"); g_hold_child_cpu = c; if (!hold_skip_child(14)) f_02039834_orig(c); }
 
 
 // logic parts of fpcM_Management / fapGm_Execute, skipped on hold passes
@@ -1722,4 +1792,64 @@ extern "C" void hook_02574144(Cpu* c) {
     f_02574144_orig(c);
     for (int i = 3; i >= 0; i--)
         if (swapped[i]) write_cam(g_prev[i].cam, exact[i]);
+}
+// Screen fade (mDoGph_calcFade 025F06A8): called once per drawn frame, so every fade (stage entry,
+// scene changes) ran 2x/4x/8x too fast with frame interpolation. Advanced once per logic step and
+// shown at the drawn pass's fraction (interp_fade.h). l_graphics (101F4808): +8 mFadeRate, +0xC
+// mFadeSpeed, +0x1F mFade.
+// debug: WWHD_INTERP_FADE_TRACE=n logs n calls (step, pass fraction, rate before and after)
+extern "C" void f_025F06A8_orig(Cpu* c);
+extern "C" void hook_025F06A8(Cpu* c) {
+    using namespace interp;
+    if (!enabled()) {
+        f_025F06A8_orig(c);
+        return;
+    }
+    const uint32_t g = GD(0x101F4808);
+    static fade::Gate gate;
+    fade::State s{(float)ldf32(g + 8), (float)ldf32(g + 0xC), (uint8_t)ld8(g + 0x1F)};
+    const float before = s.rate;
+    const float t = display_t();
+    fade::call(gate, g_logic_steps, t, s, [&](fade::State& v) {
+        stf32(g + 8, v.rate);
+        stf32(g + 0xC, v.speed);
+        st8(g + 0x1F, v.fade);
+        f_025F06A8_orig(c);
+        v.rate = (float)ldf32(g + 8);
+        v.speed = (float)ldf32(g + 0xC);
+        v.fade = (uint8_t)ld8(g + 0x1F);
+    });
+    stf32(g + 8, s.rate);
+    stf32(g + 0xC, s.speed);
+    st8(g + 0x1F, s.fade);
+    static int trace = getenv("WWHD_INTERP_FADE_TRACE") ? atoi(getenv("WWHD_INTERP_FADE_TRACE")) : 0;
+    static uint64_t calls_step = ~0ull;
+    static int calls = 0, calls_logged = 0;
+    if (calls_step != g_logic_steps) {
+        if (trace > 0 && calls_step != ~0ull && calls_logged < 10) {
+            calls_logged++;
+            LOG("[interp] fade: mDoGph_calcFade called %d times in step %llu", calls, (unsigned long long)calls_step);
+        }
+        calls_step = g_logic_steps;
+        calls = 0;
+    }
+    calls++;
+    if (trace > 0 && s.fade) {
+        trace--;
+        LOG("[interp] fade: step %llu pass %llu t %.3f rate %.4f -> %.4f speed %.4f alpha %u", (unsigned long long)g_logic_steps,
+            (unsigned long long)g_passes, t, before, s.rate, s.speed, ld8(g + 0x17));
+    }
+}
+// debug: mDoGph_calcMonotone (025F0840) calls per logic step (WWHD_INTERP_FADE_TRACE)
+extern "C" void f_025F0840_orig(Cpu* c);
+extern "C" void hook_025F0840(Cpu* c) {
+    static int trace = getenv("WWHD_INTERP_FADE_TRACE") ? atoi(getenv("WWHD_INTERP_FADE_TRACE")) : 0;
+    const uint32_t g = GD(0x101F4808);
+    const int16_t before = (int16_t)ld16(g + 0x18);
+    f_025F0840_orig(c);
+    if (trace > 0 && before != (int16_t)ld16(g + 0x18)) {
+        trace--;
+        LOG("[interp] monotone: step %llu pass %llu rate %d -> %d", (unsigned long long)interp::g_logic_steps,
+            (unsigned long long)interp::g_passes, before, (int16_t)ld16(g + 0x18));
+    }
 }
