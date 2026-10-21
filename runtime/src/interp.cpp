@@ -394,17 +394,32 @@ Prev* prev_for(uint32_t cam) {
 }
 }  // namespace
 
+// 40 fps: the logic pass's fraction (pacing::Fractions40), set by plan_step_40 (g_step40: this
+// step was planned at 40 fps)
+bool g_step40 = false;
+float g_t40 = 1.0f;
+pacing::Fractions40 g_frac40;
 // blend fraction of this pass: 1/(N+1) on a logic pass, (k+1)/(N+1) on blended hold pass k, 1 on
-// the record pass, an exact step and without interpolation
+// the record pass, an exact step and without interpolation (40 fps logic passes: Fractions40)
 float pass_t() {
     if (!enabled()) return 1.0f;
+    if (g_step40 && !g_hold) return g_t40;
     return pacing::pass_fraction(g_hold ? g_phase : 0, g_step_n, g_exact_step);
 }
-// the step's exact state is drawn and recorded (the "before" of the next step's blended frames): the
-// record pass, or at 40 fps the logic pass of a step without an in-between frame (a record logic pass:
-// logic, then drawn exactly and recorded)
+// At 40 fps the logic pass of a step without an in-between frame also records its step (g_record_logic):
+// - after a record pass it is a blended record pass: drawn blended (pass_t()), and what it draws is
+//   recorded as it is at the step (exact) for the next step's frames (record_blended());
+// - an exact step (no record pass before it) is drawn exactly and recorded like a record pass.
 bool g_record_logic = false;
-bool record_pass() { return (g_hold && g_phase >= g_step_n) || g_record_logic; }
+// the step's exact state is drawn and recorded (the "before" of the next step's blended frames): the
+// record pass, or an exact record logic pass at 40 fps
+bool record_pass() { return (g_hold && g_phase >= g_step_n) || (g_record_logic && g_exact_step); }
+// a blended record pass (40 fps): drawn blended, its step recorded for the next step's frames. Its
+// records are stamped hold_pass_count() + 1 (record_stamp): the count goes up when the next pass
+// starts (g_record_pending), so that this pass's blends still see the records from before it.
+bool record_blended() { return g_record_logic && !g_exact_step; }
+bool g_record_pending = false;
+uint64_t record_stamp() { return g_record_passes + (record_blended() ? 1 : 0); }
 
 // A sight point follows the camera's draw fraction, including camera cuts. A
 // blend can also snap internally (a >45 degree turn or abrupt collision zoom).
@@ -524,6 +539,11 @@ static void camera_draw_body(Cpu* c) {
         g_cam_blended = false;
         write_cam(cam, cur);
         if (trim_drawn == trim_drawn) stf32(cam + kCamBody + kTrimHeight, trim_drawn);  // (exact back)
+        if (record_blended()) {  // 40 fps blended record pass: the step's camera for the next step's frames
+            p->s = cur;
+            p->trim = (float)ldf32(cam + kCamBody + kTrimHeight);
+            p->valid = true;
+        }
         return;
     }
     p->s = read_cam(cam);  // exact step: remember it for the next step's blended frames
@@ -675,6 +695,8 @@ struct ModelPrev {
     std::vector<uint8_t> stale;  // per joint: hidden and not updated on that record pass (interp_joints.h)
 };
 std::unordered_map<uint32_t, ModelPrev> g_models;
+// 40 fps blended record pass: the records it replaced, which its blends use (cleared every pass)
+std::unordered_map<uint32_t, ModelPrev> g_models_before;
 // shown: joints of blended models drawn at the current step (hidden pose joints coming back)
 struct ModelStats { uint32_t blended = 0, fresh = 0, cut = 0, shown = 0; } g_mstats;
 
@@ -839,12 +861,20 @@ extern "C" void hook_027F55FC(Cpu* c) {
     }
     const uint32_t words = 12 * n;
     const uint32_t* cur = (const uint32_t*)ppc_ptr(mtx);  // guest (big-endian) words
-    if (record) {  // exact step: remember it for the next step's blended frames
+    // 40 fps blended record pass: this step is recorded (stamped for the next pass) and drawn blended
+    // from the record it replaces
+    const bool blendRecord = record_blended();
+    const uint64_t stamp = record_stamp();
+    if (blendRecord) {
+        auto old = g_models.find(jnt);
+        if (old != g_models.end() && old->second.pass != stamp) g_models_before[jnt] = old->second;
+    }
+    if (record || blendRecord) {  // exact step: remember it for the next step's blended frames
         ModelPrev& p = g_models[jnt];
         // joints hidden and not written since the last record pass: drawn at the next step instead of
         // blended from here (interp_joints.h; a model drawn twice in a pass keeps its first decision)
-        if (p.pass != g_record_passes || p.stale.size() != n) {
-            const bool before = p.pass + 1 == g_record_passes && p.mtx == mtx && p.w.size() == words;
+        if (p.pass != stamp || p.stale.size() != n) {
+            const bool before = p.pass + 1 == stamp && p.mtx == mtx && p.w.size() == words;
             const uint32_t data = ld32(model + 0xAC);
             const bool layout = data && ld32(data + 4) == n && ld32(data + 8);
             p.stale.assign(n, 0);
@@ -855,7 +885,7 @@ extern "C" void hook_027F55FC(Cpu* c) {
         // record pass with other matrices (one model placed several times per pass: only the last
         // placement is recorded, so the next step's first placement would blend from another one)
         static int multidraw = getenv("WWHD_INTERP_MULTIDRAW") ? atoi(getenv("WWHD_INTERP_MULTIDRAW")) : 0;
-        if (multidraw > 0 && p.pass == g_record_passes && p.w.size() == words && memcmp(p.w.data(), cur, 4 * words) != 0) {
+        if (multidraw > 0 && p.pass == stamp && p.w.size() == words && memcmp(p.w.data(), cur, 4 * words) != 0) {
             multidraw--;
             const float dx = wf(p.w[3]) - wf(cur[3]), dy = wf(p.w[7]) - wf(cur[7]), dz = wf(p.w[11]) - wf(cur[11]);
             LOG("[interp] step %llu: model %08X (joints %08X, %u) drawn again on the record pass, root %.1f away (vtable caller %08X)",
@@ -863,15 +893,18 @@ extern "C" void hook_027F55FC(Cpu* c) {
         }
         p.marker_cell = marker_cell;
         p.mtx = mtx;
-        p.pass = g_record_passes;
+        p.pass = stamp;
         p.w.assign(cur, cur + words);
-        trace_model("exact", jnt, n, cur);
-        f_027F55FC_orig(c);
-        return;
+        if (!blendRecord) {
+            trace_model("exact", jnt, n, cur);
+            f_027F55FC_orig(c);
+            return;
+        }
     }
     // logic pass or blended hold pass: between the step drawn last and the new one, at pass_t()
-    auto it = g_models.find(jnt);
-    if (it == g_models.end() || it->second.mtx != mtx || it->second.w.size() != words ||
+    auto& from = blendRecord ? g_models_before : g_models;
+    auto it = from.find(jnt);
+    if (it == from.end() || it->second.mtx != mtx || it->second.w.size() != words ||
         it->second.pass + 1 < g_record_passes) {  // new model, or not drawn on the last record pass
         g_mstats.fresh++;
         trace_model("new", jnt, n, cur);
@@ -1214,24 +1247,25 @@ static int g_step_holds = 0;  // hold passes drawn in this step (a skip to the r
 static int g_step_capacity = 1;  // in-between frames this step could have (40 fps: 1 or 0)
 static uint64_t g_steps40 = 0;  // 40 fps steps without a step slot (one in three gets the in-between frame)
 // 40 fps (pacing::is_fps40): 1 in-between frame for the step whose next step's frame is two frames
-// later on the step slots, 0 (a record logic pass) for the others; an exact step (no record pass
-// before it) is drawn once, as a record logic pass, and its slot's second frame stays empty
+// later on the step slots, 0 (a blended record pass) for the others; an exact step (no record pass
+// before it) is drawn once, as an exact record logic pass, and its slot's second frame stays empty.
+// The logic pass's fraction: pacing::Fractions40.
 static int plan_step_40() {
     int frames = gx2::step_frames();
     if (frames <= 0) frames = 1 + pacing::in_between_40(g_steps40++);
     else g_steps40 = 0;
-    const int n = std::clamp(frames - 1, 0, 1);
+    int n = std::clamp(frames - 1, 0, 1);
     g_step_capacity = n;
     g_step_holds = 0;
     if (paced()) g_paced_planned += n;
-    if (g_exact_step || n == 0) {
-        g_exact_step = true;  // (also unpaced: drawn exactly, and recorded)
-        return 0;
-    }
+    if (g_exact_step) n = 0;  // (drawn exactly, and recorded)
+    g_step40 = true;
+    g_t40 = g_frac40.logic(n, g_exact_step);
     return n;
 }
 static int plan_step() {
     if (fps40()) return plan_step_40();
+    g_step40 = false;
     g_step_capacity = std::max(1, in_between());
     int n = std::max(1, in_between());
     if (n > 1 && paced() && interp_on()) {
@@ -1407,6 +1441,12 @@ extern "C" void hook_0203593C(Cpu* c) {
             }
         }
     } countdown_trace{enabled() && g_hold_next};
+    // (a 40 fps blended record pass ended: its records count from here, after it has been painted)
+    if (g_record_pending) {
+        g_record_passes++;
+        g_record_pending = false;
+    }
+    if (!g_models_before.empty()) g_models_before.clear();
     fader_between_passes();
     perf::game_frame();
     fx_pass_start();
@@ -1474,6 +1514,7 @@ extern "C" void hook_0203593C(Cpu* c) {
         PassTimer timer(record_pass() ? 2 : 1);
         if (record_pass()) {
             g_record_passes++;
+            if (g_step40) g_frac40.record();
         } else {
             fx_hold_blend(pass_t());  // the effects blended at logic time, at this pass's fraction
         }
@@ -1487,10 +1528,12 @@ extern "C" void hook_0203593C(Cpu* c) {
     }
     g_phase = 0;
     g_step_n = plan_step();
-    // a step without an in-between frame (40 fps): its logic pass is also its record pass
+    // a step without an in-between frame (40 fps): its logic pass is also its record pass (blended:
+    // its records count from the next pass on)
     g_record_logic = g_step_n == 0;
     if (g_record_logic) {
-        g_record_passes++;
+        if (g_exact_step) g_record_passes++;
+        else g_record_pending = true;
         g_previous_record = true;
     }
     {
@@ -1521,8 +1564,8 @@ extern "C" void hook_0203593C(Cpu* c) {
 // pass's): their hooks take the fraction the pass was drawn at from here.
 namespace interp {
 namespace {
-struct Drawn { uint64_t pass = ~0ull; float t = 1.0f; bool record = false; } g_drawn;
-void note_drawn() { g_drawn = Drawn{g_passes, pass_t(), record_pass()}; }
+struct Drawn { uint64_t pass = ~0ull; float t = 1.0f; bool record = false, record_blended = false; } g_drawn;
+void note_drawn() { g_drawn = Drawn{g_passes, pass_t(), record_pass(), record_blended()}; }
 }  // namespace
 // blend fraction of the pass being drawn or painted (1: exact, or interpolation off)
 float display_t() {
@@ -1536,6 +1579,14 @@ bool display_record() {
     if (g_in_frame) return record_pass();
     return g_drawn.pass == g_passes && g_drawn.record;
 }
+// the pass being drawn or painted is a 40 fps blended record pass (record_blended); its records are
+// stamped display_record_stamp()
+bool display_record_blended() {
+    if (!enabled()) return false;
+    if (g_in_frame) return record_blended();
+    return g_drawn.pass == g_passes && g_drawn.record_blended;
+}
+uint64_t display_record_stamp() { return g_record_passes + (display_record_blended() ? 1 : 0); }
 }  // namespace interp
 
 // main loop body (inside the per-frame function): logic pass -> camera drawn blended;
@@ -1883,8 +1934,11 @@ extern "C" void hook_025E1AA4(Cpu* c) { se_stat(6); se_trace(6, c); if (interp::
 // its own thread (panning/volume of positional sounds such as the waves). The camera's eye and
 // j3dSys's view matrix alternate between the halfway and the exact camera at 60 fps, so the engine
 // gets private copies instead, refreshed only from the exact camera.
+// At 40 fps two steps of three have no exact frame (blended record passes): their camera, drawn
+// blended, updates the listener (one update a step, each drawn 3/4 of a step after the previous
+// one, as the frames).
 extern "C" void hook_025E1B44(Cpu* c) {
-    if (interp::g_cam_blended) return;
+    if (interp::g_cam_blended && !interp::record_blended()) return;
     if (!interp::enabled()) {
         f_025E1B44_orig(c);
         return;
