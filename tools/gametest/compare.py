@@ -20,12 +20,19 @@ import sys
 def origin(run):
     # ALIGN=link: runs are aligned on Link's first execute (profile 00A8 in the digest)
     if os.environ.get("ALIGN") == "link":
+        if not os.path.exists(os.path.join(run, "digest.txt")):
+            print("%s: no digest.txt (the run did not take place)" % run)
+            return None
         for l in open(os.path.join(run, "digest.txt"), errors="replace"):
             p = l.split()
             if len(p) > 2 and p[2] == "00A8":
                 return int(p[0])
         return None
-    for l in open(os.path.join(run, "log"), errors="replace"):
+    log = os.path.join(run, "log")
+    if not os.path.exists(log):  # (no such run: e.g. FPS without 30 compares against new30)
+        print("%s: no log (the run did not take place)" % run)
+        return None
+    for l in open(log, errors="replace"):
         m = re.search(r"\[test\] origin.*logic step (\d+)", l)
         if m:
             return int(m.group(1))
