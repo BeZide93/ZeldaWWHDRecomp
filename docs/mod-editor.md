@@ -163,8 +163,8 @@ a confirmation; Undo brings it back).
 ### Game objects
 
 **Add > Game objects** lists the game's own objects you can place: palm trees and other trees, tables, a shelf,
-lamps, plants, a nest, flags, a sea lookout tower, grass and flowers, torches, flames, fire jets and lava
-bubbles (docs/mod-sdk-v3.md, "The game's own objects"). Type in the search field or pick a
+lamps, plants, a nest, flags, a sea lookout tower, grass and flowers, torches, flames, fire jets, lava bubbles
+and bomb flowers (docs/mod-sdk-v3.md, "The game's own objects"). Type in the search field or pick a
 category, then click an object and click into the picture. An object your game files don't have is
 greyed out with "not available in your game files". The first game object adds
 `"requires": {"game_objects": 1}` to the manifest for you.

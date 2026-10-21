@@ -153,6 +153,41 @@
         "measured": "own heap 575968 bytes (its 50 bubbles) and about 3 KiB more; the archive is in a permanent pack"
       },
       "notes": "bits 8-15 switch 0xFF (bubbles keep coming); 50 bubbles 1300-2700 units around it; the game leaves it out once event bit 0x1902 is set"
+    },
+    {
+      "id": "bomb-flower",
+      "since": 6,
+      "category": "Trees and plants",
+      "label": "Bomb flower",
+      "description": "Dragon Roost's bomb plant: Link picks its bomb, throws it and it blows up; a new bomb grows back",
+      "native": {
+        "name": "BFlower",
+        "process": "BOMB_FLOWER",
+        "source": "d_a_bflower",
+        "subtype": 255,
+        "archive": "VbakH"
+      },
+      "variants": [
+        {
+          "id": "bomb-flower",
+          "label": "Bomb flower",
+          "params": "0x0000FF0F"
+        }
+      ],
+      "transform": {
+        "rotation": "yaw",
+        "scale": [
+          1,
+          1
+        ]
+      },
+      "collision": true,
+      "memory": {
+        "instance_bytes": 30720,
+        "archive_bytes": 0,
+        "measured": "own heap 27424 bytes and about 2 KiB more; the archive is in a permanent pack"
+      },
+      "notes": "the game's own word for its bomb flowers (Dragon Roost, caves): bits 4-7 kind 0 (grown), bits 8-15 switch 0xFF; angle x stays 0 (pickable)"
     }
   ]
 }

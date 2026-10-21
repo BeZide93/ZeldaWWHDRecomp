@@ -32,7 +32,7 @@ int main() {
     std::string why;
     // ---- the port's recipes
     const auto& c = story_game_objects::catalogue();
-    assert(c.version == 6);  // the volcanic kit (fire and lava) came with version 6
+    assert(c.version == 6);  // the volcanic kit (fire and lava, bomb flowers) came with version 6
     for (const auto& e : c.entries) assert(e.since == 1 || (e.group == "volcanic" && e.since == 6));
     {
         // the volcanic kit: always lit, no switch (0xFF fields), each the game's own stage actor name
@@ -45,9 +45,12 @@ int main() {
         assert(!c.find("steam-vent"));  // the game's steam vents use their own stage's particles: nothing shows elsewhere
         const auto* bubbles = c.find("lava-bubbles");
         assert(bubbles && bubbles->native_name == "Yboil00" && ((bubbles->variant("")->params >> 8) & 0xFF) == 0xFF);
+        const auto* flower = c.find("bomb-flower");
+        assert(flower && flower->native_name == "BFlower" && flower->archive == "VbakH" && ((flower->variant("")->params >> 8) & 0xFF) == 0xFF &&
+               ((flower->variant("")->params >> 4) & 0xF) == 0 && flower->variant("")->params == 0x0000FF0F);
         // an archive name of eight characters (the game's "Yfire_00") is accepted, a longer name than 15 is not
         // a manifest names them with catalogue version 6
-        const std::string flower_actor = R"({"id": "f", "actor": "game:fire-jet", "stage": "sea", "room": 44, "position": {"x": 1, "y": 2, "z": 3}})";
+        const std::string flower_actor = R"({"id": "f", "actor": "game:bomb-flower", "stage": "sea", "room": 44, "position": {"x": 1, "y": 2, "z": 3}})";
         assert(parses(manifest(flower_actor, R"({"game_objects": 6})"), why));
         assert(!parses(manifest(flower_actor, R"({"game_objects": 5})"), why) && why.find("6") != std::string::npos);
         assert(story_game_objects::archive_name_ok("Yfire_00") && !story_game_objects::archive_name_ok("ABCDEFGHIJKLMNOP") && !story_game_objects::native_name_ok("Yfire_00"));

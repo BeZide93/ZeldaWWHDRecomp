@@ -255,7 +255,7 @@ the mod manager refuses it.
 | `game:lookout-tower` | A tall wooden lookout platform that stands in the sea | `tower-ladder` (Link climbs its ladder), `tower` | 1 |
 
 **The volcanic kit** (catalogue version 6, `"requires": {"game_objects": 6}`; the palette's "Fire and
-lava"): torches, flames, fire jets and lava bubbles, the game's own actors with their own effects, sounds and behaviour.
+lava" and "Trees and plants"): torches, flames, fire jets, lava bubbles and Dragon Roost's bomb flowers, the game's own actors with their own effects, sounds and behaviour.
 
 | Id | What it is | Variants | Scale |
 | --- | --- | --- | --- |
@@ -263,9 +263,11 @@ lava"): torches, flames, fire jets and lava bubbles, the game's own actors with 
 | `game:flame` | A burning flame on its own with its light (no model, no collision): for a brazier or a torch of your own | `flame` | 1 |
 | `game:fire-jet` | A vent that shoots a column of fire every few seconds; the fire burns Link | `fire-jet`, `fire-jet-large` | 1 |
 | `game:lava-bubbles` | Bubbles that rise and burst over a lava lake, scattered in a wide ring (1300 to 2700 units) around it | `lava-bubbles` | 1 |
+| `game:bomb-flower` | Dragon Roost's bomb plant: Link picks its bomb (A), throws it (or holds it) and it explodes as a bomb does, breaking what a bomb breaks (pots, for example) and hurting Link when he is too close; a new bomb grows on the plant after a while | `bomb-flower` | 1 |
 
 The torches and flames are always lit: a torch that Link lights with fire is not available (the game keeps
-whether it burns in a switch of the room, which a game object never uses).  The lava bubbles are left out (with a line in the log) once the player has frozen Fire Mountain with
+whether it burns in a switch of the room, which a game object never uses). The bomb flower needs no bomb
+bag. The lava bubbles are left out (with a line in the log) once the player has frozen Fire Mountain with
 an ice arrow: from then on the game leaves out its own too. Fire Mountain's eruption smoke is part of the volcano itself
 (an actor that freezes with an ice arrow and starts the game's events), so it is not offered, and the
 game's steam vents are not either: their steam comes from their own island's effects and shows nowhere else.
