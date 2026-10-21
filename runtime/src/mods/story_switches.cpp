@@ -24,6 +24,7 @@ const uint32_t SwCreate=GC(0x023975B0),SwDelete=GC(0x02397AD0),SwExecute=GC(0x02
     DemoSwitch=GC(0x02398504),DemoPause=GC(0x023985AC),Ride=GC(0x0239705C),
     DoorCreate=GC(0x02058590),DoorDelete=GC(0x020583D4),DoorExecute=GC(0x0205834C),DoorDraw=GC(0x020582F0),
     DoorClosed=GC(0x02058144),DoorOpen=GC(0x02058230);
+const uint32_t SwitchClass=GD(0x101CD034),DoorClass=GD(0x1018FFE8);
 Declaration* get(uint32_t token){for(auto& d:declarations)if(d.token==token)return &d;return nullptr;}
 bool address(uint32_t a,uint32_t bytes=0x10){return a>=0x10000000u&&a<=0x50000000u-bytes&&!(a&3);}
 bool reserved(uint32_t a){return address(a)&&(ld16(a+0xE)==kSwitchProfile||ld16(a+0xE)==kDoorProfile);}
@@ -129,10 +130,10 @@ bool install(const std::function<std::string(uint32_t)>&owner,const std::functio
     // every check before the first registration, so a refusal leaves the profile table as it was
     const auto fits=[&](const char*name,uint32_t storage,uint32_t retail,uint32_t bytes){
         if(!native_actor_profiles::valid_storage(storage)){std::snprintf(text,sizeof text,"the %s profile storage %08X is invalid",name,storage);reason=text;return false;}
-        const uint32_t size=ld32(GD(retail)+0x10);if(size!=bytes){std::snprintf(text,sizeof text,"the retail %s class is %u bytes (expected %u)",name,size,bytes);reason=text;return false;}return true;};
-    if(sw&&!fits("switch",sw_profile,0x101CD034,kSwitchClassBytes))return false;if(door&&!fits("door",door_profile,0x1018FFE8,kDoorClassBytes))return false;
-    if(sw){std::memcpy(mem::ptr(sw_profile),mem::ptr(GD(0x101CD034)),0x30);st16(sw_profile+8,kSwitchProfile);if(!native_actor_profiles::add(kSwitchProfile,sw_profile,nullptr,&reason))return false;}
-    if(door){std::memcpy(mem::ptr(door_profile),mem::ptr(GD(0x1018FFE8)),0x30);st16(door_profile+8,kDoorProfile);if(!native_actor_profiles::add(kDoorProfile,door_profile,nullptr,&reason)){if(sw)native_actor_profiles::remove(kSwitchProfile,sw_profile);return false;}}
+        const uint32_t size=ld32(retail+0x10);if(size!=bytes){std::snprintf(text,sizeof text,"the retail %s class is %u bytes (expected %u)",name,size,bytes);reason=text;return false;}return true;};
+    if(sw&&!fits("switch",sw_profile,SwitchClass,kSwitchClassBytes))return false;if(door&&!fits("door",door_profile,DoorClass,kDoorClassBytes))return false;
+    if(sw){std::memcpy(mem::ptr(sw_profile),mem::ptr(SwitchClass),0x30);st16(sw_profile+8,kSwitchProfile);if(!native_actor_profiles::add(kSwitchProfile,sw_profile,nullptr,&reason))return false;}
+    if(door){std::memcpy(mem::ptr(door_profile),mem::ptr(DoorClass),0x30);st16(door_profile+8,kDoorProfile);if(!native_actor_profiles::add(kDoorProfile,door_profile,nullptr,&reason)){if(sw)native_actor_profiles::remove(kSwitchProfile,sw_profile);return false;}}
     if(!native_actor_profiles::install(owner,replace,&reason)){if(sw)native_actor_profiles::remove(kSwitchProfile,sw_profile);if(door)native_actor_profiles::remove(kDoorProfile,door_profile);return false;}
     if(sw)for(const auto&h:sw_hooks)replace(h.first,h.second);if(door)for(const auto&h:door_hooks)replace(h.first,h.second);installed=true;sw_live=sw;door_live=door;return true;
 }
