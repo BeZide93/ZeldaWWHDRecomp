@@ -265,10 +265,11 @@ It owns separate modules, descriptor layouts and a pipeline cache; the render
 thread takes a ready pipeline only after the exact key, both SPIR-V programs and
 descriptor layouts match. `WWHD_VK_PIPELINE_WARMUP=0` disables this recording and
 replay. Missing or unfinished pipelines use a separate demand compiler with an
-owned state snapshot and independent native cache. Exact guest draws remain at
+owned state snapshot and independent native cache. By default, exact guest draws remain at
 the head of the ordered command stream until ready; the renderer can repeat the
 last complete scan image while waiting. It never substitutes state or drops that
-draw. This still delays new guest frames and input response. Presentation/overlay
+draw. This still delays new guest frames and input response. **Compile shaders in the
+background** (below) lets draws into the visible picture skip that wait. Presentation/overlay
 pipeline misses currently wait without repeat pumping; this is a remaining
 limitation. BC texture decoding still creates its compute pipeline synchronously;
 its cost is recorded as `bc_decode_compute_pipeline` when tracing is enabled.
@@ -282,9 +283,53 @@ resource retirement drain the retained commands first. This overlap can shorten
 some waits; it does not guarantee removal of cold shader stutter.
 
 Cemu informed the worker, cache and startup precompile design; no implementation
-code was copied. Cemu can skip pending draws using renderer heuristics. This
-renderer always waits for demanded state and draws every object. Cemu shader and
-pipeline cache files are never inputs to this workflow.
+code was copied. Cemu shader and pipeline cache files are never inputs to this workflow.
+
+## Compile shaders in the background
+
+Settings → Graphics → **Compile shaders in the background** is **off by default**. It works with
+both renderers and on every platform, is saved with the other settings and takes effect at once.
+
+- **Off:** a draw whose shader or pipeline is not ready waits for it. Every frame is complete, but
+  the first visit to a place can stutter. (Vulkan repeats the last finished picture meanwhile. Metal
+  used to wait up to 25 ms and then skip the draw; it now waits too.)
+- **On:** such a draw waits at most a few milliseconds per frame (4 ms in all; quick results from a
+  warm cache do not count), then is left out of that frame. Its shader keeps compiling in the
+  background, and the object appears once it is ready, usually a frame or two later.
+
+Only draws into the picture you see can be left out (together with the extra buffers the same draw
+writes, such as its depth buffer). These always wait, so they are never wrong:
+
+- shadow maps and other depth-only passes;
+- reflections and anything else drawn into a texture, and post-effect passes;
+- full-screen passes (fades, filters), which would make the whole picture flash;
+- targets the game copies from now and then (photos, menu backgrounds) or reads back, including the
+  depth buffer the game checks for the sun's glare;
+- a target's first frame, for example the first frame after a load (its result may be drawn only
+  once).
+
+If a draw was left out before the game's first sun check, that frame does not answer the check and
+the game keeps its previous answer. Game logic does not change.
+
+In a test on a Mac (MoltenVK; Windfall, a Hyrule room, the open sea at dusk, each loaded fresh with
+empty game shader caches), most new pipelines belonged to draws that must wait, so the option left out
+only about 60 draws in 15 frames per run, mostly small things such as title text or a boat's wake
+for a frame. Pictures with and without the option matched otherwise; shadows, reflections and the
+sun were unchanged. With warm caches it changes nearly nothing (about 20 draws in 4 frames, none
+visible in the compared pictures).
+
+`WWHD_BG_SHADERS=1` / `=0` forces the option on / off for that start (the checkbox is then greyed
+out). `WWHD_BG_SHADER_WAIT_MS` sets the per-frame wait (the older Metal name
+`WWHD_COMPILE_WAIT_MS` still works). The log records the state at start-up and each change
+(`[shaders] compile in the background on|off`). **Copy performance report** has a line with the
+draws left out, the waits, and why the other draws waited. `WWHD_TEST_BG_SHADERS=1@<frame>` turns it
+on at a TV frame in a scripted test.
+
+Cemu's **Async shader compile** works the same way in spirit: it leaves a draw out while its
+pipeline compiles and draws it once ready. Cemu leaves draws out at once (no wait) and only keeps
+very small draws without a depth buffer (full-screen quads) and one game-specific target size exact,
+so a render-to-texture pass can be left out there. This renderer waits a short budget first, which
+catches most fast compiles, and keeps every draw that is not the visible picture exact.
 
 ## Preparing shaders
 
