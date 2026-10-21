@@ -712,6 +712,21 @@ Since 2026-10-07 every platform uses the two paths that were Android defaults be
 The Metal renderer keeps its GX2DrawDone wait: it binds large vertex buffers straight from guest
 memory. See `docs/performance.md` ("Desktop CPU/GPU overlap defaults") for the measurements.
 
+## Submission pool
+
+The renderer records into a ring of submission slots (command buffer, fence, descriptor pool and
+upload memory each). When the render thread comes back round to a slot the GPU has not finished, it
+waits for it. `WWHD_VK_SUBMISSION_POOL=N` sets the number of slots at start, 4 to 16 (default 4);
+`WWHD_VK_SUBMISSION_POOL8=1` (8 slots) and `=0` (4) are accepted as an older name. The log names the
+active size (`[vulkan] submission pool 4 slots`) and so does the performance report header. With
+`WWHD_VK_STATS=1`, `[vulkan submission ring]` reports the waits for a free slot and the submissions
+and frames still in flight at each swap.
+
+More slots don't make frames faster: when the CPU is the limit the ring is never full, and when the
+GPU is the limit the render thread only queues more work ahead of it, which adds up to a frame of
+input latency and about 32 MiB of upload memory per extra slot. See `docs/performance.md`
+("Submission pool size") for the measurements.
+
 ## Draw batching (all platforms)
 
 Every platform defaults to submitting after 2,048 guest draws, with at most three

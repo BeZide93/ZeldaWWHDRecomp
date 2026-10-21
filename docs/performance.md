@@ -502,6 +502,31 @@ copies, but the copied guest ranges hold only 2.2 MiB of unique bytes; an interp
 copies the same 18.6 MiB again. 55% of Outset draws (12% on Windfall) change only buffer pointers
 or ALU constants since the previous draw.
 
+## Submission pool size (2026-10-21)
+
+`WWHD_VK_SUBMISSION_POOL` (4 by default; `docs/vulkan.md`, "Submission pool") was tried at 8 after a
+report that 8 slots made a build much faster. Apple M3 Max, MoltenVK, `tools/bench/run_bench.py`,
+Outset (slot 3), uncapped with immediate present, one warm cache, variants interleaved, medians:
+
+| Outset, 40 s, 5 runs each | 4 slots | 8 slots |
+|---|---|---|
+| CPU-bound (1x scale): frame time avg / 1% / 0.1% / longest | 7.30 / 9.95 / 13.2 / 19.3 ms | 7.31 / 10.1 / 12.5 / 18.9 ms |
+| render thread CPU; waits for a free slot | 7.40 ms; 0.00 ms | 7.26 ms; 0.00 ms |
+| frames in flight at swap, avg (max) | 1.00 (1-2) | 1.00 (1-4) |
+
+| Outset, 30 s, 3 / 2 runs | 4 slots | 8 slots |
+|---|---|---|
+| GPU-bound (4x scale): frame time avg / 1% / 0.1% | 20.7 / 28.9 / 47.2 ms | 20.7 / 31.6 / 55.1 ms |
+| GPU submission intervals; waits for a free slot | 20.5 ms; 6.0 ms | 20.6 ms; 5.3 ms |
+| frames in flight at swap, avg (max) | 1.6 (2) | 2.6 (4) |
+
+Memory: 8 slots keep 96-128 MiB more upload blocks (256 MiB against 128-160 MiB). A frame here has
+about 3 submissions, so with the CPU as the limit the GPU has finished each slot long before the ring
+comes back to it. With the GPU as the limit, more slots only let the render thread run further ahead:
+same frame rate, about one frame more latency and slightly worse 1% frames. The default stays at 4.
+The Metal renderer has no fixed ring (command buffers from one queue, upload pools returned at
+completion), so there is nothing to change there.
+
 ## Where the time goes
 
 Busy (non-waiting) samples in one 20 s in-game run with 60 fps interpolation on, after all the fixes
