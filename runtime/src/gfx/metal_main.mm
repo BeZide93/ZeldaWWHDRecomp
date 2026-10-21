@@ -35,7 +35,7 @@ void peek_z(const uint32_t* cells, uint32_t n) {
     }
     uint32_t points = std::min(n / 3,64u);
     if (!depth || !points) return;
-    // Shader compile Safe / Fast: the game reads this depth buffer back, so draws into it keep the exact
+    // Shader compile Fast: the game reads this depth buffer back, so draws into it keep the exact
     // wait from now on; if one was left out in this frame already, the frame answers no peek and the
     // game keeps its previous answers, from a complete frame
     if (bgshaders::enabled()) bgshaders::tracker().peeked(depth->addr, R.frame);
@@ -315,8 +315,6 @@ void copy_to_scan(uint32_t cb, uint32_t target) {
     Screen& scr = (target & 1) ? R.tv : R.drc;
     Surface* s = surface_from_color_buffer(cb);
     if (!s || !s->tex) return;
-    // Shader compile (background_shaders.h): which target is the presented picture
-    if (bgshaders::enabled()) bgshaders::tracker().presented(s->addr, R.frame);
     end_encoder();
     // the image as rendered (internal resolution); the present pass scales it to the window
     NSUInteger w = s->tex.width, h = s->tex.height;
