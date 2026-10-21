@@ -603,11 +603,11 @@ set). In the 20 s run, memchr/memcmp under `compile_msl` dropped from ~670 sampl
 
 ### Render thread polled for compiles (`wait_compiled`)
 
-When a draw needs a shader or pipeline that's still compiling, the render thread waits for it, up to
-the frame's budget with Settings → Graphics → **Shader compile** Safe (the default) or Fast (4 ms,
-`WWHD_BG_SHADER_WAIT_MS`), after which the draws those levels allow are left out until the compile is
-done (see [vulkan.md](vulkan.md#shader-compile-off-safe-fast); before that setting, Metal waited up to
-25 ms and then skipped any draw redrawn every frame). It used to poll: `usleep(100)` plus a
+When a draw needs a shader or pipeline that's still compiling, the render thread waits for it. With
+Settings → Graphics → **Shader compile** Off (the default) Metal waits up to 25 ms per frame
+(`WWHD_COMPILE_WAIT_MS`) before skipping a draw into a target redrawn every frame; with Fast, both
+renderers wait up to 4 ms (`WWHD_BG_SHADER_WAIT_MS`) and then leave the draw out until its compile is
+done (see [vulkan.md](vulkan.md#shader-compile-off-or-fast)). It used to poll: `usleep(100)` plus a
 clock read in a loop. Metal's completion handlers now publish the result through `compile_done`,
 which signals a condition variable that `wait_compiled` sleeps on until the result arrives or the
 time runs out.
@@ -696,6 +696,25 @@ with and without an index buffer, counts 0–64); the new one is ~5× faster on 
 | `build_indices` self time | 291 | 57 |
 | renderer samples | 2,701 | 2,262 |
 | busy samples, whole process | 9,242 | 8,812 |
+
+## Sun check: answers one step later, every time (2026-10-22)
+
+The game checks whether the sun is hidden by reading the depth of five points around it (a "depth
+peek"). On the Wii U the game asks during one step and reads the answers at the start of the next:
+`peekData` reads the depth buffer on the CPU after the draw lists and writes the answers at once,
+and `dKyr_sun_move` reads them one step later before asking again. The port answered when the GPU
+finished the frame, which was usually in time and sometimes one step late. Then the sun's glare
+could differ between runs, even with Off, depending on load or frame dumps.
+
+Now each renderer answers a peek at once (it waits for that small copy), and the game waits at the
+end of a frame that asked until its answers are in. `WWHD_PEEKZ_SYNC=0` restores the old timing.
+In 20 fixed-seed runs (Off with and without frame dumps, render load of 5 to 25 ms, Fast) the game
+saw the same answers and its state matched step for step, also over a full tour of 7,499 steps.
+
+Cost, measured uncapped on the title screen (Mac, MoltenVK, 4 interleaved runs each): 9.0 → 9.8 ms
+per frame at 60 fps and 5.7 → 6.3 ms at 120 fps, while the sun is checked. At the normal 60 or
+120 fps limit (16.7 / 8.3 ms) there is headroom left on this Mac; slower machines may lose a little
+smoothness while the sun is on screen.
 
 ## Open leads
 

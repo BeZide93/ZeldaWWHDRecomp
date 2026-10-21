@@ -268,8 +268,8 @@ replay. Missing or unfinished pipelines use a separate demand compiler with an
 owned state snapshot and independent native cache. With Shader compile Off, exact guest draws remain at
 the head of the ordered command stream until ready; the renderer can repeat the
 last complete scan image while waiting. It never substitutes state or drops that
-draw. This still delays new guest frames and input response. **Shader compile** Safe (the default)
-and Fast (below) let some draws skip that wait. Presentation/overlay
+draw. This still delays new guest frames and input response. **Shader compile** Fast (below) lets
+draws skip that wait. Presentation/overlay
 pipeline misses currently wait without repeat pumping; this is a remaining
 limitation. BC texture decoding still creates its compute pipeline synchronously;
 its cost is recorded as `bc_decode_compute_pipeline` when tracing is enabled.
@@ -285,66 +285,53 @@ some waits; it does not guarantee removal of cold shader stutter.
 Cemu informed the worker, cache and startup precompile design; no implementation
 code was copied. Cemu shader and pipeline cache files are never inputs to this workflow.
 
-## Shader compile: Off, Safe, Fast
+## Shader compile: Off or Fast
 
 Settings → Graphics → **Shader compile** decides what happens when a draw needs a shader or pipeline
 that is not ready yet. It works with both renderers and on every platform, is saved with the other
 settings and takes effect at once.
 
-- **Off (exact):** the draw waits for its shader. Every frame is complete, but the first visit to a
-  place can stutter. (Vulkan repeats the last finished picture meanwhile.)
-- **Safe (default):** the draw waits at most a few milliseconds per frame (4 ms in all; quick
-  results from a warm cache do not count). If the shader is still not ready, only a draw into the
-  picture you see is left out of that frame, and it appears once its shader is ready, usually a frame
-  or two later. Everything else waits as with Off.
+- **Off (exact, default):** the draw waits for its shader. Every frame is complete, but the first
+  visit to a place can stutter. Vulkan repeats the last finished picture meanwhile. Metal keeps its
+  long-standing rule: it waits up to 25 ms per frame (`WWHD_COMPILE_WAIT_MS`) and then leaves a draw
+  out for a moment, but always waits for a target's first frame.
 - **Fast (not exact):** smoother first visits, but objects, shadows or effects may be missing for a
-  moment. After the same short wait any draw can be left out, including shadow maps, reflections,
-  post effects, full-screen passes and the first frame after a load.
+  moment. The draw waits at most 4 ms per frame (quick results from a warm cache do not count), is
+  then left out of that frame and appears once its shader is ready, usually a frame or two later.
+  Shadow maps, reflections, post effects, full-screen passes and the first frame after a load can be
+  left out.
 
-What Safe always waits for, so it is never wrong:
+What Fast still waits for, so nothing wrong lasts and game logic does not change:
 
-- shadow maps and other depth-only passes;
-- reflections and anything else drawn into a texture, and post-effect passes;
-- full-screen passes (fades, filters), which would make the whole picture flash;
-- targets the game copies from now and then (photos, menu backgrounds) or reads back, including the
-  depth buffer the game checks for the sun's glare;
-- a target's first frame, for example the first frame after a load (its result may be drawn only
-  once).
+- targets the game reads back, including the depth buffer of the game's sun check (its glare);
+- targets it copies from now and then (snapshots, photos);
+- targets that are new or drawn only now and then (a one-off capture).
 
-What Fast still waits for: targets the game reads back (including the depth buffer of the sun
-check), targets it copies from now and then (snapshots, photos), and targets that are new or drawn
-only now and then (a one-off capture), so nothing wrong lasts and game logic does not change.
-Presentation and overlay never wait for game shaders. The sun check matters more than it looks: when
-it got an answer from an older frame, the game's glare and its random numbers changed, and the title
-screen showed other clouds than with Off. If a draw into that depth buffer was left out before the
-game's first check, that frame does not answer it and the game keeps its previous answer.
+Presentation and overlay never wait for game shaders.
 
-Metal used to wait up to 25 ms per frame and then skip any draw into a target redrawn every frame.
-It now follows this setting like Vulkan.
+The game's sun check reads depth from the picture (a "depth peek"). Its answers now always reach
+the game one step after the request, as on the Wii U, whatever the timing: with Off and Fast, with
+or without load, the game sees the same answers (see [performance.md](performance.md)).
 
 In a test on a Mac (MoltenVK; title screen, Windfall, a Hyrule room and the open sea at dusk, each
-a first visit with empty game shader caches, two runs per level), the frames waited 2.1 to 3.6 s in all
-for shaders with Off, 1.9 to 4.2 s with Safe and 0.4 to 0.5 s with Fast; Fast's longest frame per
-place was 81 to 422 ms against 105 to 740 ms with Off. Safe left out about 57 draws in 14 frames
-(for example the title text for one frame) and made no measurable difference to stutter in this game,
-because most new shaders belong to draws Safe must wait for. Fast left out about 810 draws in 38
-frames: mostly for one to three frames, the most visible were a fade overlay that was missing for one
-frame (a flash on the file screen and when entering the Hyrule room) and enemies on the sea. With
-warm caches neither level left a draw out.
+a first visit with empty game shader caches, two runs each), the frames waited 2.1 to 3.6 s in all
+for shaders with Off and 0.4 to 0.5 s with Fast; Fast's longest frame per place was 81 to 422 ms
+against 105 to 740 ms with Off. Fast left out about 810 draws in 38 frames, mostly for one to three
+frames; the most visible were a fade overlay missing for one frame (a flash on the file screen and
+when entering the Hyrule room) and enemies on the sea. With warm caches Fast left no draw out.
 
-`WWHD_BG_SHADERS=0|safe|fast` sets the level for that start (the buttons are then greyed out).
-`WWHD_BG_SHADER_WAIT_MS` sets the per-frame wait. The log records the level at start-up and each
-change (`[shaders] shader compile off|safe|fast`). **Copy performance report** has a line with the
-level, the draws left out, the waits, and why the other draws waited.
-`WWHD_TEST_BG_SHADERS=fast@<frame>` (or `safe@`, `0@`) sets it at a TV frame in a scripted test.
+`WWHD_BG_SHADERS=0|fast` sets the level for that start (the buttons are then greyed out; `safe`,
+a former level, reads as 0). `WWHD_BG_SHADER_WAIT_MS` sets Fast's per-frame wait. The log records
+the level at start-up and each change (`[shaders] shader compile off|fast`). **Copy performance
+report** has a line with the level, the draws left out, the waits, and why the other draws waited.
+`WWHD_TEST_BG_SHADERS=fast@<frame>` (or `0@`) sets it at a TV frame in a scripted test.
 `WWHD_BG_SHADERS_DUMP=<n>` (Vulkan) writes the TV image of the first n frames that left a draw out,
 and of the two frames after each, to see what was missing.
 
 Fast is close to Cemu's **Async shader compile**: Cemu leaves a draw out while its pipeline
 compiles and draws it once ready, at once (no wait), keeping only very small draws without a depth
 buffer (full-screen quads) and one game-specific target size exact. Fast waits a short budget first,
-which catches most quick compiles, and keeps read-back and one-off targets exact. Safe keeps every
-draw that is not the visible picture exact.
+which catches most quick compiles, and keeps read-back, copied and one-off targets exact.
 
 ## Preparing shaders
 
