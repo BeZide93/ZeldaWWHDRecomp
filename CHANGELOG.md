@@ -7,6 +7,9 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Fixed: `"Wind Waker HD.exe" --editor` started the game without the world editor** (#266). The launcher now passes
+  game options such as `--editor` on to the game on Windows, macOS (`open "Wind Waker HD.app" --args --editor`) and
+  Linux (`wind-waker-hd --editor`).
 - **Calm water around mod islands** (for mod makers). An island on the open sea can set a calm-water zone, so the
   waves fade out around it the way they do near the game's own islands, and the boat can land at a low pier without
   Link being washed off. Set it in the manifest or in the world editor's Inspector. See [world objects](docs/world-objects.md).
