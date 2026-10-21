@@ -60,7 +60,7 @@ bool make_shape(const std::string&shape,Point size,float radius,float height,uin
 }
 bool decode(std::span<const uint8_t>b,Mesh&out,std::string&why){
     out={};if(b.size()<40||u32(b,0)!=0x57434F4C||u32(b,4)!=1){why="invalid WCOL header";return false;}
-    const uint32_t v=u32(b,8),t=u32(b,12);if(!v||v>MaxVertices||!t||t>MaxTriangles||b.size()!=40ull+12ull*v+8ull*t){why="invalid WCOL counts or byte length";return false;}
+    const uint32_t v=u32(b,8),t=u32(b,12);if(!v||v>MaxVertices||!t||t>MaxTriangles||b.size()!=wcol_bytes(v,t)){why="invalid WCOL counts or byte length";return false;}
     Mesh m;m.minimum={f32(b,16),f32(b,20),f32(b,24)};m.maximum={f32(b,28),f32(b,32),f32(b,36)};
     for(uint32_t i=0;i<v;++i){const size_t p=40+12*i;m.vertices.push_back({f32(b,p),f32(b,p+4),f32(b,p+8)});}
     for(uint32_t i=0;i<t;++i){const size_t p=40+12*v+8*i;m.triangles.push_back({{u16(b,p),u16(b,p+2),u16(b,p+4)},u16(b,p+6)});}

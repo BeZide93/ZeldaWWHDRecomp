@@ -79,7 +79,7 @@ std::string prepare(const std::string& mod,const story_notebook::ManifestModel& 
     std::ifstream archive(destination,std::ios::binary);char magic[4]{};archive.read(magic,4);check(archive&&std::string(magic,4)=="Yaz0","Static model converter produced an invalid archive");
     std::shared_ptr<const story_world_collision::mesh::Mesh> collision_data;
     if(collision){
-        check(fs::is_regular_file(collision_path)&&!fs::is_symlink(collision_path)&&fs::file_size(collision_path)<=100000,"Invalid collision sidecar");
+        check(fs::is_regular_file(collision_path)&&!fs::is_symlink(collision_path)&&fs::file_size(collision_path)<=story_world_collision::mesh::MaxWcolBytes,"Invalid collision sidecar");
         std::ifstream file(collision_path,std::ios::binary);std::vector<uint8_t> bytes{std::istreambuf_iterator<char>(file),{}};
         auto decoded=std::make_shared<story_world_collision::mesh::Mesh>();
         check(story_world_collision::mesh::decode(bytes,*decoded,why),"Invalid converted collision geometry");

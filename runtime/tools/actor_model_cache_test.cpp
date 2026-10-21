@@ -23,6 +23,18 @@ static std::vector<uint8_t> collision_fixture(){
     u32(0,0x57434f4c);u32(4,1);u32(8,3);u32(12,1);f32(28,100);f32(36,100);
     f32(52,100);f32(72,100);b[79]=2;b[81]=1;return b;
 }
+// The largest valid body: 8192 vertices (a 65 x 65 grid, the rest repeat its corner) and 8192 triangles,
+// 163880 bytes (story_world_collision_mesh.h MaxWcolBytes), well past the old 100000-byte sidecar cap.
+static std::vector<uint8_t> full_collision_fixture(){
+    namespace m=story_world_collision::mesh;std::vector<uint8_t> b(m::MaxWcolBytes);
+    auto u32=[&](size_t p,uint32_t v){for(unsigned k=0;k<4;++k)b[p+k]=uint8_t(v>>(24-8*k));};
+    auto f32=[&](size_t p,float v){u32(p,std::bit_cast<uint32_t>(v));};
+    auto u16=[&](size_t p,uint16_t v){b[p]=uint8_t(v>>8);b[p+1]=uint8_t(v);};
+    u32(0,0x57434f4c);u32(4,1);u32(8,m::MaxVertices);u32(12,m::MaxTriangles);f32(28,6400);f32(36,6400);
+    for(uint32_t i=0;i<m::MaxVertices;++i){const uint32_t g=std::min<uint32_t>(i,65*65-1);f32(40+12*i,float(g%65)*100);f32(40+12*i+8,float(g/65)*100);}
+    size_t p=40+12*m::MaxVertices;for(uint16_t j=0;j<64;++j)for(uint16_t i=0;i<64;++i){const uint16_t a=uint16_t(j*65+i);for(auto t:{std::array<uint16_t,3>{a,uint16_t(a+65),uint16_t(a+1)},std::array<uint16_t,3>{uint16_t(a+1),uint16_t(a+65),uint16_t(a+66)}}){for(unsigned k=0;k<3;++k)u16(p+2*k,t[k]);u16(p+6,1);p+=8;}}
+    return b;
+}
 int main(int argc,char** argv){
     namespace fs=std::filesystem;
     if(argc>1&&std::string(argv[1])=="--converter"){
@@ -37,7 +49,7 @@ int main(int argc,char** argv){
         if(std::string(argv[2])=="triangles_fraction")result["triangles"]=12.5;
         if(std::string(argv[2])=="triangles_string")result["triangles"]="12";
         if(!collision_output.empty()){
-            auto bytes=collision_fixture();if(std::string(argv[2])=="collision_corrupt")bytes[0]=0;
+            auto bytes=std::string(argv[2]).starts_with("collision_full")?full_collision_fixture():collision_fixture();if(std::string(argv[2])=="collision_corrupt")bytes[0]=0;if(std::string(argv[2])=="collision_full_oversize")bytes.push_back(0);
             if(std::string(argv[2])!="collision_missing"){std::ofstream file(collision_output,std::ios::binary);file.write(reinterpret_cast<const char*>(bytes.data()),std::streamsize(bytes.size()));}
             result["collision_sha256"]=std::string(argv[2])=="collision_digest"?"wrong":mods::hash::sha256_text(std::string(bytes.begin(),bytes.end()));
         }
@@ -68,6 +80,11 @@ int main(int argc,char** argv){
         assert(rejected&&actor_model_cache::archive_for(guest).empty()&&!actor_model_cache::collision_for(first)&&!actor_model_cache::bounds_for(first,minimum,maximum));
     }
     assert(prepare_collision("ok")==first);assert(actor_model_cache::collision_for(first));
+    // a body at the 8192-vertex/8192-triangle limit loads from the cache; one byte more is refused
+    {static_assert(story_world_collision::mesh::MaxWcolBytes==163880);assert(prepare_collision("collision_full")==first);auto mesh=actor_model_cache::collision_for(first);
+     assert(mesh&&mesh->vertices.size()==8192&&mesh->triangles.size()==8192&&mesh->maximum.x==6400&&mesh->maximum.z==6400);
+     bool rejected=false;try{prepare_collision("collision_full_oversize");}catch(const std::exception&){rejected=true;}assert(rejected&&!actor_model_cache::collision_for(first));
+     assert(prepare_collision("ok")==first&&actor_model_cache::collision_for(first));}
     prepare("owner","ok");assert(!actor_model_cache::collision_for(first)); // Render-only rebuild cannot retain old collision.
     auto prepare_coast=[&](const char* tool){return actor_model_cache::prepare("owner",model,(root/"package with spaces").string(),(root/"data").string(),command,tool,"game with spaces",false,true);};
     assert(prepare_coast("ok")==first&&actor_model_cache::shoreline_for(first));

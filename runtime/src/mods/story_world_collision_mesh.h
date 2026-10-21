@@ -10,6 +10,9 @@ namespace story_world_collision::mesh {
 // A body's triangles and vertices (each at most 8192; the 512 KiB storage budget of a body, mod_actor's
 // collision_geometry, is the closer limit for a large mesh: about 6000 welded triangles).
 inline constexpr uint32_t MaxVertices=8192,MaxTriangles=8192,LeafTriangles=32;
+// A WCOL file's size (header, vertex and triangle records) and the largest valid one: 163880 bytes.
+inline constexpr uint64_t wcol_bytes(uint64_t vertices,uint64_t triangles){return 40+12*vertices+8*triangles;}
+inline constexpr uint64_t MaxWcolBytes=wcol_bytes(MaxVertices,MaxTriangles);
 // A body's size: every collision-local coordinate within +/-MaxExtent and its extent along each axis at most
 // MaxExtent, one sea square (100000 units, 1 km). The game's own collision has no size limit below that: cBgW
 // keeps no grid, only per-node boxes it computes from the vertices (bounds start at +/-1e9, 1 unit margin),
