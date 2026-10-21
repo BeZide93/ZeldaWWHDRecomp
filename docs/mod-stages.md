@@ -241,21 +241,16 @@ wait steps, an `area` or `room` trigger and only `stage` and `scene` actions sta
 (`say`, `choice`, a demo's `messages`), sounds, music, talks, quests and the other actions are story
 content and need the Story Notebook.
 
-The sky island example's scene `bird` starts when Link walks along Outset's pier towards the lookout: the
-Helmaroc King swoops down over the pier (Link startled), opens its talons and closes them around him with
-the game's own grab animation (the attach's `blend` lifts him off the planks without a jump), and climbs
-with him struggling and then hanging. Above the clouds the island comes into view far ahead, the bird flies
-over it, its talons open and Link falls towards it; the fade takes him into the stage's spawn 2, a
-`"start": "fall"` spawn, so he drops onto the island. Its bird is `{"actor": "Dk", "spawn": "always",
-"params": 2}`: the demo's own Helmaroc King, without ground collision. Outset has a Helmaroc King of its
-own, waiting hidden for its story event; without `"spawn": "always"` the demo would move that one, which
-doesn't show.
+For example, a scene can start when Link walks along a pier: the Helmaroc King swoops down, closes its
+talons around him with the game's own grab animation (the attach's `blend` lifts him off the planks without a
+jump) and climbs with him; the scene's end takes him into a stage spawn with `"start": "fall"`, so he drops
+into it from above. Use `{"actor": "Dk", "spawn": "always", "params": 2}` for such a bird: the demo's own
+Helmaroc King, without ground collision. Outset has a Helmaroc King of its own, waiting hidden for its story
+event; without `"spawn": "always"` the demo would move that one, which doesn't show.
 
-The island in Outset's sky is a world object of the package ([world objects](world-objects.md)): a
-low-detail model of the island and its arena (`models/island-distant.glb`) placed high above the sea north
-of Outset, shown until the scene has dropped Link on the island (`"when": {"not_flag": "sky.landed"}`, a
-flag the scene's end sets, with the quest's step 2). World objects are story content, so the package needs
-the Story Notebook.
+A far-off view of a place, such as an island in the sky, can be a world object of the package
+([world objects](world-objects.md)) shown only until a flag is set (`"when": {"not_flag": "…"}`). World
+objects are story content, so such a package needs the Story Notebook.
 
 ### Boss rooms
 
@@ -267,8 +262,6 @@ A boss room is a room behind the boss door, with something to beat, a reward and
 3. **The reward**: a chest with `heart_container` (see the note under [Actors](#actors)).
 4. **The way out**: a return warp with `"after"` naming that chest, so it opens once the reward is taken.
 
-`examples/guest-mods/sky-island` is such a stage: an island in the sky with the boss key on it and an
-open-air arena behind the boss door.
 
 ### A quest through the stage
 
@@ -303,13 +296,6 @@ notebook installed, the quest, its letter and every story action work as in any 
 the package's stages and its wordless scenes play just the same, its quest and letters stay out, and its
 story actions are skipped (a line in the game's log says so); `stage` and `scene` actions still run. Only
 the Story Notebook can be an optional dependency.
-
-The sky island example needs the Story Notebook (a plain dependency, `set_package_info` `"value":
-"required"`): its scene shows the island in Outset's sky as a world object, which is story content. Its quest "The island in the sky" starts with a letter (from a Rito
-postbox) that sends Link to Outset's pier; the Helmaroc King's scene (or the updraft) takes him to the
-island (step 2), the boss key's chest moves it to the guardian (3), the darknut's defeat to the heart
-container (4), the big chest to the way home (5), and the return warp finishes it: the reward, 100 rupees,
-is given once.
 
 ## The ground model
 
@@ -352,8 +338,13 @@ give such a material texture coordinates that repeat along one axis (`uv_min` an
 and stay inside one band along the other (inside 0..1). A ground model that tiles the whole texture shows
 all the bands at once. Keep each surface's coordinates inside its band on that axis, and repeat only along
 the other; where a surface must repeat both ways, walk the band forwards and back (0 to 1 to 0) with
-vertices closer together than one band. The sky island example's `make_island.py` does both, with a table
-of the bands it uses.
+vertices closer together than one band.
+
+A kit material keeps the game's drawing of it: an opaque one stays opaque, a cut-out stays a cut-out and a blended
+one stays see-through (`list_kit_materials` does not show which is which; the export tool's GLB marks it in each
+material's `alphaMode`). The game's falling water (Forest Haven's, the castle's, the sea's islands') is a cut-out,
+drawn white with moving streaks; for water that shows the sky through it, use a blended water material of the kit,
+such as Forest Haven's spray (`SC_00_m_2_`) or coast foam (`SC_00_m`).
 
 Give the model **vertex colours** (glTF `COLOR_0`) to shade it as the game's rooms are: the kit materials
 multiply their texture by them, and the game's own rooms darken corners, the foot of cliffs and the

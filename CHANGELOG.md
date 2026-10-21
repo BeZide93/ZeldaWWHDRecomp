@@ -33,14 +33,11 @@ what is on `devel` and not released yet (also in the
   content and must not be shared or put into mods. See [world objects](docs/world-objects.md).
 - **Fixed: mod stages in release builds.** The stage builder was missing from release packages, so mod stages,
   `list_kit_materials` and the stage templates failed there; development builds were not affected.
-- **Sky island example: a full side quest** (for mod makers). "The island in the sky" now starts with a letter and
-  shows its steps in the Story Notebook: the Helmaroc King swoops down on Outset's pier, grabs Link with the game's own
-  capture animation, carries him up through the clouds to the island seen far off, and drops him over it; then the boss
-  key, the guardian, the heart container and the warp home (with a reward). New for mod makers: chests, defeated
-  Darknuts and warps in a mod stage can move a quest on (`then`), quest places can point into the mod's own stage,
-  scene clips from the game's cutscene archives that play once and hold, Link's face animations and blending in
-  scenes, a smooth `blend` when attaching one actor to another, and a scene spawn that drops Link in from above.
-  The example requires the Story Notebook.
+- **Mod stages and scenes: quests through stages, cutscene clips, carrying Link** (for mod makers). Chests,
+  defeated Darknuts and warps in a mod stage can move a quest on (`then`), quest places can point into the mod's own
+  stage, scenes can use clips from the game's cutscene archives that play once and hold, Link's face animations and
+  blending, a smooth `blend` when attaching one actor to another (e.g. the Helmaroc King grabbing and carrying Link with
+  the game's own capture animation), and a scene spawn that drops Link in from above.
 
 - **Fixed: Continue last session after quitting inside a dungeon, cave or house.** Starting the game with
   **At start → Continue last session** (or a save state chosen to load at start) put Link at the save file's start
@@ -64,11 +61,8 @@ what is on `devel` and not released yet (also in the
   and the charm's ring always landed there. It now runs once per game step at every frame rate, as at 30 fps; this
   also brings the interface's other small animations back to their original speed.
 
-- **Sky island example: the Helmaroc King carries Link there, and a textured island** (for mod makers). Stepping onto
-  Outset's pier walkway starts a scene: the Helmaroc King swoops down, grabs Link and carries him over the sea to the sky
-  island (the updraft stays as a second way in). The island now has grass, a path, cliffs and a rocky underside made
-  from Outset's own materials, and the arena a paved floor. A demo actor can ask for its own copy with
-  `"spawn": "always"` (the room's own Helmaroc King waits hidden for its story moment). A room without a material
+- **Scenes and kit materials for mod makers.** A demo actor can ask for its own copy with `"spawn": "always"` (for
+  example the Helmaroc King, while the room's own one waits hidden for its story moment). A room without a material
   mapping now uses the kit's main material instead of an arbitrary one, which fixes streaked or black ground. Scenes
   without text, sounds or story actions no longer need the Story Notebook. New editor and MCP commands:
   `list_kit_materials`, `edit_demo_actor`, `set_package_info`, and `focus` with an eye point.
@@ -79,7 +73,7 @@ what is on `devel` and not released yet (also in the
   lifts Link into the stage. A big chest can hold a heart container, and a warp can wait until a chest is opened.
   Talks and scene ends can take Link into a stage. A stage can bring its own shader template so it doesn't stutter
   on the first visit (installed after setup: run setup's Repair). Game Over in a mod stage restarts at the stage's
-  start. New example: `examples/guest-mods/sky-island`.
+  start.
 - **World editor: scenes play right away, and easier demo steps** (for mod makers). A new scene can be played with
   Play scene or Play step without saving and restarting first. In the Scenes window the step row no longer hides its
   buttons on narrow panels; the buttons say "Duplicate scene" / "Remove scene…" and "Duplicate step" / "Remove step",

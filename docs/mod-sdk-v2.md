@@ -139,11 +139,13 @@ disable it, restart and install the new version with the same ID; its settings s
 Distribute only your manifest, your ELF and resources you are allowed to share, never game
 files.
 
+The hooks example [`heart-ticker`](https://github.com/ZeldaWWHDRecomp/ZeldaWWHDMods/tree/main/heart-ticker) is in the
+mod repository: entry and return hooks on Link's per-step function, calling a game function.
+
 The examples in [`examples/guest-mods`](../examples/guest-mods) are complete mods:
 
 | Example | Shows |
 | --- | --- |
-| `heart-ticker` | entry and return hooks on Link's per-step function, calling a game function |
 | `addcalc-replace` | replacing a game function (`cLib_addCalc2`) and calling the original |
 | `hud-demo` | HUD drawing with package artwork and text, texture reload after a state load |
 | `button-icons` | reading port settings, following the game's button panes |

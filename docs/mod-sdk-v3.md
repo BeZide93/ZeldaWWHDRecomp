@@ -1593,9 +1593,8 @@ someone in its beak or claws.
 - A grab that looks like one: time a one-shot clip of the carrier (`"loop": false`)
   so that its claws close at the attach frame, with the carrier's position track
   bringing the claws down to the actor; then the carrier's loop. The carried
-  actor's own clips do the rest (Link: startled, struggling, then hanging). The
-  sky island example (`examples/guest-mods/sky-island`, scene `bird`) does this
-  with the Helmaroc King's `04_dk_cut08_hokaku.bck`, Link's Outset clips and
+  actor's own clips do the rest (Link: startled, struggling, then hanging). A scene
+  can do this with the Helmaroc King's `04_dk_cut08_hokaku.bck`, Link's Outset clips and
   an attach `blend`.
   When an offset is hard to find, attach to the joint with no offset first and
   run with `WWHD_DEMO_TRACE=1`: the log gives the carried actor's place, the
