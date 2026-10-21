@@ -598,7 +598,8 @@ public class SetupActivity extends Activity {
                     String reason = value.optString("state").equals("paused") ? value.optString("reason", null) : null;
                     if (value.has("reason")) {
                         int[] sensors = sensorReadings();
-                        text += "\n" + SetupPolicy.description(value.getString("reason"), sensors[0], sensors[1]);
+                        text += "\n" + SetupPolicy.description(value.getString("reason"), sensors[0], sensors[1],
+                            SetupPolicy.hottestCoreSensor(new File("/sys")));
                     }
                     if ("heat".equals(reason))
                         text += "\nIf the Android device does not feel hot, tap Continue anyway. Setup then ignores heat until this run ends; Android's critical heat level still pauses it.";

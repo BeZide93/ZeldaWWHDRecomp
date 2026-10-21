@@ -8,6 +8,8 @@ package org.wwhdrecomp.wwhd;
  * 41.0 °C. The user may continue anyway (heat override), which skips that pause for the rest of
  * the setup run. Android thermal status CRITICAL or higher always pauses: the phone throttles hard
  * or shuts down at that level whatever setup does.
+ *
+ * A SEVERE status that no temperature backs up is ignored (see {@link #thermalStatusUnreliable}).
  */
 public final class SetupPolicy {
     public static final int THERMAL_LIGHT = 1, THERMAL_MODERATE = 2, THERMAL_SEVERE = 3, THERMAL_CRITICAL = 4;
@@ -26,8 +28,98 @@ public final class SetupPolicy {
         return String.format(java.util.Locale.ROOT, "%.1f °C", tenths / 10f);
     }
 
+    /*
+     * Thermal status trust (issue #254). Some devices report heat that no temperature backs up: an
+     * AYANEO Pocket EVO (fan, Snapdragon 8 Gen 2, Android 13) reports SEVERE right after boot at a
+     * 30-31 °C battery with its fan far from full speed, and its thermal headroom stays at 1.09-1.38
+     * during normal play, so neither signal can confirm the other there. Its CPU sensors read 52-77 °C
+     * and its GPU sensors 45-62 °C while the game runs at 60 fps (a Retroid Pocket 6 with the same chip
+     * reports NONE at the same readings). So SEVERE is believed only when a real temperature agrees:
+     *  - the battery is at least 40.0 °C (setup's own battery limits start at 41-42 °C), or
+     *  - the hottest CPU/GPU sensor is at least 90 °C: Snapdragon cores sit in the 70s under gaming
+     *    load and only throttle near their 95-105 °C junction limits, or
+     *  - there is no battery temperature: nothing contradicts the status, so it is acted on as before.
+     * Otherwise (SEVERE, a battery below 40.0 °C, CPU/GPU sensors below 90 °C or unreadable) the status
+     * is treated as unknown; setup's battery temperature limits still apply. NONE ... MODERATE are not
+     * doubted (they never pause on their own), and CRITICAL or higher is always believed: Android
+     * throttles hard or shuts down at that level anyway. The thermal headroom is not used: the EVO
+     * forecasts SEVERE (1.0+) while cool. HardwarePropertiesManager (skin sensors) needs a system
+     * permission, so a normal app reads the CPU/GPU zones in /sys/class/thermal instead (as the
+     * performance report does).
+     */
+    public static final int THERMAL_TRUST_BATTERY_TENTHS = 400;
+    public static final float THERMAL_TRUST_CORE_CELSIUS = 90f;
+
+    /**
+     * Whether a reported thermal status contradicts the temperatures. temperatureTenths: battery
+     * (-1 or Integer.MIN_VALUE: unknown); hottestCore: hottest CPU/GPU sensor in °C (NaN: unknown).
+     */
+    public static boolean thermalStatusUnreliable(int thermal, int temperatureTenths, float hottestCore) {
+        if (thermal != THERMAL_SEVERE) return false;
+        if (temperatureTenths == -1 || temperatureTenths == Integer.MIN_VALUE) return false;
+        if (temperatureTenths >= THERMAL_TRUST_BATTERY_TENTHS) return false;
+        return !(hottestCore >= THERMAL_TRUST_CORE_CELSIUS);  // NaN (unreadable) does not confirm it
+    }
+
+    /** The thermal status to act on: the reported one, or -1 (unknown) where it looks unreliable. */
+    public static int trustedThermal(int thermal, int temperatureTenths, float hottestCore) {
+        return thermalStatusUnreliable(thermal, temperatureTenths, hottestCore) ? -1 : thermal;
+    }
+
+    /** "77.2 C", or "n/a" for no readable CPU/GPU sensor. */
+    public static String coreText(float hottestCore) {
+        return Float.isNaN(hottestCore) ? "n/a" : String.format(java.util.Locale.ROOT, "%.1f C", hottestCore);
+    }
+
+    /**
+     * The hottest CPU/GPU temperature in °C from root/class/thermal (thermal_zone types containing
+     * "cpu" or "gpu", millidegrees), NaN when none is readable. Other zones (battery, skin, "socd",
+     * a limits daemon reading 0) are left out.
+     */
+    public static float hottestCoreSensor(java.io.File root) {
+        java.io.File[] zones = new java.io.File(root, "class/thermal").listFiles();
+        float hottest = Float.NaN;
+        if (zones == null) return hottest;
+        for (java.io.File zone : zones) {
+            if (!zone.getName().startsWith("thermal_zone")) continue;
+            String type = firstLine(new java.io.File(zone, "type"));
+            if (type == null || !(type.contains("cpu") || type.contains("gpu"))) continue;
+            String temp = firstLine(new java.io.File(zone, "temp"));
+            try {
+                float celsius = temp == null ? Float.NaN : Long.parseLong(temp.trim()) / 1000f;
+                if (celsius >= -40 && celsius <= 200 && !(hottest >= celsius)) hottest = celsius;
+            } catch (NumberFormatException ignored) { /* not a reading */ }
+        }
+        return hottest;
+    }
+
+    private static String firstLine(java.io.File file) {
+        try (java.io.BufferedReader in = new java.io.BufferedReader(new java.io.FileReader(file))) {
+            return in.readLine();
+        } catch (java.io.IOException | SecurityException e) {
+            return null;
+        }
+    }
+
+    /**
+     * The performance report's "Thermal: ..." value: the status name, or for a status that looks
+     * unreliable "severe (reported by the system; battery 30.0 C, CPU/GPU 77.2 C, looks unreliable)".
+     */
+    public static String reportThermal(int thermal, int temperatureTenths, float hottestCore) {
+        if (!thermalStatusUnreliable(thermal, temperatureTenths, hottestCore)) return thermalName(thermal);
+        return thermalName(thermal) + " (reported by the system; battery " +
+            String.format(java.util.Locale.ROOT, "%.1f C", temperatureTenths / 10f) +
+            ", CPU/GPU " + coreText(hottestCore) + ", looks unreliable)";
+    }
+
     public static String readings(int thermal, int temperatureTenths) {
-        return "battery " + batteryTemperature(temperatureTenths) + ", thermal status: " + thermalName(thermal);
+        return readings(thermal, temperatureTenths, Float.NaN);
+    }
+
+    public static String readings(int thermal, int temperatureTenths, float hottestCore) {
+        String text = "battery " + batteryTemperature(temperatureTenths) + ", thermal status: " + thermalName(thermal);
+        if (thermalStatusUnreliable(thermal, temperatureTenths, hottestCore)) text += " (looks unreliable, ignored)";
+        return Float.isNaN(hottestCore) ? text : text + ", CPU/GPU " + coreText(hottestCore).replace(" C", " °C");
     }
 
     public static String description(String reason) {
@@ -41,10 +133,14 @@ public final class SetupPolicy {
 
     /** The pause text with the current sensor readings for heat pauses. */
     public static String description(String reason, int thermal, int temperatureTenths) {
+        return description(reason, thermal, temperatureTenths, Float.NaN);
+    }
+
+    public static String description(String reason, int thermal, int temperatureTenths, float hottestCore) {
         if ("heat".equals(reason))
-            return description(reason) + " (" + readings(thermal, temperatureTenths) + ")";
+            return description(reason) + " (" + readings(thermal, temperatureTenths, hottestCore) + ")";
         if ("critical".equals(reason))
-            return description(reason) + " (" + readings(thermal, temperatureTenths) + "). " +
+            return description(reason) + " (" + readings(thermal, temperatureTenths, hottestCore) + "). " +
                 "Setup continues once it cools down. Continue anyway does not apply here: " +
                 "at this level the Android device throttles hard or shuts down regardless.";
         return description(reason);

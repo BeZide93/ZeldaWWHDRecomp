@@ -49,6 +49,9 @@ public class SetupService extends Service {
     private volatile boolean destroyed;
     private int thermal;
     private int temperature = -1;
+    /** Hottest CPU/GPU sensor in °C (SetupPolicy.hottestCoreSensor), NaN while unknown. */
+    private volatile float hottestCore = Float.NaN;
+    private Boolean loggedUnreliable;
     private int battery = -1;
     private boolean charging;
     private String reason;
@@ -124,7 +127,7 @@ public class SetupService extends Service {
                 SetupStore.write(new File(job, CONTINUE_HEAT.equals(action) ? HEAT_OVERRIDE : BATTERY_OVERRIDE),
                     new JSONObject().put("schema", 1).put("since", System.currentTimeMillis()));
                 Log.i("wwhd-setup", "continue anyway: " + (CONTINUE_HEAT.equals(action) ? "heat" : "battery") +
-                    " pauses skipped for this setup run (" + SetupPolicy.readings(thermal, temperature) +
+                    " pauses skipped for this setup run (" + SetupPolicy.readings(thermal, temperature, hottestCore) +
                     ", battery " + battery + "%, charging " + charging + ")");
             }
             main.removeCallbacks(tick);
@@ -143,11 +146,20 @@ public class SetupService extends Service {
             try {
                 boolean heatOverride = new File(job, HEAT_OVERRIDE).exists();
                 boolean batteryOverride = new File(job, BATTERY_OVERRIDE).exists();
-                reason = policy.update(thermal, temperature, battery, charging,
+                hottestCore = SetupPolicy.hottestCoreSensor(new File("/sys"));
+                // A SEVERE status no temperature backs up is ignored (issue #254, SetupPolicy).
+                boolean unreliable = SetupPolicy.thermalStatusUnreliable(thermal, temperature, hottestCore);
+                if (!Boolean.valueOf(unreliable).equals(loggedUnreliable)) {
+                    if (unreliable || loggedUnreliable != null)
+                        Log.i("wwhd-setup", "thermal status " + (unreliable ? "looks unreliable, ignored" : "believed") +
+                            " (" + SetupPolicy.readings(thermal, temperature, hottestCore) + ")");
+                    loggedUnreliable = unreliable;
+                }
+                reason = policy.update(SetupPolicy.trustedThermal(thermal, temperature, hottestCore), temperature, battery, charging,
                     new File(job, "manual-pause.json").exists(), heatOverride, batteryOverride);
                 if (!java.util.Objects.equals(reason, loggedReason)) {
                     Log.i("wwhd-setup", (reason == null ? "resume" : "pause: " + reason) + " (" +
-                        SetupPolicy.readings(thermal, temperature) + ", battery " + battery + "%, charging " + charging +
+                        SetupPolicy.readings(thermal, temperature, hottestCore) + ", battery " + battery + "%, charging " + charging +
                         ", continue anyway: heat " + heatOverride + ", battery " + batteryOverride + ")");
                     loggedReason = reason;
                 }
@@ -289,10 +301,12 @@ public class SetupService extends Service {
         boolean lowRam = true;
         if (activities != null) { activities.getMemoryInfo(memory); lowRam = activities.isLowRamDevice(); }
         PowerManager power = (PowerManager) getSystemService(Context.POWER_SERVICE);
-        int thermal = power != null && Build.VERSION.SDK_INT >= 29 ? power.getCurrentThermalStatus() : 0;
+        int reported = power != null && Build.VERSION.SDK_INT >= 29 ? power.getCurrentThermalStatus() : 0;
+        int thermal = SetupPolicy.trustedThermal(reported, temperature, hottestCore);
         int jobs = SetupPolicy.compileJobs(Runtime.getRuntime().availableProcessors(), memory.availMem, lowRam, thermal);
         Log.i("wwhd-setup", "compile workers " + jobs + " (cores " + Runtime.getRuntime().availableProcessors() +
-            ", free memory " + (memory.availMem >> 20) + " MB, low-RAM " + lowRam + ", thermal " + thermal + ")");
+            ", free memory " + (memory.availMem >> 20) + " MB, low-RAM " + lowRam + ", thermal " + reported +
+            (thermal != reported ? " (looks unreliable, ignored)" : "") + ")");
         return jobs;
     }
 
@@ -338,7 +352,7 @@ public class SetupService extends Service {
         JSONObject status = SetupStore.read(new File(job, "host.json"));
         String state = status.getString("state");
         String text = state;
-        if (reason != null) text = running ? "Pausing at the next safe checkpoint" : SetupPolicy.description(reason, thermal, temperature);
+        if (reason != null) text = running ? "Pausing at the next safe checkpoint" : SetupPolicy.description(reason, thermal, temperature, hottestCore);
         else if (state.equals("running")) {
             File progress = new File(job, "state.json");
             if (progress.isFile()) {

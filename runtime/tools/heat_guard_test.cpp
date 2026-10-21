@@ -71,6 +71,45 @@ int main() {
     assert(next_paused(true, 0.95f, limits(kFanHandheld, kNormal)));
     assert(!next_paused(true, 0.89f, limits(kFanHandheld, kNormal)));
 
+    // temperature check on fan handhelds (#254). AYANEO Pocket EVO, v0.4.0 and older logs: headroom
+    // 1.09 -> 1.38 in normal 60 fps play at a 30-31 C battery, hottest CPU sensor 60-77 C: 60 fps stays on
+    {
+        const Limits l = limits(kFanHandheld, kNormal);
+        const Temperatures evo{30.5f, 77.2f};
+        bool paused = false;
+        for (float h : {1.09f, 1.11f, 1.20f, 1.30f, 1.33f, 1.38f}) {
+            paused = next_paused(paused, h, l, kFanHandheld, evo);
+            assert(!paused);
+        }
+        // battery unreadable (power_supply blocked), CPU sensors cool: still not paused
+        assert(!next_paused(false, 1.38f, l, kFanHandheld, Temperatures{NAN, 60.1f}));
+        // real heat: a hot CPU or a hot battery confirms the headroom
+        assert(next_paused(false, 1.05f, l, kFanHandheld, Temperatures{31.0f, 92.0f}));
+        assert(next_paused(false, 1.05f, l, kFanHandheld, Temperatures{44.0f, 70.0f}));
+        assert(next_paused(false, 1.00f, l, kFanHandheld, Temperatures{40.0f, NAN}));
+        assert(next_paused(false, 1.00f, l, kFanHandheld, Temperatures{NAN, 90.0f}));
+        assert(!next_paused(false, 1.00f, l, kFanHandheld, Temperatures{39.9f, 89.9f}));
+        // the headroom still has to reach the limit: hot sensors alone never pause
+        assert(!next_paused(false, 0.95f, l, kFanHandheld, Temperatures{45.0f, 95.0f}));
+        // no readable temperature: the headroom alone decides, as before
+        assert(next_paused(false, 1.00f, l, kFanHandheld, Temperatures{}));
+        // while paused: warm (85 C) keeps the pause, cool (below 38 C and 80 C) ends it at once,
+        // a headroom below 0.90 ends it whatever the temperatures
+        assert(next_paused(true, 1.20f, l, kFanHandheld, Temperatures{33.0f, 85.0f}));
+        assert(next_paused(true, 1.20f, l, kFanHandheld, Temperatures{38.0f, 70.0f}));
+        assert(!next_paused(true, 1.20f, l, kFanHandheld, Temperatures{33.0f, 79.9f}));
+        assert(!next_paused(true, 0.89f, l, kFanHandheld, Temperatures{45.0f, 95.0f}));
+        assert(next_paused(true, 1.20f, l, kFanHandheld, Temperatures{}));
+        // Off never pauses
+        assert(!next_paused(true, 1.5f, limits(kFanHandheld, kOff), kFanHandheld, Temperatures{45.0f, 95.0f}));
+        // phones keep the headroom rule whatever the sensors read
+        const Limits p = limits(kPhone, kNormal);
+        assert(next_paused(false, 0.72f, p, kPhone, Temperatures{30.0f, 60.0f}));
+        assert(next_paused(true, 0.65f, p, kPhone, Temperatures{30.0f, 60.0f}));
+        assert(!next_paused(false, 0.71f, p, kPhone, Temperatures{45.0f, 95.0f}));
+        assert(!checks_temperatures(kPhone) && checks_temperatures(kFanHandheld));
+    }
+
     // the setting's names (saved value and WWHD_HEAT_GUARD)
     assert(parse(nullptr) == kNormal && parse("normal") == kNormal && parse("0") == kNormal);
     assert(parse("relaxed") == kRelaxed && parse("1") == kRelaxed);

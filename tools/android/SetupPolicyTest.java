@@ -89,6 +89,73 @@ public final class SetupPolicyTest {
         expect("Compiling: 79/80 · about a minute left", SetupPolicy.compileProgress("compiled", 79, 0, 80, 20));
         expect("Compiling: done (80/80)", SetupPolicy.compileProgress("complete", 80, 0, 80, -1));
         expect(null, SetupPolicy.compileProgress("compiled", 1, 0, 0, -1));
+
+        // Thermal status trust (issue #254): SEVERE needs a 40.0 °C battery or a 90 °C CPU/GPU sensor
+        float nan = Float.NaN;
+        // AYANEO Pocket EVO (v0.4.0 reports): SEVERE at a 30-31 °C battery, hottest CPU 60.1 / 77.2 °C
+        if (!SetupPolicy.thermalStatusUnreliable(3, 300, 60.1f)) throw new AssertionError("EVO 30 °C, CPU 60.1");
+        if (!SetupPolicy.thermalStatusUnreliable(3, 310, 77.2f)) throw new AssertionError("EVO 31 °C, CPU 77.2");
+        if (!SetupPolicy.thermalStatusUnreliable(3, 300, nan)) throw new AssertionError("EVO, sensors unreadable");
+        if (!SetupPolicy.thermalStatusUnreliable(3, 399, 89.9f)) throw new AssertionError("39.9 °C, 89.9 °C");
+        if (SetupPolicy.trustedThermal(3, 310, 77.2f) != -1) throw new AssertionError("EVO ignored");
+        // real heat: a hot battery or a hot CPU/GPU backs SEVERE up
+        if (SetupPolicy.thermalStatusUnreliable(3, 440, nan)) throw new AssertionError("hot device 44 °C");
+        if (SetupPolicy.thermalStatusUnreliable(3, 440, 85f)) throw new AssertionError("hot device 44 °C, CPU 85");
+        if (SetupPolicy.thermalStatusUnreliable(3, 400, 50f)) throw new AssertionError("40.0 °C");
+        if (SetupPolicy.thermalStatusUnreliable(3, 310, 90f)) throw new AssertionError("CPU 90 °C");
+        if (SetupPolicy.thermalStatusUnreliable(3, 310, 98.5f)) throw new AssertionError("CPU 98.5 °C");
+        if (SetupPolicy.trustedThermal(3, 440, nan) != 3) throw new AssertionError("hot device kept");
+        // no battery data: nothing contradicts SEVERE, it is believed
+        if (SetupPolicy.thermalStatusUnreliable(3, -1, nan)) throw new AssertionError("no battery, -1");
+        if (SetupPolicy.thermalStatusUnreliable(3, Integer.MIN_VALUE, 50f)) throw new AssertionError("no battery, MIN");
+        // none / light / moderate are never doubted; CRITICAL and higher always believed; unknown stays unknown
+        for (int status : new int[] {-1, 0, 1, 2, 4, 5, 6})
+            if (SetupPolicy.thermalStatusUnreliable(status, 300, 60f) || SetupPolicy.trustedThermal(status, 300, 60f) != status)
+                throw new AssertionError("status " + status);
+        // setup: the EVO no longer pauses for heat, a hot device still does, CRITICAL still pauses
+        SetupPolicy evo = new SetupPolicy();
+        expect(null, evo.update(SetupPolicy.trustedThermal(3, 300, 60.1f), 300, 80, true, false));
+        expect(null, evo.update(SetupPolicy.trustedThermal(3, 310, 77.2f), 310, 80, true, false));
+        expect("heat", evo.update(SetupPolicy.trustedThermal(3, 310, 92f), 310, 80, true, false));
+        expect("heat", new SetupPolicy().update(SetupPolicy.trustedThermal(3, 440, nan), 440, 80, true, false));
+        expect("heat", new SetupPolicy().update(SetupPolicy.trustedThermal(3, -1, nan), -1, 80, true, false));
+        expect(null, new SetupPolicy().update(SetupPolicy.trustedThermal(0, 300, nan), 300, 80, true, false));
+        expect(null, new SetupPolicy().update(SetupPolicy.trustedThermal(2, 300, nan), 300, 80, true, false));
+        expect("critical", new SetupPolicy().update(SetupPolicy.trustedThermal(4, 300, nan), 300, 80, true, false));
+        // compile workers: the EVO keeps its parallel compilers, a hot device still gets one
+        if (SetupPolicy.compileJobs(8, 10L << 30, false, SetupPolicy.trustedThermal(3, 300, 60.1f)) != 4)
+            throw new AssertionError("EVO compile workers");
+        if (SetupPolicy.compileJobs(8, 10L << 30, false, SetupPolicy.trustedThermal(3, 440, nan)) != 1)
+            throw new AssertionError("hot device compile workers");
+        // texts: performance report and setup readings
+        expect("severe (reported by the system; battery 30.0 C, CPU/GPU 60.1 C, looks unreliable)",
+            SetupPolicy.reportThermal(3, 300, 60.1f));
+        expect("severe (reported by the system; battery 31.0 C, CPU/GPU n/a, looks unreliable)",
+            SetupPolicy.reportThermal(3, 310, nan));
+        expect("severe", SetupPolicy.reportThermal(3, 440, nan));
+        expect("severe", SetupPolicy.reportThermal(3, Integer.MIN_VALUE, nan));
+        expect("moderate", SetupPolicy.reportThermal(2, 300, nan));
+        expect("none", SetupPolicy.reportThermal(0, 300, nan));
+        expect("n/a", SetupPolicy.reportThermal(-1, Integer.MIN_VALUE, nan));
+        expect("battery 30.0 °C, thermal status: severe (looks unreliable, ignored), CPU/GPU 77.2 °C",
+            SetupPolicy.readings(3, 300, 77.2f));
+        expect("battery 44.0 °C, thermal status: severe", SetupPolicy.readings(3, 440, nan));
+        expect("Waiting for the Android device to cool down (battery 44.0 °C, thermal status: severe, CPU/GPU 61.5 °C)",
+            SetupPolicy.description("heat", 3, 440, 61.5f));
+        // CPU/GPU sensors from a sysfs copy: only cpu/gpu zones, millidegrees, junk skipped
+        try {
+            java.io.File root = java.nio.file.Files.createTempDirectory("thermal").toFile();
+            String[][] zones = {{"cpu-1-1", "77200"}, {"gpuss-1", "58900"}, {"socd", "100"}, {"battery", "95000"},
+                {"cpuss-3", "garbage"}, {"skin-therm", "99000"}};
+            for (int z = 0; z < zones.length; ++z) {
+                java.io.File zone = new java.io.File(root, "class/thermal/thermal_zone" + z);
+                zone.mkdirs();
+                java.nio.file.Files.writeString(new java.io.File(zone, "type").toPath(), zones[z][0] + "\n");
+                java.nio.file.Files.writeString(new java.io.File(zone, "temp").toPath(), zones[z][1] + "\n");
+            }
+            if (SetupPolicy.hottestCoreSensor(root) != 77.2f) throw new AssertionError("hottest core " + SetupPolicy.hottestCoreSensor(root));
+            if (!Float.isNaN(SetupPolicy.hottestCoreSensor(new java.io.File(root, "missing")))) throw new AssertionError("no sysfs");
+        } catch (java.io.IOException e) { throw new AssertionError(e); }
         System.out.println("Setup policy checks passed");
     }
 }
