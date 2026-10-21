@@ -7,6 +7,15 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Sky island example: a full side quest** (for mod makers). "The island in the sky" now starts with a letter and
+  shows its steps in the Story Notebook: the Helmaroc King swoops down on Outset's pier, grabs Link with the game's own
+  capture animation, carries him up through the clouds to the island seen far off, and drops him over it; then the boss
+  key, the guardian, the heart container and the warp home (with a reward). New for mod makers: chests, defeated
+  Darknuts and warps in a mod stage can move a quest on (`then`), quest places can point into the mod's own stage,
+  scene clips from the game's cutscene archives that play once and hold, Link's face animations and blending in
+  scenes, a smooth `blend` when attaching one actor to another, and a scene spawn that drops Link in from above.
+  The example requires the Story Notebook.
+
 - **Fixed: Continue last session after quitting inside a dungeon, cave or house.** Starting the game with
   **At start → Continue last session** (or a save state chosen to load at start) put Link at the save file's start
   point on Outset and then left the screen black. Link now arrives where you left off; loading states during play is
