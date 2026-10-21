@@ -135,11 +135,32 @@ static const int g_env_hz = getenv("WWHD_DISPLAY_HZ") ? atoi(getenv("WWHD_DISPLA
 static std::atomic<int> g_display_hz{0};
 static std::atomic<bool> g_present_vsync{true};
 int display_hz() { return g_env_hz >= 0 ? g_env_hz : g_display_hz.load(std::memory_order_relaxed); }
+bool display_hz_overridden() { return g_env_hz >= 0; }
+static std::atomic<int> g_display_hz_lo{0}, g_display_hz_hi{0}, g_requested_hz{-1};
+static void note_display_hz_seen(int hz) {
+    if (hz <= 0) return;
+    int lo = g_display_hz_lo.load(std::memory_order_relaxed);
+    while ((lo <= 0 || hz < lo) && !g_display_hz_lo.compare_exchange_weak(lo, hz)) {}
+    int hi = g_display_hz_hi.load(std::memory_order_relaxed);
+    while (hz > hi && !g_display_hz_hi.compare_exchange_weak(hi, hz)) {}
+}
+void display_hz_seen(int* lo, int* hi) {
+    *lo = g_display_hz_lo.load(std::memory_order_relaxed);
+    *hi = g_display_hz_hi.load(std::memory_order_relaxed);
+}
+void reset_display_hz_seen() {
+    const int hz = g_display_hz.load(std::memory_order_relaxed);
+    g_display_hz_lo = hz > 0 ? hz : 0;
+    g_display_hz_hi = hz > 0 ? hz : 0;
+}
+void set_requested_display_hz(int hz) { g_requested_hz.store(hz, std::memory_order_relaxed); }
+int requested_display_hz() { return g_requested_hz.load(std::memory_order_relaxed); }
 bool present_vsync() { return g_present_vsync.load(std::memory_order_relaxed); }
 int output_fps() { return pacing::cap_fps(fps(), display_hz(), present_vsync()); }
 static void note_display_40();
 void set_display_hz(int hz) {
     if (hz < 0) hz = 0;
+    note_display_hz_seen(hz);
     const int old = g_display_hz.exchange(hz);
     if (old == hz) return;
     if (g_env_hz >= 0) LOG("[interp] display refresh rate %d Hz (WWHD_DISPLAY_HZ=%d is used)", hz, g_env_hz);

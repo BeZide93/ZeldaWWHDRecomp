@@ -765,6 +765,14 @@ std::string performance_report() {
     }
 #endif
     if (const int g = motion::settings().source; g != motion::kOff) h.gyro = motion::source_id(g);
+    reporthdr::Display d;
+    d.hz = interp::display_hz();
+    d.overridden = interp::display_hz_overridden();
+    d.requestedHz = interp::requested_display_hz();
+    interp::display_hz_seen(&d.seenLo, &d.seenHi);
+    // the drawn rate: frame interpolation's (capped to the display), true 60's or the original 30
+    d.fps = interp::mode() == 1 ? interp::output_fps() : interp::mode() == 2 ? 60 : 30;
+    h.display = reporthdr::display_line(d);
     report = reporthdr::format(h) + report;
     return report;
 }
@@ -1095,7 +1103,7 @@ void tab_graphics() {
 #endif
     heading("Overlay");
     if (check("Performance overlay (FPS, frame time)", perf_shown(), &v)) set_perf_shown(v);
-    if (ImGui::Button("Reset performance averages")) { g_average.reset(); perf::reset(); }
+    if (ImGui::Button("Reset performance averages")) { g_average.reset(); perf::reset(); interp::reset_display_hz_seen(); }
     // the render-thread profiler (render_prof.h): its report is the detailed part of the performance report
     if (check("Detailed performance profiling", rprof::requested(), &v, !rprof::env_override())) {
         rprof::set_requested(v);  // applied at the next frame
