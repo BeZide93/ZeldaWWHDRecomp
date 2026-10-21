@@ -15,6 +15,7 @@
 #include <atomic>
 #include <cmath>
 #include <cstring>
+#include <cstdlib>
 #include <future>
 #include <stdexcept>
 #include <thread>
@@ -452,11 +453,23 @@ void initialize() {
   bool initialized=false;
   try {
    if(host->vm->AttachCurrentThread(&host->env,nullptr)!=JNI_OK)throw std::runtime_error("OpenXR thread could not attach to Android");
-   host->setup();initialized=true;started.set_value();host->loop();
+   host->setup();initialized=true;started.set_value();
+   // Debug launch aid: exercise the real post-start failure/error-screen path.
+   if(std::getenv("WWHD_TEST_QUEST_STOP"))throw std::runtime_error("injected theater stop after startup");
+   host->loop();
   }catch(const std::exception& error){LOG("[OpenXR] %s",error.what());if(!initialized){host->failed_start_cleanup();started.set_exception(std::current_exception());}}
   host->showing=false;
-  host->passthrough.update(false);
-  if(initialized)gx2::quiesce_quest_presentation();
+  // Withdraw presents before draining. The Vulkan swapchain still names the
+  // XR-owned surface, so simply clearing `theater` is not a safe SDL fallback.
+  try { host->passthrough.update(false); }
+  catch(const std::exception& error) { LOG("[OpenXR] stopping passthrough: %s",error.what()); }
+  if(initialized) {
+   try { gx2::quiesce_quest_presentation(); }
+   catch(const std::exception& error) { LOG("[OpenXR] draining presentation: %s",error.what()); }
+   const auto notify=host->env->GetMethodID(host->activityClass,"showTheaterStopped","()V");
+   if(notify)host->env->CallVoidMethod(host->activity,notify);
+   if(host->env->ExceptionCheck()){host->env->ExceptionDescribe();host->env->ExceptionClear();}
+  }
   if(host->env)host->vm->DetachCurrentThread();
  });
  try { ready.get(); }

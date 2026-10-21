@@ -22,6 +22,9 @@ import java.io.File;
 // The game: SDL loads libmain.so and runs its SDL_main (runtime/src/main.cpp).
 public class WwhdActivity extends SDLActivity {
     @Override protected boolean redirectActivityBeforeNativeStart() {
+        // Shader preparation and test activities own separate SDL lifetimes.
+        // Only the two concrete gameplay entry points participate in routing.
+        if (getClass() != WwhdActivity.class && getClass() != QuestActivity.class) return false;
         Intent selected = QuestActivity.gameIntent(this);
         if (selected.getComponent().getClassName().equals(getClass().getName())) return false;
         // Includes explicit intents and shortcuts created before the theater existed.

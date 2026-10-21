@@ -22,6 +22,17 @@ public class QuestActivity extends WwhdActivity {
 
     public boolean useQuestTheater() { return true; }
 
+    /** Called after the compositor stops; never leave a silent black game view. */
+    public void showTheaterStopped() {
+        runOnUiThread(() -> {
+            if (isFinishing() || isDestroyed()) return;
+            // A dialog in this immersive Activity would still be hidden behind
+            // the failed compositor. Show an ordinary Android activity instead.
+            startActivity(new Intent(this, TheaterErrorActivity.class));
+            finish();
+        });
+    }
+
     // Invoked on the compositor thread, only while the OpenXR session is visible.
     // Repaint on hover/state changes, never on every game draw.
     public static void paintTheaterControls(Surface surface, int hovered, int state) {

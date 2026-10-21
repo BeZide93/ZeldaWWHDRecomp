@@ -54,6 +54,7 @@ jobs:
           emulator-options: -no-window -no-snapshot -noaudio -no-boot-anim -gpu swiftshader_indirect -memory 2048
           disable-animations: true
           script: |
+            python3 tools/android/activity_routing_smoke.py --serial emulator-5554 --apk android/app/build/outputs/apk/debug/app-debug.apk --output build/activity-routing-result.json
             python3 tools/android/display_smoke.py --serial emulator-5554 --apk android/app/build/outputs/apk/debug/app-debug.apk --require-fence-retirement --require-present-worker --measure-timing --timing-report-only --exercise-primary-rotation --exercise-folds --exercise-dismissal --exercise-surface-loss --output build/display-smoke-result.json
             python3 tools/android/shared_image_smoke.py --serial emulator-5554 --apk android/app/build/outputs/apk/debug/app-debug.apk --output build/shared-image-result.json
             python3 tools/android/shared_image_smoke.py --serial emulator-5554 --apk android/app/build/outputs/apk/debug/app-debug.apk --general-layout --output build/shared-image-general-result.json
@@ -67,6 +68,7 @@ jobs:
         with:
           name: android-display-smoke-${{ github.sha }}
           path: |
+            build/activity-routing-result.json
             build/display-smoke-result.json
             build/display-smoke-result.log
             build/display-smoke-result.displays.txt
