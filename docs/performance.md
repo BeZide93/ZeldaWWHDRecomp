@@ -524,6 +524,10 @@ Memory: 8 slots keep 96-128 MiB more upload blocks (256 MiB against 128-160 MiB)
 about 3 submissions, so with the CPU as the limit the GPU has finished each slot long before the ring
 comes back to it. With the GPU as the limit, more slots only let the render thread run further ahead:
 same frame rate, about one frame more latency and slightly worse 1% frames. The default stays at 4.
+Xiaomi 14 (Adreno 750), Outset, 120 fps interpolation uncapped (not at a cap: median 17 ms), one
+run each after a cool start: 57.0 / 56.3 fps, 1% 28.7 / 29.8 ms, render thread 14.1 / 14.6 ms, GPU
+12.3 / 12.1 ms, no waits for a free slot with 4 slots, 3 submissions per frame in flight with either;
+8 slots cost 64 MiB of upload blocks and about 55 MiB more app memory (PSS).
 The Metal renderer has no fixed ring (command buffers from one queue, upload pools returned at
 completion), so there is nothing to change there.
 
