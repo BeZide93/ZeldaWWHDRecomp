@@ -1,0 +1,14 @@
+#pragma once
+// D-sweep proof of concept (debug, off by default): draw every model of the loaded archives once with the game's
+// own model and material code, so the renderer creates the pipelines those models need. See dsweep.cpp.
+#include <cstdint>
+struct Cpu;
+namespace dsweep {
+// The batch being drawn (1-based), 0 outside a sweep; written by the game thread, read by the renderer's key log.
+int tag();
+// fopAc_Draw hook, after the actor's own draw: runs the sweep from the player's draw (camera and lists are set up).
+void after_actor_draw(Cpu* c, uint32_t actor);
+// WWHD_DSWEEP_ONLY=<step>: from that logic step on no actor draws itself (the sweep's models are the only models in
+// the frame's draw lists), so the pipelines of a run belong to the sweep, not the scene
+bool hide_actor_draw(uint32_t actor);
+}  // namespace dsweep

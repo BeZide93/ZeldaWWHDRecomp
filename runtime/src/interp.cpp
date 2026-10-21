@@ -1,4 +1,5 @@
 #include "interp.h"
+#include "dsweep.h"
 #include "mods/story_native_restore_resume.h"
 namespace interp {class NativeResumeBoundaryIssuer {public:static void after_service(Cpu*c){story_native_restore_resume::LoadWindow::service_return(c);}};}
 #include "countdown.h"
@@ -2193,9 +2194,10 @@ extern "C" void hook_025D4654(Cpu* c) {
     const uint32_t condition = keep_condition ? ld32(actor + 0x2E4) : 0;
     const Cpu saved = *c;
     if (keep_condition && (condition & 0x04)) interp::actor_keep(actor);  // (not drawn by the step's logic pass)
-    f_025D4654_orig(c);
+    if (!dsweep::hide_actor_draw(actor)) f_025D4654_orig(c);
     if (keep_condition) st32(actor + 0x2E4, condition);
     interp::edge_draw(saved, c, actor);
+    dsweep::after_actor_draw(c, actor);  // debug D-sweep (WWHD_DSWEEP), off by default
 }
 
 namespace interp {

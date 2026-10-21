@@ -28,6 +28,7 @@
 #include "shaders.h"
 #include "shader_binary.h"
 #include "stutter_trace.h"
+#include "../../dsweep.h"
 #include "pipeline_state.h"
 #include "pipeline_worker.h"
 #include "pipeline_demand.h"
@@ -959,6 +960,17 @@ Pipeline &pipeline(const uint32_t *r, vk::Shader *vs, vk::Shader *ps,
   portableKey.vs = vs->pipelineId; portableKey.ps = ps->pipelineId;
   const auto* keyBytes = reinterpret_cast<const uint8_t*>(&portableKey);
   std::vector<uint8_t> recipeKey(keyBytes, keyBytes + sizeof key);
+  // debug: WWHD_VK_KEY_LOG=file appends one line per pipeline this run creates: steady-clock ns, renderer frame,
+  // portable key digest (FNV-1a of the recipe key), in-memory key hash (as in the stutter trace), D-sweep tag
+  static FILE* keyLog = [] { const char* p = getenv("WWHD_VK_KEY_LOG"); return p && *p ? std::fopen(p, "a") : nullptr; }();
+  if (keyLog) {
+    uint64_t digest = 1469598103934665603ull;
+    for (uint8_t byte : recipeKey) digest = (digest ^ byte) * 1099511628211ull;
+    std::fprintf(keyLog, "%lld %llu %016llx %016llx %d\n",
+        (long long)std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch()).count(),
+        (unsigned long long)R.frame, (unsigned long long)digest, (unsigned long long)PipelineKeyHash{}(key), dsweep::tag());
+    std::fflush(keyLog);
+  }
   // Own prerequisite identities independently of the mutable shader cache.
   const std::array<std::shared_ptr<vk::ShaderBinary>, 2> shaderBinaries{vs->binary, ps->binary};
   std::array<std::vector<uint32_t>, 2> recipeSpirv{vs->spirv(), ps->spirv()};
@@ -2245,8 +2257,21 @@ Surface* resolve_texture(const uint32_t* r, vk::Shader* sh, uint32_t unit, bool*
     else reach = std::max(uint32_t(s1.get_MIN_LOD()), uint32_t(s1.get_MAX_LOD())) / 64 + 2;
   }
   auto *s = sampled_texture(r + texbase + unit * 7, sh->dec->textureUsesDepthCompare[unit], reach);
+  // debug D-sweep (WWHD_DSWEEP): a swept model can sample a texture its actor sets by code. An earlier texture stands
+  // in (pipelines do not depend on the texture); its texture words replace the missing ones in this draw's
+  // register copy, so the view matches.
+  static const bool sweep = getenv("WWHD_DSWEEP") && *getenv("WWHD_DSWEEP");
+  struct StandIn { Surface* surface = nullptr; uint32_t words[7] = {}; };
+  static StandIn standIn[2];
+  const bool depthCompare = sh->dec->textureUsesDepthCompare[unit];
+  uint32_t* words = const_cast<uint32_t*>(r + texbase + unit * 7);
+  if (!s && sweep && standIn[depthCompare].surface) {
+    s = standIn[depthCompare].surface;
+    memcpy(words, standIn[depthCompare].words, sizeof standIn[depthCompare].words);
+  }
   if (!s)
     exception_report::raise("missing sampled texture");
+  if (sweep) { standIn[depthCompare].surface = s; memcpy(standIn[depthCompare].words, words, sizeof standIn[depthCompare].words); }
   auto& ao = ao_private();
   if (!sh->vertex && ao_hires_enabled() && ao.source &&
       s->addr == ao.source && ao.frame == R.frame &&
