@@ -1,0 +1,173 @@
+// Compile shaders in the background (background_shaders.h).
+#include "background_shaders.h"
+
+#include <atomic>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <mutex>
+
+void log_msg(const char* fmt, ...);
+#define LOG(...) log_msg(__VA_ARGS__)
+
+namespace bgshaders {
+
+namespace {
+std::atomic<bool> g_requested{false};  // the setting
+std::mutex g_counterMutex;              // the counters are read from the UI thread
+Counters g_counters;
+uint64_t g_budgetFrame = ~uint64_t{0}, g_budgetSpent = 0;  // render thread
+uint64_t g_skipFrame = ~uint64_t{0};
+}
+
+const char* env_override() {
+    static const char* const e = getenv("WWHD_BG_SHADERS");
+    return e && *e ? e : nullptr;
+}
+static bool env_on() { return env_override() && strcmp(env_override(), "0") != 0; }
+static const char* source() {
+    return env_override() ? (env_on() ? "WWHD_BG_SHADERS=1" : "WWHD_BG_SHADERS=0") : "setting";
+}
+bool enabled() { return env_override() ? env_on() : g_requested.load(std::memory_order_relaxed); }
+void set_requested(bool on) {
+    if (g_requested.exchange(on) == on) return;
+    if (env_override())
+        LOG("[shaders] compile in the background: setting %s; %s decides for this start", on ? "on" : "off", source());
+    else
+        LOG("[shaders] compile in the background %s (setting)", on ? "on" : "off");
+}
+void start(bool saved) {
+    g_requested = saved;
+    LOG("[shaders] compile in the background %s (%s); wait budget %.1f ms per frame", enabled() ? "on" : "off",
+        source(), wait_budget_ms());
+}
+double wait_budget_ms() {
+    static const double ms = [] {
+        const char* e = getenv("WWHD_BG_SHADER_WAIT_MS");
+        if (!e || !*e) e = getenv("WWHD_COMPILE_WAIT_MS");  // the older name (Metal)
+        const double v = e && *e ? atof(e) : kDefaultWaitMs;
+        return v < 0 ? 0.0 : v > 1000 ? 1000.0 : v;
+    }();
+    return ms;
+}
+
+const char* verdict_name(Verdict v) {
+    static const char* const names[kVerdicts] = {"left out", "option off", "no colour target", "not the picture",
+                                                 "first frame", "read back", "copied", "full-screen pass"};
+    return v < kVerdicts ? names[v] : "?";
+}
+
+Verdict classify(bool on, const TargetFacts* colors, int colorCount, const TargetFacts* depth, uint32_t vertices) {
+    if (!on) return kOff;
+    if (colorCount <= 0) return kNoColor;
+    if (vertices <= kFullScreenVertices) return kFullScreen;
+    // the picture: at least one written colour target is presented; the draw's other targets (more
+    // colour targets, the depth buffer) are drawn together with it, like its depth buffer
+    bool picture = false;
+    for (int i = 0; i < colorCount; i++) picture |= colors[i].presented;
+    if (!picture) return kNotVisible;
+    auto check = [](const TargetFacts& t) {
+        if (!t.redrawn) return kFirstFrame;
+        if (t.readBack) return kReadBack;
+        if (t.copiedOccasionally) return kCopied;
+        return kSkippable;
+    };
+    for (int i = 0; i < colorCount; i++)
+        if (Verdict v = check(colors[i]); v != kSkippable) return v;
+    if (depth)
+        if (Verdict v = check(*depth); v != kSkippable) return v;
+    return kSkippable;
+}
+
+bool Tracker::copied(uint32_t addr, uint64_t frame) {
+    Use& u = use_[addr];
+    if (u.copied != frame) {
+        if (u.copied == kNever || u.copied + 1 != frame) u.copyRunStart = frame;
+        u.copied = frame;
+    }
+    const bool afterSkip = u.leftOut == frame;
+    if (afterSkip) {
+        std::lock_guard lock(g_counterMutex);
+        g_counters.copiesAfterSkip++;
+    }
+    return afterSkip;
+}
+TargetFacts Tracker::facts(uint32_t addr, uint64_t frame) const {
+    TargetFacts f;
+    auto it = use_.find(addr);
+    if (it == use_.end()) return f;
+    const Use& u = it->second;
+    auto within = [frame](uint64_t at, uint64_t frames) { return at != kNever && at <= frame && frame - at <= frames; };
+    f.presented = within(u.presented, 1);
+    f.redrawn = !u.history.must_wait(frame);
+    f.readBack = within(u.readBack, kQuietFrames);
+    // copies in consecutive frames up to the previous one refresh their result every frame
+    const bool everyFrame = within(u.copied, 1) && u.copyRunStart != kNever && u.copyRunStart < u.copied;
+    f.copiedOccasionally = within(u.copied, kQuietFrames) && !everyFrame;
+    return f;
+}
+Tracker& tracker() {
+    static Tracker t;
+    return t;
+}
+
+uint64_t budget_left_ns(uint64_t frame) {
+    if (g_budgetFrame != frame) { g_budgetFrame = frame; g_budgetSpent = 0; }
+    const uint64_t budget = uint64_t(wait_budget_ms() * 1e6);
+    return g_budgetSpent >= budget ? 0 : budget - g_budgetSpent;
+}
+void spent(uint64_t frame, uint64_t ns, bool ranOut) {
+    if (g_budgetFrame != frame) { g_budgetFrame = frame; g_budgetSpent = 0; }
+    if (ranOut || ns >= kFastWaitNs) g_budgetSpent += ns;  // fast results (a warm cache) are free
+    std::lock_guard lock(g_counterMutex);
+    g_counters.budgetWaits++;
+    g_counters.budgetWaitNs += ns;
+    if (ranOut) g_counters.budgetRanOut++;
+}
+void skipped(uint64_t frame) {
+    std::lock_guard lock(g_counterMutex);
+    g_counters.skipped++;
+    if (g_skipFrame != frame) { g_skipFrame = frame; g_counters.skipFrames++; }
+}
+bool skipped_in_frame(uint64_t frame) { return g_skipFrame == frame; }
+void peek_withheld() {
+    std::lock_guard lock(g_counterMutex);
+    g_counters.peeksWithheld++;
+}
+void exact(Verdict v) {
+    if (v >= kVerdicts) return;
+    std::lock_guard lock(g_counterMutex);
+    g_counters.exact[v]++;
+}
+Counters counters() {
+    std::lock_guard lock(g_counterMutex);
+    return g_counters;
+}
+void reset_counters() {
+    std::lock_guard lock(g_counterMutex);
+    g_counters = {};
+    g_budgetFrame = g_skipFrame = ~uint64_t{0};
+    g_budgetSpent = 0;
+}
+std::string report_line() {
+    const Counters c = counters();
+    char buf[512];
+    int n = snprintf(buf, sizeof buf,
+        "Background shader compile: %s (%s). Draws left out while compiling: %llu in %llu frames; "
+        "budget waits %llu (%.0f ms, %llu ran out); depth peeks kept: %llu; copies after a left-out draw: %llu. "
+        "Exact waits:",
+        enabled() ? "on" : "off", source(), (unsigned long long)c.skipped, (unsigned long long)c.skipFrames,
+        (unsigned long long)c.budgetWaits, c.budgetWaitNs / 1e6, (unsigned long long)c.budgetRanOut,
+        (unsigned long long)c.peeksWithheld, (unsigned long long)c.copiesAfterSkip);
+    std::string line(buf, n > 0 && n < int(sizeof buf) ? size_t(n) : strlen(buf));
+    bool any = false;
+    for (int v = kOff; v < kVerdicts; v++)
+        if (c.exact[v]) {
+            line += std::string(any ? ", " : " ") + verdict_name(Verdict(v)) + " " + std::to_string(c.exact[v]);
+            any = true;
+        }
+    if (!any) line += " none";
+    return line + "\n";
+}
+
+}  // namespace bgshaders
