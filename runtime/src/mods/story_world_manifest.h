@@ -744,6 +744,8 @@ inline bool parse_actors_impl(const mods::json::Value& m,std::vector<ManifestAct
             else return why="unsupported named actor parameter: "+key,false;
         }
         if(a.actor=="resident")if(const char* no=story_resident_types::place_problem(uint8_t(a.resident),a.stage,a.position.x,a.position.z))return why=no,false;
+        if(a.actor=="resident"&&a.resident<256&&story_resident_types::goron(uint8_t(a.resident))&&(a.scale.x!=a.scale.y||a.scale.x!=a.scale.z||a.scale.x<0.5f||a.scale.x>1.5f))
+            return why="a Goron merchant takes a uniform scale from 0.5 to 1.5",false;
         if(a.actor=="resident"&&v.object.contains("path")){
             if(const char* no=story_resident_types::no_walk(uint8_t(a.resident)))return why=no,false;
             if(!parse_path(v.get("path"),a.position,true,a.path,why))return false;

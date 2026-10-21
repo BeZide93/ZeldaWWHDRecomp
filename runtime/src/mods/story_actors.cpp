@@ -66,7 +66,7 @@ std::set<std::string> g_island_mods;
 
 void(*g_original)(Cpu*,uint32_t)=nullptr;
 uint32_t(*g_call)(Cpu*,uint32_t,std::initializer_list<uint32_t>)=nullptr;
-uint32_t g_scratch=0; bool g_installed=false,g_resident_hooks=false,g_ym1_hooks=false;
+uint32_t g_scratch=0; bool g_installed=false,g_resident_hooks=false,g_ym1_hooks=false,g_goron_hooks=false;
 std::function<bool(const std::string&,const std::string&)> g_scene;
 std::function<bool(const std::string&,const std::string&,unsigned,unsigned)> g_stage;  // mod_stages::enter_stage
 const uint32_t kRoom=GC(0x025C2E8C),kCreate=GC(0x025D5834),kSearch=GC(0x025D54C4),kSearchName=GC(0x025C109C);
@@ -143,15 +143,19 @@ Actor* find(uint32_t address) {
         if(a.enemy_token){story_enemies::Kind kind;if(!enemy_kind(a.spec,kind)||ld16(address+0xE)!=story_enemy_ownership::descriptor(kind).profile||ld32(address+0xB0)!=story_enemies::parameters(a.enemy_token)||ld8(address+0x2DD)!=0xFF)return nullptr;}
         if(a.switch_token&&(ld16(address+0xE)!=(a.spec.actor=="switch"?story_switches::kSwitchProfile:story_switches::kDoorProfile)||ld32(address+0xB0)!=story_switches::parameters(a.spec.actor=="switch"?story_switches::Kind::Switch:story_switches::Kind::Door)||ld8(address+0x2DD)!=0xFF))return nullptr;
         if(a.game&&story_game_objects::read_back(address,a.game_native)!=story_game_objects::ReadBack::Match)return nullptr;
-        if(a.spec.actor=="resident"){const bool seated=a.spec.resident==kYm1;if(ld16(address+0xE)!=(seated?0x13B:0x175)||ld8(address+0x2DD)!=(seated?0xFF:a.spec.resident))return nullptr;if(seated&&ld32(address+0xB0)!=1)return nullptr;}
+        if(a.spec.actor=="resident"){const uint8_t r=uint8_t(a.spec.resident);if(ld16(address+0xE)!=story_resident_types::profile(r)||ld8(address+0x2DD)!=uint8_t(story_resident_types::create_argument(r)))return nullptr;if(r==kYm1&&ld32(address+0xB0)!=1)return nullptr;if(story_resident_types::goron(r)&&ld32(address+0xB0)!=story_resident_types::goron_params(r))return nullptr;}
         return &a;
     }
     return nullptr;
 }
 Actor* people(uint32_t address) {
     Actor* a=find(address);
-    return a&&a->spec.actor=="resident"&&a->spec.resident!=kYm1&&ld8(address+0x905)==a->spec.resident?a:nullptr;
+    return a&&a->spec.actor=="resident"&&people_type(a->spec.resident)&&ld8(address+0x905)==a->spec.resident?a:nullptr;
 }
+// a placed Goron merchant (daNpcRoten_c): its merchant number (+0xB31, set by its first create phase) is the declared one
+constexpr uint32_t kRotenNpcNo=0xB31,kRotenResFlag=0xB30,kRotenTalking=0xB28,kRotenOrder=0xB2B,kRotenMsgList=0xB00;
+bool goron_type(unsigned resident){return resident<256&&story_resident_types::goron(uint8_t(resident));}
+Actor* goron(uint32_t address){Actor* a=find(address);return a&&a->spec.actor=="resident"&&goron_type(a->spec.resident)&&ld8(address+kRotenNpcNo)==story_resident_types::goron_number(uint8_t(a->spec.resident))?a:nullptr;}
 Actor* ym1(uint32_t address){Actor* a=find(address);return a&&a->spec.actor=="resident"&&a->spec.resident==kYm1&&ld8(address+0xA20)==1&&ld8(address+0xA21)==1?a:nullptr;}
 uint32_t talk_latch_address(const Actor* a){return g_scratch+kTalkLatchOffset+uint32_t(a-g_actors.data());}
 void talk_latch(const Actor* a,uint8_t value){if(a&&g_scratch)st8(talk_latch_address(a),value?uint8_t((ld8(talk_latch_address(a))&0xFC)|value):0);}
@@ -399,6 +403,60 @@ void ym1_execute(Cpu* c){
     g_original(c,kYm1Execute);
     if(g_talk.npc==npc&&ld16(npc+0xF8)==0){if(g_talk.terminal)end_talk();else cancel_talk("ym1-nonterminal-cancel");}
 }
+// ---- the Goron merchants (daNpcRoten_c). A placed copy keeps the class's own wait, look-at, talk
+// animations, attention and collision; what belongs to the sea's merchants is intercepted per copy:
+// the game's gate (they appear once the story has them, event bit 0x1108), their messages (getMsg sets
+// the first-talk save bit and runs the trade's message lists), the item show (the trade: its event
+// condition, callback and exchange/map events) and the retail event cuts. The sea's merchants are untouched.
+const uint32_t kRotenPhase1=GC(0x022D3234),kRotenMsg=GC(0x022D6304),kRotenNext=GC(0x022D60DC),kRotenEventOrder=GC(0x022D4EF0);
+const uint32_t kRotenExecute=GC(0x022D5580),kRotenTalk=GC(0x022D5ABC),kRotenDelete=GC(0x022D3B34);
+void roten_phase1(Cpu* c){
+    const uint32_t npc=c->r[3];g_original(c,kRotenPhase1);
+    if(c->r[3]!=3)return;  // cPhs_STOP_e: the game's merchants aren't out yet
+    Actor* a=goron(npc);if(!a)return;
+    st8(npc+kRotenResFlag,1);c->r[3]=2;native_trace(a,npc,"goron-gate");  // as the game does once they are (cPhs_NEXT_e)
+}
+void roten_message(Cpu* c){
+    const uint32_t npc=c->r[3];Actor* a=goron(npc);if(!a)return g_original(c,kRotenMsg);
+    st32(npc+kRotenMsgList,0);  // no retail message list: next_msgStatus never walks one
+    const uint32_t layer=ld32(npc+0x2C);
+    if((layer&&scene_is_deleting(ld32(layer+0x18)))||!story_mail::can_say()||talk_latch(a)==3||(g_talk.npc&&g_talk.npc!=npc)){c->r[3]=0;return;}
+    if(!bind_talk(a,npc)){c->r[3]=0;return;}
+    a->restore_talk=false;native_trace(a,npc,"goron-text-bind");
+    LOG("[actors] %s:%s native dialogue uses mod text (%zu UTF-16 units)",a->mod.c_str(),a->spec.id.c_str(),g_talk.text.size());
+    c->r[3]=kCarrier;
+}
+void roten_next(Cpu* c){if(goron(c->r[3]))c->r[3]=0x10;else g_original(c,kRotenNext);}
+void roten_event_order(Cpu* c){
+    const uint32_t npc=c->r[3];Actor* a=goron(npc);
+    if(a&&ld8(npc+kRotenOrder)>2)st8(npc+kRotenOrder,0);  // talk orders only: no exchange, item or map event
+    g_original(c,kRotenEventOrder);
+    if(a)st16(npc+0xFA,uint16_t(ld16(npc+0xFA)&~0x0020u));  // no item show (the trade)
+}
+void roten_talk(Cpu* c){
+    const uint32_t npc=c->r[3];Actor* a=goron(npc);const bool talking=a&&ld8(npc+kRotenTalking)==1;
+    g_original(c,kRotenTalk);
+    // executeTalk ends the talk (its flag back to 0) once the message box has closed: the mod text was all said
+    if(a&&talking&&ld8(npc+kRotenTalking)==0&&g_talk.npc==npc&&ld32(npc+0x7C0)==kCarrier){g_talk.terminal=true;native_trace(a,npc,"goron-terminal");}
+}
+void roten_execute(Cpu* c){
+    const uint32_t npc=c->r[3];Actor* a=goron(npc);if(!a)return g_original(c,kRotenExecute);
+    if(!player_present(c)){if(g_talk.npc==npc)cancel_talk("no-player");c->r[3]=0;return;}
+    const uint32_t layer=ld32(npc+0x2C);
+    if(talk_latch(a)==3&&ld16(npc+0xF8)==0){talk_latch(a,0);clear_talk_proof();}
+    if(layer&&scene_is_deleting(ld32(layer+0x18))){if(g_talk.npc==npc)cancel_talk("draining");a->restore_talk=false;}
+    else if(a->restore_talk){
+        a->restore_talk=false;
+        if(!g_talk.actor&&ld16(npc+0xF8)==1&&ld32(npc+0x7C0)==kCarrier&&ld8(npc+0x7CC)<=1&&ld32(npc+0x7C8)!=0xFFFFFFFFu&&story_mail::can_say()){bind_talk(a,npc,false,true);native_trace(a,npc,"goron-restore-text-rebind");}
+    }
+    st16(npc+0xFC,0xFFFF);  // no retail event
+    st32(npc+0x100,0);st32(npc+0x104,0);st32(npc+0x108,0);  // the item-show (trade) callbacks belong to the sea's merchants
+    g_original(c,kRotenExecute);
+    if(g_talk.npc==npc&&ld16(npc+0xF8)==0){if(g_talk.terminal)end_talk();else cancel_talk("goron-nonterminal-cancel");}
+}
+void roten_delete(Cpu* c){Actor* a=find(c->r[3]);if(a&&a->spec.actor=="resident"&&goron_type(a->spec.resident)){if(g_talk.actor==a)cancel_talk("delete");talk_latch(a,0);a->restore_talk=false;native_trace(a,c->r[3],"goron-native-delete");a->process=0xFFFFFFFFu;st32(g_scratch+128+uint32_t(a-g_actors.data())*4,0xFFFFFFFFu);}g_original(c,kRotenDelete);}
+// the placed copy of `a` at `npc` through the accessor of its class
+Actor* placed_resident(const Actor* a,uint32_t npc){return a->spec.resident==kYm1?ym1(npc):goron_type(a->spec.resident)?goron(npc):people(npc);}
 void ym1_delete(Cpu* c){Actor* a=find(c->r[3]);if(a&&a->spec.resident==kYm1){if(g_talk.actor==a)cancel_talk("delete");talk_latch(a,0);a->restore_talk=false;native_trace(a,c->r[3],"ym1-native-delete");a->process=0xFFFFFFFFu;st32(g_scratch+128+uint32_t(a-g_actors.data())*4,0xFFFFFFFFu);}g_original(c,kYm1Delete);}
 
 // The checks a mod's actor list must pass, shared by start-up loading and the world editor's live
@@ -725,7 +783,7 @@ void room_loaded(Cpu* c,int room) {
             if(!a.game_batch){++a.game_attempts;a.game_checked=false;story_game_objects::trace_before_create(c,g_call,a.mod,a.spec.id);}
         }
         story_enemies::Kind enemy{};(void)enemy_kind(a.spec,enemy);
-        uint32_t proc=a.game?uint32_t(a.game_native.process):a.enemy_token?story_enemy_ownership::descriptor(enemy).profile:a.switch_token?(a.spec.actor=="switch"?story_switches::kSwitchProfile:story_switches::kDoorProfile):a.prop_token?story_props::kProfile:a.spec.kind=="mod"?(a.spec.world_object()?mod_actor::kWorldProfile:mod_actor::kProfile):a.spec.actor=="sign"?0xB6u:a.spec.resident==kYm1?0x13Bu:0x175u;
+        uint32_t proc=a.game?uint32_t(a.game_native.process):a.enemy_token?story_enemy_ownership::descriptor(enemy).profile:a.switch_token?(a.spec.actor=="switch"?story_switches::kSwitchProfile:story_switches::kDoorProfile):a.prop_token?story_props::kProfile:a.spec.kind=="mod"?(a.spec.world_object()?mod_actor::kWorldProfile:mod_actor::kProfile):a.spec.actor=="sign"?0xB6u:uint32_t(story_resident_types::profile(uint8_t(a.spec.resident)));
         if(a.spec.actor=="chest"&&!a.spec.item_mod.empty()&&!story_treasure_chest::item_hook_ready()){
             static bool told=false;if(!told)LOG("[actors] %s:%s holds a mod item: it appears after a restart",a.mod.c_str(),a.spec.id.c_str());told=true;continue;
         }
@@ -733,6 +791,14 @@ void room_loaded(Cpu* c,int room) {
             std::memcpy(mem::ptr(g_scratch+0x50),"takara",7);Cpu probe=*c;
             const uint32_t entry=g_call(&probe,kSearchName,{g_scratch+0x50});
             if(!entry){LOG("[actors] takara object name unavailable; chest omitted");continue;}proc=ld16(entry+8);
+        }
+        if(a.spec.actor=="resident"&&goron_type(a.spec.resident)){
+            // the Goron merchants' class as the game's object name table knows it (another game version: left out)
+            static int known=-1;
+            if(known<0){std::memset(mem::ptr(g_scratch+0x50),0,16);std::memcpy(mem::ptr(g_scratch+0x50),story_resident_types::kGoronStageName,std::strlen(story_resident_types::kGoronStageName));Cpu probe=*c;
+                const uint32_t entry=g_call(&probe,kSearchName,{g_scratch+0x50});known=entry&&ld16(entry+8)==story_resident_types::kGoronProfile&&ld8(entry+0xA)==0;
+                LOG("[actors] Goron merchants: the game's %s is %s",story_resident_types::kGoronStageName,known?"the merchant class":"another class; placed Goron merchants are left out");}
+            if(!known)continue;
         }
         const float p[]={a.spec.position.x,a.spec.position.y,a.spec.position.z};
         const float s[]={a.spec.scale.x,a.spec.scale.y,a.spec.scale.z};
@@ -755,7 +821,7 @@ void room_loaded(Cpu* c,int room) {
         Cpu call=*c;a.deleting=false;
         const uint32_t previous_layer=g_call(&call,GC(0x025DED64),{});
         g_call(&call,GC(0x025DEAB4),{room_layer});
-        try{talk_latch(&a,0);a.process=hole_pid!=0xFFFFFFFFu?create_child(call,proc,hole_pid,params,uint32_t(room)):g_call(&call,kCreate,{proc,params,g_scratch,uint32_t(room),g_scratch+0xC,g_scratch+0x14,a.game?(a.game_native.subtype==0xFF?0xFFFFFFFFu:uint32_t(a.game_native.subtype)):a.spec.actor=="resident"&&a.spec.resident!=kYm1?a.spec.resident:0xFFFFFFFFu,0});}
+        try{talk_latch(&a,0);a.process=hole_pid!=0xFFFFFFFFu?create_child(call,proc,hole_pid,params,uint32_t(room)):g_call(&call,kCreate,{proc,params,g_scratch,uint32_t(room),g_scratch+0xC,g_scratch+0x14,a.game?(a.game_native.subtype==0xFF?0xFFFFFFFFu:uint32_t(a.game_native.subtype)):a.spec.actor=="resident"?story_resident_types::create_argument(uint8_t(a.spec.resident)):0xFFFFFFFFu,0});}
         catch(...){g_call(&call,GC(0x025DEAB4),{previous_layer});throw;}
         g_call(&call,GC(0x025DEAB4),{previous_layer});
         if(a.enemy_token&&a.process&&a.process!=0xFFFFFFFFu)story_enemies::bind(a.enemy_token,a.process);
@@ -814,7 +880,7 @@ void service(Cpu* c){
         Cpu lookup=*c;st32(g_scratch+0x40,0);g_call(&lookup,kSearch,{g_talk.actor->process,g_scratch+0x40});
         const uint32_t npc=ld32(g_scratch+0x40);
         const uint32_t layer=npc?ld32(npc+0x2C):0;
-        if(!npc||(g_talk.actor->spec.resident==kYm1?ym1(npc):people(npc))!=g_talk.actor)cancel_talk("missing-pid",false);
+        if(!npc||placed_resident(g_talk.actor,npc)!=g_talk.actor)cancel_talk("missing-pid",false);
         else if(layer&&scene_is_deleting(ld32(layer+0x18)))cancel_talk("draining");
     }
     Cpu probe=*c;const uint32_t play=g_call(&probe,kPlay,{});if(!play)return;
@@ -903,7 +969,7 @@ void restore_talk_text(){
     if(!story_mail::restore_say_owner(kCarrier,owner)||owner.token>g_actors.size())return;
     Actor* a=&g_actors[owner.token-1];const uint32_t npc=owner.actor;
     if((a->spec.actor!="resident"&&a->spec.actor!="sign")||a->process!=owner.pid||find(npc)!=a||ld16(npc+0xF8)!=1||ld32(GD(0x1046F0B0)+0x529C)!=owner.partner)return;
-    if(a->spec.actor=="resident"&&((a->spec.resident==kYm1?ym1(npc):people(npc))!=a||ld32(npc+0x7C0)!=kCarrier||ld8(npc+0x7CC)>1))return;
+    if(a->spec.actor=="resident"&&(placed_resident(a,npc)!=a||ld32(npc+0x7C0)!=kCarrier||ld8(npc+0x7CC)>1))return;
     const uint32_t layer=ld32(npc+0x2C);if(layer&&scene_is_deleting(ld32(layer+0x18)))return;
     bool terminal=false;
     if(a->spec.actor=="sign"){}
@@ -911,6 +977,7 @@ void restore_talk_text(){
         const bool open=talk_latch(a)==1&&ld8(npc+0xA1D)==5&&ld32(npc+0x7C8)!=0xFFFFFFFFu;
         terminal=talk_latch(a)==2&&ld32(npc+0x7C8)==0xFFFFFFFFu&&ld8(npc+0x7CC)==1&&ld8(npc+0xA1D)==11&&ld8(npc+0xA13)==0;
         if(!open&&!terminal)return;
+    }else if(goron_type(a->spec.resident)){if(ld32(npc+0x7C8)==0xFFFFFFFFu)return;  // an open message box only
     }else{terminal=ld16(npc+0x8F0)==0x12&&ld32(npc+0x7C8)==0xFFFFFFFFu;if(ld32(npc+0x7C8)==0xFFFFFFFFu&&!terminal)return;}
     g_talk={};g_talk.npc=npc;g_talk.actor=a;g_talk.started=true;g_talk.terminal=terminal;
     if(!capture_talk(a,true)){g_talk={};talk_latch(a,3);a->restore_talk=false;story_mail::unsay();clear_talk_proof();return;}
@@ -941,7 +1008,7 @@ const char* restart_kind(const ManifestActor& a){
 bool live_capable(const std::string& mod,const ManifestActor& a,std::string& why){
     if(const char* kind=restart_kind(a))return why=std::string(kind)+" appears after a restart",false;
     if(!g_installed)return why="the game had no mod actors at start-up: new actors appear after a restart",false;if(a.chart_marker.enabled&&!story_chart::installed())return why="the first island chart marker appears after a restart",false;
-    if(a.actor=="resident"&&!(a.resident==kYm1?g_ym1_hooks:g_resident_hooks))return why="the first resident of this kind appears after a restart",false;
+    if(a.actor=="resident"&&!(a.resident==kYm1?g_ym1_hooks:goron_type(a.resident)?g_goron_hooks:g_resident_hooks))return why="the first resident of this kind appears after a restart",false;
     if(a.kind=="mod"){
         if(!mod_actor::live_ready())return why="the first mod model actor appears after a restart",false;
         if(!g_models.contains({mod,a.model}))return why="model "+a.model+" is not prepared yet: it appears after a reload or restart",false;if(!visual_ready(mod,a,why))return false;
@@ -1446,6 +1513,11 @@ void install(const std::function<std::string(uint32_t)>& replaced_by,const std::
         const std::pair<uint32_t,void(*)(Cpu*)> seated_hooks[]={{kYm1Init,ym1_init},{kYm1Msg,ym1_message},{kYm1Next,ym1_next},{kYm1Talk,ym1_talk},{kYm1Execute,ym1_execute},{kYm1Delete,ym1_delete},{kYm1Demo,ym1_demo},{kYm1Staff,ym1_staff},{kYm1CheckTalk,ym1_check_talk}};
         hooks.insert(hooks.end(),std::begin(seated_hooks),std::end(seated_hooks));
         g_ym1_hooks=true;
+    }
+    if(g_live_kinds||std::any_of(g_actors.begin(),g_actors.end(),[](const Actor& a){return a.spec.actor=="resident"&&goron_type(a.spec.resident);})){
+        const std::pair<uint32_t,void(*)(Cpu*)> goron_hooks[]={{kRotenPhase1,roten_phase1},{kRotenMsg,roten_message},{kRotenNext,roten_next},{kRotenEventOrder,roten_event_order},{kRotenExecute,roten_execute},{kRotenTalk,roten_talk},{kRotenDelete,roten_delete}};
+        hooks.insert(hooks.end(),std::begin(goron_hooks),std::end(goron_hooks));
+        g_goron_hooks=true;
     }
     if(!story_treasure::installed())hooks.push_back({kRoom,room_hook});
     if(replaced_by(kPeopleMsg).empty()) {hooks.push_back({kPeopleMsg,people_msg_hook});hooks.push_back({kPeopleNext,people_next_hook});hooks.push_back({kPeopleExecute,people_execute_hook});}

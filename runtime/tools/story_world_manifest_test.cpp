@@ -269,13 +269,24 @@ int main() {
     for(const auto& name:{"uo2","um1","ym1"}){v=example();v["actors"].array[0]["parameters"]["resident"]=name;assert(parse_actors(v,actors,why));assert(actors[0].resident==(std::string(name)=="uo2"?1u:std::string(name)=="ym1"?19u:9u));}
     for(const auto& name:{"Uo2","ug1","1","","um3x"}){v=example();v["actors"].array[0]["parameters"]["resident"]=name;assert(!parse_actors(v,actors,why));}
     // the catalogue of placeable villagers: every declared code parses to its native subtype
-    {const std::pair<const char*,unsigned> codes[]={{"uo1",0},{"uo2",1},{"uo3",2},{"ub1",3},{"ub2",4},{"ub3",5},{"ub4",6},{"uw1",7},{"uw2",8},{"um1",9},{"um2",10},{"sa1",12},{"sa2",13},{"sa3",14},{"sa4",15},{"ym1",19}};
+    {const std::pair<const char*,unsigned> codes[]={{"uo1",0},{"uo2",1},{"uo3",2},{"ub1",3},{"ub2",4},{"ub3",5},{"ub4",6},{"uw1",7},{"uw2",8},{"um1",9},{"um2",10},{"sa1",12},{"sa2",13},{"sa3",14},{"sa4",15},{"ym1",19},{"rotena",20},{"rotenb",21},{"rotenc",22}};
      assert(std::size(codes)==std::size(story_resident_types::kTypes));
      for(const auto&[code,subtype]:codes){v=example();v["actors"].array[0]["parameters"]["resident"]=code;assert(parse_actors(v,actors,why));assert(actors[0].resident==subtype);
       const auto*t=story_resident_types::find(code);assert(t&&t->subtype==subtype&&story_resident_types::by_subtype(uint8_t(subtype))==t&&std::strlen(t->label)&&std::strlen(t->help));
-      assert(story_resident_types::profile(uint8_t(subtype))==(subtype==19?0x13B:0x175));
-      // the story-gated pair skips its gate (stage argument 0xFF); everyone else keeps the ordinary 0
-      assert(story_resident_types::params(uint8_t(subtype))==(subtype==19?1u:(subtype==8||subtype==10)?0x00FF00FFu:0x00FF0000u));}}
+      assert(story_resident_types::profile(uint8_t(subtype))==(subtype==19?0x13B:subtype>=20?0x174:0x175));
+      // the story-gated pair skips its gate (stage argument 0xFF); everyone else keeps the ordinary 0;
+      // a Goron merchant: its number in the top byte and no rail (0xFF)
+      assert(story_resident_types::params(uint8_t(subtype))==(subtype==19?1u:subtype>=20?((subtype-20u)<<24)|0x00FFFFFFu:(subtype==8||subtype==10)?0x00FF00FFu:0x00FF0000u));
+      assert(story_resident_types::create_argument(uint8_t(subtype))==(subtype==19?0xFFFFFFFFu:subtype>=20?subtype-20u:subtype));
+      assert(story_resident_types::people(uint8_t(subtype))==(subtype<19));}}
+    // the Goron merchants stand: a route is refused with the reason; talks and lines are theirs as any resident's
+    for(const auto& name:{"rotena","rotenb","rotenc"}){v=example();v["actors"].array[0]["parameters"]["resident"]=name;
+      v["actors"].array[0]["path"]=mods::json::parse(R"({"points":[{"x":300,"y":0,"z":0}]})");
+      assert(!parse_actors(v,actors,why)&&why.find("Goron merchant")!=std::string::npos);}
+    // a young Goron: a uniform scale 0.5..1.5
+    v=example();v["actors"].array[0]["parameters"]["resident"]="rotena";v["actors"].array[0]["scale"]=mods::json::parse(R"({"x":0.7,"y":0.7,"z":0.7})");assert(parse_actors(v,actors,why)&&actors[0].resident==20);
+    v["actors"].array[0]["scale"]=mods::json::parse(R"({"x":0.4,"y":0.4,"z":0.4})");assert(!parse_actors(v,actors,why)&&why.find("0.5 to 1.5")!=std::string::npos);
+    v["actors"].array[0]["scale"]=mods::json::parse(R"({"x":1,"y":0.7,"z":1})");assert(!parse_actors(v,actors,why));
     // unsafe characters are refused with the reason, the rest with the list
     for(const auto& name:{"um3","sa5","ug1","ug2"}){v=example();v["actors"].array[0]["parameters"]["resident"]=name;assert(!parse_actors(v,actors,why)&&actors.empty());assert(why.find("not supported")!=std::string::npos&&why.find(name)!=std::string::npos);}
     v=example();v["actors"].array[0]["parameters"]["resident"]="rsh1";assert(!parse_actors(v,actors,why));assert(why.find("one of uo2, um1")!=std::string::npos&&why.find("ym1")!=std::string::npos);

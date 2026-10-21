@@ -55,6 +55,9 @@ character's quest or story variants.
 | `sa3` | The sailor on the stone dock | |
 | `sa4` | The sailor at the end of the wooden pier | |
 | `ym1` | A seated man | See below |
+| `rotena` | The Goron merchant in the striped hat (green pack) | See [Goron merchants](#goron-merchants) |
+| `rotenb` | The Goron merchant in the blue hat (brown pack) | |
+| `rotenc` | The Goron merchant in the red vest (pale blue pack) | |
 
 Day and night: a copy looks like the character at the time of day it was created.
 Other names and numeric values are rejected. These Windfall people are not placeable, because
@@ -73,6 +76,39 @@ save flags. Author the seated character's height and location; this adapter does
 not ground-correct, walk, or support scene `move`/`face`. Its narrow native
 relocation area near x=-202066, z=320123 is rejected. Camera following and dialogue
 remain available. Other Ym1/Ym2 staff variants are unsupported.
+
+### Goron merchants
+
+The three travelling Goron merchants of the sea can be placed as residents: `rotena`, `rotenb` and
+`rotenc`. They are the game's own merchants, loaded from the player's game files: three Gorons
+with their big packs, each with a look of his own (his own hat, clothes and pack: the game has three
+merchant models and no other Goron). Place as many as you like (within the actor limits below), for example a family of them:
+
+```json
+{
+  "id": "elder", "actor": "resident", "parameters": {"resident": "rotenb"},
+  "stage": "sea", "room": 44, "position": {"x": -201700, "y": 168, "z": 312050},
+  "rotation": {"x": 0, "y": 20, "z": 0},
+  "talks": [
+    {"when": {"quest": "homeland", "step": 1}, "lines": ["The mountain calls us home, brother."],
+     "then": [{"action": "quest_step", "id": "homeland", "step": 2}]},
+    {"lines": ["Welcome to the island, brother!"]}
+  ]
+}
+```
+
+A placed Goron stands where you put it, turns his head to Link and talks with
+your `lines` or `talks` (with their conditions, quest steps and `then`), as every resident does. He
+appears whatever the player's story: the game's own merchants only come out once the story has them,
+a placed copy is always there. He keeps none of the merchants' trade: showing him an item does
+nothing, he takes no rupees and sets none of the game's flags (his first talk, the exchange counts
+and the map) — the merchants on the sea keep their own talks and trades unchanged. A Goron doesn't
+walk a route (refused with "a Goron merchant stands where it is placed and does not walk a route")
+and doesn't take scene `move` or `face` steps; scene camera and `say` steps work.
+
+`scale` makes a smaller or larger Goron, such as a young one: `"scale": {"x": 0.7, "y": 0.7, "z": 0.7}`
+(uniform, 0.5 to 1.5). His model, pack and hat scale; his talk distance and the circle Link bumps into
+stay the merchant's own size. There is no other colour or model than the three merchants' own.
 
 ### Residents walking a route
 
