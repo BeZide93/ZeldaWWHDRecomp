@@ -110,7 +110,7 @@ using interp::pacing::lerp_s16;
 using interp::pacing::lerp_u8;
 
 int trace_left(int part) {
-    static int left[8] = {-1, -1, -1, -1, -1, -1, -1, -1};
+    static int left[16] = {-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1};
     if (left[part] < 0) left[part] = getenv("WWHD_INTERP_FX_TRACE") ? atoi(getenv("WWHD_INTERP_FX_TRACE")) : 0;
     return left[part] > 0 ? left[part]-- : 0;
 }
@@ -1356,15 +1356,26 @@ static void rnd_call(Cpu* c, char fn, void (*orig)(Cpu*)) {
             c->f[1].ps0 = (float)from_frac(it->second[i]);
             return;
         }
-        // true 60: a draw on a half pass must not consume random numbers either (the full passes
-        // keep the 30 fps sequence: drops, AI choices); it gets the next value without using it
+        // A draw on a pass without logic must not consume random numbers (frame interpolation and
+        // true 60): the logic keeps the 30 fps sequence (drops, AI choices, effects). It gets the next
+        // value without using it. (With frame interpolation this was missing: a draw that called
+        // cM_rnd more often on a hold pass than on its logic pass, or only there, advanced the
+        // game's seeds once per extra drawn frame, and from then on the game drew other random
+        // numbers than at 30 fps: the logic of a 120 fps run left the 30 fps one within seconds.)
+        // debug: WWHD_INTERP_RND_KEEP=0 lets those calls consume the seeds again
+        static const bool consume = getenv("WWHD_INTERP_RND_KEEP") && !atoi(getenv("WWHD_INTERP_RND_KEEP"));
         uint32_t seeds[3];
-        bool keep = true60::enabled();
+        const bool keep = true60::enabled() || !consume;
         if (keep)
             for (int k = 0; k < 3; k++) seeds[k] = ld32(GD(0x101FF9D4) + 4 * k);
         orig(c);
         if (keep)
             for (int k = 0; k < 3; k++) st32(GD(0x101FF9D4) + 4 * k, seeds[k]);
+        static int tr = trace_left(15);
+        if (tr) {
+            tr--;
+            LOG("[interp-fx] cM_rnd%c from %08X on a pass without logic, no logic-pass value: seeds %s", fn, c->lr, keep ? "kept" : "consumed");
+        }
         return;
     }
     RndRec& r = g_rnd_logic;
