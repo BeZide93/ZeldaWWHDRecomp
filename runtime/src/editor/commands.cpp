@@ -1301,8 +1301,34 @@ std::vector<Location> Session::locations() const {
     return build_locations(stage_rooms_, open, host_ ? host_->mod_stages() : std::vector<Host::ModStage>{});
 }
 
-bool Session::warp_to(const Location& to, std::string& why) {
+bool resolve_warp_stage(Location& to, const std::vector<Host::ModStage>& mod_stages, std::string& why) {
+    const Host::ModStage* stage = nullptr;
+    if (to.stage.rfind("stage:", 0) == 0) {  // a package's stage, by the package's own ids
+        const std::string rest = to.stage.substr(6);
+        const size_t slash = rest.find('/');
+        unsigned matches = 0;
+        for (const auto& ms : mod_stages)
+            if (slash == std::string::npos ? ms.id == rest : (ms.mod == rest.substr(0, slash) && ms.id == rest.substr(slash + 1))) stage = &ms, ++matches;
+        if (matches > 1) return why = "more than one package has a stage \"" + rest + "\": name it as stage:<mod>/" + rest, false;
+        if (!stage) return why = "no installed package makes the stage \"" + to.stage + "\" (list_locations, group Mod stages)", false;
+        to.stage = stage->name;
+    } else {
+        for (const auto& ms : mod_stages)
+            if (ms.name == to.stage) stage = &ms;
+    }
+    if (to.stage.empty() || to.stage.size() > 7 || to.stage.find_first_of(":/") != std::string::npos)
+        return why = "\"" + to.stage + "\" is not a stage name (up to 7 characters, or stage:<mod>/<id>)", false;
+    if (to.room < 0 || to.room > 63) return why = "a room is 0..63", false;
+    if (stage && std::find(stage->rooms.begin(), stage->rooms.end(), to.room) == stage->rooms.end())
+        return why = "the stage " + stage->id + " (" + stage->mod + ") has no room " + std::to_string(to.room), false;
+    return true;
+}
+
+bool Session::warp_to(const Location& place, std::string& why) {
     if (!host_) return why = "the game is not running", false;
+    // every editor warp (warp, warp_to, warp_back) names its stage as the game does
+    Location to = place;
+    if (!resolve_warp_stage(to, host_->mod_stages(), why)) return false;
     if (host_->busy(why)) return false;
     const Place from = host_->link();
     if (!host_->warp(to, why)) return false;
@@ -1621,14 +1647,9 @@ Value Session::dispatch(const std::string& command, const Value& p, std::string&
             to.id = "manual";
             to.stage = text(p, "stage");
             to.room = int(p.get("room").number);
-            if (to.stage.rfind("stage:", 0) == 0 && host_) {  // a package's stage: "stage:<mod>/<id>"
-                std::string name;
-                for (const auto& ms : host_->mod_stages())
-                    if ("stage:" + ms.mod + "/" + ms.id == to.stage) name = ms.name;
-                if (name.empty()) return why = "no mod stage \"" + to.stage + "\" is installed (list_locations, group Mod stages)", r;
-                to.stage = name;
-            }
-            if (to.stage.empty() || to.stage.size() > 7 || to.room < 0 || to.room > 63) return why = "a stage name of up to 7 characters and a room 0..63", r;
+            // a package's stage ("stage:<mod>/<id>") by its game name; warp_to checks it again
+            if (!host_) return why = "the game is not running", r;
+            if (!resolve_warp_stage(to, host_->mod_stages(), why)) return r;
             if (p.get("point").type == Value::Number) to.point = int(p.get("point").number);
             if (p.get("position").type != Value::Null) {
                 read_point(p.get("position"), to.position);

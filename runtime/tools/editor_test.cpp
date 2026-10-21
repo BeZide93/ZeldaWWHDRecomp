@@ -93,6 +93,16 @@ struct FakeHost : editor::Host {
         last_warp = to;
         return true;
     }
+    std::vector<ModStage> installed_stages;  // the game's mod stages (mod_stages())
+    std::vector<ModStage> mod_stages() override { return installed_stages; }
+    int step_starts = 0;
+    editor::Location last_step_place;
+    bool start_at_step(const std::string&, const std::vector<editor::Record>&, const std::vector<editor::RecordValue>&,
+                       const std::vector<std::pair<std::string, int>>&, const editor::Location& to, bool, std::string&) override {
+        ++step_starts;
+        last_step_place = to;
+        return true;
+    }
     editor::Place link() override {
         editor::Place p;
         p.valid = true;
@@ -367,6 +377,74 @@ void locations() {
     const auto* step = find("step:editor-test:q:1");
     CHECK(step && step->room == 44 && step->stage == "sea");
     CHECK(find("island:11") && find("island:11")->label.find("Windfall") != std::string::npos);
+}
+
+// Warps into a package's own stage: every path (warp, warp_to a quest step's place, start_at_step) hands the
+// game the stage's game name, never "stage:<mod>/<id>" (the game read its first 7 characters as a stage name
+// and halted in dStage_infoCreate: stageRsrc != 0); what can't be warped to is refused with a reason.
+void mod_stage_warps() {
+    using MS = editor::Host::ModStage;
+    const std::vector<MS> stages = {{"sky-island", "sky", "Zrg23s1", {0, 1, 2}}};
+    editor::Location l;
+    std::string why;
+    l.stage = "stage:sky-island/sky", l.room = 1;
+    CHECK(editor::resolve_warp_stage(l, stages, why) && l.stage == "Zrg23s1" && l.room == 1);
+    l.stage = "stage:sky", l.room = 0;  // the package's own short form: one installed package has it
+    CHECK(editor::resolve_warp_stage(l, stages, why) && l.stage == "Zrg23s1");
+    l.stage = "Zrg23s1", l.room = 2;  // the game name stays
+    CHECK(editor::resolve_warp_stage(l, stages, why) && l.stage == "Zrg23s1");
+    l.stage = "sea", l.room = 44;
+    CHECK(editor::resolve_warp_stage(l, stages, why) && l.stage == "sea");
+    l.stage = "stage:sky-island/sky", l.room = 5;  // not a room of the stage
+    CHECK(!editor::resolve_warp_stage(l, stages, why) && why.find("no room 5") != std::string::npos);
+    l.stage = "Zrg23s1", l.room = 7;
+    CHECK(!editor::resolve_warp_stage(l, stages, why));
+    l.stage = "stage:other/sky", l.room = 0;  // not installed
+    CHECK(!editor::resolve_warp_stage(l, stages, why) && why.find("no installed package") != std::string::npos);
+    l.stage = "stage:sky-island/sky", l.room = 0;
+    CHECK(!editor::resolve_warp_stage(l, {}, why));
+    const std::vector<MS> two = {stages[0], {"other", "sky", "Zab12cd", {0}}};
+    l.stage = "stage:sky", l.room = 0;  // two packages have "sky": the short form is ambiguous
+    CHECK(!editor::resolve_warp_stage(l, two, why) && why.find("more than one") != std::string::npos);
+    l.stage = "stage:other/sky";
+    CHECK(editor::resolve_warp_stage(l, two, why) && l.stage == "Zab12cd");
+
+    // the session: a quest whose steps stand in the package's stage (as sky-island's do)
+    FakeHost host;
+    host.installed_stages = stages;
+    editor::Session s(&host);
+    Value m = json(kManifest);
+    m["quests_format"] = 1;
+    m["quests"] = json(R"([{"id": "sky", "title": "Sky", "steps": [
+        {"n": 1, "text": "Fly", "place": {"x": -194790, "z": 314530}},
+        {"n": 2, "text": "Arena", "place": {"stage": "stage:sky", "room": 1, "x": 0, "y": 200, "z": 4400, "sea": {"x": -194790, "z": 314530}}},
+        {"n": 3, "text": "Gone", "place": {"stage": "stage:gone", "room": 0, "x": 0, "y": 0, "z": 0, "sea": {"x": -194790, "z": 314530}}}]}])");
+    s.add_package("sky-island", "Sky island", "", m);
+    auto run = [&](const char* command, const char* params) { return s.run(command, json(params)); };
+    // warp_to the step's place (the editor's location list): the game gets Zrg23s1, the position stays
+    Value r = run("warp_to", R"({"location": "step:sky-island:sky:2"})");
+    CHECK(ok(r) && host.warps == 1 && host.last_warp.stage == "Zrg23s1" && host.last_warp.room == 1);
+    CHECK(host.last_warp.point == editor::kAtPosition && host.last_warp.position.z == 4400);
+    // warp by the package's ids, both rooms both ways, by spawn point and by position
+    for (const char* p : {R"({"stage": "stage:sky-island/sky", "room": 0})", R"({"stage": "stage:sky-island/sky", "room": 1, "position": {"x": 0, "y": 200, "z": 3600}})",
+                          R"({"stage": "Zrg23s1", "room": 0, "point": 0})", R"({"stage": "stage:sky", "room": 1, "point": 1})"}) {
+        const int before = host.warps;
+        r = run("warp", p);
+        CHECK(ok(r) && host.warps == before + 1 && host.last_warp.stage == "Zrg23s1");
+    }
+    // refused with a reason, and the game is never asked
+    const int before = host.warps;
+    r = run("warp_to", R"({"location": "step:sky-island:sky:3"})");
+    CHECK(!ok(r) && r.get("error").string().find("stage:sky-island/gone") != std::string::npos);
+    CHECK(!ok(run("warp", R"({"stage": "stage:sky-island/sky", "room": 9})")));
+    CHECK(!ok(run("warp", R"({"stage": "stage:nothing/sky", "room": 0})")));
+    CHECK(host.warps == before);
+    // start at a step: its place goes to the game by the stage's game name too
+    CHECK(ok(run("test_mode", R"({"on": true})")));
+    r = run("start_at_step", R"({"quest": "sky", "step": 2, "warp": "place", "play": false})");
+    CHECK(ok(r) && host.step_starts == 1 && host.last_step_place.stage == "Zrg23s1" && host.last_step_place.room == 1);
+    r = run("start_at_step", R"({"quest": "sky", "step": 3, "warp": "place", "play": false})");
+    CHECK(!ok(r) && host.step_starts == 1);
 }
 
 void records() {
@@ -1776,6 +1854,7 @@ int main(int argc, char** argv) {
     command_layer();
     handle_drag();
     locations();
+    mod_stage_warps();
     records();
     package_files(argv[1]);
     live_kinds_note();

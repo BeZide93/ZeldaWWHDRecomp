@@ -532,6 +532,11 @@ const char* island_name(int room);  // "Windfall Island"; nullptr outside 1..49
 std::vector<Location> build_locations(const std::vector<std::pair<std::string, std::vector<int>>>& stage_rooms,
                                       const std::vector<std::pair<std::string, Value>>& packages,
                                       const std::vector<Host::ModStage>& mod_stages = {});
+// A warp destination's stage as the game names it. A package's stage ("stage:<mod>/<id>", or "stage:<id>"
+// when one installed package has that stage) becomes its game name, and a mod stage's room must be one of its
+// rooms. False with `why` (said to the person) when no installed stage matches: the game never gets a stage
+// name it has no archive for.
+bool resolve_warp_stage(Location& to, const std::vector<Host::ModStage>& mod_stages, std::string& why);
 // The story records that hold a mod's progress (its actor and scene flags, quests, letters, and the charts and
 // items Link got from it).
 std::vector<Record> mod_records(const std::string& mod, const Value& manifest);

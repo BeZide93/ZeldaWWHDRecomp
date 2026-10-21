@@ -15,6 +15,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <set>
 #include <string>
 #include <system_error>
 #include <thread>
@@ -25,6 +26,7 @@
 #include "mods/fast_forward.h"
 #include "mods/story_store.h"
 #include "mods/mod_stages.h"
+#include "editor/stage_files.h"
 #include "mods/mods.h"
 // Save states: snapshot the whole running game into one of 5 slots and restore it, also in a new
 // process.
@@ -1966,6 +1968,27 @@ PendingWarp g_warp;  // under g_mu
 struct PendingFileSave { std::string path; std::function<void(bool, const std::string&)> done; bool full=false; };
 PendingFileSave g_file_save;  // under g_mu
 
+bool warp_stage_loadable(const std::string& stage, int room, std::string& why) {
+    if (stage.empty() || stage.size() > 7 || stage.find_first_of(":/") != std::string::npos)
+        return why = "\"" + stage + "\" is not a stage name the game knows", false;
+    if (room < 0 || room > 63) return why = "a room is 0..63", false;
+    mod_stages::Info info;
+    if (mod_stages::find(stage, info)) {
+        if (std::find(info.rooms.begin(), info.rooms.end(), unsigned(room)) != info.rooms.end()) return true;
+        return why = "the stage " + info.id + " (" + info.mod + ") has no room " + std::to_string(room), false;
+    }
+    // the game's stages: its loose Stage files and the packs' (the sea's archives are in a pack); read once
+    static const std::set<std::string> game = [] {
+        std::set<std::string> names;
+        for (const auto& [name, rooms] : editor::game_stage_rooms(config::game_dir)) names.insert(name);
+        return names;
+    }();
+    // a game without a readable list (no files found): only the mod stage names are known to be missing
+    if (game.count(stage) || (game.empty() && !mod_stages::missing(stage))) return true;
+    return why = mod_stages::missing(stage) ? "the stage " + stage + " is a mod stage that no installed package makes"
+                                            : "the game has no stage " + stage, false;
+}
+
 void service_warp(Cpu* c) {
     PendingWarp p;
     {
@@ -1982,6 +2005,9 @@ void service_warp(Cpu* c) {
     };
     std::string why;
     bool retry = false;
+    // the game loads the stage's Stage archive (dStage_infoCreate halts the game without its stage.dzs): only a
+    // stage it can load, an installed mod stage or one of the game's files, is ever written as the next stage
+    if (!warp_stage_loadable(p.w.stage, p.w.room, why)) return finish(false, why);
     if (!gameplay_ready(why, retry) || !player_has_control(c, why)) return finish(false, why);
     const uint32_t sv = ld32(kSaveInfoPtr);
     char name[8] = {};
