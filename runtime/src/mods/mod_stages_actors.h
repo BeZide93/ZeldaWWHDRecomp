@@ -18,7 +18,27 @@ struct NativeActor {
     std::string tag, name;
     uint32_t params = 0;
     uint16_t angle_x = 0, angle_z = 0x00FF;
+    bool scalable = false;  // the game's scaled-actor table (SCOB) can hold it with a size: the large tree
 };
+
+// The game's trees: the variants of the stage actor "tree" (their models, collision, sway and cutting are the
+// game's own). "small" and its groups are the islands' small trees, "bushy" a round bushy one, "large" the big
+// leafy tree (it can be scaled 0.5 to 1.5), "palm" the palm tree.
+struct TreeKind {
+    const char* variant;
+    const char* name;
+    uint32_t params;
+    bool scalable;
+};
+inline constexpr TreeKind kTrees[] = {
+    {"small", "swood", 0x00000010u, false},    // one small tree
+    {"small_3", "swood", 0x00000013u, false},  // a group of three
+    {"small_5", "swood", 0x00000017u, false},  // a group of five
+    {"bushy", "woodb", 0x00000000u, false},
+    {"large", "lwood", 0xFFFFFFFFu, true},
+    {"palm", "Oyashi", 0xFFFFFFFFu, false},
+};
+inline constexpr double kTreeScaleMin = 0.5, kTreeScaleMax = 1.5;
 
 // The chest items: the game's item number and the chest it comes in (the game's small chest for a small key,
 // the larger one for the map and compass, the big one for the boss key).
@@ -42,7 +62,7 @@ inline const ChestItem* chest_item(const std::string& item) {
 }
 
 // the kinds, for messages
-inline constexpr const char* kKinds = "chuchu, bokoblin, keese, darknut, pot, big_pot or chest";
+inline constexpr const char* kKinds = "chuchu, bokoblin, keese, darknut, pot, big_pot, tree or chest";
 
 // `actor`/`variant` -> the native entry; a chest's `flag` is its chest bit (0..31). False with a reason.
 inline bool native_actor(const std::string& actor, const std::string& variant, const std::string& item, unsigned flag, NativeActor& out,
@@ -58,6 +78,12 @@ inline bool native_actor(const std::string& actor, const std::string& variant, c
         out.params = 0xFF000000u | uint32_t(c->shape) << 20 | uint32_t(flag) << 7;  // no switch, the chest's flag
         out.angle_z = uint16_t(c->number << 8 | 0xFF);                                // the item, no opening switch
         return true;
+    }
+    if (actor == "tree") {
+        const std::string v = variant.empty() ? "small" : variant;
+        for (const auto& t : kTrees)
+            if (v == t.variant) return out.name = t.name, out.params = t.params, out.scalable = t.scalable, true;
+        return why = "tree: unknown variant \"" + variant + "\" (small, small_3, small_5, bushy, large, palm)", false;
     }
     if (!variant.empty() && (actor == "pot" || actor == "big_pot")) return why = actor + " has no variants", false;
     if (actor == "pot") return out.name = "kotubo", out.params = 0x707FFF3Fu, true;

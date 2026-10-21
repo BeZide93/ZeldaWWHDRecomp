@@ -210,6 +210,20 @@ class Phase2(unittest.TestCase):
         with self.assertRaises(sb.BuildError):
             sb.check_room_table(d, [], [[0, 2]])  # 0 and 2 aren't joined
 
+    def test_scaled_actor(self):
+        r = recipe(1)
+        r['rooms'][0]['actors'] = [{'tag': 'SCOB', 'name': 'lwood', 'params': 0xFFFFFFFF, 'position': [1, 2, 3], 'angle': 90, 'scale': 1.3},
+                                   {'tag': 'ACTR', 'name': 'swood', 'params': 0x13, 'position': [4, 5, 6], 'angle': 0}]
+        sb.check_recipe(r)
+        rc = sb.read_dz(sb.build_dzr(kit_dzr(), 0, r['rooms'][0]))
+        scob = sb.chunk(rc, 'SCOB')
+        self.assertEqual((scob[1], len(scob[2])), (1, 0x24))
+        self.assertEqual(scob[2][:5], b'lwood')
+        self.assertEqual(struct.unpack_from('>h', scob[2], 0x1A)[0], 16384)  # the heading
+        self.assertEqual(scob[2][0x20:], bytes((13, 13, 13, 0xFF)))       # its size in tenths
+        actr = sb.chunk(rc, 'ACTR')
+        self.assertEqual((actr[1], actr[2][:5], len(actr[2])), (1, b'swood', 0x20))
+
     def test_kit_collision(self):
         pos, tris = box_room(-10, 10)
         prims = [{'collision': False, 'material': 'rock', 'positions': [tuple(100 * x for x in p) for p in pos], 'triangles': tris}]

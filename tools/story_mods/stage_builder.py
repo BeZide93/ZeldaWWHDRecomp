@@ -53,7 +53,7 @@ import notebook_model as base  # noqa: E402  (Bfres, sarc, yaz0_stored, BuildErr
 import game_piece_model as gp  # noqa: E402  (room_files, read_model, Writer, write_model, ATTRIBUTE_CLASS)
 from skinned_actor_model import append_dictionary, append_string  # noqa: E402
 
-VERSION = 4
+VERSION = 5
 FORMAT = 1
 BuildError = base.BuildError
 MAX_ROOMS = 16
@@ -264,7 +264,7 @@ def build_dzr(kit_dzr, room, recipe_room):
     lgtv = chunk(kit, 'LGTV')
     if lgtv:
         out.append(('LGTV', lgtv[1], lgtv[2][:0x1C * lgtv[1]]))
-    for tag in ('ACTR', 'TRES'):
+    for tag in ('ACTR', 'SCOB', 'TRES'):
         entries = [a for a in recipe_room.get('actors', []) if a['tag'] == tag]
         if entries:
             out.append((tag, len(entries), b''.join(actor_entry(a, room) for a in entries)))
@@ -272,11 +272,16 @@ def build_dzr(kit_dzr, room, recipe_room):
 
 
 def actor_entry(a, room):
-    """an ACTR or TRES entry (0x20 bytes): name, parameters, position, rotation words; a chest's x word is its room"""
+    """an ACTR or TRES entry (0x20 bytes): name, parameters, position, rotation words; a chest's x word is its room.
+    A SCOB entry (0x24 bytes) is an ACTR entry and its size: x, y, z in tenths, and a pad byte"""
     x, y, z = a['position']
     ax = (a.get('angle_x', 0) & ~0x3F | room) if a['tag'] == 'TRES' else a.get('angle_x', 0)
-    return struct.pack('>8sI3fHhHH', a['name'].encode('ascii'), int(a['params']) & 0xFFFFFFFF, x, y, z, ax & 0xFFFF, angle16(a.get('angle', 0)),
+    body = struct.pack('>8sI3fHhHH', a['name'].encode('ascii'), int(a['params']) & 0xFFFFFFFF, x, y, z, ax & 0xFFFF, angle16(a.get('angle', 0)),
                        a.get('angle_z', 0xFF) & 0xFFFF, 0xFFFF)
+    if a['tag'] == 'SCOB':
+        s = max(1, min(255, int(round(a.get('scale', 1.0) * 10))))
+        body += bytes((s, s, s, 0xFF))
+    return body
 
 
 # ---- collision (room.dzb) ------------------------------------------------------------------------------------
@@ -987,7 +992,7 @@ def check_recipe(r):
         actors = x.get('actors', [])
         require(isinstance(actors, list) and len(actors) <= 16, 'room %d: at most 16 actors' % x['room'])
         for a in actors:
-            require(a.get('tag') in ('ACTR', 'TRES') and isinstance(a.get('name'), str) and 0 < len(a['name']) <= 8 and isinstance(a.get('params'), (int, float))
+            require(a.get('tag') in ('ACTR', 'SCOB', 'TRES') and isinstance(a.get('name'), str) and 0 < len(a['name']) <= 8 and isinstance(a.get('params'), (int, float))
                     and _point(a.get('position')), 'room %d: invalid actor' % x['room'])
         spawns = x.get('spawns')
         require(isinstance(spawns, list) and 0 < len(spawns) <= MAX_SPAWNS, 'room %d: 1 to %d spawns' % (x['room'], MAX_SPAWNS))

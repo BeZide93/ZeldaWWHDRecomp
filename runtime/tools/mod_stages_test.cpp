@@ -247,6 +247,31 @@ int main() {
         }
     }
 
+    // the game's trees: variants, a large tree's size (into the scaled-actor table), refusals
+    {
+        mod_stages::NativeActor n;
+        std::string w;
+        assert(mod_stages::native_actor("tree", "", "", 0, n, w) && n.name == "swood" && n.params == 0x10 && !n.scalable);
+        assert(mod_stages::native_actor("tree", "small_3", "", 0, n, w) && n.params == 0x13);
+        assert(mod_stages::native_actor("tree", "large", "", 0, n, w) && n.name == "lwood" && n.scalable);
+        assert(mod_stages::native_actor("tree", "palm", "", 0, n, w) && n.name == "Oyashi");
+        assert(!mod_stages::native_actor("tree", "oak", "", 0, n, w) && w.find("small_3") != std::string::npos);
+        std::string text = kValid;
+        const std::string tree = "{\"id\": \"t1\", \"actor\": \"tree\", \"variant\": \"large\", \"scale\": 1.3, \"position\": {\"x\": 0, \"y\": 0, \"z\": 0}}";
+        text.replace(text.find("\"spawns\""), 0, "\"actors\": [" + tree + "], ");
+        std::vector<Stage> m;
+        assert(parse(parse_json(text), m, why) && m[0].rooms[0].actors.size() == 1 && m[0].rooms[0].actors[0].scale == 1.3);
+        const Value tr = recipe(m[0], "Zaaaaaa", {{"chamber", "Zaaaaaa"}, {"other", "Zbbbbbb"}}, [](const std::string& p) { return p; });
+        const Value& e = tr.get("rooms").array[0].get("actors").array[0];
+        assert(e.get("tag").string() == "SCOB" && e.get("name").string() == "lwood" && e.get("scale").number == 1.3);
+        for (const char* bad : {"\"scale\": 1.3", "\"scale\": 2"}) {
+            std::string t = text;
+            if (std::string(bad) == "\"scale\": 1.3") t.replace(t.find("\"large\""), 7, "\"small\"");  // a small tree has no size
+            else t.replace(t.find("\"scale\": 1.3"), 12, bad);
+            assert(!parse(parse_json(t), m, why) && why.find("scale") != std::string::npos);
+        }
+    }
+
     // phase 3: the dungeon map's title and the rooms' floors
     {
         std::string text = kValid;

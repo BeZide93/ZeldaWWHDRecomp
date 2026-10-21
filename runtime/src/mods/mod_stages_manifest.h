@@ -64,6 +64,7 @@ struct RoomActor {
     std::string id, actor, variant, item;
     Point position;
     double angle = 0;
+    double scale = 1;   // a large tree's size (0.5 to 1.5)
     unsigned flag = 0;  // a chest's flag (0..31)
     std::string then;   // story actions (JSON) when the chest is opened or the enemy defeated ("" none)
     unsigned defeat_switch = 0;  // an enemy with "then": the stage switch its defeat sets (given by parse)
@@ -354,7 +355,7 @@ inline bool parse(const Value& m, std::vector<Stage>& out, std::string& why, boo
                 return why = rat + "actors must be a list of up to " + std::to_string(kMaxRoomActors), false;
             for (const auto& av : actors.array) {
                 RoomActor a;
-                if (!keys(av, {"id", "actor", "variant", "item", "position", "angle", "then"}) || !id(av.get("id")) || av.get("actor").type != Value::String ||
+                if (!keys(av, {"id", "actor", "variant", "item", "position", "angle", "scale", "then"}) || !id(av.get("id")) || av.get("actor").type != Value::String ||
                     !point(av.get("position"), kMaxCoordinate, a.position))
                     return why = rat + "an actor has an id, an actor kind and a position", false;
                 a.id = av.get("id").text;
@@ -379,6 +380,9 @@ inline bool parse(const Value& m, std::vector<Stage>& out, std::string& why, boo
                 NativeActor n;
                 std::string reason;
                 if (!native_actor(a.actor, a.variant, a.item, 0, n, reason)) return why = rat + "actor " + a.id + ": " + reason, false;
+                if (av.get("scale").type != Value::Null &&
+                    (!n.scalable || !number(av.get("scale"), kTreeScaleMin, kTreeScaleMax, a.scale)))
+                    return why = rat + "actor " + a.id + ": \"scale\" (0.5 to 1.5) is for a large tree", false;
                 r.actors.push_back(a);
             }
             s.rooms.push_back(std::move(r));
@@ -688,6 +692,10 @@ inline Value recipe(const Stage& s, const std::string& name, const std::map<std:
             e["angle"] = Value(a.angle);
             e["angle_x"] = Value(double(n.angle_x));
             e["angle_z"] = Value(double(n.angle_z));
+            if (n.scalable) {  // the scaled-actor table, with its size
+                e["tag"] = "SCOB";
+                e["scale"] = Value(a.scale);
+            }
             actors.array.push_back(e);
         }
         rooms.array.push_back(v);

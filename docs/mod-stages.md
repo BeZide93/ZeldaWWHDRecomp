@@ -190,6 +190,7 @@ A room's `actors` are the game's own actors, created by the game when the room l
 | `keese` | `variant` `normal` (default) or `fire`. |
 | `darknut` | `variant` `darknut` (default), `shield`, `helmet` or `mighty`. |
 | `pot`, `big_pot` | A pot Link can lift and throw. |
+| `tree` | The game's own trees, with their own collision, sway and cutting: `variant` `small` (default; one small tree), `small_3` or `small_5` (a group), `bushy`, `large` (the big leafy tree; `"scale"` 0.5 to 1.5 sizes it) or `palm`. |
 
 A heart container from a mod's chest raises Link's maximum hearts in the player's real save file, as the
 game's own do, and turning the mod off does not take it back. Give one deliberately: one per boss room at
