@@ -465,6 +465,8 @@ bool is_point(const Value& v) {
 }
 bool type_ok(const std::string& type, const Value& v) {
     if (type == "any") return true;
+    if (const size_t bar = type.find('|'); bar != std::string::npos)  // a union: any of its types ("integer|object")
+        return type_ok(type.substr(0, bar), v) || type_ok(type.substr(bar + 1), v);
     if (type == "string") return v.type == Value::String;
     if (type == "boolean") return v.type == Value::Bool;
     if (type == "number") return v.type == Value::Number;

@@ -280,6 +280,13 @@ void stage_commands(const fs::path& root) {
     r = s.run("add_room", json(R"({"stage": "keep", "ground": "assets/room.glb"})"));
     CHECK(ok(r));
     CHECK(s.manifest("dun")->get("stages").array[0].get("rooms").array.size() == 2);
+    // "kit" is a room number or {stage, room} (a parameter of two types); other values are refused
+    CHECK(ok(s.run("add_room", json(R"({"stage": "keep", "ground": "assets/room.glb", "kit": {"stage": "Hyroom", "room": 0}})"))));
+    CHECK(s.manifest("dun")->get("stages").array[0].get("rooms").array[2].get("kit").get("stage").string() == "Hyroom");
+    CHECK(ok(s.run("add_room", json(R"({"stage": "keep", "ground": "assets/room.glb", "kit": 0})"))));
+    CHECK(!ok(s.run("add_room", json(R"({"stage": "keep", "ground": "assets/room.glb", "kit": "Hyroom"})"))));
+    CHECK(ok(s.run("undo")) && ok(s.run("undo")));
+    CHECK(s.manifest("dun")->get("stages").array[0].get("rooms").array.size() == 2);
     // Check lists the room nothing leads to; export refuses it; saving keeps the work
     auto reach_problem = [&] {
         const Value checked = s.run("check_package");
