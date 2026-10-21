@@ -547,8 +547,8 @@ void load_world(const std::string& mod,const mods::json::Value& manifest,const s
                 const auto bridge=BuildBridge::installed(std::string());
                 const auto tool=std::filesystem::path(bridge.builder).parent_path().parent_path()/"story_mods"/"kit_model.py";
                 // only a distant model: its game textures at the size of the game's own distant views
-                const bool far=distant_uses&&!actor_uses&&!collision_uses;
-                const auto set=story_kit_models::build(mod,model,package_dir,story_kit_models::cache_directory(data_dir),bridge.python,tool.string(),config::game_dir,far);
+                const bool distant_only=distant_uses&&!actor_uses&&!collision_uses;
+                const auto set=story_kit_models::build(mod,model,package_dir,story_kit_models::cache_directory(data_dir),bridge.python,tool.string(),config::game_dir,distant_only);
                 if(distant_uses&&set->pieces[0].triangles>1024)throw std::runtime_error("a distant model may have 1 to 1024 triangles");
                 if(!story_kit_models::register_for_mod(mod,model.id,*set,false,why))throw std::runtime_error(why);
             } catch(const std::exception& e) {

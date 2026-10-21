@@ -22,7 +22,7 @@ bool point(const mods::json::Value& v, story_notebook::WorldPoint& out) {
 }
 }  // namespace
 
-std::string recipe(const story_notebook::ManifestModel& model, const std::string& glb, bool far) {
+std::string recipe(const story_notebook::ManifestModel& model, const std::string& glb, bool distant_only) {
     using mods::json::quote;
     std::string out = "{\"kit_model_format\": 1, \"id\": " + quote(model.id) + ", \"glb\": " + quote(glb) + ", \"kit\": {\"stage\": " +
                       quote(model.kit_stage) + ", \"room\": " + std::to_string(model.kit_room) + "}";
@@ -33,7 +33,7 @@ std::string recipe(const story_notebook::ManifestModel& model, const std::string
             out += (i ? ", " : "") + quote(model.kit_materials[i].first) + ": " + quote(model.kit_materials[i].second);
         out += "}";
     }
-    if (far) out += ", \"far\": true";
+    if (distant_only) out += ", \"far\": true";
     return out + "}\n";
 }
 

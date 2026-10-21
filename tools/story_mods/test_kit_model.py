@@ -164,7 +164,7 @@ class KitModelTest(unittest.TestCase):
         semantics = [struct.unpack_from('>4H', body, 40 + 12 * mesh[2] + 8 * i)[3] for i in range(4)]
         self.assertEqual(sorted(semantics), sorted([collision_mesh.SEMANTICS['col_grass']] * 2 + [collision_mesh.SEMANTICS['col_stone']] * 2))
         # an unknown collision material is refused
-        bad = self.write('bad.glb', glb([('visible', [('grass', ground, ground_tris)]), ('island_col', [('col_lava', ground, ground_tris)])]))
+        bad = self.write('bad.glb', glb([('visible', [('grass', ground, ground_tris)]), ('island_col', [('col_magma', ground, ground_tris)])]))
         with self.assertRaises(km.BuildError):
             km.kit_collision(sb.read_glb(bad))
 

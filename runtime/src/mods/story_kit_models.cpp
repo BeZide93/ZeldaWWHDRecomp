@@ -25,7 +25,7 @@ std::mutex g_build_mutex;
 std::shared_ptr<const story_game_pieces::BuiltSet> build(const std::string& mod, const story_notebook::ManifestModel& model,
                                                          const std::string& package_dir, const std::string& cache_dir,
                                                          const std::vector<std::string>& python, const std::string& tool,
-                                                         const std::string& game_dir, bool far) {
+                                                         const std::string& game_dir, bool distant_only) {
     auto fail = [](const std::string& why) { throw std::runtime_error(why); };
     if (model.kind != "kit" || model.kit_stage.empty() || model.kit_room < 0) fail("not a kit model");
     if (cache_dir.empty() || python.empty() || tool.empty() || game_dir.empty() || package_dir.empty()) fail("the kit model converter is unavailable");
@@ -36,10 +36,10 @@ std::shared_ptr<const story_game_pieces::BuiltSet> build(const std::string& mod,
     }
     std::error_code ec;
     if (!fs::is_regular_file(glb, ec) || fs::file_size(glb, ec) > 16u * 1024 * 1024) fail("the model " + model.source + " is missing or larger than 16 MiB");
-    const std::string text = recipe(model, fs::absolute(glb).string(), far);
+    const std::string text = recipe(model, fs::absolute(glb).string(), distant_only);
     // the identity: the recipe without the file's place (a moved package keeps its built models) and the file's content
     // (a changed model is a new archive, so the editor can take it while the game runs)
-    const std::string archive = identity(mod, model.id, recipe(model, model.source, far) + mods::hash::sha256_file(glb.string()));
+    const std::string archive = identity(mod, model.id, recipe(model, model.source, distant_only) + mods::hash::sha256_file(glb.string()));
     const fs::path dir(cache_dir);
     if (fs::is_symlink(dir, ec)) fail("the model cache cannot be a symbolic link");
     std::lock_guard building(g_build_mutex);
