@@ -72,6 +72,7 @@ bool digesting();                  // WWHD_PROC_DIGEST (comparisons of two build
 void proc_digest(uint32_t proc);
 }
 namespace interp {
+bool enabled();            // interp.cpp: a 60 fps mode is on
 bool hold_pass();          // interp.cpp: this is a half pass (no 30 Hz logic)
 uint64_t logic_steps();    // full logic steps so far
 }
@@ -1206,7 +1207,11 @@ extern "C" void hook_025DF904(Cpu* c) {
     static std::vector<uint32_t> dw_before;
     bool dw = dwlog && half_pass() && g_draw_depth >= 2;
     if (dw) dw_before.assign((uint32_t*)ppc_ptr(GD(0x1046F0B0)), (uint32_t*)ppc_ptr(GD(0x104C3000)));
+    // frame interpolation: actor draws that advance their own state, once per logic step (interp_fx.cpp)
+    const uint32_t keep_exec = interp::enabled() && interp::hold_pass() ? actor_execute_fn(proc) : 0;
+    if (keep_exec) interp::fx_actor_draw(proc, keep_exec, true);
     f_025DF904_orig(c);
+    if (keep_exec) interp::fx_actor_draw(proc, keep_exec, false);
     if (dw) {
         static std::unordered_map<uint32_t, int> cnt;
         static std::unordered_map<uint32_t, uint32_t> who;

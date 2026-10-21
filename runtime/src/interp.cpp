@@ -2003,13 +2003,16 @@ extern "C" void hook_025F06A8(Cpu* c) {
             (unsigned long long)g_passes, t, before, s.rate, s.speed, ld8(g + 0x17));
     }
 }
-// debug: mDoGph_calcMonotone (025F0840) calls per logic step (WWHD_INTERP_FADE_TRACE)
+// mDoGph_calcMonotone (025F0840, from the environment's execute, once per logic step): its change of
+// the grey-scale rate is drawn blended (interp_fx.cpp fx_monotone_step). debug: WWHD_INTERP_FADE_TRACE
+namespace interp { void fx_monotone_step(int16_t before, int16_t after); }
 extern "C" void f_025F0840_orig(Cpu* c);
 extern "C" void hook_025F0840(Cpu* c) {
     static int trace = getenv("WWHD_INTERP_FADE_TRACE") ? atoi(getenv("WWHD_INTERP_FADE_TRACE")) : 0;
     const uint32_t g = GD(0x101F4808);
     const int16_t before = (int16_t)ld16(g + 0x18);
     f_025F0840_orig(c);
+    if (interp::enabled() && !interp::g_hold) interp::fx_monotone_step(before, (int16_t)ld16(g + 0x18));
     if (trace > 0 && before != (int16_t)ld16(g + 0x18)) {
         trace--;
         LOG("[interp] monotone: step %llu pass %llu rate %d -> %d", (unsigned long long)interp::g_logic_steps,

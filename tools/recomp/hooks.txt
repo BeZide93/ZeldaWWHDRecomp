@@ -231,6 +231,15 @@
 025EA548  # mDoExt_3DlineMat0_c::update: line control points blended (interp_fx.cpp)
 025EAF58  # mDoExt_3DlineMat0_c::update (widths): line control points blended (interp_fx.cpp)
 0247255C  # daShip_c::draw: hull texture scroll and cannon sight arc blended (interp_fx.cpp)
+024D1D44  # daVrbox2_Draw: sky back-cloud scroll drawn between the steps (interp_fx.cpp)
+024D1C44  # vrbox2 texScrollCheck: the cloud SRTs the draw scrolls (interp_fx.cpp)
+0258CA60  # dMagma_packet_c::update: lava scroll and lava balls drawn between the steps (interp_fx.cpp)
+025A1D10  # dOvlpFd2_Draw: swirl scene wipe angle and scale drawn between the steps (interp_fx.cpp)
+02413E80  # daPy_matAnm_c::calc: Link's eye offset once per logic step, drawn between the steps (interp_fx.cpp)
+024556E8  # daPz_matAnm_c::calc: Tetra/Zelda eye offset drawn between the steps (interp_fx.cpp)
+02281564  # daNpc_Ls1_matAnm_c::calc: Aryll's eye offset drawn between the steps (interp_fx.cpp)
+023086FC  # daNpc_Zl1_matAnm_c::calc: Zelda's eye offset drawn between the steps (interp_fx.cpp)
+0251AE90  # dChain_packet_c::draw: balance-lift chains between the steps (interp_fx.cpp)
 024EC1C8  # dAttDraw_c::draw: in true 60, the attention arrow is built from halfway values and the current camera
 025615B8  # dScnKy_env_light_c::settingTevStruct_plightcol_plus: candle flicker held on frames without logic (interp_fx.cpp)
 020198D8  # cM_rndF: the flicker random value inside it
