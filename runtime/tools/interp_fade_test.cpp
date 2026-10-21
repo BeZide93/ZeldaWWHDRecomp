@@ -128,6 +128,49 @@ int main() {
         assert(std::fabs(s.rate - 0.2f) < 1e-6f);                   // the next step advances once
         assert(std::fabs(g_shown - 0.125f) < 1e-6f);
     }
+    // floats_call: a value eased once per call (the HD projection zoom, cLib_addCalc towards 1 by at
+    // most 0.1 per call) advances once per logic step at every frame rate, and blended passes show it
+    // between the step's start and end
+    {
+        auto ease = [](float* v) { v[0] = v[0] - 1.0f > 0.1f ? v[0] - 0.1f : 1.0f; };
+        auto run = [&](int frames) {
+            FloatsGate<1> g;
+            float z = 1.3333334f;
+            std::vector<float> shown;
+            for (uint64_t step = 1; step <= 6; step++)
+                for (int k = 0; k < frames; k++) {
+                    floats_call(g, 7, step, k == 0, float(k + 1) / frames, 1u, &z, ease);
+                    shown.push_back(z);
+                }
+            return shown;
+        };
+        const auto s30 = run(1), s120 = run(4), s60 = run(2);
+        assert(s30.size() == 6 && s30[0] < 1.3333334f && s30[5] == 1.0f);
+        for (size_t i = 0; i < s30.size(); i++) {
+            assert(s120[4 * i + 3] == s30[i]);  // the step's last frame: the 30 fps value
+            assert(s60[2 * i + 1] == s30[i]);
+        }
+        for (size_t i = 1; i < 12; i++) assert(s120[i] < s120[i - 1]);  // moves on every frame while easing
+        // not blended (bit clear): every pass shows the step's exact value
+        FloatsGate<2> g;
+        float v[2] = {0.0f, 0.0f};
+        auto inc = [](float* x) { x[0] += 1.0f; x[1] += 1.0f; };
+        floats_call(g, 1, 1, true, 0.25f, 2u, v, inc);
+        assert(v[0] == 1.0f && v[1] == 0.25f);
+        floats_call(g, 1, 1, false, 0.5f, 2u, v, inc);
+        assert(v[0] == 1.0f && v[1] == 0.5f);  // advanced once only
+        floats_call(g, 1, 2, true, 0.25f, 2u, v, inc);
+        assert(v[0] == 2.0f && v[1] == 1.25f);
+        // another owner starts a new gate
+        float w[2] = {5.0f, 5.0f};
+        floats_call(g, 2, 2, false, 0.5f, 2u, w, inc);
+        assert(w[0] == 6.0f && w[1] == 5.5f);
+    }
+    // unwrap_near: a wrapping texture scroll blends the short way
+    assert(unwrap_near(0.98f, 0.02f, 1.0f) == 0.98f - 1.0f);
+    assert(unwrap_near(0.02f, 0.98f, 1.0f) == 0.02f + 1.0f);
+    assert(unwrap_near(0.40f, 0.45f, 1.0f) == 0.40f);
+    assert(unwrap_near(0.40f, 0.45f, 0.0f) == 0.40f);
     printf("interp_fade: all tests passed (fade-in %d steps, stage fader 26 steps at 30/60/120/240 fps)\n", r30.steps_to_end);
     return 0;
 }

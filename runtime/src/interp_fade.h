@@ -122,4 +122,52 @@ void bytes_call(BytesGate<N>& g, uint32_t owner, uint64_t step, bool logic, floa
     }
 }
 
+// Float values a drawing function advances once per call, the same way: Link's eye texture offset
+// (daPy_matAnm_c::calc 02413E80, from the material calculation of every drawn pass: its morph towards
+// the target 1/(n+1) of the way per call ran 2x/4x/8x per logic step) and the HD projection zoom that
+// camera_draw eases towards 1 (cLib_addCalc, every drawn pass). The call advances them on the logic
+// pass only; elements in `blend` (bit i: element i) are shown at the pass's fraction between the
+// step's start and end, the others (the call's own memory, e.g. the previous offset the morph starts
+// from) keep the step's exact value.
+template <int N>
+struct FloatsGate {
+    uint64_t step = ~0ull;
+    uint32_t owner = 0;
+    bool have = false;
+    float before[N], after[N], shown[N];
+};
+template <int N, class Child>
+void floats_call(FloatsGate<N>& g, uint32_t owner, uint64_t step, bool logic, float frac, uint32_t blend, float* v, Child&& child) {
+    const bool same = g.have && g.owner == owner;
+    if (same)
+        for (int i = 0; i < N; i++)
+            if (v[i] == g.shown[i]) v[i] = g.after[i];  // the step's exact values (nothing changed them since)
+    if (logic || !same || g.step != step) {
+        for (int i = 0; i < N; i++) g.before[i] = v[i];
+        child(v);
+        for (int i = 0; i < N; i++) g.after[i] = v[i];
+        g.step = step;
+        g.owner = owner;
+        g.have = true;
+    } else {
+        child(v);  // (the call's other work)
+        for (int i = 0; i < N; i++) v[i] = g.after[i];
+    }
+    for (int i = 0; i < N; i++) {
+        const float a = g.before[i], b = g.after[i];
+        g.shown[i] = frac < 1.0f && a != b && (blend >> i & 1) ? (1.0f - frac) * a + frac * b : b;
+        v[i] = g.shown[i];
+    }
+}
+
+// A texture scroll that wraps (0..period): the previous step's value moved by whole periods to the
+// side of the new one, so a blend between them goes the short way (0.98 -> 0.02 passes 1.0, not 0.5).
+// The blended value may lie outside 0..period; a texture translation repeats, so it draws the same.
+inline float unwrap_near(float prev, float cur, float period) {
+    if (!(period > 0.0f)) return prev;
+    for (int i = 0; i < 4 && cur - prev > 0.5f * period; i++) prev += period;
+    for (int i = 0; i < 4 && prev - cur > 0.5f * period; i++) prev -= period;
+    return prev;
+}
+
 }  // namespace interp::fade

@@ -125,6 +125,46 @@ inline CamState blend(const CamState& a, const CamState& b, float t, bool dist_r
     return m;
 }
 
+// Camera shake (dCamera_c::shakeCamera: explosions, boss hits, heavy landings). The camera's store
+// (024F8430) draws the body's eye and centre plus a shake offset that flips its sign every step
+// (mEyeShake, mCenterShake; and mFovYShake, mBankShake added to fovy and bank). Blending the drawn
+// cameras of two steps averaged +a and -b towards zero: the in-between frames lost most of the
+// shake. The base camera (without the shake) is blended instead, and the new step's shake is added
+// on top, so every frame of a step shakes as the 30 fps frame of that step does.
+struct Shake {
+    float eye[3] = {0, 0, 0}, center[3] = {0, 0, 0}, fovy = 0;
+    int16_t bank = 0;
+    bool on = false;  // the store added it to the drawn camera (no demo camera, no event flag 1)
+};
+inline CamState unshake(const CamState& s, const Shake& k) {
+    if (!k.on) return s;
+    CamState b = s;
+    for (int i = 0; i < 3; i++) {
+        b.eye[i] -= k.eye[i];
+        b.center[i] -= k.center[i];
+    }
+    b.fovy -= k.fovy;
+    b.bank = (int16_t)(uint16_t)((uint16_t)b.bank - (uint16_t)k.bank);
+    return b;
+}
+inline CamState add_shake(const CamState& s, const Shake& k) {
+    if (!k.on) return s;
+    CamState b = s;
+    for (int i = 0; i < 3; i++) {
+        b.eye[i] += k.eye[i];
+        b.center[i] += k.center[i];
+    }
+    b.fovy += k.fovy;
+    b.bank = (int16_t)(uint16_t)((uint16_t)b.bank + (uint16_t)k.bank);
+    return b;
+}
+// a and b drawn with shakes ka and kb: the blended base camera with b's shake (a step drawn
+// exactly by blend(), a cut, comes back as b itself)
+inline CamState blend_shaken(const CamState& a, const Shake& ka, const CamState& b, const Shake& kb, float t, bool dist_rule) {
+    if (!ka.on && !kb.on) return blend(a, b, t, dist_rule);
+    return add_shake(blend(unshake(a, ka), unshake(b, kb), t, dist_rule), kb);
+}
+
 // Letterbox bars (dCamera_c mTrimHeight, the scissor camera_draw sets): CalcTrimSize eases the
 // height 25 % of the way to its target per step (events, talk), so on blended frames it is drawn
 // between the two steps' heights. Two sizes set it at once (and are drawn at once): 4 switches the

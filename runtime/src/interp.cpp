@@ -317,6 +317,7 @@ uint64_t g_logic_steps = 0; // full logic steps (all passes without a 60 fps mod
 uint64_t g_passes = 0;      // every pass of the per-frame function
 bool g_hold = false;        // hold pass: draw only, no logic
 bool g_cam_blended = false; // camera_draw is drawing the blended camera
+uint32_t g_drawing_cam = 0; // the camera process camera_draw is drawing (zoom_ease)
 bool g_logic_pass = false;  // logic pass with interpolation on: camera drawn blended
 bool g_blend_draw = false;  // inside the loop body of a blended pass (logic pass or blended hold pass)
 bool g_hold_next = false;   // the next pass is a hold pass
@@ -344,8 +345,38 @@ struct Prev {
     uint64_t drawn_pass = ~0ull;
     uint32_t projection[16]{}; // raw projection-view words before true60's actor rollback
     uint64_t projection_pass = ~0ull;
+    camera::Shake shake;       // the shake offset the exact step was drawn with (interp_camera.h)
+    fade::FloatsGate<1> zoom;  // the HD projection zoom camera_draw eases (zoom_ease)
 };
 Prev g_prev[4];
+
+// The shake offset the camera's store (024F8430) added to the drawn camera (interp_camera.h Shake):
+// dCamera_c (camera +0x248) mCenter +0x10, mEye +0x1C, mCenterShake +0x56C, mEyeShake +0x578,
+// mFovYShake +0x584, mBankShake +0x588. The store adds it unless a demo camera or event flag 1 draws
+// the camera: it was added when the drawn eye and centre are the body's plus the offset.
+// debug: WWHD_INTERP_CAM_SHAKE=0 blends the shaken cameras as before
+camera::Shake read_shake(uint32_t cam) {
+    static const bool off = getenv("WWHD_INTERP_CAM_SHAKE") && !atoi(getenv("WWHD_INTERP_CAM_SHAKE"));
+    camera::Shake k;
+    if (off) return k;
+    const uint32_t body = cam + kCamBody;
+    bool any = false;
+    for (int i = 0; i < 3; i++) {
+        k.eye[i] = (float)ldf32(body + 0x578 + 4 * i);
+        k.center[i] = (float)ldf32(body + 0x56C + 4 * i);
+        any |= k.eye[i] != 0.0f || k.center[i] != 0.0f;
+    }
+    k.fovy = (float)ldf32(body + 0x584);
+    k.bank = (int16_t)ld16(body + 0x588);
+    if (!any && k.fovy == 0.0f && k.bank == 0) return k;
+    bool added = true;
+    for (int i = 0; i < 3; i++) {
+        const float e = (float)ldf32(body + 0x1C + 4 * i) + k.eye[i], c = (float)ldf32(body + 0x10 + 4 * i) + k.center[i];
+        added &= e == (float)ldf32(cam + kEye + 4 * i) && c == (float)ldf32(cam + kCenter + 4 * i);
+    }
+    k.on = added;
+    return k;
+}
 
 void capture_projection(Prev& p) {
     if (!enabled()) return;
@@ -425,7 +456,14 @@ extern "C" void hook_024FFC40(Cpu* c) {
     camera_draw(c);
     editor::camera_drawn(cam);
 }
+static void camera_draw_body(Cpu* c);
 static void camera_draw(Cpu* c) {
+    const uint32_t saved = interp::g_drawing_cam;
+    interp::g_drawing_cam = c->r[3];
+    camera_draw_body(c);
+    interp::g_drawing_cam = saved;
+}
+static void camera_draw_body(Cpu* c) {
     using namespace interp;
     uint32_t cam = c->r[3];
     mods::moon_jump_camera(cam);
@@ -448,7 +486,18 @@ static void camera_draw(Cpu* c) {
                     }
                 }
             }
-            if (p->snap_step == g_logic_steps && !p->snap) write_cam(cam, camera::blend(p->s, cur, pass_t(), p->dist_rule));
+            if (p->snap_step == g_logic_steps && !p->snap) {
+                // (a shaking camera: the base camera blended, the new step's shake on top)
+                const camera::Shake shake = read_shake(cam);
+                write_cam(cam, camera::blend_shaken(p->s, p->shake, cur, shake, pass_t(), p->dist_rule));
+                static int shake_trace = getenv("WWHD_INTERP_CAM_TRACE") ? atoi(getenv("WWHD_INTERP_CAM_TRACE")) : 0;
+                if (shake_trace > 0 && (shake.on || p->shake.on)) {
+                    shake_trace--;
+                    LOG("[interp] camera shake step %llu t %.3f: eye offset y %.2f -> %.2f, drawn eye y %.2f (exact %.2f)",
+                        (unsigned long long)g_logic_steps, pass_t(), p->shake.on ? p->shake.eye[1] : 0.0f, shake.on ? shake.eye[1] : 0.0f,
+                        (float)ldf32(cam + kEye + 4), cur.eye[1]);
+                }
+            }
             // letterbox bars (interp_camera.h trim_blends): between the steps' heights
             const uint32_t body = cam + kCamBody;
             const float trim = (float)ldf32(body + kTrimHeight);
@@ -478,6 +527,7 @@ static void camera_draw(Cpu* c) {
         return;
     }
     p->s = read_cam(cam);  // exact step: remember it for the next step's blended frames
+    p->shake = read_shake(cam);
     p->trim = (float)ldf32(cam + kCamBody + kTrimHeight);
     p->valid = true;
     p->drawn = p->s;
@@ -521,6 +571,38 @@ static void camera_draw(Cpu* c) {
     f_024FFC40_orig(c);
     capture_projection(*p);
 }
+
+// The HD projection zoom (dCamera_c +0x730 mScale, +0x734 mTarget): camera_draw, which runs on every
+// drawn pass, eases it towards 1 with cLib_addCalc (0.2, at most 0.3, at least 0.1 per call) after
+// the cinema-scope display mode (trim sizes 2/3 set 4:3, 1.333) ends, so the ease ran 2x/4x/8x per
+// logic step. The call (returning to 0250018C) is gated (interp_fade.h floats_call): the zoom eases
+// once per logic step and every pass shows it at its fraction. true60.cpp hook_0200ECD4 hands the
+// call here. debug: WWHD_INTERP_ZOOM_EASE=0 turns the gate off
+namespace interp {
+bool zoom_ease(Cpu* c, void (*orig)(Cpu*)) {
+    static const bool off = getenv("WWHD_INTERP_ZOOM_EASE") && !atoi(getenv("WWHD_INTERP_ZOOM_EASE"));
+    if (!interp_on() || off || true60::enabled() || !g_drawing_cam) return false;
+    Prev* p = prev_for(g_drawing_cam);
+    const uint32_t v = c->r[3];
+    float x = (float)ldf32(v), before = x;
+    double ret = 0;
+    fade::floats_call(p->zoom, g_drawing_cam, g_logic_steps, !g_hold, pass_t(), 1u, &x, [&](float* y) {
+        stf32(v, y[0]);
+        orig(c);
+        y[0] = (float)ldf32(v);
+        ret = c->f[1].ps0;
+    });
+    stf32(v, x);
+    c->f[1].ps0 = ret;
+    static int trace = getenv("WWHD_INTERP_CAM_TRACE") ? atoi(getenv("WWHD_INTERP_CAM_TRACE")) : 0;
+    if (trace > 0 && (before != 1.0f || x != 1.0f)) {
+        trace--;
+        LOG("[interp] zoom ease step %llu t %.3f: %.4f -> %.4f, drawn %.4f", (unsigned long long)g_logic_steps, pass_t(), p->zoom.before[0],
+            p->zoom.after[0], x);
+    }
+    return true;
+}
+}  // namespace interp
 
 // dCamera_c::bumpCheck (024FD11C, from dCamera_c::Run in the camera's execute): the collision check
 // that pulls the eye in front of walls, trees and bushes. dCamera_c +0 is its camera process (the

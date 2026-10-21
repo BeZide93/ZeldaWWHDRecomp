@@ -134,6 +134,33 @@ int main() {
         assert(trim_blends(3, 90.0f, 67.5f, 90.0f));    // size 3 in an event eases out
         assert(!trim_blends(1, 50.0f, 50.0f, 90.0f));
     }
+    // camera shake: the base camera blends, the new step's shake is added on top (blending the shaken
+    // cameras averaged the alternating offsets away)
+    {
+        CamState a = at(300), b = at(300);
+        Shake ka, kb;
+        ka.on = kb.on = true;
+        ka.eye[1] = ka.center[1] = 6.0f;    // step S: +6
+        kb.eye[1] = kb.center[1] = -5.0f;   // step S+1: -5 (the sign flips every step)
+        ka.bank = 100;
+        kb.bank = -90;
+        const CamState sa = add_shake(a, ka), sb = add_shake(b, kb);
+        for (float t : {0.25f, 0.5f, 0.75f}) {
+            const CamState m = blend_shaken(sa, ka, sb, kb, t, false);
+            assert(std::fabs(m.eye[1] - sb.eye[1]) < 1e-3f && std::fabs(m.center[1] - sb.center[1]) < 1e-3f);
+            assert(m.bank == sb.bank);
+            const CamState old = blend(sa, sb, t, false);  // (the old way: shrunk towards 0)
+            assert(std::fabs(old.eye[1] - b.eye[1]) < std::fabs(sb.eye[1] - b.eye[1]));
+        }
+        // no shake on either step: exactly the plain blend
+        Shake none;
+        const CamState p = blend_shaken(a, none, at(280), none, 0.25f, false), q = blend(a, at(280), 0.25f, false);
+        for (int i = 0; i < 3; i++) assert(p.eye[i] == q.eye[i] && p.center[i] == q.center[i]);
+        // a moving base with a shake: the base blends as without the shake
+        CamState c = at(280);
+        const CamState m = blend_shaken(sa, ka, add_shake(c, kb), kb, 0.5f, false), base = blend(a, c, 0.5f, false);
+        for (int i = 0; i < 3; i++) assert(std::fabs(m.eye[i] - (base.eye[i] + kb.eye[i])) < 1e-3f);
+    }
     printf("interp_camera: all tests passed\n");
     return 0;
 }

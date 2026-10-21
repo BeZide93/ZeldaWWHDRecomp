@@ -843,7 +843,11 @@ extern "C" void hook_025DF940(Cpu* c) {
 // re-implementations of the GameCube source with fractional smoothing and split steps.
 
 // f32 cLib_addCalc(f32* v, f32 target, f32 scale, f32 maxStep, f32 minStep)
+namespace interp { bool zoom_ease(Cpu* c, void (*orig)(Cpu*)); void fx_actor_draw(uint32_t proc, uint32_t exec, bool begin); }
 extern "C" void hook_0200ECD4(Cpu* c) {
+    // camera_draw's ease of the HD projection zoom: once per logic step with frame interpolation (interp.cpp)
+    static const uint32_t zoom_call = GC(0x0250018C);
+    if (c->lr == zoom_call && interp::zoom_ease(c, f_0200ECD4_orig)) return;
     if (t_dt < 1.0f) {
         c->f[2].ps0 = (float)frac(c->f[2].ps0);
         c->f[3].ps0 = (float)(c->f[3].ps0 * t_dt);
