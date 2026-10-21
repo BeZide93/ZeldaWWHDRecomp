@@ -7,6 +7,32 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Lava for mods** (for mod makers). A `col_lava` ground burns Link exactly like the game's lava (he jumps, loses half
+  a heart and is sent back) and makes bombs explode, in mod stages, world objects, island grounds and models with
+  several materials. Mod stages and the world editor can place the game's moving lava floor and Dragon Roost's heat
+  shimmer; on the sea the water tool can make a lava pool (e.g. in Fire Mountain's crater) that glows and flows like
+  Fire Mountain's own lava. See [mod stages](docs/mod-stages.md).
+- **Fixed: water in mod stages was not swimmable.** Its surface sat one level too deep for the game's water check, so
+  Link stood on it; it now works like the game's own water.
+- **Game materials on your own sea models** (for mod makers). A model placed on the sea can name the game's own
+  materials (rock, ash, planks, …) instead of bringing textures; they are built from your game files and lit like
+  the islands' own buildings at every time of day. Materials with your own small textures can sit next to them in
+  the same model, and such a model can also be a distant view. Collision bodies can now have up to 8192 triangles,
+  and the parts of one composition are placed together. See [world objects](docs/world-objects.md).
+- **Bigger islands for mods** (for mod makers). One collision body on the sea can now be as large as a whole sea
+  square (1 km instead of 200 m), like the game's own islands, so a big island no longer has to be split into
+  sections with seams. The editor's focus frames objects that size.
+- **Detailed performance profiling is now a setting, off by default** (#261, thanks @pancreations). The detailed
+  per-draw profiler and the periodic performance lines in the log no longer run unless you want them: Settings →
+  Graphics → Overlay → Detailed performance profiling turns them on at once, without a restart. Then play a few
+  seconds and use "Copy performance report" for the detailed sections; with it off, the report says so.
+- **Fixed: Link's fist could float off his arm with frame interpolation** after the Triforce cutscene, e.g. in
+  Hyrule Castle (#255). A part of a model that did not move no longer makes the whole model skip smoothing.
+- **Fixed: the game could hang after previewing a scene in the world editor.** A scene that creates an actor
+  made the game draw it twice, and its models looped in the draw list. Scene actors are now created like the game's
+  own, and a model entered twice is drawn once instead of looping.
+- **Fixed: the world editor crashed when jumping into a mod's own stage** (e.g. to a quest step there). Every editor
+  jump now uses the stage's game name and checks the room, and the game refuses a jump to a place it can't load.
 - **Meta Quest: a floating theater** (#259, thanks to the contributor). On a Quest the game shows on a flat or
   curved screen in your room, with controls for 2D/3D, size, distance, passthrough and recentering; the controllers
   work the toolbar and the name keyboard, a gamepad plays the game. If the VR display stops during play, a "VR display
