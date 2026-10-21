@@ -7,6 +7,13 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Export the game's islands for Blender** (for mod makers). The editor's new `export_glb` command (and
+  `tools/story_mods/export_glb.py`) writes a game room, e.g. Outset or Windfall, or one building as a GLB file with
+  textures, the game's material names and optionally collision by ground type and actor markers. It is a reference
+  for scale, style and material names when building your own islands; the files are your own copy of the game's
+  content and must not be shared or put into mods. See [world objects](docs/world-objects.md).
+- **Fixed: mod stages in release builds.** The stage builder was missing from release packages, so mod stages,
+  `list_kit_materials` and the stage templates failed there; development builds were not affected.
 - **Sky island example: a full side quest** (for mod makers). "The island in the sky" now starts with a letter and
   shows its steps in the Story Notebook: the Helmaroc King swoops down on Outset's pier, grabs Link with the game's own
   capture animation, carries him up through the clouds to the island seen far off, and drops him over it; then the boss
