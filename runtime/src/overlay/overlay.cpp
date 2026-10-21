@@ -97,6 +97,7 @@ namespace gfxvk { bool buffer_cache_enabled(); unsigned submission_pool_slots();
 #include "template_export.h"
 #endif
 #include "../render_prof.h"
+#include "../background_shaders.h"
 #include <cctype>
 #include "../perf_metrics.h"
 #include "../build_info.h"
@@ -744,6 +745,7 @@ std::string performance_report() {
     report += android_telemetry() + "\n";
 #endif
     report += "CPU time is thread running time per output frame. GPU submission intervals may include stalls; not GPU load.\n";
+    report += bgshaders::report_line();  // Compile shaders in the background: draws left out, waits
     report += rprof::report_section();  // the detailed sections, or a line on how to turn them on
     // which build, system, GPU and rendering-path switches (report_header.h)
     reporthdr::Info h;
@@ -1044,6 +1046,16 @@ void tab_graphics() {
     flow::next(flow::check("Edge smoothing (FXAA)"), 30);
     if (check("Edge smoothing (FXAA)", render::fxaa(), &v, render::feature_available(render::kFeatureFXAA)))
         post_changed([v] { render::set_fxaa(v); });
+    // background_shaders.h: wait a few ms for a missing shader, then leave that draw out of the frame
+    if (check("Compile shaders in the background", bgshaders::enabled(), &v, !bgshaders::env_override())) {
+        bgshaders::set_requested(v);  // applies to the next draw
+        hostui::post([v] { hostui::set(bgshaders::kSettingKey, v ? "1" : "0"); });
+    }
+    if (bgshaders::env_override()) note("WWHD_BG_SHADERS=%s is set for this start and takes precedence.", bgshaders::env_override());
+    else help("Fewer stutters on a first visit: when a shader is not ready, the game no longer waits for it. That "
+              "object is missing for a moment and appears once its shader is ready. Shadows, reflections and other "
+              "effects still wait, so they are never wrong. Off: every frame waits until it is complete. "
+              "Takes effect at once. Off by default.");
 #if defined(WWHD_HAS_VULKAN) && !defined(__ANDROID__)
     if (render::vulkan()) {
         heading("GPU (Vulkan)");
@@ -2904,6 +2916,19 @@ ImDrawData* frame(float pw, float ph, void (*renderer_init)()) {
             rprof::set_requested(on);
             hostui::post([on] { hostui::set(rprof::kSettingKey, on ? "1" : "0"); });
             tprof = nullptr;
+        }
+    }
+    // debug: WWHD_TEST_BG_SHADERS=1@600 (or 0@N) sets Graphics > Compile shaders in the background at TV
+    // frame N, as the checkbox does (saved too)
+    static const char* tbg = getenv("WWHD_TEST_BG_SHADERS");
+    if (tbg) {
+        const char* at = strchr(tbg, '@');
+        if (render::frame_count() + 1 >= (at ? strtoull(at + 1, nullptr, 10) : 1)) {
+            const bool on = tbg[0] == '1';
+            LOG("[overlay] test: compile shaders in the background %s", on ? "on" : "off");
+            bgshaders::set_requested(on);
+            hostui::post([on] { hostui::set(bgshaders::kSettingKey, on ? "1" : "0"); });
+            tbg = nullptr;
         }
     }
     const double t = now_s();

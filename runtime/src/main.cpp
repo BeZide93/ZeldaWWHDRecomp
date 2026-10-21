@@ -37,6 +37,7 @@
 #include "gfx/shader_prebuild.h"
 #include "overlay/hostui.h"
 #include "render_prof.h"
+#include "background_shaders.h"
 #include "mods/cemu_pack.h"
 #include "mods/content.h"
 #include "gx2/gx2.h"
@@ -524,6 +525,8 @@ int main(int argc, char** argv) {
         // Settings > Graphics > Detailed performance profiling (render_prof.h; WWHD_PROFILE wins)
         std::string saved;
         rprof::start(hostui::get(rprof::kSettingKey, saved) && saved == "1");
+        // Settings > Graphics > Compile shaders in the background (background_shaders.h; WWHD_BG_SHADERS wins)
+        bgshaders::start(hostui::get(bgshaders::kSettingKey, saved) && saved == "1");
     }
     exception_report::sink.store(+[](const char* message) noexcept {
         static std::once_flag error_log;
