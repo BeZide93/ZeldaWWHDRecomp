@@ -7,6 +7,9 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Fixed: switches and doors waited for a restart in the world editor.** With all of the editor's live kinds
+  installed, the table for the port's own actor types was full, so switches and doors fell back to "after a restart".
+  They now appear at once like the other actors, and a failure names its cause in the log.
 - **Mod stages: the light of a place of the game, the game's trees, joined rooms** (for mod makers). A mod stage
   can take its light from another place, e.g. `"light": {"stage": "sea", "room": 44}` for Outset's daylight that
   follows the game's clock; it can place the game's own trees (small, bushy, large with a scale, palm) as room
