@@ -830,8 +830,10 @@ extern "C" void hook_0251D864(Cpu* c) {
 // dCloth_packet_c is not its simulation. Never advance or scale a cloth simulation here.
 struct PacketField { uint32_t addr, words; bool matrix = false; };
 struct PacketPose { uint64_t record; std::vector<uint32_t> words; };
-enum ClothPacketKind { kGridSail, kPirateSail, kFortressFlag, kBuoyFlag, kBuoyPole, kMantle, kPirateFlag, kLineMat };
-constexpr const char* kClothPacketNames[] = {"KoRL sail", "pirate sail", "fortress flag", "buoy flag", "buoy pole", "mantle", "pirate flag", "3D lines"};
+enum ClothPacketKind { kGridSail, kPirateSail, kFortressFlag, kBuoyFlag, kBuoyPole, kMantle, kPirateFlag, kLineMat, kLineMat0 };
+constexpr const char* kClothPacketNames[] = {"KoRL sail", "pirate sail", "fortress flag", "buoy flag", "buoy pole", "mantle", "pirate flag", "3D lines",
+                                             "3D lines (mat0)"};
+constexpr bool is_line(ClothPacketKind k) { return k == kLineMat || k == kLineMat0; }
 std::unordered_map<uint64_t, PacketPose> g_packet_poses;
 template <typename Fields>
 void cloth_packet_fields(Cpu* c, ClothPacketKind kind, void (*original)(Cpu*), const Fields& fields) {
@@ -850,13 +852,13 @@ void cloth_packet_fields(Cpu* c, ClothPacketKind kind, void (*original)(Cpu*), c
     }
     auto it = g_packet_poses.find(key);
     if (!halfway() || it == g_packet_poses.end() ||
-        (kind == kLineMat ? it->second.record != record : it->second.record + 1 < record) ||
+        (is_line(kind) ? it->second.record != record : it->second.record + 1 < record) ||
         it->second.words.size() != exact.size()) { original(c); return; }
     const auto& before = it->second.words;
     // As with J3D models, do not smear a teleport or a non-finite placement matrix.
     uint32_t offset = 0;
     for (const auto& f : fields) {
-        if (f.matrix || kind == kLineMat) {
+        if (f.matrix || is_line(kind)) {
             for (uint32_t j = 0; j < f.words; j++) {
                 if (!std::isfinite(wf(before[offset+j])) || !std::isfinite(wf(exact[offset+j]))) {
                     original(c);
@@ -898,7 +900,7 @@ void cloth_packet_fields(Cpu* c, ClothPacketKind kind, void (*original)(Cpu*), c
         offset += f.words;
     }
     static const int trace = getenv("WWHD_INTERP_FX_TRACE") ? atoi(getenv("WWHD_INTERP_FX_TRACE")) : 0;
-    static int traces[] = {trace, trace, trace, trace, trace, trace, trace, trace};
+    static int traces[] = {trace, trace, trace, trace, trace, trace, trace, trace, trace};
     if (traces[kind] > 0) {
         offset = 0;
         for (const auto& f : fields) {
@@ -927,18 +929,24 @@ void cloth_packet(Cpu* c, ClothPacketKind kind, void (*original)(Cpu*), std::ini
     cloth_packet_fields(c, kind, original, fields);
 }
 
-// mDoExt_3DlineMat1 generates its GPU vertices here, outside J3DModel::viewCalc.
-// Bridge ropes and held-item ropes must use the same pass fraction as the models.
-// Keep the exact control points in guest memory after the synchronous upload.
-std::unordered_map<uint32_t, std::vector<uint32_t>> g_line_layouts;
-void line_packet(Cpu* c, void (*original)(Cpu*)) {
+// mDoExt_3DlineMat1 (textured: ropes, grapple, bridges) and mDoExt_3DlineMat0 (plain: Ganondorf's
+// hair, Puppet Ganon's strings, Moblin and Stalfos weapon ropes, chained items) generate their GPU
+// vertices in update/updateWidths, outside J3DModel::viewCalc. Their control points (set by the
+// actors' logic) are drawn at the same pass fraction as the models. The exact control points are
+// back in guest memory after the synchronous upload. Layout: line count (u16), points per line
+// (u16), line array (0x10 each, +0 the line's points): Mat1 +0x17C/+0x17E/+0x184, Mat0
+// +0x13C/+0x13E/+0x144.
+struct LineLayout { uint32_t count, points, lines; };
+constexpr LineLayout kLineMat1Layout{0x17C, 0x17E, 0x184}, kLineMat0Layout{0x13C, 0x13E, 0x144};
+std::unordered_map<uint64_t, std::vector<uint32_t>> g_line_layouts;  // (kind << 32 | packet) -> layout seen
+void line_packet(Cpu* c, void (*original)(Cpu*), ClothPacketKind kind, const LineLayout& lay) {
     if (!on(16) || true60::enabled() || interp::in_execute()) { original(c); return; }
     static const bool off = getenv("WWHD_INTERP_LINES") && !atoi(getenv("WWHD_INTERP_LINES")); // diagnostic ablation
     if (off) { original(c); return; }
     const uint32_t packet = c->r[3];
-    const uint32_t count = ld16(packet+0x17C);
-    const uint32_t points = std::min(c->r[4] & 0xFFFFu, uint32_t(ld16(packet+0x17E)));
-    const uint32_t lines = ld32(packet+0x184);
+    const uint32_t count = ld16(packet+lay.count);
+    const uint32_t points = std::min(c->r[4] & 0xFFFFu, uint32_t(ld16(packet+lay.points)));
+    const uint32_t lines = ld32(packet+lay.lines);
     if (!lines || !count || count > 256 || points < 2 || points > 4096) { original(c); return; }
     std::vector<PacketField> fields;
     std::vector<uint32_t> layout{count, points, lines};
@@ -948,17 +956,22 @@ void line_packet(Cpu* c, void (*original)(Cpu*)) {
         fields.push_back({pos, points*3});
         layout.push_back(pos);
     }
-    auto& old = g_line_layouts[packet];
+    const uint64_t key = (uint64_t(kind)<<32)|packet;
+    auto& old = g_line_layouts[key];
     if (old != layout) {
-        g_packet_poses.erase((uint64_t(kLineMat)<<32)|packet);
+        g_packet_poses.erase(key);
         old = std::move(layout);
     }
-    cloth_packet_fields(c, kLineMat, original, fields);
+    cloth_packet_fields(c, kind, original, fields);
 }
 extern "C" void f_025EC62C_orig(Cpu*);
 extern "C" void f_025ED1BC_orig(Cpu*);
-extern "C" void hook_025EC62C(Cpu* c) { line_packet(c, f_025EC62C_orig); }
-extern "C" void hook_025ED1BC(Cpu* c) { line_packet(c, f_025ED1BC_orig); }
+extern "C" void f_025EA548_orig(Cpu*);
+extern "C" void f_025EAF58_orig(Cpu*);
+extern "C" void hook_025EC62C(Cpu* c) { line_packet(c, f_025EC62C_orig, kLineMat, kLineMat1Layout); }
+extern "C" void hook_025ED1BC(Cpu* c) { line_packet(c, f_025ED1BC_orig, kLineMat, kLineMat1Layout); }
+extern "C" void hook_025EA548(Cpu* c) { line_packet(c, f_025EA548_orig, kLineMat0, kLineMat0Layout); }
+extern "C" void hook_025EAF58(Cpu* c) { line_packet(c, f_025EAF58_orig, kLineMat0, kLineMat0Layout); }
 extern "C" void f_021625DC_orig(Cpu*); // daHo_packet_c upload (KoRL sail)
 extern "C" void hook_021625DC(Cpu* c) {
     const uint32_t p = c->r[3];
@@ -1438,7 +1451,7 @@ void fx_step_stats() {
     for (auto it = g_anm.begin(); it != g_anm.end();) it = it->second.pass + 2 < now ? g_anm.erase(it) : std::next(it);
     for (auto it = g_emtr.begin(); it != g_emtr.end();) it = it->second.step + 2 < now ? g_emtr.erase(it) : std::next(it);
     for (auto it = g_line_layouts.begin(); it != g_line_layouts.end();) {
-        auto pose = g_packet_poses.find((uint64_t(kLineMat)<<32)|it->first);
+        auto pose = g_packet_poses.find(it->first);
         if (pose == g_packet_poses.end() || pose->second.record + 2 < now) {
             if (pose != g_packet_poses.end()) g_packet_poses.erase(pose);
             it = g_line_layouts.erase(it);
