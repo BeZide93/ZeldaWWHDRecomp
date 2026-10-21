@@ -833,6 +833,8 @@ bool world_object_query(const std::string&mod,const story_notebook::ManifestActo
         allocation+=story_world_collision::mesh::allocation_bytes(*d.collision)+d.spec.grapple_points.size()*(story_world_grapple::kProxyBytes+64);grapple_count+=d.spec.grapple_points.size();
         // bodies of water of one mod may meet (a waterfall at its river's step, a river running into a pond)
         if(spec.water_body()&&d.spec.water_body()&&d.mod==mod)continue;
+        // parts of one composition (the same mod's static objects with one origin, story_world_manifest.h)
+        if(d.mod==mod&&story_notebook::one_composition(spec,d.spec))continue;
         Bounds other;
         if(!world_bounds(d,d.spec.position,other))return why="invalid existing object bounds",false;
         const std::string other_id=d.mod+":"+d.spec.id;const char* whose=d.mod==mod?"this mod's world object":"another mod's world object";

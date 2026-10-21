@@ -96,6 +96,15 @@ struct ManifestActor {
     std::string piece;
     bool game_piece()const{return !piece.empty();}
 };
+// Parts of one composition: two static world objects of one mod placed with the same origin (position, turn
+// and scale) were made together in one model space (an island's ground and the ruins standing on it, each with
+// materials of its own kit room). Placement never compares their collisions with each other; everything else
+// (the room, other objects, other mods) counts for each as for any world object.
+inline bool one_composition(const ManifestActor& a,const ManifestActor& b){
+    return a.world_object()&&b.world_object()&&a.behaviour=="static"&&b.behaviour=="static"&&a.stage==b.stage&&a.room==b.room&&
+           a.position.x==b.position.x&&a.position.y==b.position.y&&a.position.z==b.position.z&&a.rotation.x==b.rotation.x&&a.rotation.y==b.rotation.y&&
+           a.rotation.z==b.rotation.z&&a.scale.x==b.scale.x&&a.scale.y==b.scale.y&&a.scale.z==b.scale.z;
+}
 template<class Condition,class Quest,class Item,class Flag>
 inline bool condition_matches(const Condition&c,Quest quest,Item item,Flag flag,bool day){
     if(!c.quest.empty()&&quest(c.quest)!=int32_t(c.quest_step))return false;

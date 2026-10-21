@@ -510,6 +510,22 @@ int main() {
         auto extra=many;extra["actors"].array.resize(1);extra["actors"].array[0]["room"]=4;selected.push_back({"fifth",extra});assert(!world_manifest::validate_world_packages(selected,why));
     }
 
+    // parts of one composition: the same mod's static world objects with one origin; moved, turned, scaled, in
+    // another room or floating they are two
+    {
+        auto pair=mods::json::parse(R"({"actors":[{"id":"ground","kind":"mod","model":"post","behaviour":"static","collision":{"shape":"box","size":{"x":100,"y":100,"z":100}},
+            "stage":"sea","room":44,"position":{"x":-200512,"y":6640,"z":301774},"rotation":{"x":0,"y":198,"z":0}},
+            {"id":"ruin","kind":"mod","model":"post","behaviour":"static","collision":{"shape":"box","size":{"x":100,"y":100,"z":100}},
+            "stage":"sea","room":44,"position":{"x":-200512,"y":6640,"z":301774},"rotation":{"x":0,"y":198,"z":0}}],
+            "models":[{"id":"post","source":"models/post.glb"}]})");
+        assert(parse_actors(pair,actors,why)&&actors.size()==2&&story_notebook::one_composition(actors[0],actors[1]));
+        auto moved=actors[1];moved.position.x+=1;assert(!story_notebook::one_composition(actors[0],moved));
+        auto turned=actors[1];turned.rotation.y=90;assert(!story_notebook::one_composition(actors[0],turned));
+        auto scaled=actors[1];scaled.scale.y=2;assert(!story_notebook::one_composition(actors[0],scaled));
+        auto elsewhere=actors[1];elsewhere.room=43;assert(!story_notebook::one_composition(actors[0],elsewhere));
+        auto floating=actors[1];floating.behaviour="floating";assert(!story_notebook::one_composition(actors[0],floating));
+        auto prop=actors[1];prop.behaviour.clear();assert(!story_notebook::one_composition(actors[0],prop));
+    }
     std::vector<ManifestModel> models;assert(parse_models(valid_mod,models,why)&&models[0].kind=="static");
     mod=valid_mod;mod["models"].array[0]["kind"]="skinned";assert(parse_models(mod,models,why)&&models[0].kind=="skinned");
     mod["models"].array[0]["kind"]="static";assert(parse_models(mod,models,why)&&models[0].kind=="static");

@@ -315,6 +315,13 @@ where the ground slopes under it, as the islands' own buildings do; only a real 
 geometry is in the way (a cliff, a pillar, a wall, the ground higher up the object). Floating and drifting
 objects keep their whole motion range clear.
 
+**Parts of one composition.** Static world objects of one mod placed with the same origin (the same
+`position`, `rotation` and `scale`) were made together in one model space: an island's ground and the ruins
+standing on it, say, each with materials of its own. Their collisions are not compared
+with each other, so the ruins' foundations may reach into the ground as the model has them. Everything else
+counts for each part as for any world object: the room, the island's own things, other world objects and
+other mods' objects.
+
 An object must stay inside the indexed room. A sea object that crosses into a neighbouring square is
 refused until coverage for that placement is available. Missing, malformed or unsupported collision, event
 or route data prevents placement rather than treating the room as empty. Drifting objects stop at the same
