@@ -420,6 +420,24 @@ bool record_pass() { return (g_hold && g_phase >= g_step_n) || (g_record_logic &
 bool record_blended() { return g_record_logic && !g_exact_step; }
 bool g_record_pending = false;
 uint64_t record_stamp() { return g_record_passes + (record_blended() ? 1 : 0); }
+// Gates that step a value once per logic step and leave the pass's blend of it in guest memory
+// (fade::fader_call, bytes_call: their next call takes it back) rely on the step's last pass, the
+// record pass, showing it exactly before the next step's logic runs. After a blended record pass the
+// next pass is a logic pass: the step's exact values go back into guest memory when it starts
+// (after the blended pass has been painted), so the game's logic never sees a blended one.
+// exact_after_pass(ea, value, size): put back `size` (1 or 4) bytes at ea; only on blended record passes.
+struct ExactWrite { uint32_t ea, value; int size; };
+std::vector<ExactWrite> g_exact_writes;
+void exact_after_pass(uint32_t ea, uint32_t value, int size) {
+    if (record_blended()) g_exact_writes.push_back({ea, value, size});
+}
+static void put_back_exact() {
+    for (auto it = g_exact_writes.rbegin(); it != g_exact_writes.rend(); ++it) {
+        if (it->size == 1) st8(it->ea, (uint8_t)it->value);
+        else st32(it->ea, it->value);
+    }
+    g_exact_writes.clear();
+}
 
 // A sight point follows the camera's draw fraction, including camera cuts. A
 // blend can also snap internally (a >45 degree turn or abrupt collision zoom).
@@ -1441,11 +1459,13 @@ extern "C" void hook_0203593C(Cpu* c) {
             }
         }
     } countdown_trace{enabled() && g_hold_next};
-    // (a 40 fps blended record pass ended: its records count from here, after it has been painted)
+    // (a 40 fps blended record pass ended: its records count from here, after it has been painted,
+    // and the values it left blended are exact again before the next step's logic)
     if (g_record_pending) {
         g_record_passes++;
         g_record_pending = false;
     }
+    if (!g_exact_writes.empty()) put_back_exact();
     if (!g_models_before.empty()) g_models_before.clear();
     fader_between_passes();
     perf::game_frame();
@@ -1774,6 +1794,8 @@ extern "C" void hook_02728A74(Cpu* c) {
         for (int i = 0; i < 3; i++) x.w[i] = ld32(f + 4 * i);
     });
     put(v);
+    for (int i = 0; i < 3; i++)
+        if (v.w[i] != gate.after.w[i]) interp::exact_after_pass(f + 4 * i, gate.after.w[i], 4);
 }
 extern "C" void hook_02039834(Cpu* c) { FaderWatch fw("child 14"); g_hold_child_cpu = c; if (!hold_skip_child(14)) f_02039834_orig(c); }
 

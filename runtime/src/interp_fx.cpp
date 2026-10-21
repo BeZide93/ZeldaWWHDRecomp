@@ -72,6 +72,7 @@ bool record_blended();
 uint64_t record_stamp();
 bool display_record_blended();    // (the pass being drawn or painted)
 uint64_t display_record_stamp();
+void exact_after_pass(uint32_t ea, uint32_t value, int size);  // (blended record pass: put back before the next logic)
 }  // namespace interp
 
 extern "C" {
@@ -795,6 +796,7 @@ extern "C" void hook_025CA6EC(Cpu* c) {
             LOG("[interp-fx] fallen tree %d fade t %.3f: %u -> %u, drawn %u", i, interp::pass_t(), gate.before[i], gate.after[i], v[i]);
         }
         st8(pk + 0x9C + 0xA8 * i + 3, v[i]);
+        if (v[i] != gate.after[i]) interp::exact_after_pass(pk + 0x9C + 0xA8 * i + 3, gate.after[i], 1);
     }
 }
 extern "C" void hook_0254C6C4(Cpu* c) { sway_calc(c, 0, f_0254C6C4_orig); }
