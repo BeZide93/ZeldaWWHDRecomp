@@ -490,7 +490,7 @@ int main() {
          // pond, river and waterfall surfaces (the editor's water tool): each its own identity, each a body of water
          for(const char*flowing:{"pond","river","waterfall"}){auto f=island;f["actors"].array[0]["shoreline"]["material"]=flowing;assert(parse_actors(f,actors,why)&&actors[0].shoreline.material==flowing&&actors[0].water_body());assert(story_actors::identity::fingerprint("m",actors[0])!=foam_identity&&story_actors::identity::fingerprint("m",actors[0])!=story_actors::identity::fingerprint("m",water_spec));}
          water["actors"].array[0]["shoreline"]["material"]="foam";assert(parse_actors(water,actors,why)&&actors[0].shoreline.material.empty()&&!actors[0].water_body());
-         for(const char*bad_material:{"lava","Water",""}){auto bad=island;bad["actors"].array[0]["shoreline"]["material"]=bad_material;rejected(bad);}
+         for(const char*bad_material:{"magma","Water",""}){auto bad=island;bad["actors"].array[0]["shoreline"]["material"]=bad_material;rejected(bad);}
          auto bad=island;bad["actors"].array[0]["distant"]["material"]="water";rejected(bad);assert(parse_actors(island,actors,why));}
         for(const char*behaviour:{"floating","drifting"}){auto bad=island;bad["actors"].array[0]["behaviour"]=behaviour;if(std::string(behaviour)=="drifting")bad["actors"].array[0]["drift"]=mods::json::parse(R"({"wind_speed":1})");rejected(bad);}
         {auto bad=island;bad["actors"].array[0]["stage"]="town";rejected(bad);}

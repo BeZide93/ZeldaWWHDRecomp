@@ -118,9 +118,9 @@ int main(){std::string why;Mesh m,out;std::array<uint8_t,Surfaces> raw{2,4,1,11,
      // lava alone (no ordinary ground of its own besides its bottom) and the limits: lava counts twice
      Mesh pool;pool.vertices={{0,0,0},{0,0,100},{100,0,0},{100,0,100}};pool.triangles={{{0,1,2},SurfaceLava},{{2,1,3},SurfaceLava}};pool.minimum={0,0,0};pool.maximum={100,0,100};
      std::vector<uint8_t> native;assert(build_native(pool,lraw,3,native,why)&&word(native,32)==3);group_trees(native);assert(relocate(native,0x20000000,why));
-     Mesh big;big.vertices={{0,0,0},{0,0,100},{100,0,0}};big.minimum={0,0,0};big.maximum={100,0,100};big.triangles.assign(2049,{{0,1,2},SurfaceLava});
-     assert(!validate(big,why)&&counts(big).vertices==0); // 2049 lava triangles: 4098 native ones
-     big.triangles.resize(2048);assert(validate(big,why)&&native_size(big).triangles==4096&&native_size(big).vertices==6&&counts(big).triangles==4096);}
+     Mesh big;big.vertices={{0,0,0},{0,0,100},{100,0,0}};big.minimum={0,0,0};big.maximum={100,0,100};big.triangles.assign(MaxTriangles/2+1,{{0,1,2},SurfaceLava});
+     assert(!validate(big,why)&&counts(big).vertices==0); // MaxTriangles/2+1 lava triangles: MaxTriangles+2 native ones
+     big.triangles.resize(MaxTriangles/2);assert(validate(big,why)&&native_size(big).triangles==MaxTriangles&&native_size(big).vertices==6&&counts(big).triangles==MaxTriangles);}
     // The layout without lava is the one before lava, byte for byte (a world object's identity is its collision's
     // digest, which full save states keep): a fixture with water and void, its size and FNV-1a digest from that build.
     {Mesh ground;assert(make_shape("box",{400,100,400},0,0,0,ground,why));Mesh mixed=ground;const uint16_t v0=uint16_t(mixed.vertices.size());
