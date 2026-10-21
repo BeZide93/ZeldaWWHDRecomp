@@ -1655,6 +1655,80 @@ extern "C" void hook_021768B0(Cpu* c) {
     st32(cnt, saved[4]);
 }
 
+// The King of Red Lions (daShip_c::draw 0247255C, actor Draw, every pass): the hull's texture
+// scroll (+0x6B8, advanced 0..1 with wrap in the execute, written into the texture SRTs by the
+// draw) is drawn between the steps' values. The cannon sight's arc (25 segments of the sight
+// packet at +0x1B54: +0xA0 the segments, 0xA8 apart, matrix +0x74), placed by the execute along
+// the shot's path every 8 path samples from a phase that advances 0.75 a step (101D0348), is drawn
+// between the steps' positions (painted after the pass: blended on the logic pass, re-applied on the
+// blended hold passes). When the phase wraps, every segment moved one place along the arc: segment i
+// blends from the previous step's segment i - 1, and segment 0 is new. Segments not in use hold the
+// packet's reset matrix (104A03EC).
+namespace {
+struct ShipRec { uint64_t record = ~0ull; uint32_t ship = 0; float scroll = 0, phase = 0; uint32_t seg[25][12]; };
+ShipRec g_ship;
+}  // namespace
+extern "C" void f_0247255C_orig(Cpu*);
+extern "C" void hook_0247255C(Cpu* c) {
+    const uint32_t ship = c->r[3];
+    if (!on(16) || true60::enabled()) { f_0247255C_orig(c); return; }
+    const uint32_t scroll_a = ship + 0x6B8, segs = ld32(ship + 0x1B54 + 0xA0), phase_a = GD(0x101D0348), reset = GD(0x104A03EC);
+    const float scroll = (float)ldf32(scroll_a), phase = (float)ldf32(phase_a);
+    if (interp::record_pass()) {
+        g_ship.record = interp::hold_pass_count();
+        g_ship.ship = ship;
+        g_ship.scroll = scroll;
+        g_ship.phase = phase;
+        for (int i = 0; i < 25 && segs; i++)
+            for (int k = 0; k < 12; k++) g_ship.seg[i][k] = ld32(segs + 0xA8 * i + 0x74 + 4 * k);
+        f_0247255C_orig(c);
+        return;
+    }
+    if (!halfway() || g_ship.ship != ship || g_ship.record != interp::hold_pass_count()) { f_0247255C_orig(c); return; }
+    const float t = interp::pass_t();
+    float d = scroll - g_ship.scroll;  // the scroll wraps over 0..1
+    if (d > 0.5f) d -= 1.0f;
+    else if (d < -0.5f) d += 1.0f;
+    float m = g_ship.scroll + t * d;
+    if (m >= 1.0f) m -= 1.0f;
+    else if (m < 0.0f) m += 1.0f;
+    if (d != 0.0f && std::fabs(d) < 0.25f) stf32(scroll_a, m);
+    static int tr_scroll = trace_left(7);
+    if (tr_scroll && d != 0.0f) {
+        tr_scroll--;
+        LOG("[interp-fx] ship hull scroll t %.3f: %.4f -> %.4f, drawn %.4f", t, g_ship.scroll, scroll, (float)ldf32(scroll_a));
+    }
+    if (interp::logic_pass() && segs) {
+        const bool wrapped = phase < g_ship.phase;
+        uint32_t reset_w[12];
+        for (int k = 0; k < 12; k++) reset_w[k] = ld32(reset + 4 * k);
+        auto unused = [&](const uint32_t* w) { return memcmp(w, reset_w, sizeof reset_w) == 0; };
+        int blended = 0;
+        for (int i = 0; i < 25; i++) {
+            const int j = wrapped ? i - 1 : i;
+            if (j < 0) continue;  // a new segment at the start of the arc
+            const uint32_t a = segs + 0xA8 * i + 0x74;
+            uint32_t cur[12];
+            for (int k = 0; k < 12; k++) cur[k] = ld32(a + 4 * k);
+            const uint32_t* prev = g_ship.seg[j];
+            if (unused(cur) || unused(prev) || !memcmp(cur, prev, sizeof cur)) continue;
+            float d2 = 0;
+            for (int k : {3, 7, 11}) d2 += (u32_as_f32(cur[k]) - u32_as_f32(prev[k])) * (u32_as_f32(cur[k]) - u32_as_f32(prev[k]));
+            if (!(d2 < 1000.0f * 1000.0f)) continue;
+            for (int k = 0; k < 12; k++)
+                if (cur[k] != prev[k]) temp_blend_f32(a + 4 * k, prev[k], t);
+            blended++;
+        }
+        static int tr = trace_left(7);
+        if (tr && blended) {
+            tr--;
+            LOG("[interp-fx] cannon sight: %d segments blended, phase %.2f -> %.2f%s", blended, g_ship.phase, phase, wrapped ? " (wrapped)" : "");
+        }
+    }
+    f_0247255C_orig(c);
+    stf32(scroll_a, scroll);
+}
+
 // save state loaded: forget every effect history (the guest state jumped); interp.cpp also bumps the
 // hold pass count, which invalidates the step-stamped records
 namespace interp {
@@ -1675,6 +1749,7 @@ void fx_ss_reset() {
     g_att.clear();
     g_trails.clear();
     g_hook = HookRec{};
+    g_ship = ShipRec{};
     for (auto& s : g_sway) s = SwayRec{};
     g_wood = WoodRec{};
     g_sea.packet = 0;
