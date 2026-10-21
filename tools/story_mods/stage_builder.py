@@ -52,6 +52,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import notebook_model as base  # noqa: E402  (Bfres, sarc, yaz0_stored, BuildError)
 import game_piece_model as gp  # noqa: E402  (room_files, read_model, Writer, write_model, ATTRIBUTE_CLASS)
 from skinned_actor_model import append_dictionary, append_string  # noqa: E402
+import kit_materials as km  # noqa: E402  (the kit materials: shared with world objects, actor_model.py)
+from kit_materials import kit_materials, main_material  # noqa: E402
 
 VERSION = 5
 FORMAT = 1
@@ -828,64 +830,6 @@ def png(width, height, rows):
 
 # ---- the room archive (graft) --------------------------------------------------------------------------------
 
-def mesh_shape(src, template, prim):
-    """a Shape (game_piece_model) with the template shape's vertex layout and the primitive's geometry: each
-    record starts as the template's first record, then position, normal, texture coordinate and colour"""
-    s = gp.Shape()
-    s.at, s.name, s.node, s.material = template.at, 'mesh', 'mesh', template.material
-    s.vertex, s.nattr, s.stride, s.at_p = template.vertex, template.nattr, template.stride, template.at_p
-    attrs = src.rel(s.vertex + 0x10)
-    layout = {src.cstr(src.rel(attrs + i * 12)): (src.u16(attrs + i * 12 + 6), src.u32(attrs + i * 12 + 8)) for i in range(s.nattr)}
-    first = template.records[0]
-    s.records, s.pos = [], []
-    for k, p in enumerate(prim['positions']):
-        r = bytearray(first)
-        struct.pack_into('>3f', r, s.at_p, *p)
-        if '_n0' in layout:
-            put_normal(r, layout['_n0'], prim['normals'][k])
-        if '_u0' in layout:
-            put_uv(r, layout['_u0'], prim['uvs'][k])
-        if '_c0' in layout:
-            put_color(r, layout['_c0'], prim['colors'][k] if prim['colors'] else (1.0, 1.0, 1.0, 1.0))
-        s.records.append(bytes(r))
-        s.pos.append(tuple(p))
-    s.tris = list(prim['triangles'])
-    return s
-
-
-def put_normal(r, spec, n):
-    at, fmt = spec
-    if fmt == 0x811:
-        struct.pack_into('>3f', r, at, *n)
-    elif fmt == 0x20B:  # snorm 10_10_10_2
-        q = [max(-511, min(511, int(round(v * 511)))) & 0x3FF for v in n]
-        struct.pack_into('>I', r, at, q[0] | q[1] << 10 | q[2] << 20)
-    elif fmt == 0x20A:  # snorm 8x4
-        struct.pack_into('>4b', r, at, *[max(-127, min(127, int(round(v * 127)))) for v in n], 0)
-    else:
-        raise BuildError('the kit material\'s normal format is not supported (0x%X)' % fmt)
-
-
-def put_uv(r, spec, uv):
-    at, fmt = spec
-    if fmt == 0x80D:
-        struct.pack_into('>2f', r, at, uv[0], uv[1])
-    elif fmt == 0x808:  # float 16x2
-        struct.pack_into('>2e', r, at, uv[0], uv[1])
-    else:
-        raise BuildError('the kit material\'s texture coordinate format is not supported (0x%X)' % fmt)
-
-
-def put_color(r, spec, c):
-    at, fmt = spec
-    if fmt == 0x813:
-        struct.pack_into('>4f', r, at, *c)
-    elif fmt == 0x00A:
-        struct.pack_into('>4B', r, at, *[max(0, min(255, int(round(v * 255)))) for v in c])
-    elif fmt == 0x80F:
-        struct.pack_into('>4e', r, at, *c)
-
-
 def replace_embedded(bfres, name, body):
     f = base.Bfres(bfres)
     group = f.rel(0x20 + 4 * 11)
@@ -905,26 +849,6 @@ def embedded_files(src):
     for n, at in src.dict(group) if group else []:
         out[n] = bytes(src.b[src.rel(at):src.rel(at) + src.u32(at + 4)])
     return out
-
-
-def kit_materials(src):
-    """material name -> (kit model name, the first shape drawn with it)"""
-    out = {}
-    for mname, _ in src.dict(src.rel(0x20)):
-        _, shapes, _ = gp.read_model(src, mname)
-        for s in shapes:
-            out.setdefault(s.material, (mname, s))
-    return out
-
-
-def main_material(src):
-    """the kit room's main ground material: the one most of its triangles are drawn with (the alphabetically first
-    is often a distant backdrop's, a cut-out picture of mountains or clouds made for one strip of the sky)"""
-    count = {}
-    for mname, _ in src.dict(src.rel(0x20)):
-        for s in gp.read_model(src, mname)[1]:
-            count[s.material] = count.get(s.material, 0) + len(s.tris)
-    return max(sorted(count), key=lambda m: count[m])
 
 
 def build_room_archive(kit_files, kit_room, room, prims, recipe_room, dzb, dzr):
@@ -954,28 +878,8 @@ def build_room_archive(kit_files, kit_room, room, prims, recipe_room, dzb, dzr):
         require(kit_name in mats, 'the kit room has no material "%s" (it has: %s)' % (kit_name, ', '.join(sorted(mats))))
     # visible primitives grouped by the kit model their material comes from: one output model each (the
     # game looks a model's shader archive up by the model's name)
-    # the parts drawn with one kit material become one shape (a model of a hundred parts draws as a few)
-    merged = {}
-    tris = 0
-    for p in prims:
-        if p['collision']:
-            continue
-        kit_name = mapping.get(p['material']) or (p['material'] if p['material'] in mats else default)
-        m = merged.setdefault(kit_name, {'positions': [], 'normals': [], 'uvs': [], 'colors': [], 'triangles': [], 'has_colors': False})
-        base_index = len(m['positions'])
-        m['positions'] += p['positions']
-        m['normals'] += p['normals']
-        m['uvs'] += p['uvs']
-        m['colors'] += p['colors'] if p['colors'] else [(1.0, 1.0, 1.0, 1.0)] * len(p['positions'])
-        m['has_colors'] |= bool(p['colors'])
-        m['triangles'] += [(a + base_index, b + base_index, c + base_index) for a, b, c in p['triangles']]
-        tris += len(p['triangles'])
-    by_model = {}
-    for kit_name, m in sorted(merged.items()):
-        if not m['has_colors']:
-            m['colors'] = None
-        kit_model, template = mats[kit_name]
-        by_model.setdefault(kit_model, []).append(mesh_shape(src, template, m))
+    by_model, tris = km.kit_shapes(src, mats, [p for p in prims if not p['collision']],
+                                   lambda p: mapping.get(p['material']) or (p['material'] if p['material'] in mats else default))
     require(0 < tris <= MAX_TRIANGLES, 'the ground model has more than %d visible triangles' % MAX_TRIANGLES)
     require(len(by_model) <= 4, 'the ground model uses materials of more than four kit models')
     out = base.Bfres(data)
@@ -984,9 +888,8 @@ def build_room_archive(kit_files, kit_room, room, prims, recipe_room, dzb, dzr):
     models = []
     members = {}
     for i, (kit_model, shapes) in enumerate(sorted(by_model.items())):
-        model_at, _, materials = gp.read_model(src, kit_model)
         name = gp.model_name(i)
-        dst, _, _ = gp.write_model(w, model_at, name, shapes, {k: s.tris for k, s in enumerate(shapes)}, materials, textures, (0.0, 0.0, 0.0))
+        dst, _ = km.write_kit_model(w, src, kit_model, name, shapes, textures)
         models.append((name, dst))
         archive = kit_model + '.sharcfb'
         require(archive in kit_files, 'the kit room has no shader archive ' + archive)
@@ -1261,37 +1164,8 @@ def templates(game):
 
 
 def kit_room_materials(game, stage, room):
-    """a kit room's materials as a ground model can use them: name, the textures' names, how many of the room's
-    triangles use it and the texture coordinates the room's own models give it (a range inside 0..1 on one axis
-    means the texture is an atlas: several surfaces in bands, see docs/mod-stages.md). Names and numbers only."""
-    files = gp.room_files(game, '%s_Room%d.szs' % (stage, room))
-    bf = [n for n in files if n.endswith('.bfres')]
-    require(len(bf) == 1, 'the kit room has no room model')
-    src = base.Bfres(files[bf[0]])
-    out = {}
-    main = None
-    for mname, _ in src.dict(src.rel(0x20)):
-        _, shapes, materials = gp.read_model(src, mname)
-        mats = dict(materials)
-        for s in shapes:
-            e = out.get(s.material)
-            if e is None:
-                mat = mats[s.material]
-                refs = src.rel(mat + 0x28)
-                textures = [src.cstr(src.rel(refs + 8 * i)) for i in range(src.b[mat + 0x10])]
-                e = out[s.material] = {'material': s.material, 'textures': textures, 'triangles': 0, 'uv_min': None, 'uv_max': None}
-            e['triangles'] += len(s.tris)
-            attrs = src.rel(s.vertex + 0x10)
-            layout = {src.cstr(src.rel(attrs + i * 12)): (src.u16(attrs + i * 12 + 6), src.u32(attrs + i * 12 + 8)) for i in range(s.nattr)}
-            if layout.get('_u0', (0, 0))[1] in (0x80D, 0x808):
-                at, fmt = layout['_u0']
-                for r in s.records:
-                    uv = struct.unpack_from('>2f' if fmt == 0x80D else '>2e', r, at)
-                    e['uv_min'] = [round(min(a, b), 2) for a, b in zip(e['uv_min'] or uv, uv)]
-                    e['uv_max'] = [round(max(a, b), 2) for a, b in zip(e['uv_max'] or uv, uv)]
-    if out:
-        main = main_material(src)
-    return {'materials': sorted(out.values(), key=lambda e: -e['triangles']), 'main': main}
+    """a kit room's materials (kit_materials.list_materials): names and numbers only"""
+    return km.list_materials(game, stage, room)
 
 
 def main():
