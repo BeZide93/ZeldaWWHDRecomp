@@ -243,7 +243,7 @@ the material's image before you export, and the game draws its own from the play
 
 - **Its light.** The game materials are drawn like the islands' own buildings: with the background light of the
   room the model stands in, so they have that place's colours through the day, at dusk and at night, its fog and
-  its weather. An island in the sky over the sea has the sea's light.
+  its weather.
 - **Its parts.** A kit model is drawn in at most two parts: the game materials of each of the kit room's models
   they come from (its ground model, its water model), and your own textures. So it can have game materials of one
   of the room's models and textures of its own, or game materials of two of its models. The second of those is

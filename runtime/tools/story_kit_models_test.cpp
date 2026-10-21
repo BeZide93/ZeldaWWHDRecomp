@@ -52,19 +52,19 @@ int main() {
     model.kit_stage = "sea";
     model.kit_room = 41;
     model.kit_materials = {{"grass", "m_kusa_v"}, {"spray", "SC_00_m_2_"}};
-    const std::string text = story_kit_models::recipe(model, "/packages/sky/assets/island.glb");
+    const std::string text = story_kit_models::recipe(model, "/packages/my-mod/assets/island.glb");
     const Value r = mods::json::parse(text);
-    assert(r.get("kit_model_format").number == 1 && r.get("id").string() == "island" && r.get("glb").string() == "/packages/sky/assets/island.glb");
+    assert(r.get("kit_model_format").number == 1 && r.get("id").string() == "island" && r.get("glb").string() == "/packages/my-mod/assets/island.glb");
     assert(r.get("kit").get("stage").string() == "sea" && r.get("kit").get("room").number == 41 && r.get("material").type == Value::Null);
     assert(r.get("materials").get("spray").string() == "SC_00_m_2_" && r.get("materials").object.size() == 2);
     model.kit_material = "m_iwa_v";
     assert(mods::json::parse(story_kit_models::recipe(model, "/g.glb")).get("material").string() == "m_iwa_v");
     // the identity: 31 characters, "gk", stable, and another for another mod, model or recipe
-    const std::string id = story_kit_models::identity("sky-island", "island", text);
-    assert(id.size() == 31 && id.rfind("gk", 0) == 0 && id == story_kit_models::identity("sky-island", "island", text));
-    assert(id != story_kit_models::identity("other", "island", text) && id != story_kit_models::identity("sky-island", "ruins", text) &&
-           id != story_kit_models::identity("sky-island", "island", text + " "));
-    assert(story_kit_models::cache_directory("/m/Data/sky-island") == "/m/Data/.kit-models" && story_kit_models::cache_directory("").empty());
+    const std::string id = story_kit_models::identity("my-mod", "island", text);
+    assert(id.size() == 31 && id.rfind("gk", 0) == 0 && id == story_kit_models::identity("my-mod", "island", text));
+    assert(id != story_kit_models::identity("other", "island", text) && id != story_kit_models::identity("my-mod", "ruins", text) &&
+           id != story_kit_models::identity("my-mod", "island", text + " "));
+    assert(story_kit_models::cache_directory("/m/Data/my-mod") == "/m/Data/.kit-models" && story_kit_models::cache_directory("").empty());
     // a distant model's recipe says so (its game textures are drawn smaller)
     assert(mods::json::parse(story_kit_models::recipe(model, "/g.glb", true)).get("far").boolean &&
            mods::json::parse(story_kit_models::recipe(model, "/g.glb")).get("far").type == Value::Null);
