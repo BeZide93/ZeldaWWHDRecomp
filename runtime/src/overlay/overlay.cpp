@@ -1046,14 +1046,12 @@ void tab_graphics() {
     flow::next(flow::check("Edge smoothing (FXAA)"), 30);
     if (check("Edge smoothing (FXAA)", render::fxaa(), &v, render::feature_available(render::kFeatureFXAA)))
         post_changed([v] { render::set_fxaa(v); });
-    // background_shaders.h: what a draw does while its shader compiles (off / safe / fast)
+    // background_shaders.h: what a draw does while its shader compiles (off / fast)
     {
-        static const char* const names[] = {"Shader compile: Off (exact)", "Safe", "Fast (not exact)"};
+        static const char* const names[] = {"Shader compile: Off (exact)", "Fast (not exact)"};
         static const char* const tips[] = {
-            "Every frame waits until its shaders are ready: complete pictures, but a first visit to a place "
-            "can stutter.",
-            "Default. Smoother first visits: when a shader is not ready, an object in the picture can be missing "
-            "for a moment. Shadows, reflections and effects still wait, so they are never wrong.",
+            "Default. Frames wait for their shaders, so pictures are complete, but a first visit to a place can "
+            "stutter. (Metal waits up to 25 ms per frame, then leaves that object out for a moment.)",
             "Fast: smoother first visits, objects, shadows or effects may be missing for a moment. Anything the "
             "game reads back or keeps (photos, snapshots) still waits."};
         const bool env = bgshaders::env_override() != nullptr;
@@ -2931,8 +2929,8 @@ ImDrawData* frame(float pw, float ph, void (*renderer_init)()) {
             tprof = nullptr;
         }
     }
-    // debug: WWHD_TEST_BG_SHADERS=fast@600 (or safe@N, 0@N) sets Graphics > Shader compile at TV frame N,
-    // as the radio buttons do (saved too)
+    // debug: WWHD_TEST_BG_SHADERS=fast@600 (or 0@N) sets Graphics > Shader compile at TV frame N, as the
+    // radio buttons do (saved too)
     static const char* tbg = getenv("WWHD_TEST_BG_SHADERS");
     if (tbg) {
         const char* at = strchr(tbg, '@');
