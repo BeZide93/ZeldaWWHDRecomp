@@ -57,11 +57,14 @@ int main() {
         d = c.decide(win(27, 0.97));
         CHECK(!d.changed && c.level == 2);  // the minimum
     }
-    // far below the frame rate: two levels at once
+    // far below the frame rate: still one level at a time (the renderers keep only neighbouring levels)
     {
         Controller c;
         c.reset(4);
         Decision d = c.decide(win(18, 0.99));
+        CHECK(d.changed && c.level == 1);
+        c.decide(win(18, 0.99));  // settling
+        d = c.decide(win(18, 0.99));
         CHECK(d.changed && c.level == 2);
     }
     // the CPU is the limit (GPU mostly idle): no change; at the frame rate with a busy GPU: no change
@@ -134,8 +137,8 @@ int main() {
         w.budgetMs = 4;
         CHECK(c.decide(w).changed && c.level == 1);
         c.decide(w);
-        w.budgetMs = 2;  // 2.5x the budget: two levels
-        CHECK(c.decide(w).changed && c.level == 3);
+        w.budgetMs = 2;  // 2.5x the budget: still one level
+        CHECK(c.decide(w).changed && c.level == 2);
         w.budgetMs = 50;
         int windows = 0;
         while (c.level > 0 && windows < 100) { c.decide(w); windows++; }

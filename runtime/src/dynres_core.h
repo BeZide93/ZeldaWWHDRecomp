@@ -10,7 +10,8 @@
 // Input: one measurement window (about half a second): wall time, frames presented, GPU busy time
 // (the union of the command buffers' GPU intervals) and the frame rate the game aims for.
 // Busy share = GPU busy time / wall time. GPU-bound = the game misses its frame rate (< 95 %) while
-// the GPU is busy more than 90 % of the time: one level down (two when far below the frame rate).
+// the GPU is busy more than 90 % of the time: one level down (always one: the renderers keep only the
+// images of the levels next to the current one, so a one-level change needs no new images).
 // A game held back by the CPU leaves the GPU idle, so the resolution stays.
 // Going up: when the share predicted at the next level (pixels grow with the square of the scale)
 // stays under 80 % for two windows in a row, and the last step down is at least `hold` ago. The hold
@@ -51,7 +52,7 @@ struct Decision {
 };
 
 struct Controller {
-    static constexpr double kDownShare = 0.90, kUpShare = 0.80, kMissed = 0.95, kFarMissed = 0.75;
+    static constexpr double kDownShare = 0.90, kUpShare = 0.80, kMissed = 0.95;
     static constexpr double kHoldBase = 2.0, kHoldMax = 32.0, kUndoneWithin = 4.0, kHoldReset = 30.0;
     static constexpr double kLongWindow = 2.0;  // longer: paused, in the background or loading
     int level = 0, lowest = 0;
@@ -96,8 +97,8 @@ struct Controller {
         if (missed && d.share > (budget ? 1.0 : kDownShare)) {
             room = 0;
             if (level < lowest) {
-                const bool far = budget ? d.share > 1.5 : d.fps < target * kFarMissed;
-                level = std::min(lowest, level + (far ? 2 : 1));
+                // one level at a time: the renderers keep the images of the neighbouring levels only
+                level = std::min(lowest, level + 1);
                 if (sinceUp < kUndoneWithin) hold = std::min(kHoldMax, hold * 2);
                 sinceDown = 0;
             }

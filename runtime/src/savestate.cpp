@@ -1235,6 +1235,10 @@ PendingPortable g_pload;          // under g_mu
 bool g_pload_waiting = false;     // the "waiting for gameplay" message was shown
 std::string g_last_portable;      // newest portable state written or loaded (under g_mu)
 // after a portable load: the old Link's process id (a new Link has a new one), the state for the HD sections
+// TV frame at which the last portable load arrived (Link settled in the restored stage; 0: none). Full
+// loads keep their own marker (g_last_load_frame), which crash recovery reads; test aids that count
+// frames after "a load" take the newer of the two (dynres.cpp).
+std::atomic<uint64_t> g_last_arrival_frame{0};
 struct Arrival { std::string stage; float pos[3]; uint64_t frame = 0; uint32_t link_id = 0; int frames = 0; std::shared_ptr<pstate::State> s; LoadResult result; } g_arrival;
 
 void cancel_portable_arrival(const std::string&why){
@@ -1414,6 +1418,7 @@ void watch_arrival(Cpu* c) {
     }
     auto result=g_arrival.result;
     g_arrival = Arrival{};
+    g_last_arrival_frame = render::frame_count();
     controller_reapply::request("progress load");
     result.complete(true,"");
 }
@@ -1757,6 +1762,7 @@ std::atomic<uint64_t> g_last_load_frame{0}, g_last_load_step{0};
 std::atomic<uint32_t> g_last_load_counter{0};
 uint32_t last_load_counter() { return g_last_load_counter.load(); }
 uint64_t last_load_frame() { return g_last_load_frame.load(); }
+uint64_t last_arrival_frame() { return g_last_arrival_frame.load(); }
 uint64_t last_load_step() { return g_last_load_step.load(); }
 
 std::string states_dir() { return state_dir(); }

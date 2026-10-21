@@ -24,8 +24,11 @@ void gpu_interval(double startNs, double endNs);
 float latch(uint64_t frame, float base);
 float factor();  // the factor in effect (any thread)
 
-// the renderers keep this many images of other scales per render target while on (released when off)
-constexpr int kSpares = 2;
+// The renderers keep the render target images of the levels next to the current one and make them ahead
+// while on (a few a frame): a one-level scale change then only copies. Released when off.
+int levels();        // levels in use: 1 + the lowest level (1 while off)
+float level_factor(int level);
+constexpr int kPrecreatePerFrame = 4;  // images made ahead per frame (spreads the allocation cost)
 
 // the performance report's line ("Dynamic resolution: ..."), without newline
 std::string status();
@@ -39,5 +42,10 @@ struct Stats {
 Stats stats();
 void count_reused();
 void count_created();
+// render thread: time spent at a scale change (logged with WWHD_DYNRES_LOG_FRAMES, per frame)
+void note_rescale(bool created, double createMs, double copyMs);
+void note_precreated(int images, double ms);
+void note_view();   // an image view was created (render thread)
+void note_image();  // any image was created (render thread; render targets, mip chains, AO, feedback copies)
 
 }  // namespace dynres

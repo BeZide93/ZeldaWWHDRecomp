@@ -453,7 +453,15 @@ void compose(VkImage image,VkImageView view,VkImageLayout& layout,VkExtent2D ext
   // sRGB texture views decode on sampling; the scan flag also identifies linear
   // scan values held in a UNORM image. sRGB targets encode shader linear output.
   const bool sourceLinear=q.sourceLinear||srgb_format(q.image->fmt.pixel);
-  auto params=present_params(fxaa&&linear,filter,scale,sourceLinear,targetLinear);params.alpha=q.alpha;
+  // dynamic resolution (dynres.h): a picture below the internal resolution is always scaled filtered.
+  // Integer scaling would show its pixels as blocks (it can't be a whole multiple any more): smooth;
+  // sharp scaling takes its sharpness from the picture's full size, so the extra upscale is bilinear.
+  int qfilter=filter;float qscale=scale;
+  if(q.image->dyn<1.0f) {
+   if(qfilter==2)qfilter=0;
+   else if(qfilter==1)qscale=std::min(q.box.w/nominal_width(q.image),q.box.h/nominal_height(q.image));
+  }
+  auto params=present_params(fxaa&&linear,qfilter,qscale,sourceLinear,targetLinear);params.alpha=q.alpha;
   if(hdrOutput) {
    const auto h=hdr::parameters();params.hdrWhite=h.paper;params.hdrPeak=h.peak;
    params.hdrExposure=h.exposure;params.hdrHighlights=h.highlights;

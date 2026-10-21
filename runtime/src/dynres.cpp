@@ -5,7 +5,7 @@
 //   WWHD_DYNRES_TEST_BUDGET=f:ms,.. from render frame f on, judge against a GPU budget of ms per frame
 //                                   instead of the frame rate (forces the scale down on a fast GPU);
 //                                   ms 0 ends the test budget. Lf instead of f: f frames after the last
-//                                   save state load (as WWHD_DUMP_LOAD_FRAMES)
+//                                   save state load (full: its load; portable: its arrival)
 //   WWHD_DYNRES_TEST_AT=f:factor,.. from render frame f on (or Lf), force that level (nearest of the
 //                                   levels); factor 0 hands back to the controller
 //   WWHD_DYNRES_LOG_FRAMES=1        around each change, log the 8 frames before and after it: wall time
@@ -16,6 +16,7 @@
 #include "savestate.h"
 #include "render_prof.h"
 #include "runtime.h"
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cmath>
@@ -43,7 +44,8 @@ std::atomic<uint64_t> g_changes{0}, g_reused{0}, g_created{0};
 std::mutex g_busy_mutex;
 BusyUnion g_busy;  // under g_busy_mutex
 
-// render thread
+// render thread: this frame's scale-change costs (dynres.h note_rescale), as text, then reset
+std::string take_costs();
 // test aid (WWHD_DYNRES_LOG_FRAMES): frame times around a change
 struct FrameLog {
     const bool on = getenv("WWHD_DYNRES_LOG_FRAMES") != nullptr;
@@ -59,10 +61,12 @@ struct FrameLog {
         if (last != clk::time_point{}) {
             const double w = std::chrono::duration<double, std::milli>(now - last).count(), u = (c - lastCpu) / 1e6;
             if (after > 0) {
-                LOG("[dynres] frame %llu, +%d after the change: %.2f ms (render thread CPU %.2f ms)", (unsigned long long)f,
-                    kN + 1 - after, w, u);
+                const std::string costs = take_costs();
+                LOG("[dynres] frame %llu, +%d after the change: %.2f ms (render thread CPU %.2f ms)%s", (unsigned long long)f,
+                    kN + 1 - after, w, u, costs.c_str());
                 after--;
             } else {
+                take_costs();
                 wall[next] = w;
                 cpu[next] = u;
                 next = (next + 1) % kN;
@@ -105,7 +109,8 @@ std::vector<Entry> schedule(const char* name) {
 // the value of a frame schedule at `frame` (-1: no entry yet)
 float scheduled(const std::vector<Entry>& s, uint64_t frame) {
     float v = -1;
-    const uint64_t loaded = ss::last_load_frame();
+    // the newer of the last full load and the last portable load's arrival
+    const uint64_t loaded = std::max(ss::last_load_frame(), ss::last_arrival_frame());
     for (auto& e : s)
         if (e.afterLoad ? loaded && frame >= loaded + e.frame : frame >= e.frame) v = e.value;
     return v;
@@ -200,7 +205,8 @@ float latch(uint64_t frame, float base) {
         g_window = now;
         g_frames = 0;
         const Decision d = g_ctl.decide(w);
-        if (d.share >= 0) g_share = (float)d.share;
+        // the real busy share (in test-budget mode d.share is the ratio to the budget)
+        if (w.busyMs > 0 && w.seconds > 0) g_share = (float)(w.busyMs / (w.seconds * 1000.0));
         if (w.busyMs <= 0 && !g_no_timing_logged && el < 2.0) {
             g_no_timing_logged = true;
             LOG("[dynres] no GPU timing from this renderer/device yet: the resolution stays until there is");
@@ -230,8 +236,36 @@ std::string status() {
     return b;
 }
 
+int levels() { return on() ? lowest_level(min_factor()) + 1 : 1; }
+float level_factor(int level) { return kLevels[std::clamp(level, 0, kLevelCount - 1)]; }
+
 Stats stats() { return {g_changes.load(), g_reused.load(), g_created.load()}; }
 void count_reused() { g_reused++; }
 void count_created() { g_created++; }
+// per frame (render thread): rescales and their cost, images made ahead
+static struct { int rescales = 0, created = 0, precreated = 0, views = 0, images = 0; double createMs = 0, copyMs = 0, precreateMs = 0; } g_cost;
+void note_rescale(bool created, double createMs, double copyMs) {
+    g_cost.rescales++;
+    g_cost.created += created;
+    g_cost.createMs += createMs;
+    g_cost.copyMs += copyMs;
+}
+void note_view() { g_cost.views++; }
+void note_image() { g_cost.images++; }
+void note_precreated(int images, double ms) {
+    g_cost.precreated += images;
+    g_cost.precreateMs += ms;
+}
+namespace {
+std::string take_costs() {
+    char b[200] = "";
+    if (g_cost.rescales || g_cost.precreated || g_cost.views || g_cost.images)
+        snprintf(b, sizeof b, "; %d targets rescaled, %d new images %.2f ms, copies %.2f ms; %d images/views made ahead %.2f ms; "
+                 "all images created %d, views created %d", g_cost.rescales, g_cost.created, g_cost.createMs, g_cost.copyMs,
+                 g_cost.precreated, g_cost.precreateMs, g_cost.images, g_cost.views);
+    g_cost = {};
+    return b;
+}
+}  // namespace
 
 }  // namespace dynres

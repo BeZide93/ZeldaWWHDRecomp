@@ -203,8 +203,8 @@ static id<MTLTexture> make_texture(Surface* s, MTLTextureType type, bool forRend
 
 // a render target made at another factor (the setting changed, or a CPU texture now rendered to):
 // reallocate it at the current one, keeping its contents (filtered)
-// Dynamic resolution: a render target changing scale keeps its previous texture (up to dynres::kSpares
-// of them, the most recent first), and a change back to a kept scale takes it again instead of
+// Dynamic resolution: a render target changing scale keeps its previous texture (two: the levels next to
+// the current one, as the controller steps one level at a time), and a change back to a kept scale takes it again instead of
 // creating a texture: no allocation while the scale moves between recent levels. Off: none are kept.
 static Surface* rescale(Surface* s) {
     float want = target_scale(s), ax, ay;
@@ -237,7 +237,7 @@ static Surface* rescale(Surface* s) {
     if (keep) {
         s->spares.insert(s->spares.begin(), Surface::Kept{old, oscale, odyn, oax, oay, osx, osy});
         g_spare_textures++;
-        while (s->spares.size() > size_t(dynres::kSpares)) { s->spares.pop_back(); g_spare_textures--; }
+        while (s->spares.size() > size_t(2)) { s->spares.pop_back(); g_spare_textures--; }
     }
     forget_texture_views();
     if (getenv("WWHD_LOG_RESCALE"))

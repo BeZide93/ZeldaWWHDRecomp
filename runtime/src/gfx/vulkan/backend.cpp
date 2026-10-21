@@ -2871,13 +2871,7 @@ void copy_to_scan(uint32_t cb, uint32_t target) {
     if (dynres::on()) {
       for (auto it = s.scanSpares.begin(); it != s.scanSpares.end(); ++it)
         if (fits(it->get())) { kept = std::move(*it); s.scanSpares.erase(it); break; }
-      if (s.buildingScan) {
-        s.scanSpares.insert(s.scanSpares.begin(), std::move(s.buildingScan));
-        while (s.scanSpares.size() > size_t(2 * dynres::kSpares)) {
-          destroy_surface_image(s.scanSpares.back().get());
-          s.scanSpares.pop_back();
-        }
-      }
+      if (s.buildingScan) s.scanSpares.insert(s.scanSpares.begin(), std::move(s.buildingScan));
     }
     if (s.buildingScan)
       destroy_surface_image(s.buildingScan.get());
@@ -2897,6 +2891,37 @@ void copy_to_scan(uint32_t cb, uint32_t target) {
   if (!dynres::on() && !s.scanSpares.empty()) {
     for (auto &k : s.scanSpares) destroy_surface_image(k.get());
     s.scanSpares.clear();
+  }
+  if (dynres::on()) {
+    // Scan images for the sizes of the source's kept images (the neighbouring levels: two each, the scan
+    // and the one being published), made ahead one a frame; images of other sizes go.
+    auto neighbour = [src](const Surface *d) {
+      for (auto &k : src->spares)
+        if (k->image && d->extent.width == k->extent.width && d->extent.height == k->extent.height && d->fmt.pixel == src->fmt.pixel)
+          return true;
+      return false;
+    };
+    for (auto it = s.scanSpares.begin(); it != s.scanSpares.end();) {
+      // keep: the neighbours' sizes, and one of the current size (the published scan's partner after a change)
+      if (neighbour(it->get()) || fits(it->get())) ++it;
+      else { destroy_surface_image(it->get()); it = s.scanSpares.erase(it); }
+    }
+    static uint64_t madeFrame = ~0ull;
+    if (madeFrame != R.frame)
+      for (auto &k : src->spares) {
+        if (!k->image) continue;
+        int have = 0;
+        for (auto &d : s.scanSpares)
+          if (d->extent.width == k->extent.width && d->extent.height == k->extent.height && d->fmt.pixel == src->fmt.pixel) have++;
+        if (have >= 2) continue;
+        auto d = std::make_unique<Surface>();
+        d->width = k->extent.width; d->height = k->extent.height; d->format = src->format; d->fmt = src->fmt; d->scale = 1;
+        create_surface_image(d.get(), false);
+        touch_image(d.get());
+        s.scanSpares.push_back(std::move(d));
+        madeFrame = R.frame;
+        break;
+      }
   }
   // the size the picture stands for (layout, dynres.h): the scan at the full internal resolution
   s.buildingScan->dyn = src->dyn;

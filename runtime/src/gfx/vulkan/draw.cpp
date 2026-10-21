@@ -13,6 +13,7 @@
 #include "Cafe/HW/Latte/ISA/LatteReg.h"
 #include "Cafe/HW/Latte/ISA/RegDefines.h"
 #include "backend.h"
+#include "dynres.h"
 #include "stereo.h"
 #include "../stereo_projection.h"
 #include "sampler_filtering.h"
@@ -101,6 +102,50 @@ struct AoPrivate {
 };
 std::array<AoPrivate, 2> aoPrivateEyes;  // stereo: each eye replays into its own images
 AoPrivate& ao_private() { return aoPrivateEyes[stereoEye]; }
+// dynamic resolution (dynres.h): private AO images of other sizes, kept for a change back (private_ao_surface)
+static std::vector<Surface>& ao_kept() { static std::vector<Surface> kept; return kept; }
+// ... and made ahead for the sizes the target's kept images (the neighbouring levels) need, one a frame
+static void prepare_ao_neighbours(const Surface& dst, const Surface* like) {
+  if (!dynres::on()) return;
+  static uint64_t madeFrame = ~0ull;
+  if (madeFrame == R.frame) return;
+  auto& kept = ao_kept();
+  auto needed = [&](const Surface& e) {  // a size of this target's levels (current or kept), or another format's
+    if (e.fmt.pixel != like->fmt.pixel || e.width != dst.width || e.height != dst.height) return true;
+    if (e.extent.width == dst.extent.width && e.extent.height == dst.extent.height) return true;
+    for (auto& k : like->spares)
+      if (k->image && e.extent.width == k->extent.width * 3 / 2 && e.extent.height == k->extent.height * 3 / 2) return true;
+    return false;
+  };
+  for (size_t i = 0; i < kept.size();)
+    if (!needed(kept[i])) { destroy_surface_image(&kept[i]); kept.erase(kept.begin() + long(i)); } else ++i;
+  for (auto& k : like->spares) {
+    if (!k->image) continue;
+    const VkExtent3D extent{k->extent.width * 3 / 2, k->extent.height * 3 / 2, 1};
+    bool have = false;
+    for (auto& e : kept)
+      if (e.image && e.width == dst.width && e.height == dst.height && e.extent.width == extent.width &&
+          e.extent.height == extent.height && e.fmt.pixel == like->fmt.pixel) have = true;
+    if (have || !extent.width || !extent.height || extent.width > R.properties.limits.maxImageDimension2D ||
+        extent.height > R.properties.limits.maxImageDimension2D) continue;
+    Surface n = *like;
+    n.spares.clear(); n.mipChain.reset();
+    n.image = VK_NULL_HANDLE; n.memory = VK_NULL_HANDLE; n.view = VK_NULL_HANDLE;
+    n.layerViews.clear(); n.sampledViews.clear(); n.guestLayout.reset();
+    n.addr = n.mipAddr = 0;
+    n.width = dst.width; n.height = dst.height; n.slices = n.mips = 1;
+    n.dim = uint32_t(Latte::E_DIM::DIM_2D);
+    n.gpuWritten = true; n.dirty = false;
+    create_surface_image(&n, false, extent);
+    // (not cleared ahead as the other images made ahead: this runs between draws, and a clear would end the pass)
+    layer_view(&n, 0);  // the views the private image is used through, so its first use creates none
+    for (auto& [key, view] : dst.sampledViews) make_sampled_view(&n, key);
+    kept.push_back(n);
+    madeFrame = R.frame;
+    while (kept.size() > 8) { destroy_surface_image(&kept.front()); kept.erase(kept.begin()); }  // a safety bound
+    return;
+  }
+}
 Surface* private_ao_surface(Surface& dst, const Surface* like) {
   const uint64_t logicalWidth = uint64_t(like->width) * 3 / 2;
   const uint64_t logicalHeight = uint64_t(like->height) * 3 / 2;
@@ -117,6 +162,32 @@ Surface* private_ao_surface(Surface& dst, const Surface* like) {
       dst.extent.width != extent.width || dst.extent.height != extent.height ||
       dst.fmt.pixel != like->fmt.pixel) {
     end_encoder();
+    // dynamic resolution (dynres.h): the private images of other sizes are kept (a few), and one of the
+    // needed size is taken back instead of creating it (its contents are drawn again each frame)
+    auto& kept = ao_kept();
+    if (!dynres::on()) {
+      for (auto& k : kept) destroy_surface_image(&k);
+      kept.clear();
+    } else {
+      for (size_t i = 0; i < kept.size(); ++i) {
+        const Surface& k = kept[i];
+        if (k.width == width && k.height == height && k.extent.width == extent.width && k.extent.height == extent.height &&
+            k.fmt.pixel == like->fmt.pixel && k.image) {
+          Surface take = kept[i];
+          kept.erase(kept.begin() + long(i));
+          if (dst.image) kept.insert(kept.begin(), dst);
+          dst = take;
+          while (kept.size() > 8) { destroy_surface_image(&kept.back()); kept.pop_back(); }
+          return &dst;
+        }
+      }
+      if (dst.image) {
+        kept.insert(kept.begin(), dst);
+        dst.image = VK_NULL_HANDLE; dst.memory = VK_NULL_HANDLE; dst.view = VK_NULL_HANDLE;
+        dst.layerViews.clear(); dst.sampledViews.clear(); dst.mipChain.reset(); dst.allocationBytes = 0;
+        while (kept.size() > 8) { destroy_surface_image(&kept.back()); kept.pop_back(); }
+      }
+    }
     destroy_surface_image(&dst);
     dst = *like;
     dst.mipChain.reset();
@@ -130,6 +201,7 @@ Surface* private_ao_surface(Surface& dst, const Surface* like) {
     dst.dirty = false;
     create_surface_image(&dst, false, extent);
   }
+  prepare_ao_neighbours(dst, like);
   return &dst;
 }
 

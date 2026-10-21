@@ -276,6 +276,8 @@ void create_surface_image(Surface*,bool forRendering,VkExtent3D explicitExtent =
 void reset_ao_private_cache();
 void destroy_surface_image(Surface*);
 VkImageView layer_view(Surface*,uint32_t slice);
+VkImageView make_sampled_view(Surface*,uint32_t key); // a sampled view by its key (surfaces.cpp sampled_texture_view)
+void touch_image(Surface*); // dynamic resolution: clear an image made ahead once (surfaces.cpp)
 VkImageView sampled_texture_view(Surface*,const uint32_t* texWords);
 Surface* find_or_create_surface(const SurfaceDesc&,bool forRendering);
 Surface* color_target(const uint32_t*,int,uint32_t* slice=nullptr);

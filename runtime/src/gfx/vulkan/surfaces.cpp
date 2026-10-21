@@ -28,6 +28,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <cmath>
 #include <cstring>
 #include <cstdlib>
@@ -102,10 +103,17 @@ static void latch_aspect();
 static float g_dyn_frame = 1.0f;
 static uint64_t g_spare_images = 0;  // images kept in Surface::spares (all surfaces)
 static void release_spares(Surface* s);
+static bool g_in_precreate=false;  // views made by precreate_levels (debug log WWHD_DYNRES_LOG_VIEWS: the others)
+static void log_view(const Surface* s,const char* kind) {
+    static const bool on=getenv("WWHD_DYNRES_LOG_VIEWS")!=nullptr;
+    if(on&&!g_in_precreate&&dynres::on())
+        LOG("[dynres] view created at use: %s %08X %ux%u fmt %X image %ux%u",kind,s->addr,s->width,s->height,s->format,s->extent.width,s->extent.height);
+}
 static void warm_dynamic_resolution();
+static void precreate_levels();
 static void latch_dynamic_resolution() {
     g_dyn_frame = dynres::latch(R.frame, g_res_frame);
-    if (dynres::on()) warm_dynamic_resolution();
+    if (dynres::on()) { warm_dynamic_resolution(); precreate_levels(); }
     // off: the images kept for scale changes go (a target not drawn any more keeps its own until then)
     if (!dynres::on() && g_spare_images)
         for (auto& [addr, s] : R.surfaces) release_spares(s.get());
@@ -768,6 +776,7 @@ void create_surface_image(Surface* s, bool forRendering, VkExtent3D explicitExte
         viewInfo.subresourceRange={VkImageAspectFlags(s->fmt.depth?VK_IMAGE_ASPECT_DEPTH_BIT:VK_IMAGE_ASPECT_COLOR_BIT),0,s->mips,0,s->arrayLayers};
         check_vk(vkCreateImageView(R.device,&viewInfo,nullptr,&s->view),"create sampling image view");
         s->layout=VK_IMAGE_LAYOUT_UNDEFINED;s->use={};
+        if(dynres::on()) { dynres::note_image();log_view(s,"IMAGE"); }
     } catch(...) {
         if(s->view)vkDestroyImageView(R.device,s->view,nullptr);
         if(s->image)vkDestroyImage(R.device,s->image,nullptr);
@@ -804,6 +813,7 @@ VkImageView layer_view(Surface* s,uint32_t layer) {
         usage.usage=R.attachmentViewUsage?attachment_view_usage(s->usage,s->fmt.depth):0;
         if(usage.usage)info.pNext=&usage;
         check_vk(vkCreateImageView(R.device,&info,nullptr,&s->layerViews[layer]),"create attachment layer view");
+        dynres::note_view();log_view(s,"attachment");
     }
     return s->layerViews[layer];
 }
@@ -830,14 +840,26 @@ VkImageView sampled_texture_view(Surface* s,const uint32_t* texWords) {
         exception_report::raise("Vulkan sampled cube requires a cube-compatible backing image");
     uint32_t selectors[4]={uint32_t(w4.get_DST_SEL_X()),uint32_t(w4.get_DST_SEL_Y()),uint32_t(w4.get_DST_SEL_Z()),uint32_t(w4.get_DST_SEL_W())};
     static const VkComponentSwizzle mapping[8]={VK_COMPONENT_SWIZZLE_R,VK_COMPONENT_SWIZZLE_G,VK_COMPONENT_SWIZZLE_B,VK_COMPONENT_SWIZZLE_A,VK_COMPONENT_SWIZZLE_ZERO,VK_COMPONENT_SWIZZLE_ONE,VK_COMPONENT_SWIZZLE_ZERO,VK_COMPONENT_SWIZZLE_ZERO};
+    (void)mapping;
     uint32_t key=uint32_t(type)<<12;for(unsigned i=0;i<4;++i)key|=(s->fmt.depth?i:selectors[i])<<(i*3);
     auto found=s->sampledViews.find(key);if(found!=s->sampledViews.end())return found->second;
+    return make_sampled_view(s,key);
+}
+// the sampled view a key stands for (view type << 12 | four 3-bit component selectors); also used to give an
+// image kept for dynamic resolution the views its surface already uses (precreate_levels)
+VkImageView make_sampled_view(Surface* s,uint32_t key) {
+    static const VkComponentSwizzle mapping[8]={VK_COMPONENT_SWIZZLE_R,VK_COMPONENT_SWIZZLE_G,VK_COMPONENT_SWIZZLE_B,VK_COMPONENT_SWIZZLE_A,VK_COMPONENT_SWIZZLE_ZERO,VK_COMPONENT_SWIZZLE_ONE,VK_COMPONENT_SWIZZLE_ZERO,VK_COMPONENT_SWIZZLE_ZERO};
+    const VkImageViewType type=VkImageViewType(key>>12);
+    const bool threeD=type==VK_IMAGE_VIEW_TYPE_3D;
+    uint32_t selectors[4];for(unsigned i=0;i<4;++i)selectors[i]=(key>>(i*3))&7;
     VkImageViewCreateInfo info{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};info.image=s->image;info.viewType=type;info.format=s->fmt.pixel;
     // Comparison samplers require a depth-only, identity-component view.
     if(!s->fmt.depth)info.components={mapping[selectors[0]],mapping[selectors[1]],mapping[selectors[2]],mapping[selectors[3]]};
     uint32_t layers=(type==VK_IMAGE_VIEW_TYPE_1D||type==VK_IMAGE_VIEW_TYPE_2D||threeD)?1:type==VK_IMAGE_VIEW_TYPE_CUBE?6:s->arrayLayers;
     info.subresourceRange={VkImageAspectFlags(s->fmt.depth?VK_IMAGE_ASPECT_DEPTH_BIT:VK_IMAGE_ASPECT_COLOR_BIT),0,s->mips,0,layers};
-    VkImageView view=VK_NULL_HANDLE;check_vk(vkCreateImageView(R.device,&info,nullptr,&view),"create sampled texture view");s->sampledViews.emplace(key,view);return view;
+    VkImageView view=VK_NULL_HANDLE;check_vk(vkCreateImageView(R.device,&info,nullptr,&view),"create sampled texture view");s->sampledViews.emplace(key,view);
+    dynres::note_view();log_view(s,"sampled");
+    return view;
 }
 // ---------------------------------------------------------------- scaled copies without blits
 // Vulkan requires no depth/stencil format to support blits (BLIT_SRC/BLIT_DST are optional for all of
@@ -1070,6 +1092,10 @@ static void draw_depth_copy(Surface* src,uint32_t srcLevel,uint32_t srcLayer,uin
 // plane, stencil and colour to zero) instead of aborting the game; the game redraws its targets every
 // frame, so at worst one frame shows the cleared contents. Only a whole destination is cleared, a
 // partial one keeps its contents.
+static void clear_unscalable(Surface* dst,uint32_t dstW,uint32_t dstH);
+// Dynamic resolution: an image made ahead is cleared once right away, so a driver's first-use work (Adreno:
+// several ms of render-thread time on the first frames at a new level) happens then, not at the change.
+void touch_image(Surface* s) { if(s&&s->image)clear_unscalable(s,s->extent.width,s->extent.height); }
 static void clear_unscalable(Surface* dst,uint32_t dstW,uint32_t dstH) {
     if(dstW!=dst->extent.width||dstH!=dst->extent.height)return;
     end_encoder();
@@ -1170,14 +1196,19 @@ static void swap_image(Surface& a,Surface& b) {
     std::swap(a.extent,b.extent);std::swap(a.layout,b.layout);std::swap(a.use,b.use);std::swap(a.usage,b.usage);
     std::swap(a.createFlags,b.createFlags);std::swap(a.layerViews,b.layerViews);std::swap(a.sampledViews,b.sampledViews);
     std::swap(a.scale,b.scale);std::swap(a.dyn,b.dyn);std::swap(a.ax,b.ax);std::swap(a.ay,b.ay);std::swap(a.sx,b.sx);std::swap(a.sy,b.sy);
+    std::swap(a.mipChain,b.mipChain);a.mipChainLevels=b.mipChainLevels=0;  // a sampled mip chain of that size goes with it (rebuilt)
 }
 static void release_spares(Surface* s) {
     auto spares=std::move(s->spares);s->spares.clear();
     for(auto& k:spares) { destroy_surface_image(k.get());--g_spare_images; }
 }
-// Dynamic resolution: a render target changing scale keeps its previous image (up to dynres::kSpares
-// of them, the most recent first), and a change back to a kept scale takes it again instead of
-// creating an image: no allocation while the scale moves between recent levels. Off: none are kept.
+// Dynamic resolution: a render target keeps images of the levels next to the current one (one step up
+// and one step down; Surface::spares). The controller changes one level at a time, so a change takes an
+// image that exists and only copies into it. The neighbours are made ahead (precreate_levels, a few a
+// frame); when the level changes, the new neighbour is made and the level now two steps away goes.
+// Keeping every level would double the image memory, a bad trade on the memory-tight devices
+// dynamic resolution is for. Off: none are kept.
+static size_t spare_cap() { return 4; }  // two neighbours plus images of a former neighbour not yet released (precreate_levels)
 static bool take_spare(Surface* s,Surface& into,float wanted,float ax,float ay) {
     for(size_t i=0;i<s->spares.size();++i) {
         Surface& k=*s->spares[i];
@@ -1188,13 +1219,110 @@ static bool take_spare(Surface* s,Surface& into,float wanted,float ax,float ay) 
     }
     return false;
 }
-static void keep_spare(Surface* s,Surface& old) {
+static std::shared_ptr<Surface> spare_like(const Surface& old) {
     auto k=std::make_shared<Surface>();
-    k->width=old.width;k->height=old.height;k->slices=old.slices;k->mips=old.mips;k->dim=old.dim;k->format=old.format;
+    k->width=old.width;k->height=old.height;k->slices=old.slices;k->mips=old.mips;k->dim=old.dim;k->format=old.format;k->tileMode=old.tileMode;
     k->isDepth=old.isDepth;k->fmt=old.fmt;k->imageType=old.imageType;k->viewType=old.viewType;k->arrayLayers=old.arrayLayers;k->aspect=old.aspect;
+    k->linearFiltering=old.linearFiltering;
+    return k;
+}
+static void keep_spare(Surface* s,Surface& old) {
+    auto k=spare_like(old);
     swap_image(*k,old);
     s->spares.insert(s->spares.begin(),std::move(k));++g_spare_images;
-    while(s->spares.size()>size_t(dynres::kSpares)) { destroy_surface_image(s->spares.back().get());s->spares.pop_back();--g_spare_images; }
+    while(s->spares.size()>spare_cap()) { destroy_surface_image(s->spares.back().get());s->spares.pop_back();--g_spare_images; }
+}
+// a render target that dynamic resolution scales (as target_dyn with a factor below 1)
+static bool dyn_target(const Surface* s) {
+    if(!s->image||s->imageType!=VK_IMAGE_TYPE_2D||s->viewType!=VK_IMAGE_VIEW_TYPE_2D||s->fmt.compressed||s->mips>1||s->slices>1)return false;
+    if(!(s->usage&(s->fmt.depth?VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT:VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT)))return false;
+    uint32_t width,height;
+    return !mods::cemu::texture_extent(s->width,s->height,s->format,s->slices,s->tileMode,width,height);
+}
+// the level of a factor (dynres::level_factor), -1 if none
+static int level_of(float f) {
+    for(int l=0;l<dynres::levels();++l) if(dynres::level_factor(l)==f) return l;
+    return -1;
+}
+// Makes up to dynres::kPrecreatePerFrame missing neighbour images (render thread, at the frame
+// boundary) and drops kept images of levels that are no neighbours any more. The cost of image creation
+// (about 10 ms for a whole set on an Adreno phone) is spread over frames instead of landing on the frame
+// of a scale change.
+static void precreate_levels() {
+    static uint64_t epoch=~0ull;static float doneBase=0,doneKx=0,doneKy=0,doneDyn=0;static int doneLevels=0;static bool complete=false;
+    static size_t doneViews=0;
+    size_t views=0;
+    for(auto& [addr,sp]:R.surfaces) views+=sp->sampledViews.size();  // a surface sampled through a new view: its kept images get it too
+    if(complete&&epoch==R.surfaces.size()&&doneBase==g_res_frame&&doneLevels==dynres::levels()&&doneKx==g_aspect_kx&&doneKy==g_aspect_ky&&doneDyn==g_dyn_frame&&doneViews==views)return;
+    complete=false;epoch=R.surfaces.size();doneViews=views;doneBase=g_res_frame;doneLevels=dynres::levels();doneKx=g_aspect_kx;doneKy=g_aspect_ky;doneDyn=g_dyn_frame;
+    const int current=std::max(level_of(g_dyn_frame),0);
+    // wanted: the current level (a target not drawn since the change still holds its old image) and its neighbours
+    auto wanted=[&](float scale) {
+        for(int l=std::max(current-1,0);l<=std::min(current+1,dynres::levels()-1);++l)
+            if(scale==g_res_frame*dynres::level_factor(l)) return true;
+        return false;
+    };
+    const auto started=std::chrono::steady_clock::now();
+    int made=0,dropped=0;
+    const float saved=g_dyn_frame;
+    struct Mark { Mark(){g_in_precreate=true;} ~Mark(){g_in_precreate=false;} } mark;
+    for(auto& [addr,sp]:R.surfaces) {
+        Surface* s=sp.get();
+        if(!dyn_target(s))continue;
+        float ax,ay;target_aspect(s,ax,ay);
+        // images of a level that is no neighbour any more, or of another internal resolution or aspect ratio, go,
+        // a few a frame as they are made: freeing a whole level at once cost the phone several ms on one frame
+        for(size_t i=0;i<s->spares.size();) {
+            Surface& k=*s->spares[i];
+            if(k.ax!=ax||k.ay!=ay||!wanted(k.scale)) {
+                if(dropped>=dynres::kPrecreatePerFrame) { complete=false;++i;continue; }
+                destroy_surface_image(&k);s->spares.erase(s->spares.begin()+i);--g_spare_images;++dropped;
+            } else ++i;
+        }
+        for(int l=std::max(current-1,0);l<=std::min(current+1,dynres::levels()-1);++l) {
+            const float f=dynres::level_factor(l),want=g_res_frame*f;
+            if(s->scale==want&&s->ax==ax&&s->ay==ay)continue;
+            bool have=false;
+            for(auto& k:s->spares) if(k->scale==want&&k->ax==ax&&k->ay==ay) have=true;
+            if(have)continue;
+            if(made>=dynres::kPrecreatePerFrame) { g_dyn_frame=saved;dynres::note_precreated(made,std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-started).count());return; }
+            auto k=spare_like(*s);
+            g_dyn_frame=f;  // create_surface_image sizes it as target_scale does at that level
+            try { create_surface_image(k.get(),true); } catch(...) { g_dyn_frame=saved;throw; }
+            g_dyn_frame=saved;
+            touch_image(k.get());
+            s->spares.push_back(std::move(k));++g_spare_images;++made;
+        }
+        // the kept images get the views the surface uses (attachment view, sampled views), so the first frames at a
+        // new level create none (Adreno: several ms for a set)
+        for(auto& k:s->spares) {
+            if(!k->image)continue;
+            if(k->layerViews.empty()||!k->layerViews[0]) { layer_view(k.get(),0);++made; }
+            // the sampled mip chain the surface has (with_mip_chain): one of the kept image's size, so the first
+            // sampling at the new level only fills it
+            if(Surface* sc=s->mipChain.get(); sc&&sc->image&&!k->mipChain) {
+                auto chain=std::make_shared<Surface>();
+                Surface* c=chain.get();
+                c->addr=sc->addr;c->mipAddr=sc->mipAddr;c->width=sc->width;c->height=sc->height;c->slices=1;
+                c->mips=sc->mips;c->format=sc->format;c->dim=sc->dim;c->fmt=sc->fmt;c->gpuWritten=true;
+                uint32_t full=1;while((std::max(k->extent.width,k->extent.height)>>full)>0)full++;
+                if(c->mips<=full) {
+                    create_surface_image(c,false,k->extent);
+                    touch_image(c);
+                    for(auto& [key,view]:sc->sampledViews) make_sampled_view(c,key);
+                    k->mipChain=std::move(chain);k->mipChainLevels=0;++made;
+                }
+            }
+            for(auto& [key,view]:s->sampledViews)
+                if(!k->sampledViews.count(key)) { make_sampled_view(k.get(),key);++made; }
+            if(made>=dynres::kPrecreatePerFrame*4) { complete=false;dynres::note_precreated(made,std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-started).count());return; }
+        }
+    }
+    g_dyn_frame=saved;
+    if(dropped<dynres::kPrecreatePerFrame) complete=true;  // (else stale images are left for the next frames)
+    if(made)dynres::note_precreated(made,std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-started).count());
+    static bool logged=false;
+    if(!logged) { logged=true;LOG("[dynres] render target images of the neighbouring levels made ahead (%llu kept images)",(unsigned long long)g_spare_images); }
 }
 static Surface* rescale(Surface* s) {
     float wanted=target_scale(s),ax,ay;
@@ -1211,6 +1339,8 @@ static Surface* rescale(Surface* s) {
     Surface replacement;
     replacement.width=s->width;replacement.height=s->height;replacement.slices=s->slices;replacement.mips=s->mips;
     replacement.dim=s->dim;replacement.format=s->format;replacement.isDepth=s->isDepth;replacement.fmt=s->fmt;
+    using clock=std::chrono::steady_clock;
+    const auto t0=clock::now();
     const bool reused=keep&&take_spare(s,replacement,wanted,ax,ay);
     if(reused) {
         replacement.imageType=s->imageType;replacement.viewType=s->viewType;replacement.arrayLayers=s->arrayLayers;replacement.aspect=s->aspect;
@@ -1220,15 +1350,18 @@ static Surface* rescale(Surface* s) {
         create_surface_image(&replacement,true);
         if(dynres::on())dynres::count_created();
     }
+    const auto t1=clock::now();
     try { resample(s,&replacement,s->arrayLayers,1,1,0,0); }
     catch(...) { destroy_surface_image(&replacement);throw; }
     if(keep) {
-        if(s->mipChain) { destroy_surface_image(s->mipChain.get()); s->mipChain.reset(); }
         ++g_surface_epoch;  // as destroy_surface_image: the surface's image changes
-        keep_spare(s,*s);
+        keep_spare(s,*s);   // (its mip chain goes with it)
     } else destroy_surface_image(s);
+    if(dynres::on())dynres::note_rescale(!reused,std::chrono::duration<double,std::milli>(t1-t0).count(),
+                                         std::chrono::duration<double,std::milli>(clock::now()-t1).count());
     s->image=replacement.image;s->memory=replacement.memory;s->view=replacement.view;s->allocationBytes=replacement.allocationBytes;
     s->layerViews=std::move(replacement.layerViews);s->sampledViews=std::move(replacement.sampledViews);
+    s->mipChain=std::move(replacement.mipChain);s->mipChainLevels=0;
     s->extent=replacement.extent;s->layout=replacement.layout;s->use=replacement.use;s->usage=replacement.usage;s->createFlags=replacement.createFlags;s->scale=replacement.scale;s->dyn=replacement.dyn;s->ax=replacement.ax;s->ay=replacement.ay;s->sx=replacement.sx;s->sy=replacement.sy;
     if(getenv("WWHD_LOG_RESCALE"))
         LOG("[gfx] rescaled %08X %ux%u to %ux%u (%s)",s->addr,s->width,s->height,s->extent.width,s->extent.height,reused?"kept image":"new image");

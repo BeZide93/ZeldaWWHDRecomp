@@ -310,7 +310,7 @@ void copy_to_scan(uint32_t cb, uint32_t target) {
             for (auto it = scr.scanSpares.begin(); it != scr.scanSpares.end(); ++it)
                 if (fits(*it)) { kept = *it; scr.scanSpares.erase(it); break; }
             if (scr.tex) scr.scanSpares.insert(scr.scanSpares.begin(), scr.tex);
-            while (scr.scanSpares.size() > size_t(dynres::kSpares)) scr.scanSpares.pop_back();
+            while (scr.scanSpares.size() > size_t(2)) scr.scanSpares.pop_back();
         }
         if (kept) scr.tex = kept;
         else {

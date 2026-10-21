@@ -741,8 +741,10 @@ void show_startup_notice(const std::string& title, const std::string& text) {
 static bool is_srgb(MTLPixelFormat f) { return f == MTLPixelFormatBGRA8Unorm_sRGB || f == MTLPixelFormatRGBA8Unorm_sRGB; }
 
 // draw `tex` into the target rectangle (pixels); src_linear: the image holds linear values (sRGB scan buffer)
+// dyn: the picture's dynamic resolution factor (Screen::dyn; below 1: always scaled filtered, as the Vulkan
+// presentation: integer scaling becomes smooth, sharp scaling takes its sharpness from the full size)
 static void draw_image(id<MTLRenderCommandEncoder> e, MTLPixelFormat fmt, float dw, float dh, id<MTLTexture> tex,
-                       bool src_linear, Box b, float alpha) {
+                       bool src_linear, Box b, float alpha, float dyn = 1.0f) {
     if (!tex || b.w <= 0 || b.h <= 0) return;
     float rect[4] = {b.x / dw, b.y / dh, b.w / dw, b.h / dh};
     bool blend = alpha < 0.999f;
@@ -754,7 +756,12 @@ static void draw_image(id<MTLRenderCommandEncoder> e, MTLPixelFormat fmt, float 
     p.conv = src_linear == dst_linear ? 0 : dst_linear ? 1 : 2;
     float scale = std::min(b.w / tex.width, b.h / tex.height);  // target pixels per source texel
     int filter = g_filter;
-    p.sharp = filter == kSmooth || scale <= 1.0f ? 1.0f : filter == kSharp ? scale : 1e4f;
+    float sharpScale = scale;
+    if (dyn < 1.0f) {
+        if (filter == kInteger) filter = kSmooth;
+        else if (filter == kSharp) sharpScale = std::min(b.w / (tex.width / dyn), b.h / (tex.height / dyn));
+    }
+    p.sharp = filter == kSmooth || sharpScale <= 1.0f ? 1.0f : filter == kSharp ? sharpScale : 1e4f;
     p.foot = scale < 1.0f ? 1.0f / scale : 1.0f;
     [e setVertexBytes:rect length:sizeof rect atIndex:0];
     [e setFragmentTexture:tex atIndex:0];
@@ -785,12 +792,12 @@ static void compose_tv(id<MTLTexture> target, const Layout& L) {
     id<MTLRenderCommandEncoder> e = [command_buffer() renderCommandEncoderWithDescriptor:rp];
     float dw = target.width, dh = target.height;
     MTLPixelFormat fmt = target.pixelFormat;
-    draw_image(e, fmt, dw, dh, R.tv.tex, R.tv.srgb, L.tv, 1.0f);
+    draw_image(e, fmt, dw, dh, R.tv.tex, R.tv.srgb, L.tv, 1.0f, R.tv.dyn);
     if (L.pip_on && R.drc.tex) {
         float op = L.drc_only ? 1.0f : g_pip_opacity.load(), bw = std::max(1.0f, roundf(L.pip.w / 200.0f));
         float frame[4] = {0, 0, 0, 0.6f * op};
         draw_solid(e, fmt, dw, dh, {L.pip.x - bw, L.pip.y - bw, L.pip.w + 2 * bw, L.pip.h + 2 * bw}, frame);
-        draw_image(e, fmt, dw, dh, R.drc.tex, R.drc.srgb, L.pip, op);
+        draw_image(e, fmt, dw, dh, R.drc.tex, R.drc.srgb, L.pip, op, R.drc.dyn);
         if(auto* draw=overlay::guesthud::gamepad_region(dw,dh,L.pip.x,L.pip.y,L.pip.w,L.pip.h,op)) {
             if(is_srgb(fmt))overlay::linearize_colors(draw,true);
             ImGui_ImplMetal_NewFrame(rp);
@@ -814,7 +821,7 @@ static void compose_drc(id<MTLTexture> target) {
     rp.colorAttachments[0].storeAction = MTLStoreActionStore;
     id<MTLRenderCommandEncoder> e = [command_buffer() renderCommandEncoderWithDescriptor:rp];
     Layout L = layout(target.width, target.height, nominal_w(R.drc), nominal_h(R.drc), 0, 0, false);
-    draw_image(e, target.pixelFormat, target.width, target.height, R.drc.tex, R.drc.srgb, L.tv, 1.0f);
+    draw_image(e, target.pixelFormat, target.width, target.height, R.drc.tex, R.drc.srgb, L.tv, 1.0f, R.drc.dyn);
     if (auto* draw = overlay::guesthud::gamepad_region(target.width,target.height,L.tv.x,L.tv.y,L.tv.w,L.tv.h,1)) {
         if (is_srgb(target.pixelFormat)) overlay::linearize_colors(draw, true);
         ImGui_ImplMetal_NewFrame(rp);
@@ -870,7 +877,7 @@ static void screenshot_screen(Screen& scr, const std::string& path, bool tv) {
     rp.colorAttachments[0].clearColor = MTLClearColorMake(0, 0, 0, 1);
     rp.colorAttachments[0].storeAction = MTLStoreActionStore;
     id<MTLRenderCommandEncoder> e = [command_buffer() renderCommandEncoderWithDescriptor:rp];
-    draw_image(e, t.pixelFormat, w, h, scr.tex, scr.srgb, Box{0, 0, (float)w, (float)h}, 1.0f);
+    draw_image(e, t.pixelFormat, w, h, scr.tex, scr.srgb, Box{0, 0, (float)w, (float)h}, 1.0f, scr.dyn);
     [e endEncoding];
     id<MTLBuffer> buf = [R.device newBufferWithLength:w * h * 4 options:MTLResourceStorageModeShared];
     id<MTLBlitCommandEncoder> b = [command_buffer() blitCommandEncoder];
