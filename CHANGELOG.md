@@ -7,6 +7,11 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Fewer shader variants on Metal (macOS)** (idea from the GreenNaugahyde Android fork). Metal now keys shaders on
+  the same narrow state as the Vulkan renderer, so the same scenes need far fewer shaders and pipelines (in our Outset
+  test about 500 instead of 3,500 shaders); existing shader caches keep working. Pictures are unchanged.
+- **Crash logs and performance reports list the renderer's live shaders, pipelines and memory mappings**, which helps
+  us find out-of-memory crashes.
 - **Less GPU work on Vulkan** (idea and first versions from the GreenNaugahyde Android fork). Shaders use the slower
   exact multiply only where a value may be infinite, and rendered mip chains are built only as deep as the game samples
   them, starting from the first changed level. On our test phone the GPU time per frame fell by about 8–9%; pictures
