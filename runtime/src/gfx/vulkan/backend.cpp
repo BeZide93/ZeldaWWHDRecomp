@@ -23,6 +23,7 @@
 #define VK_USE_PLATFORM_ANDROID_KHR
 #include <android/native_window_jni.h>
 #include <jni.h>
+#include "platform/quest_theater.h"
 #endif
 #include "backend.h"
 #include "pass.h"
@@ -1636,7 +1637,9 @@ static void make_swapchain(Screen &s) {
   // changes then and the swapchain is made again for the new size.)
   {
     int pw = 0, ph = 0;
-    if (s.window && SDL_GetWindowSizeInPixels(s.window, &pw, &ph) && pw > 0 && ph > 0)
+    if (&s == &R.tv && quest_theater::active())
+      extent = {quest_theater::width,quest_theater::height};
+    else if (s.window && SDL_GetWindowSizeInPixels(s.window, &pw, &ph) && pw > 0 && ph > 0)
       extent = {uint32_t(pw), uint32_t(ph)};
     else if (&s == &R.drc && s.width > 0 && s.height > 0)
       extent = {uint32_t(s.width.load()), uint32_t(s.height.load())};
@@ -2396,6 +2399,9 @@ static void present_held(bool forced) {
   trace_even_presented(at);
 }
 static bool present(Screen &s) {
+#ifdef __ANDROID__
+  if (&s == &R.tv && quest_theater::active() && !quest_theater::visible()) return false;
+#endif
   if (&s == &R.tv) present_held(true);  // the previous frame, if it is still held
   if (handoff_trace::enabled()) handoff_trace::set_producer_frame(R.frame);
   if (presentObservation && &s == &R.tv) poll_present_observer();
@@ -2817,6 +2823,9 @@ static bool present(Screen &s) {
   // Even frame delivery (interp_pacing.h EvenSchedule; interp.cpp: on by default on Android): a TV frame of a
   // swap that is ready before its slot is held (its work is submitted; only the present call waits)
   if (&s == &R.tv && async && evenPresentSwap && !secondary && !present_capture_requested() &&
+#ifdef __ANDROID__
+      !quest_theater::active() &&
+#endif
       (evenPresentInterval || even_trace_file())) {
     const int64_t ready = even_now_ns();
     const int64_t due = evenSchedule.plan(ready, evenPresentInterval);
@@ -2842,6 +2851,9 @@ static bool present(Screen &s) {
     return pr == VK_SUCCESS || pr == VK_SUBOPTIMAL_KHR;
   }
   const VkResult pr = queue_present(s, s.swapchain, index, finishedSemaphore, pi.pNext, observedPresentId, R.frame, secondary);
+#ifdef __ANDROID__
+  if (&s == &R.tv && (pr == VK_SUCCESS || pr == VK_SUBOPTIMAL_KHR)) quest_theater::presented(stereo::frame.mode);
+#endif
   if (!async)
     vk_check(timed_call(timing.idle, [&] { return vkQueueWaitIdle(R.queue); }, rprof::kWaitGpu),
              "present completion");
@@ -4107,7 +4119,11 @@ static void init_device(std::vector<const char *> extensions,
   // starts with the device); WWHD_VK_RECORD_WORKER takes precedence (record_worker.cpp)
   {
     std::string value;
-    set_record_worker_saved_choice(::hostui::get("vkRecordWorker", value) ? value == "1" : record_worker_default());
+    bool defaultWorker=record_worker_default();
+#ifdef __ANDROID__
+    defaultWorker=defaultWorker||quest_theater::device();
+#endif
+    set_record_worker_saved_choice(::hostui::get("vkRecordWorker", value) ? value == "1" : defaultWorker);
   }
   nativeWorkerPresentation = false;
   if (record_worker_requested()) {
@@ -4602,6 +4618,7 @@ void init() {
   if (!R.tv.window)
     exception_report::raise(SDL_GetError());
 #ifdef __ANDROID__
+  quest_theater::initialize();
   // one surface: the GamePad picture is drawn into it (display_modes.h: picture-in-picture, GamePad
   // only), never a window of its own
 #else
@@ -4645,6 +4662,9 @@ void init() {
   input::init();
   install_graphics_menu(R.tv.window);
   ::hostui::load_saved_options();  // graphics and GamePad screen options saved by the settings overlay (settings.ini)
+#ifdef __ANDROID__
+  if (quest_theater::active()) stereo::set_mode(stereo::Off); // opt in using the theater's 3D button
+#endif
 }
 #endif
 void save_renderer_caches() {

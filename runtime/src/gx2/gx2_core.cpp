@@ -492,6 +492,13 @@ void request_background_vulkan_cache_checkpoint() {
     if (!gfxvk::background_renderer_caches_ready()) return;
     background_cache_checkpoint().request();
 }
+#ifdef __ANDROID__
+void quiesce_quest_presentation() {
+    if (!gfxvk::background_renderer_caches_ready()) return;
+    std::lock_guard<std::recursive_mutex> lk(g_exec_mutex);
+    gfxvk::wait_idle();
+}
+#endif
 void checkpoint_present_observer() {
     if (!present_observer::enabled()) return;
     render_sync();
