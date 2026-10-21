@@ -603,11 +603,11 @@ set). In the 20 s run, memchr/memcmp under `compile_msl` dropped from ~670 sampl
 
 ### Render thread polled for compiles (`wait_compiled`)
 
-When a draw needs a shader or pipeline that's still compiling, the render thread waits for it. With
-Settings → Graphics → **Compile shaders in the background** on, a draw into the visible picture waits
-at most 4 ms per frame (`WWHD_BG_SHADER_WAIT_MS`) and is then left out until its compile is done (see
-[vulkan.md](vulkan.md#compile-shaders-in-the-background); before that option, Metal waited up to 25 ms
-and then skipped any draw redrawn every frame). It used to poll: `usleep(100)` plus a
+When a draw needs a shader or pipeline that's still compiling, the render thread waits for it, up to
+the frame's budget with Settings → Graphics → **Shader compile** Safe (the default) or Fast (4 ms,
+`WWHD_BG_SHADER_WAIT_MS`), after which the draws those levels allow are left out until the compile is
+done (see [vulkan.md](vulkan.md#shader-compile-off-safe-fast); before that setting, Metal waited up to
+25 ms and then skipped any draw redrawn every frame). It used to poll: `usleep(100)` plus a
 clock read in a loop. Metal's completion handlers now publish the result through `compile_done`,
 which signals a condition variable that `wait_compiled` sleeps on until the result arrives or the
 time runs out.
