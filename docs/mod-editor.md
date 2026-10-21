@@ -889,7 +889,7 @@ separated by `;`, or `@file` with one such line per row. Results go to the log.
 | `add_scene` | `id`?, `mod`? | a new scene (with its end step) |
 | `remove_scene` | `id`, `confirm`, `mod`? | remove a scene (refused while an actor or another scene starts it) |
 | `duplicate_scene` | `id`, `new_id`?, `mod`? | a copy of a scene, without its trigger |
-| `set_scene_trigger` | `scene`, `type` (`none`, `talk`, `quest_step`, `room`, `area`, `salvage`), `actor`?, `quest`?, `step`?, `chart`?, `at`? (`link`, `camera`), `stage`?, `room`?, `position`?, `radius`?, `mod`? | what starts the scene |
+| `set_scene_trigger` | `scene`, `type` (`none`, `talk`, `quest_step`, `room`, `area`, `salvage`), `actor`?, `quest`?, `step`?, `chart`?, `at`? (`link`, `camera`), `stage`?, `room`?, `position`?, `radius`?, `again`?, `mod`? | what starts the scene (`again`: an area scene plays again once Link has left the area) |
 | `add_scene_step` | `scene`, `type`, `at`?, `fields`?, `mod`? | a step with defaults that fit (a camera takes the fly camera's view; a choice comes with its two branches) |
 | `edit_scene_step` | `scene`, `step`, `fields`, `mod`? | several fields of a step at once (`null` removes one); a new id moves the links to it along |
 | `remove_scene_step` | `scene`, `step`, `mod`? | remove a step (refused while another step leads to it) |

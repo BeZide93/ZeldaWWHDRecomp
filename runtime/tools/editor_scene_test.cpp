@@ -398,6 +398,10 @@ void walking_paths_and_triggers() {
     const Value& t = scene_of(s, "harbor")->get("trigger");
     CHECK(t.get("type").string() == "area" && t.get("stage").string() == "sea" && t.get("room").number == 11 && near(t.get("position").get("x").number, 200) &&
           t.get("radius").number == 300);
+    CHECK(t.get("again").type == Value::Null);
+    CHECK(ok(s.run("set_scene_trigger", params(R"({"scene": "harbor", "type": "area", "radius": 300, "again": true})"))));
+    CHECK(scene_of(s, "harbor")->get("trigger").get("again").boolean);
+    CHECK(!ok(s.run("set_scene_trigger", params(R"({"scene": "harbor", "type": "room", "again": true})"))));
     CHECK(ok(s.run("set_scene_trigger", params(R"({"scene": "harbor", "type": "room", "at": "camera"})"))));
     CHECK(scene_of(s, "harbor")->get("trigger").get("type").string() == "room");
     CHECK(ok(s.run("set_scene_trigger", params(R"({"scene": "harbor", "type": "none"})"))) && !scene_of(s, "harbor")->object.contains("trigger"));

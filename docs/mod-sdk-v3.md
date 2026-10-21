@@ -1433,6 +1433,16 @@ scenes to continue. Already fired room/area triggers do not immediately fire aga
 after an interruption; loading a state also suppresses those triggers in the loaded
 room until the room changes.
 
+A room or area scene plays once per visit of its room. An `area` trigger with `"again": true` plays
+again once Link has left the area (by 60 units past its radius) and walked back in, in the same room
+visit: a way up that can be taken again, such as a Helmaroc King that carries Link up from Outset's
+pier each time he walks out to the lookout after falling into the sea.
+
+```json
+"trigger": {"type": "area", "stage": "sea", "room": 44, "position": {"x": -194790, "y": 136, "z": 314530},
+            "radius": 120, "again": true}
+```
+
 A scene plays on one of two routes. The **fallback route** runs the scene's
 `steps` through native compulsory-event admission, the game's camera and message
 functions, and native event teardown. It does not replace the stage's event-list

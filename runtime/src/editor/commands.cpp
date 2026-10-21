@@ -345,7 +345,7 @@ const std::vector<CommandInfo> kCommands = {
      {{"scene", "string", "", true}, {"type", "string", "none, talk, quest_step, room, area or salvage", true}, {"actor", "string", "talk: the actor"},
       {"quest", "string", "quest_step: the quest"}, {"step", "integer", "quest_step: the step"}, {"chart", "string", "salvage: the chart"},
       {"at", "string", "room / area: link (default) or camera"}, {"stage", "string", "room / area"}, {"room", "integer", "room / area"},
-      {"position", "point", "area: its centre"}, {"radius", "number", "area: its radius (default 500)"}, {"mod", "string", ""}},
+      {"position", "point", "area: its centre"}, {"radius", "number", "area: its radius (default 500)"}, {"again", "boolean", "area: plays again once Link has left the area"}, {"mod", "string", ""}},
      true},
     {"add_scene_step", "Adds a step to a scene, with defaults that fit (a camera takes the fly camera's view; a choice comes with its two branches).",
      {{"scene", "string", "", true}, {"type", "string", "camera, say, move, face, wait, sound, fade, end, camera_path, camera_follow, animation, walk, choice, music, particle or demo", true},

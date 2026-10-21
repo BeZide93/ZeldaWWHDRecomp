@@ -143,6 +143,8 @@ struct ManifestScene {
     std::optional<story_native_scene_manifest::Definition> native;
     std::string trigger,stage,actor,quest,chart; unsigned room=0,quest_step=0;
     WorldPoint position; float radius=0;
+    // an area trigger with "again": the scene can play again once Link has left the area (in the same room visit)
+    bool again=false;
     bool operator==(const ManifestScene&)const=default;
 };
 // What a placed chest can hold ("parameters": {"item": ...}): the game items a treasure chart's chest can hold
@@ -803,12 +805,13 @@ inline bool parse_scenes_impl(const mods::json::Value& m,std::vector<ManifestSce
         const auto& trigger=v.get("trigger");if(trigger.type!=Value::Null){s.trigger=trigger.get("type").string();
             bool trigger_keys=false;
             if(s.trigger=="room")trigger_keys=keys(trigger,{"type","stage","room"});
-            else if(s.trigger=="area")trigger_keys=keys(trigger,{"type","stage","room","position","radius"});
+            else if(s.trigger=="area")trigger_keys=keys(trigger,{"type","stage","room","position","radius","again"});
             else if(s.trigger=="talk")trigger_keys=keys(trigger,{"type","actor"});
             else if(s.trigger=="quest_step")trigger_keys=keys(trigger,{"type","quest","step"});
             else if(s.trigger=="salvage")trigger_keys=keys(trigger,{"type","chart"});
             if(!trigger_keys)return why="unknown scene trigger or field",false;
-            if(s.trigger=="room"||s.trigger=="area"){if(!place(trigger,s.stage,s.room))return why="invalid scene room trigger",false;if(s.trigger=="area"){if(!point(trigger.get("position"),s.position)||trigger.get("radius").type!=Value::Number||!std::isfinite(trigger.get("radius").number)||trigger.get("radius").number<=0||trigger.get("radius").number>10000)return why="invalid scene area trigger",false;s.radius=float(trigger.get("radius").number);}}
+            if(s.trigger=="room"||s.trigger=="area"){if(!place(trigger,s.stage,s.room))return why="invalid scene room trigger",false;if(s.trigger=="area"){if(!point(trigger.get("position"),s.position)||trigger.get("radius").type!=Value::Number||!std::isfinite(trigger.get("radius").number)||trigger.get("radius").number<=0||trigger.get("radius").number>10000)return why="invalid scene area trigger",false;s.radius=float(trigger.get("radius").number);
+                if(trigger.object.contains("again")){if(trigger.get("again").type!=Value::Bool)return why="a scene area trigger's again is true or false",false;s.again=trigger.get("again").boolean;}}}
             else if(s.trigger=="talk"){s.actor=trigger.get("actor").string();if(!declared(m,"actors",s.actor))return why="unknown trigger actor",false;}
             else if(s.trigger=="quest_step"){s.quest=trigger.get("quest").string();if(!integer(trigger.get("step"),1,254)||!quest_step(m,s.quest,unsigned(trigger.get("step").number)))return why="unknown trigger quest step",false;s.quest_step=unsigned(trigger.get("step").number);}
             else if(s.trigger=="salvage"){s.chart=trigger.get("chart").string();if(!declared(m,"charts",s.chart))return why="unknown trigger chart",false;}

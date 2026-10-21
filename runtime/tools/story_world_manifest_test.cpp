@@ -543,6 +543,16 @@ int main() {
     mod["models"].array[0]["kind"]="static";assert(parse_models(mod,models,why)&&models[0].kind=="static");
     for(const auto& kind:{"animated","", "native"}){mod["models"].array[0]["kind"]=kind;assert(!parse_models(mod,models,why));}
     mod["models"].array[0]["kind"]=mods::json::Value{};assert(!parse_models(mod,models,why));
+    // a scene area trigger may play "again" once Link has left the area
+    {
+        auto v=mods::json::parse(R"({"scenes":[{"id":"bird","trigger":{"type":"area","stage":"sea","room":44,"position":{"x":-194790,"y":136,"z":314530},"radius":120,"again":true},
+            "steps":[{"type":"wait","frames":10},{"type":"end"}]}]})");
+        std::vector<ManifestScene> scenes;assert(parse_scenes(v,scenes,why)&&scenes.size()==1&&scenes[0].again&&scenes[0].trigger=="area");
+        v["scenes"].array[0]["trigger"].object.erase("again");assert(parse_scenes(v,scenes,why)&&!scenes[0].again);
+        v["scenes"].array[0]["trigger"]["again"]="yes";assert(!parse_scenes(v,scenes,why));
+        auto room=mods::json::parse(R"({"scenes":[{"id":"r","trigger":{"type":"room","stage":"sea","room":44,"again":true},"steps":[{"type":"wait","frames":10},{"type":"end"}]}]})");
+        assert(!parse_scenes(room,scenes,why));  // only an area has an "inside" to leave
+    }
     // parts of one composition: the same mod's static world objects that name one "group"; the same origin alone is not
     // one, nor another group, room or a floating object; group is for static world objects only
     {
