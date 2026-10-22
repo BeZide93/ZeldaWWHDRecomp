@@ -7,6 +7,10 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Fixed: Fast Forward's 3x and 4x ran only as fast as 2x** (#268). On a 60 Hz display the game waited for the screen
+  after every step, which capped it at twice the normal speed. While Fast Forward is held, the game no longer waits
+  for the screen, so 3x and 4x really run three and four times as fast, with or without frame interpolation and
+  in True 60. Normal pacing comes back cleanly when you let go.
 - **Experimental setup step: "Preparing shaders: models"** (off by default). When switched on in setup, it draws every
   object model, every stage's rooms and the characters and objects they place, the sky and weather at different times of
   day, plants and the file select once with the game's own code, so their shaders are ready before you play: in our test
