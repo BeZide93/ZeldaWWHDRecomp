@@ -155,8 +155,8 @@ public class SetupService extends Service {
                             " (" + SetupPolicy.readings(thermal, temperature, hottestCore) + ")");
                     loggedUnreliable = unreliable;
                 }
-                reason = policy.update(SetupPolicy.trustedThermal(thermal, temperature, hottestCore), temperature, battery, charging,
-                    new File(job, "manual-pause.json").exists(), heatOverride, batteryOverride);
+                reason = policy.update(thermal, temperature, hottestCore, battery, charging,
+                    new File(job, "manual-pause.json").exists(), heatOverride, batteryOverride, android.os.SystemClock.elapsedRealtime());
                 if (!java.util.Objects.equals(reason, loggedReason)) {
                     Log.i("wwhd-setup", (reason == null ? "resume" : "pause: " + reason) + " (" +
                         SetupPolicy.readings(thermal, temperature, hottestCore) + ", battery " + battery + "%, charging " + charging +

@@ -5,53 +5,78 @@ public final class SetupPolicyTest {
         if (!java.util.Objects.equals(expected, actual))
             throw new AssertionError("Expected " + expected + ", got " + actual);
     }
+    private static String sample(SetupPolicy p, long now, int status, int battery, float core) {
+        return p.update(status, battery, core, 80, true, false, false, false, now);
+    }
     public static void main(String[] args) {
+        // #277: SEVERE at normal temperatures, including intermittent missing battery data.
+        // Baseline 921afe40a5 returned heat/null/heat/null at one-second intervals here.
+        SetupPolicy replay = new SetupPolicy();
+        long now = 0;
+        for (int battery : new int[] {-1, 300, Integer.MIN_VALUE, 310, -1, 300}) {
+            expect(null, sample(replay, now, 3, battery, 77.2f));
+            now += 1000;
+        }
+        for (int status : new int[] {3, 0, 3, 1, 3}) {
+            expect(null, sample(replay, now, status, 310, Float.NaN));
+            now += 1000;
+        }
+        expect(null, sample(new SetupPolicy(), 0, 3, -1, Float.NaN));
+        expect("heat", sample(new SetupPolicy(), 0, 3, -1, 90f));
+        // Existing pause limits are unchanged.
+        expect(null, sample(new SetupPolicy(), 0, 0, 449, 70f));
+        expect("heat", sample(new SetupPolicy(), 0, 0, 450, 70f));
+        expect(null, sample(new SetupPolicy(), 0, 2, 419, 70f));
+        expect("heat", sample(new SetupPolicy(), 0, 2, 420, 70f));
+        expect("heat", sample(new SetupPolicy(), 0, 3, 400, 70f));
+        expect("heat", sample(new SetupPolicy(), 0, 3, 300, 90f));
+        // A real pause survives brief dips, threshold chatter, unknown data, and warm cores.
         SetupPolicy policy = new SetupPolicy();
-        expect(null, policy.update(0, 300, 80, false, false));
-        // Android thermal status SEVERE pauses; hysteresis holds until LIGHT and <= 41.0 °C
-        expect("heat", policy.update(3, 300, 80, true, false));
-        expect("heat", policy.update(2, 300, 80, true, false));
-        expect("heat", policy.update(1, 415, 80, true, false));
-        expect(null, policy.update(1, 410, 80, true, false));
-        // battery temperature alone: 42.0-44.9 °C runs while Android reports none/light (issue #142)
-        expect(null, policy.update(0, 431, 80, true, false));
-        expect(null, policy.update(1, 449, 80, true, false));
-        expect("heat", policy.update(0, 450, 80, true, false));
-        expect("heat", policy.update(0, 420, 80, true, false));
-        expect("heat", policy.update(2, 411, 80, true, false));
-        expect(null, policy.update(0, 400, 80, true, false));
-        // 42.0 °C together with MODERATE pauses; 41.9 °C with MODERATE does not
-        expect(null, policy.update(2, 419, 80, true, false));
-        expect("heat", policy.update(2, 420, 80, true, false));
-        expect(null, policy.update(0, -1, 80, true, false));
-        // battery level
-        expect("battery", policy.update(0, 390, 20, false, false));
-        expect("battery", policy.update(0, 300, 29, false, false));
-        expect(null, policy.update(0, 300, 30, false, false));
-        expect("manual", policy.update(3, 450, 10, false, true));
-        expect("heat", policy.update(3, 450, 10, true, false));
-        expect(null, policy.update(0, 300, 10, true, false));
-        expect("battery_unknown", policy.update(0, -1, -1, false, false));
-        expect(null, policy.update(0, -1, -1, true, false));
-
-        // Continue anyway: heat override skips heat pauses, never CRITICAL or a manual pause
+        expect("heat", sample(policy, 0, 3, 450, 92f));
+        expect("heat", sample(policy, 1000, 0, 410, 79f));
+        expect("heat", sample(policy, 2000, 0, 411, 79f));
+        expect("heat", sample(policy, 3000, 0, 410, 79f));
+        expect("heat", sample(policy, 4000, 0, -1, Float.NaN));
+        expect("heat", sample(policy, 5000, 0, 410, 80f));
+        expect("heat", sample(policy, 6000, 2, 410, 79f));
+        for (long t = 7000; t < 12000; t += 1000)
+            expect("heat", sample(policy, t, 0, 410, 79f));
+        expect("heat", sample(policy, 11999, 0, 410, 79f));
+        expect(null, sample(policy, 12000, 0, 410, 79f));
+        // Sampling gaps restart the cooling interval instead of counting unsampled time.
+        expect("heat", sample(policy, 13000, 0, 450, 70f));
+        expect("heat", sample(policy, 14000, 0, 300, 70f));
+        expect("heat", sample(policy, 24000, 0, 300, 70f));
+        for (long t = 25000; t < 29000; t += 1000)
+            expect("heat", sample(policy, t, 0, 300, 70f));
+        expect(null, sample(policy, 29000, 0, 300, 70f));
+        // Core-only devices can prove cooling; fully missing temperatures cannot.
+        SetupPolicy coreOnly = new SetupPolicy();
+        expect("heat", sample(coreOnly, 0, 3, -1, 92f));
+        expect("heat", sample(coreOnly, 1000, 3, -1, Float.NaN));
+        for (long t = 2000; t < 7000; t += 1000)
+            expect("heat", sample(coreOnly, t, 3, -1, 77f));
+        expect(null, sample(coreOnly, 7000, 3, -1, 77f));
+        // Continue anyway works immediately and skips later heat, while critical/manual still win.
         SetupPolicy anyway = new SetupPolicy();
-        expect("heat", anyway.update(3, 431, 80, true, false, false, false));
+        expect("heat", sample(anyway, 0, 3, 450, 92f));
+        for (long t : new long[] {1, 1000, 2000, 50000})
+            expect(null, anyway.update(3, 470, 95f, 80, true, false, true, false, t));
+        expect("critical", anyway.update(4, 470, 95f, 80, true, false, true, false, 50001));
+        expect("manual", anyway.update(4, 470, 95f, 80, true, true, true, true, 50002));
+        expect("critical", anyway.update(6, 300, Float.NaN, 80, true, false, true, true, 50003));
+        expect("critical", anyway.update(4, 300, Float.NaN, 80, true, false, false, false, 50004));
         expect(null, anyway.update(3, 431, 80, true, false, true, false));
-        expect(null, anyway.update(0, 470, 80, true, false, true, false));
-        expect("critical", anyway.update(4, 431, 80, true, false, true, false));
-        expect("critical", anyway.update(6, 431, 80, true, false, true, true));
-        expect("critical", anyway.update(4, 300, 80, true, false, false, false));
-        expect("manual", anyway.update(4, 300, 80, true, true, true, true));
-        expect(null, anyway.update(3, 431, 80, true, false, true, false));
-        // the heat override does not skip battery pauses; the battery override does
-        expect("battery", anyway.update(3, 431, 10, false, false, true, false));
-        expect(null, anyway.update(3, 431, 10, false, false, true, true));
-        expect("heat", anyway.update(3, 431, 10, false, false, false, true));
-        expect(null, anyway.update(0, 300, -1, false, false, false, true));
-        expect("battery_unknown", new SetupPolicy().update(0, 300, -1, false, false, false, false));
-        // the hysteresis state keeps tracking while overridden
-        expect(null, anyway.update(1, 300, 80, true, false, false, false));
+        SetupPolicy batteryPolicy = new SetupPolicy();
+        expect("battery", batteryPolicy.update(0, 300, 20, false, false));
+        expect("battery", batteryPolicy.update(0, 300, 29, false, false));
+        expect(null, batteryPolicy.update(0, 300, 30, false, false));
+        expect("battery_unknown", batteryPolicy.update(0, -1, -1, false, false));
+        expect(null, batteryPolicy.update(0, -1, -1, true, false));
+        expect("battery", batteryPolicy.update(0, 300, 10, false, false, true, false));
+        expect(null, batteryPolicy.update(0, 300, 10, false, false, false, true));
+        expect(null, batteryPolicy.update(0, -1, -1, false, false, false, true));
+        expect("battery", batteryPolicy.update(0, 300, 10, false, false, false, false));
 
         // texts
         expect("none", SetupPolicy.thermalName(0));
@@ -65,7 +90,7 @@ public final class SetupPolicyTest {
         expect("n/a", SetupPolicy.batteryTemperature(Integer.MIN_VALUE));
         expect("Waiting for the Android device to cool down (battery 43.1 °C, thermal status: none)",
             SetupPolicy.description("heat", 0, 431));
-        expect("Waiting for the Android device to cool down (battery n/a, thermal status: severe)",
+        expect("Waiting for the Android device to cool down (battery n/a, thermal status: severe (looks unreliable, ignored))",
             SetupPolicy.description("heat", 3, -1));
         String critical = SetupPolicy.description("critical", 4, 470);
         if (!critical.startsWith("Paused because Android reports the device as critically hot (battery 47.0 °C, thermal status: critical).") ||
@@ -105,9 +130,9 @@ public final class SetupPolicyTest {
         if (SetupPolicy.thermalStatusUnreliable(3, 310, 90f)) throw new AssertionError("CPU 90 °C");
         if (SetupPolicy.thermalStatusUnreliable(3, 310, 98.5f)) throw new AssertionError("CPU 98.5 °C");
         if (SetupPolicy.trustedThermal(3, 440, nan) != 3) throw new AssertionError("hot device kept");
-        // no battery data: nothing contradicts SEVERE, it is believed
-        if (SetupPolicy.thermalStatusUnreliable(3, -1, nan)) throw new AssertionError("no battery, -1");
-        if (SetupPolicy.thermalStatusUnreliable(3, Integer.MIN_VALUE, 50f)) throw new AssertionError("no battery, MIN");
+        // Missing battery data cannot confirm SEVERE; cool cores do not confirm it either
+        if (!SetupPolicy.thermalStatusUnreliable(3, -1, nan)) throw new AssertionError("no battery, -1");
+        if (!SetupPolicy.thermalStatusUnreliable(3, Integer.MIN_VALUE, 50f)) throw new AssertionError("no battery, MIN");
         // none / light / moderate are never doubted; CRITICAL and higher always believed; unknown stays unknown
         for (int status : new int[] {-1, 0, 1, 2, 4, 5, 6})
             if (SetupPolicy.thermalStatusUnreliable(status, 300, 60f) || SetupPolicy.trustedThermal(status, 300, 60f) != status)
@@ -116,9 +141,9 @@ public final class SetupPolicyTest {
         SetupPolicy evo = new SetupPolicy();
         expect(null, evo.update(SetupPolicy.trustedThermal(3, 300, 60.1f), 300, 80, true, false));
         expect(null, evo.update(SetupPolicy.trustedThermal(3, 310, 77.2f), 310, 80, true, false));
-        expect("heat", evo.update(SetupPolicy.trustedThermal(3, 310, 92f), 310, 80, true, false));
+        expect("heat", sample(evo, 2000, 3, 310, 92f));
         expect("heat", new SetupPolicy().update(SetupPolicy.trustedThermal(3, 440, nan), 440, 80, true, false));
-        expect("heat", new SetupPolicy().update(SetupPolicy.trustedThermal(3, -1, nan), -1, 80, true, false));
+        expect(null, new SetupPolicy().update(SetupPolicy.trustedThermal(3, -1, nan), -1, 80, true, false));
         expect(null, new SetupPolicy().update(SetupPolicy.trustedThermal(0, 300, nan), 300, 80, true, false));
         expect(null, new SetupPolicy().update(SetupPolicy.trustedThermal(2, 300, nan), 300, 80, true, false));
         expect("critical", new SetupPolicy().update(SetupPolicy.trustedThermal(4, 300, nan), 300, 80, true, false));
@@ -133,7 +158,8 @@ public final class SetupPolicyTest {
         expect("severe (reported by the system; battery 31.0 C, CPU/GPU n/a, looks unreliable)",
             SetupPolicy.reportThermal(3, 310, nan));
         expect("severe", SetupPolicy.reportThermal(3, 440, nan));
-        expect("severe", SetupPolicy.reportThermal(3, Integer.MIN_VALUE, nan));
+        expect("severe (reported by the system; battery n/a, CPU/GPU n/a, looks unreliable)",
+            SetupPolicy.reportThermal(3, Integer.MIN_VALUE, nan));
         expect("moderate", SetupPolicy.reportThermal(2, 300, nan));
         expect("none", SetupPolicy.reportThermal(0, 300, nan));
         expect("n/a", SetupPolicy.reportThermal(-1, Integer.MIN_VALUE, nan));

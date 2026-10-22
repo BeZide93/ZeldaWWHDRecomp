@@ -127,6 +127,7 @@ void adapt_60(int64_t now) {
     // dropping below them. The limits (phones 0.72 / 0.60, a Galaxy S25 Ultra already halved its clocks
     // at 0.76; fan-cooled handhelds 1.00 / 0.90) and the player's Heat guard setting: heat_guard.h.
     static bool hot = false;
+    static heat_guard::State heatState;
     {
         const heat_guard::Limits limits = heat_guard_limits();
         static AThermalManager* thermal = AThermal_acquireManager();
@@ -139,7 +140,7 @@ void adapt_60(int64_t now) {
         heat_guard::Temperatures temps;
         if (heat_guard::checks_temperatures(device) && heat_guard::next_paused(hot, headroom, limits))
             temps = heat_guard_temperatures();
-        const bool next = heat_guard::next_paused(hot, headroom, limits, device, temps);
+        const bool next = heatState.update(headroom, limits, device, temps, now / 1000000);
         static bool loggedCool = false;
         if (!next && !hot && heat_guard::next_paused(hot, headroom, limits)) {
             if (!loggedCool)
