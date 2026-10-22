@@ -43,6 +43,9 @@ void emit(Op op, const uint32_t* words, uint32_t count) {
 }
 }
 namespace mods::cemu { float aspect_ratio() { return 0; } }
+extern "C" void f_025A847C_orig(Cpu*) {}
+extern "C" void f_02704D2C_orig(Cpu*) {}
+extern "C" void f_0282D9C0_orig(Cpu*) {}
 extern "C" void f_02874038_orig(Cpu*) {}
 extern "C" void f_02877100_orig(Cpu*) {}
 extern "C" void f_028F8250_orig(Cpu*) {}

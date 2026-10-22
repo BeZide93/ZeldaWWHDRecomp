@@ -289,3 +289,8 @@
 
 023F22FC  # daPy_lk_c::setDemoData: event commands only on full steps (may replace model heaps)
 027C93A8  # shadow cascade setup (worker): the step's exact camera on passes before a logic pass (interp.cpp)
+
+# Shared HUD particle coordinate capture and per-emitter drawing projection (aspect.cpp).
+02704D2C # hdPaneUtil::getGlobalTranslation: remember the source pane without changing guest coordinates
+0282D9C0 # JPA draw: live pane anchor and TV 2D aspect projection; world and DRC untouched
+025A847C # dPa shared emitter factory: bind captured pane anchors and reset pooled emitters

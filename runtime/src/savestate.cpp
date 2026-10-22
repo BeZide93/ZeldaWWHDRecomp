@@ -54,6 +54,7 @@
 // runtime allocations) and guest memory (MEM2, runtime objects, fixed slots, foreground bucket,
 // MEM1; all-zero 64 KiB chunks are left out).
 #include "savestate.h"
+#include "aspect.h"
 #include "savestate_native_gate.h"
 #include "mods/story_native_restore_resume.h"
 // The issuer exists only in the actual full-load pipeline, never a caller
@@ -151,6 +152,7 @@ enum : uint32_t {
     kSecDispatch = 'DSPT',
     kSecMemory = 'MEM ',
     kSecGuestMods = 'GMOD',
+    kSecAspectParticles = 'APAR',
 };
 
 using Region=MemoryRegion;
@@ -584,6 +586,8 @@ bool do_save_fast(int slot, const std::string& destination, std::function<void(b
     put_section(*payload, kSecDispatch, w);
     w=Writer();guestmods::save_mod_set(w,guestmods::enabled_mods());
     put_section(*payload,kSecGuestMods,w);
+    w=Writer();aspect::ss_save_particles(w);
+    put_section(*payload,kSecAspectParticles,w);
     // memory last, written straight into the payload
     payload->u32(kSecMemory);
     size_t len_at = payload->b.size();
@@ -703,6 +707,8 @@ bool do_save_streaming(int slot, const std::string& destination, std::function<v
     put_section(*payload, kSecDispatch, w);
     w=Writer();guestmods::save_mod_set(w,guestmods::enabled_mods());
     put_section(*payload,kSecGuestMods,w);
+    w=Writer();aspect::ss_save_particles(w);
+    put_section(*payload,kSecAspectParticles,w);
     Header h{};
     memcpy(h.magic, kMagic, 8);
     h.version = kVersion;
@@ -765,7 +771,8 @@ bool do_load(const std::shared_ptr<Snapshot>& s) {
     std::string busy, why;
     // Structural checks precede targets: that helper changes thread wait state.
     try {
-        if(!gx2_ss_validate(s->section(kSecGx2),why) || !mem_ss_validate(s->section(kSecHeaps),why) ||
+        if(!aspect::ss_validate_particles(s->section(kSecAspectParticles)) ||
+           !gx2_ss_validate(s->section(kSecGx2),why) || !mem_ss_validate(s->section(kSecHeaps),why) ||
            !threads_ss_validate(s->section(kSecThreads),why)) {
             message("%s: invalid state metadata",slot_label(s->slot).c_str());return refused("invalid state metadata");
         }
@@ -832,6 +839,7 @@ bool do_load(const std::shared_ptr<Snapshot>& s) {
     gx2_ss_load(r);
     guestmods::state_loaded();
     interp::ss_reset();
+    aspect::ss_load_particles(s->section(kSecAspectParticles));
     aspect::ss_reset();
     button_glyphs::ss_reset();
     rumble::reset();     // an effect running before the load is not the restored game's

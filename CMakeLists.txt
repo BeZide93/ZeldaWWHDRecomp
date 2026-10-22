@@ -1813,6 +1813,11 @@ target_compile_options(android_display_rate_test PRIVATE -UNDEBUG)
 add_test(NAME android_display_rate COMMAND android_display_rate_test)
 
 add_executable(aspect_panes_test runtime/tools/aspect_panes_test.cpp)
+add_executable(aspect_particles_test runtime/tools/aspect_particles_test.cpp runtime/src/aspect.cpp runtime/src/guest_addr_identity.c)
+target_include_directories(aspect_particles_test PRIVATE runtime/src runtime/include)
+target_compile_options(aspect_particles_test PRIVATE -UNDEBUG)
+add_test(NAME aspect_particles COMMAND aspect_particles_test)
+
 add_executable(gameplay_fov_test runtime/tools/gameplay_fov_test.cpp runtime/src/aspect.cpp runtime/src/guest_addr_identity.c)
 target_include_directories(gameplay_fov_test PRIVATE runtime/src runtime/include)
 target_compile_options(gameplay_fov_test PRIVATE -UNDEBUG)
