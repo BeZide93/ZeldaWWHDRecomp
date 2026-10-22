@@ -39,21 +39,27 @@ Run fade_in(int frames) {
 
 // the display fader's per-frame update (child 13): count up to the duration, alpha from the count
 void fader_child(Fader& f) {
-    if (f.w[0] == 0) return;
+    if (f.w[0] != 2 && f.w[0] != 3) return;  // idle (0, 1): nothing counts
     const uint32_t dur = f.w[1] >> 16, n = (f.w[1] & 0xFFFF) + 1;
     f.w[1] = (dur << 16) | n;
     f.w[2] = n * 255 / dur;
     if (n >= dur) f.w[0] = 0;
 }
-// a stage fade (26 frames at 30 fps) drawn with `frames` frames per step: steps until done, alphas shown
-Run fader_run(int frames) {
+// a stage fade (26 frames at 30 fps) drawn with `frames` frames per step: steps until done, alphas shown.
+// `poke`: the game stores 255 into the alpha before the child, 1: on the logic pass (the title screen's
+// exit), 2: on every pass (scene changes) (#273); the fader idles at alpha 255 before the fade starts
+Run fader_run(int frames, int poke = 0) {
     FaderGate g;
     Fader f;
-    f.w[0] = 3;
+    f.w[0] = 1;
+    f.w[2] = poke ? 255 : 0;
+    if (frames > 1) fader_call(g, 0, true, 1.0f / frames, f, fader_child);  // idle before the fade
+    f.w[0] = 3;  // the game starts the fade-out
     f.w[1] = 26u << 16;
     Run r{-1, {}};
     for (uint64_t step = 1; step < 100 && r.steps_to_end < 0; step++)
         for (int k = 1; k <= frames; k++) {
+            if (f.w[0] && (poke == 2 || (poke == 1 && k == 1))) f.w[2] = 255;  // the game, before the child
             if (frames == 1) fader_child(f);
             else fader_call(g, step, k == 1, (float)k / frames, f, fader_child);
             r.shown.push_back((float)f.w[2]);
@@ -92,7 +98,35 @@ int main() {
         assert(a30.steps_to_end == 26);
         assert(a60.steps_to_end == 26 && a120.steps_to_end == 26 && a240.steps_to_end == 26);
         for (size_t i = 0; i < a30.shown.size(); i++) assert(a120.shown[4 * i + 3] == a30.shown[i]);
-        for (size_t i = 1; i < a120.shown.size(); i++) assert(a120.shown[i] > a120.shown[i - 1]);
+        // (the step that starts the fade shows its alpha exactly; from then on a new alpha every frame)
+        for (size_t i = 1; i < a120.shown.size(); i++) assert(a120.shown[i] > a120.shown[i - 1] || (i < 4 && a120.shown[i] == a120.shown[i - 1]));
+        // #273: the game stores 255 into the alpha before the child on every step: the fade looks the
+        // same (it used to blend from 255: every logic pass far darker than the pass after it)
+        // (written on every pass, the hold passes advanced the fade a second time: twice as fast)
+        for (int poke : {1, 2}) {
+            for (int n : {2, 3, 4, 8}) {
+                const Run p = fader_run(n, poke), q = fader_run(n);
+                assert(p.steps_to_end == 26 && p.shown == q.shown);
+                for (size_t i = 1; i < p.shown.size(); i++) assert(p.shown[i] >= p.shown[i - 1]);
+            }
+            const Run p30 = fader_run(1, poke);
+            assert(p30.shown == a30.shown);
+        }
+        // an alpha the game writes while the fader idles is kept (the child does not set it then)
+        {
+            FaderGate g;
+            Fader f;
+            f.w[0] = 1;
+            fader_call(g, 1, true, 0.5f, f, fader_child);
+            fader_call(g, 1, false, 1.0f, f, fader_child);
+            f.w[2] = 255;  // the next step's logic
+            fader_call(g, 2, true, 0.5f, f, fader_child);
+            assert(f.w[0] == 1 && f.w[2] == 255);
+            fader_call(g, 2, false, 1.0f, f, fader_child);
+            assert(f.w[0] == 1 && f.w[2] == 255);
+            fader_call(g, 3, true, 0.5f, f, fader_child);
+            assert(f.w[2] == 255);
+        }
         // ungated (the child on every pass), as before: 4 times as fast
         Fader f;
         f.w[0] = 3;

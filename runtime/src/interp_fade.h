@@ -49,11 +49,18 @@ void call(Gate& g, uint64_t step, float frac, State& s, Orig&& orig) {
 
 // The HD display's fader (the stage fades: dOvlpFd_startFadeInHD 02728CB8 starts it, 26 frames)
 // is advanced by the per-frame function's child 13 (02728A74), which runs on every drawn pass:
-// +0 state (0 idle, 2/3 fading), +4 duration << 16 | frame counter, +8 alpha (0..255, read when the
-// fader layer is painted). Gated the same way: the child advances it on the logic pass only (on the
-// other passes its advance is taken back), and every pass shows the alpha at its fraction between
-// the step's start and its end. A fader the game starts or changes between two passes (its logic
-// runs before the child on the logic pass) is taken as it is.
+// +0 state (0/1 idle, 2/3 fading), +4 duration << 16 | frame counter, +8 alpha (0..255, read when the
+// fader layer is painted; while the fade counts, the child sets it from the counter). Gated the same
+// way: the child advances it on the logic pass only (on the other passes its advance is taken back),
+// and while the fade counts on, every pass shows the alpha at its fraction between the alpha shown at
+// the end of the previous step and the step's own.
+// While the fader counts, the game stores 255 into its alpha between the passes (the title screen's
+// exit before the child on every step, scene changes on every pass); the child overwrites it, so 30
+// fps never shows it. Such a write is no change of the fade (#273: the gate took it for a new fade:
+// it blended from 255, so every logic pass was far darker than the pass after it, and where the write
+// came on every pass, the hold passes advanced the fade a second time). A fade the game starts or
+// changes (state or counter written) is taken as it is and shown exactly for its first step; while
+// the fader idles, an alpha the game writes is kept.
 struct Fader {
     uint32_t w[3] = {0, 0, 0};  // state, duration/counter, alpha
     bool operator==(const Fader& o) const { return w[0] == o.w[0] && w[1] == o.w[1] && w[2] == o.w[2]; }
@@ -62,24 +69,35 @@ struct FaderGate {
     uint64_t step = ~0ull;
     Fader before, after, shown;
     bool have = false;
+    bool counting = false;  // the step's advance moved the counter (the alpha is the child's, from the counter)
+    bool blend = false;     // the step's alpha is shown blended (the fade counts on from the previous step)
 };
 // One run of the child on a pass at fraction `frac` of logic step `step` (`logic`: the step's logic
 // pass). `f` is the guest fader; child(f) runs the child on it. Leaves the shown state in f.
 template <class Child>
 void fader_call(FaderGate& g, uint64_t step, bool logic, float frac, Fader& f, Child&& child) {
-    if (g.have && f == g.shown) f = g.after;  // the step's exact state (nothing changed it since)
-    if (logic || g.step != step || !(f == g.after)) {
+    // the same fade as `o`: state and counter (and the alpha, unless the child sets it from the counter)
+    auto same = [&](const Fader& o) { return f.w[0] == o.w[0] && f.w[1] == o.w[1] && (g.counting || f.w[2] == o.w[2]); };
+    if (g.have && same(g.shown)) f = g.after;  // the step's exact state (nothing changed the fade since)
+    if (logic || g.step != step || !same(g.after)) {
+        // the fade continues from where the previous step left it
+        const bool cont = g.have && f.w[0] == g.after.w[0] && f.w[1] == g.after.w[1];
+        const uint32_t prev_alpha = g.after.w[2];
         g.before = f;
         child(f);
         g.after = f;
         g.step = step;
         g.have = true;
+        g.counting = g.after.w[1] != g.before.w[1];
+        g.blend = cont && g.counting;
+        if (g.blend) g.before.w[2] = prev_alpha;
     } else {
+        f = g.after;  // (an alpha written since: the child's own value)
         child(f);     // (the child's other work)
         f = g.after;  // its advance taken back: once per step
     }
     g.shown = g.after;
-    if (frac < 1.0f && (g.before.w[0] != 0 || g.after.w[0] != 0)) {
+    if (frac < 1.0f && g.blend) {
         const float a = (1.0f - frac) * (float)g.before.w[2] + frac * (float)g.after.w[2];
         g.shown.w[2] = (uint32_t)(a + 0.5f);
     }
