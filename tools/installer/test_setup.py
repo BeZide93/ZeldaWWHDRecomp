@@ -982,7 +982,7 @@ class ModelSweepOption(unittest.TestCase):
             self.assertFalse(setup.model_sweep_wanted(self.ctx(skip_shader_prebuild=True), ui))
             ui.yesno.assert_not_called()
         self.assertIn("Experimental", setup.MODEL_SWEEP_TEXT)
-        self.assertIn("6 minutes", setup.MODEL_SWEEP_TEXT)
+        self.assertIn("10 minutes", setup.MODEL_SWEEP_TEXT)
 
     def test_flag_window_choice_and_environment_override(self):
         ui = mock.Mock(interactive=True)

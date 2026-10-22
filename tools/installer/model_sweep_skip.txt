@@ -5,8 +5,10 @@ BFlower
 BigElf
 Bj8
 Blift
+BLK_CR
 Bm1
 Bm2
+Bm3
 Bst
 CmTrap
 door10
@@ -17,6 +19,7 @@ Ecube
 Fmastr1
 Gflag
 Hdai3
+Humi5z
 ikada_h
 ikada_u
 keyshut
