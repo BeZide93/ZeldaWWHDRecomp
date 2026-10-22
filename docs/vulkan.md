@@ -373,8 +373,7 @@ question of the text setup, or `--model-sweep`); setup remembers the choice, so 
 carries out Rebuild shader cache) runs it again. It runs for each prepared renderer (on macOS Metal and
 Vulkan at the same time, on one bar): the game starts hidden and muted from its title screen (no save is
 needed or touched), loads every object archive and every stage's rooms named in your game files and
-draws each of their models once, shows the title's sea and sky at other times of day and in a storm, creates every particle
-effect once,
+draws each of their models once, shows the title's sea and sky at other times of day and in a storm,
 shows every actor the rooms place for a few frames (made by the game, drawn, never running its logic,
 then removed) and the grass they plant with and without its wind animation, enters every stage at its first
 room and shows it under its own lighting, fog and sky (the game's own stage change, as starting a game does), and

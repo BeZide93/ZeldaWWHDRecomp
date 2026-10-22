@@ -118,7 +118,7 @@ class ModelSweepTests(unittest.TestCase):
         self.assertEqual(self.run_sweep(game), 'done')
         listed = Path(game.calls[0][1]['WWHD_DSWEEP_STAGES']).read_text().splitlines()
         self.assertEqual(listed, ['A_mori Stage Room0', 'Name Stage', 'sea Stage Room1 Room10 LOD03 LODALL'])
-        for key in ('WWHD_DSWEEP_ENV', 'WWHD_DSWEEP_PARTICLES', 'WWHD_DSWEEP_ACTORS', 'WWHD_DSWEEP_FILE_SELECT'):
+        for key in ('WWHD_DSWEEP_ENV', 'WWHD_DSWEEP_ACTORS', 'WWHD_DSWEEP_FILE_SELECT'):
             self.assertEqual(game.calls[0][1][key], '1')
         # stage visits (on unless WWHD_SETUP_MODEL_SWEEP_VISITS=0): each stage with rooms at its first room
         self.assertEqual(Path(game.calls[0][1]['WWHD_DSWEEP_VISIT']).read_text().splitlines(), ['A_mori 0', 'sea 1'])
