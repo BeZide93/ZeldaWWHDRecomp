@@ -1076,6 +1076,10 @@ static void apply_scenario(PadState& s) {
         }
 #endif
         process_peak_rss::write_endpoint(render::frame_count());
+        // The headless harness stops the process as soon as it sees test_done.
+        // Publish complete trace records before that marker, rather than losing
+        // buffered Link/camera records or leaving a partial final line.
+        fflush(nullptr);
         if (FILE* f = fopen("test_done", "w")) fclose(f);
     }
     true60_test::tick(t, sc.end > 0 && t >= sc.end);
