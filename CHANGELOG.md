@@ -35,6 +35,9 @@ what is on `devel` and not released yet (also in the
 - **Fixed: some effects were drawn in the wrong place at aspect ratios other than 16:9** (#275): the elemental arrow
   glow and rupee sparkles now sit where they belong at every aspect ratio, also after switching it while playing or
   loading a save state.
+- **Fixed: a possible crash at 40 and 120 fps when the scene changes** (a door, warp or loading zone while the camera
+  moves), in development builds since the frame interpolation logic changes. Also: archive loads and the camera now
+  follow the game's steps exactly at every frame rate, so scene changes and distant islands play the same as at 30 fps.
 - **New setting: Shader compile** (Settings → Graphics). **Off** (the default) draws everything exactly and waits for
   shaders that aren't ready yet, as before. **Fast** keeps playing while new shaders compile and may leave out a few
   objects for a frame or two, for fewer stutters on first visits.
