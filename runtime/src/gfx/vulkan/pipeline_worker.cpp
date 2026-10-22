@@ -113,16 +113,27 @@ bool group_resident(const Worker& w, const PipelineRecipe& recipe) {
   for (auto group : recipe.groups) if (w.resident.contains(group)) return true;
   return false;
 }
-// Full: the entry least likely to be drawn soon goes first, one whose archives are all unloaded, else the oldest.
+// Compiling ahead stops while the ready pipelines fill the limit with ones compiled at start (ungrouped: the boot's,
+// the title's and the other generic ones, needed anywhere): it never pushes those out.
+bool room_for_prefetch(const Worker& w) {
+  if (w.ready.size() + 64 < maxUnusedWarmPipelines) return true;
+  for (const auto& [key, entry] : w.ready)
+    if (!entry.recipe->groups.empty()) return true;
+  return false;
+}
+// Full: the entry least likely to be drawn soon goes first: one whose archives are all unloaded, else the oldest
+// compiled ahead for an archive (the newest load is drawn next), else the oldest.
 void retain_ready(Worker& w, const std::string& key, WarmPipeline handles,
                   const std::shared_ptr<PipelineRecipe>& recipe) {
   if(w.ready.size() >= maxUnusedWarmPipelines) {
     auto victim=w.ready.end();
+    // rank: 2 = only unloaded archives, 1 = grouped, 0 = ungrouped (compiled at start)
+    auto rank=[&](const Ready& r){ return r.recipe->groups.empty() ? 0 : group_resident(w,*r.recipe) ? 1 : 2; };
+    int victimRank=-1;
     for (auto it=w.ready.begin();it!=w.ready.end();++it) {
-      const bool unloaded=!it->second.recipe->groups.empty() && !group_resident(w,*it->second.recipe);
-      if (victim==w.ready.end()) { victim=it; continue; }
-      const bool victimUnloaded=!victim->second.recipe->groups.empty() && !group_resident(w,*victim->second.recipe);
-      if ((unloaded && !victimUnloaded) || (unloaded==victimUnloaded && it->second.sequence<victim->second.sequence)) victim=it;
+      const int itRank=rank(it->second);
+      if (victim==w.ready.end() || itRank>victimRank || (itRank==victimRank && it->second.sequence<victim->second.sequence))
+        victim=it, victimRank=itRank;
     }
     destroy(w.device,victim->second.handles); w.ready.erase(victim);
   }
@@ -399,7 +410,7 @@ void run(Worker& w, std::vector<uint8_t> seed) {
               w.prefetch.insert(w.prefetch.begin(), fresh.begin(), fresh.end());
               w.workWake.notify_all();
             }
-            while (!w.prefetch.empty() && !recipe) {
+            while (!w.prefetch.empty() && !recipe && room_for_prefetch(w)) {
               auto key = std::move(w.prefetch.front()); w.prefetch.pop_front();
               auto found = w.recipes.find(key);
               if (found == w.recipes.end() || w.consumed.contains(key) || w.ready.contains(key) ||

@@ -6,6 +6,7 @@ BigElf
 Bj8
 Blift
 Bm1
+Bm2
 Bst
 CmTrap
 door10

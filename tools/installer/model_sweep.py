@@ -26,6 +26,8 @@ STAGE_ARCHIVE = re.compile(r'^(.+)_(Stage|Room\d+|LOD\d+|LODALL)$')
 MAX_ATTEMPTS = 40          # attempts in a row that finish no archive or actor (each skips what it stopped at)
 MAX_ATTEMPTS_TOTAL = 1000  # attempts in all (actors that stop the game: a few seconds each)
 DEFAULT_SKIP = Path(__file__).with_name('model_sweep_skip.txt')
+# models drawn per batch (two frames each); WWHD_SETUP_MODEL_SWEEP_BATCH=n for measurements only
+MODELS_PER_BATCH = max(1, min(8, int(os.environ.get('WWHD_SETUP_MODEL_SWEEP_BATCH', '1') or 1)))
 STALL_SECONDS = 60         # no new line in progress.txt for this long: the attempt counts as a crash (a model, room or
                            # actor takes well under a second; a stuck game writes nothing more)
 
@@ -139,7 +141,8 @@ def environment(base, game, cache_env, renderer, state, archives, scratch, stage
                WWHD_NO_HOST_INPUT='1', WWHD_NO_GAMEPAD='1', WWHD_LAST_SESSION='0',
                WWHD_SETTINGS=str(scratch / 'settings.ini'), WWHD_DISPLAY_SETTINGS=str(scratch / 'display.plist'),
                WWHD_CONTROLS=str(scratch / 'controls.json'), WWHD_STATE_DIR=str(scratch / 'states'),
-               WWHD_DSWEEP='title,3,2', WWHD_DSWEEP_ARCHIVES=str(archives), WWHD_DSWEEP_STATE=str(state),
+               WWHD_DSWEEP='title,%d,2' % MODELS_PER_BATCH, WWHD_DSWEEP_ARCHIVES=str(archives),
+               WWHD_DSWEEP_STATE=str(state),
                WWHD_DSWEEP_EXIT='1',
                # no frame limit: the game runs as fast as it can draw (faster than real time; nobody watches)
                WWHD_UNCAPPED='1')
