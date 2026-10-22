@@ -41,6 +41,10 @@ what is on `devel` and not released yet (also in the
 - **Fixed: the mouse camera's up/down was inverted in some interiors** (#274), for example Grandma's house and the
   Pictograph shop. Mouse and right stick now look up and down the same way everywhere, with and without "Invert camera
   up/down".
+- **World editor: custom items** (#269, #270, for mod makers): opening a chest with a custom item no longer crashes,
+  and the item's own icon is held up over Link's head. New items and icon changes now work while the game runs (a chest
+  with a new item appears at once); changes that still need a restart are marked "Takes effect after a restart", and
+  "Restart and return here" restarts the game and brings you back to the same spot.
 - **New setting: Shader compile** (Settings → Graphics). **Off** (the default) draws everything exactly and waits for
   shaders that aren't ready yet, as before. **Fast** keeps playing while new shaders compile and may leave out a few
   objects for a frame or two, for fewer stutters on first visits.
