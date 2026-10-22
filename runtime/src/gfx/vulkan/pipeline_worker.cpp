@@ -57,6 +57,10 @@ struct Worker {
   std::atomic<bool> cacheChanged{false};
   std::unordered_map<std::string, Ready> ready;
   std::unordered_map<std::string, std::shared_ptr<PipelineRecipe>> recipes;
+  // first-seen order of the recipes (loaded ones in file order): snapshots keep it, so the next start warms them in
+  // the order the game first needed them (boot and title first)
+  std::unordered_map<std::string, uint64_t> order;
+  uint64_t nextOrder = 0;
   std::unordered_set<std::string> consumed;
   size_t recipeBytes = 0;
   RecipeShaderPool shaderPool;
@@ -152,6 +156,7 @@ bool insert_recipe(Worker& w, const std::shared_ptr<PipelineRecipe>& recipe) {
   w.shaderPool.freeze(*recipe);
   w.recipeBytes += size - old + (w.shaderPool.packedBytes - packed);
   index_groups(w, key, *recipe);
+  w.order.try_emplace(key, w.nextOrder++);
   w.recipes.insert_or_assign(std::move(key), recipe);
   return true;
 }
@@ -171,8 +176,15 @@ void persist_snapshot(Worker& w) {
     std::lock_guard lock(w.mutex);
     if (!w.revision.dirty()) return;
     revision = w.revision.current;
-    snapshot.reserve(w.recipes.size());
-    for (auto& [key, recipe] : w.recipes) snapshot.push_back(recipe);
+    std::vector<std::pair<uint64_t, std::shared_ptr<PipelineRecipe>>> ordered;
+    ordered.reserve(w.recipes.size());
+    for (auto& [key, recipe] : w.recipes) {
+      auto at = w.order.find(key);
+      ordered.emplace_back(at == w.order.end() ? UINT64_MAX : at->second, recipe);
+    }
+    std::sort(ordered.begin(), ordered.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
+    snapshot.reserve(ordered.size());
+    for (auto& entry : ordered) snapshot.push_back(std::move(entry.second));
   }
   try {
     auto bytes = encode_local_pipeline_recipes(w.fingerprint, snapshot);

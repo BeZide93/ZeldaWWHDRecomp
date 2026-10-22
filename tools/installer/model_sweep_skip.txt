@@ -1,11 +1,13 @@
 # Names the model sweep leaves out from the start (names only): actors that stop the game when made outside their
 # room (doors, shutters and others that need their room's data), and archives the title cannot load. Anything else
 # that stops the game is found and skipped by the sweep itself (shader-prebuild/model-sweep/<renderer>/skip.txt).
+BFlower
 BigElf
 Bj8
 Blift
 Bm1
 Bst
+CmTrap
 door10
 door20
 doorKD
@@ -19,6 +21,7 @@ ikada_u
 keyshut
 Kkiba
 Klft
+Ko1
 magma
 Mmrr
 Oship

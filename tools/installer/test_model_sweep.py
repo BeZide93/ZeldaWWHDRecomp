@@ -126,7 +126,7 @@ class ModelSweepTests(unittest.TestCase):
         command, env = game.calls[0]
         self.assertEqual(command[1:3], ['--game', str(self.game)])
         for key, value in (('WWHD_NO_AUDIO', '1'), ('WWHD_HIDDEN_WINDOWS', '1'), ('WWHD_NO_HOST_INPUT', '1'),
-                           ('WWHD_DSWEEP', 'title,1,2'), ('WWHD_DSWEEP_EXIT', '1'), ('WWHD_RENDERER_RUNTIME', 'vulkan'),
+                           ('WWHD_DSWEEP', 'title,3,2'), ('WWHD_DSWEEP_EXIT', '1'), ('WWHD_RENDERER_RUNTIME', 'vulkan'),
                            ('WWHD_SHADER_CACHE', 'live/shaders.bin'), ('WWHD_UNCAPPED', '1')):
             self.assertEqual(env[key], value)
         self.assertEqual(env['WWHD_HEADSTART'], '0')

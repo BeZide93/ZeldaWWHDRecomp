@@ -220,9 +220,9 @@ namespace gfxvk { int64_t pipeline_recipes_durable_ns(); }
 namespace dsweep {
 namespace {
 #endif
-// Work is marked done ("...-done" lines) only once the pipelines it recorded are on disk: Vulkan saves its recipes
-// in snapshots (pipeline_recipes_durable_ns); Metal appends each one at once. A sweep that stops the game redoes
-// what was not saved yet instead of losing it.
+// Archives (and environment states) are marked done ("...-done" lines) only once the pipelines they recorded are
+// on disk: Vulkan saves its recipes in snapshots (pipeline_recipes_durable_ns); Metal appends each one at once. A
+// sweep that stops the game redoes what was not saved yet instead of losing it.
 std::vector<std::pair<int64_t, std::string>> g_pending_done;
 void write_progress(const std::string& line);
 void flush_done(bool all) {
@@ -239,7 +239,9 @@ void flush_done(bool all) {
 }
 void progress(const std::string& line) {
     if (g.state_dir.empty()) return;
-    if (line.find("-done ") != std::string::npos && line.find("-done ") < 12) {
+    // (actors: at once. An actor can leave something behind that stops the game a little later; redone after a
+    // restart it would stop it again and an innocent actor after it would be skipped each time)
+    if (line.find("-done ") != std::string::npos && line.find("-done ") < 12 && line.rfind("actor-done ", 0) != 0) {
         g_pending_done.emplace_back(now_ns(), line);
         return flush_done(false);
     }

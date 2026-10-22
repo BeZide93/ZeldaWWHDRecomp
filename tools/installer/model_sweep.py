@@ -139,7 +139,7 @@ def environment(base, game, cache_env, renderer, state, archives, scratch, stage
                WWHD_NO_HOST_INPUT='1', WWHD_NO_GAMEPAD='1', WWHD_LAST_SESSION='0',
                WWHD_SETTINGS=str(scratch / 'settings.ini'), WWHD_DISPLAY_SETTINGS=str(scratch / 'display.plist'),
                WWHD_CONTROLS=str(scratch / 'controls.json'), WWHD_STATE_DIR=str(scratch / 'states'),
-               WWHD_DSWEEP='title,1,2', WWHD_DSWEEP_ARCHIVES=str(archives), WWHD_DSWEEP_STATE=str(state),
+               WWHD_DSWEEP='title,3,2', WWHD_DSWEEP_ARCHIVES=str(archives), WWHD_DSWEEP_STATE=str(state),
                WWHD_DSWEEP_EXIT='1',
                # no frame limit: the game runs as fast as it can draw (faster than real time; nobody watches)
                WWHD_UNCAPPED='1')
