@@ -130,7 +130,8 @@ static void layout_panes_and_material() {
 }
 
 static void enlarging() {
-    // a constant colour stays constant, the size grows; a transparent texel's colour does not bleed
+    // a constant colour stays constant (the sharpening leaves flat areas alone), the size grows; a transparent
+    // texel's colour does not bleed
     game_layouts::Image flat{4, 3, Bytes(4 * 3 * 4, 0), true};
     for (size_t i = 0; i < flat.rgba.size(); i += 4) flat.rgba[i] = 200, flat.rgba[i + 1] = 100, flat.rgba[i + 2] = 50, flat.rgba[i + 3] = 255;
     const game_layouts::Image big = game_layouts::upscale(flat, 3);

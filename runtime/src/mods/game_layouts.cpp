@@ -301,16 +301,49 @@ Image upscale(const Image& in, uint32_t factor) {
     };
     const std::vector<float> wide = pass(src, in.width, in.height, true);
     const std::vector<float> full = pass(wide, w, in.height, false);
+    // straight colour again, then sharpened as an enlargement needs: an unsharp mask on the colour (blur:
+    // two box passes of the factor's radius, amount 1.2) and a steeper alpha ramp (x1.8 about one half) for
+    // crisp outlines, as the soft source edges would otherwise stay blurred at the larger size
+    std::vector<float> rgb(size_t(w) * h * 3), alpha(size_t(w) * h);
+    for (size_t p = 0; p < alpha.size(); p++) {
+        const float a = std::clamp(full[p * 4 + 3], 0.0f, 1.0f);
+        alpha[p] = a;
+        for (int c = 0; c < 3; c++) rgb[p * 3 + c] = a > 1e-4f ? std::clamp(full[p * 4 + c] / a, 0.0f, 1.0f) : 0.0f;
+    }
+    // the blur is alpha-weighted (premultiplied colour and alpha blurred, then divided), so invisible
+    // texels never pull the colour at an outline
+    std::vector<float> blur(size_t(w) * h * 4), tmp(blur.size());
+    for (size_t p = 0; p < alpha.size(); p++) {
+        for (int c = 0; c < 3; c++) blur[p * 4 + c] = rgb[p * 3 + c] * alpha[p];
+        blur[p * 4 + 3] = alpha[p];
+    }
+    const int r = int(factor);
+    for (int round = 0; round < 2; round++) {
+        for (uint32_t y = 0; y < h; y++)
+            for (uint32_t x = 0; x < w; x++)
+                for (int c = 0; c < 4; c++) {
+                    float sum = 0;
+                    for (int k = -r; k <= r; k++) sum += blur[(size_t(y) * w + uint32_t(std::clamp(int(x) + k, 0, int(w) - 1))) * 4 + c];
+                    tmp[(size_t(y) * w + x) * 4 + c] = sum / float(2 * r + 1);
+                }
+        for (uint32_t y = 0; y < h; y++)
+            for (uint32_t x = 0; x < w; x++)
+                for (int c = 0; c < 4; c++) {
+                    float sum = 0;
+                    for (int k = -r; k <= r; k++) sum += tmp[(size_t(std::clamp(int(y) + k, 0, int(h) - 1)) * w + x) * 4 + c];
+                    blur[(size_t(y) * w + x) * 4 + c] = sum / float(2 * r + 1);
+                }
+    }
     Image out;
     out.width = w, out.height = h, out.srgb = in.srgb;
     out.rgba.resize(size_t(w) * h * 4);
-    for (size_t i = 0; i < out.rgba.size(); i += 4) {
-        const float a = std::clamp(full[i + 3], 0.0f, 1.0f);
+    for (size_t p = 0; p < alpha.size(); p++) {
         for (int c = 0; c < 3; c++) {
-            const float v = a > 1e-4f ? full[i + c] / a : 0.0f;
-            out.rgba[i + c] = uint8_t(std::lround(std::clamp(v, 0.0f, 1.0f) * 255.0f));
+            const float b = blur[p * 4 + 3] > 1e-4f ? blur[p * 4 + c] / blur[p * 4 + 3] : rgb[p * 3 + c];
+            const float v = rgb[p * 3 + c] + 1.2f * (rgb[p * 3 + c] - b);
+            out.rgba[p * 4 + c] = uint8_t(std::lround(std::clamp(v, 0.0f, 1.0f) * 255.0f));
         }
-        out.rgba[i + 3] = uint8_t(std::lround(a * 255.0f));
+        out.rgba[p * 4 + 3] = uint8_t(std::lround(std::clamp((alpha[p] - 0.5f) * 1.8f + 0.5f, 0.0f, 1.0f) * 255.0f));
     }
     return out;
 }

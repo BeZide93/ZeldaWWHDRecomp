@@ -346,7 +346,8 @@ player's installed 2D pack, in the language the game uses, while the game runs:
   (`"BtnMapBalloon_00/r2c_b^t#P_DummyMapBig_00"`) to colour it with that material's black and white
   colours, the way the game draws it. End the name with `@2`, `@3` or `@4`
   (`"BtnMapBalloon_00/r2c_b^t#P_DummyMapBig_00@3"`) to get the picture enlarged that many times with
-  Lanczos-3 resampling (premultiplied alpha), sharper than the HUD's own scaling when small art is drawn
+  Lanczos-3 resampling (premultiplied alpha) and sharpened (an alpha-weighted unsharp mask on the colour,
+  a steeper alpha ramp at outlines), crisper than the HUD's own scaling when small soft art is drawn
   large. Images count towards the usual per-mod limits; release them as usual.
 - `wwhd_game_pane_get("layout-pane:<Layout>/<pane>", &pane)` reads a pane of such a layout. It gives
   the centre and size in the layout's root coordinates, with +y up and the parents' translation and
