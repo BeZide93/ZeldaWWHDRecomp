@@ -2250,6 +2250,10 @@ extern "C" void hook_02728A74(Cpu* c) {
         f_02728A74_orig(c);
         return;
     }
+    // (the start delay, +0x448 of the fader manager, counts down once per logic step too)
+    static const bool wipe_off = getenv("WWHD_INTERP_WIPE_FADE") && !atoi(getenv("WWHD_INTERP_WIPE_FADE"));
+    const uint32_t mgr = ld32(GD(0x101F86B4));
+    const uint32_t delay = ld32(mgr + 0x448);
     static interp::fade::FaderGate gate;
     interp::fade::Fader v;
     for (int i = 0; i < 3; i++) v.w[i] = ld32(f + 4 * i);
@@ -2262,6 +2266,22 @@ extern "C" void hook_02728A74(Cpu* c) {
     put(v);
     for (int i = 0; i < 3; i++)
         if (v.w[i] != gate.after.w[i]) interp::exact_after_pass(f + 4 * i, gate.after.w[i], 4);
+    if (interp::g_hold_frame && !wipe_off) st32(mgr + 0x448, delay);
+    // debug: WWHD_INTERP_FADE_PASSES=n logs n passes' shown fades (the task fader's words, the colour
+    // fade of l_graphics) while a fade is on screen
+    static int passes = getenv("WWHD_INTERP_FADE_PASSES") ? atoi(getenv("WWHD_INTERP_FADE_PASSES")) : 0;
+    if (passes > 0) {
+        const uint32_t g = GD(0x101F4808);
+        const uint32_t col = ld32(g + 0x14);
+        if ((v.w[0] != 0 && v.w[0] != 1) || (v.w[2] & 0xFF) || (col & 0xFF) || ld8(g + 0x1F) || ld8(GD(0x101D616C))) {
+            passes--;
+            const uint32_t w = GD(0x101D6160);
+            LOG("[fadepass] step %llu pass %llu %s t %.3f task %08X %08X %08X delay %u | gph fade %u rate %.4f speed %.4f col %08X | gc on %u rate %.4f speed %.4f",
+                (unsigned long long)interp::g_logic_steps, (unsigned long long)interp::g_passes, interp::g_hold_frame ? "hold " : "logic",
+                interp::pass_t(), v.w[0], v.w[1], v.w[2], ld32(mgr + 0x448), ld8(g + 0x1F), (float)ldf32(g + 8),
+                (float)ldf32(g + 0xC), col, ld8(w + 0xC), (float)ldf32(w), (float)ldf32(w + 4));
+        }
+    }
 }
 extern "C" void hook_02039834(Cpu* c) { FaderWatch fw("child 14"); g_hold_child_cpu = c; if (!hold_skip_child(14)) f_02039834_orig(c); }
 
@@ -2563,6 +2583,68 @@ extern "C" void hook_025F06A8(Cpu* c) {
         trace--;
         LOG("[interp] fade: step %llu pass %llu t %.3f rate %.4f -> %.4f speed %.4f alpha %u", (unsigned long long)g_logic_steps,
             (unsigned long long)g_passes, t, before, s.rate, s.speed, ld8(g + 0x17));
+    }
+}
+// The GameCube fade (0252F5A0, the snapshot fade and the event director's fades; drawn as the HD
+// wipe's texture scale): called from child 13 on every drawn pass, so it ran 2x/4x/8x too fast and
+// the logic waiting for it went on earlier than at 30 fps. Advanced on the logic pass only, shown at
+// the pass's fraction (interp_fade.h rate_call). 101D6160 rate, +4 speed, +C on.
+// debug: WWHD_INTERP_WIPE_FADE=0 turns this gate (and the fader's start delay per step) off
+extern "C" void f_0252F5A0_orig(Cpu* c);
+extern "C" void hook_0252F5A0(Cpu* c) {
+    using namespace interp;
+    static const bool off = getenv("WWHD_INTERP_WIPE_FADE") && !atoi(getenv("WWHD_INTERP_WIPE_FADE"));
+    const uint32_t w = GD(0x101D6160);
+    // test aid: WWHD_TEST_WIPE=step:speed starts this fade at a logic step as 0252F54C does (rate from
+    // the end it starts at, the speed, on), for a check of its time and frames at every frame rate
+    static uint64_t test_step = 0;
+    static float test_speed = 0;
+    static const bool test = getenv("WWHD_TEST_WIPE") && sscanf(getenv("WWHD_TEST_WIPE"), "%llu:%f", (unsigned long long*)&test_step, &test_speed) == 2;
+    if (test && !g_hold_frame && g_logic_steps == test_step) {
+        test_step = 0;
+        stf32(w, test_speed >= 0.0f ? (float)ldf32(GD(0x1004CA34)) : (float)ldf32(GD(0x1004CA30)));
+        stf32(w + 4, test_speed);
+        st8(w + 0xC, 1);
+        LOG("[test] WWHD_TEST_WIPE: the GC fade starts at logic step %llu, speed %.4f (bounds %.4f %.4f)", (unsigned long long)g_logic_steps, test_speed, (float)ldf32(GD(0x1004CA34)), (float)ldf32(GD(0x1004CA30)));
+    }
+    // debug: WWHD_INTERP_WIPE_TRACE=n logs n calls while it is on (step, pass, fraction, rate shown)
+    static int trace = getenv("WWHD_INTERP_WIPE_TRACE") ? atoi(getenv("WWHD_INTERP_WIPE_TRACE")) : 0;
+    struct Trace {
+        int& n;
+        uint32_t w;
+        ~Trace() {
+            if (n > 0 && ld8(w + 0xC)) {
+                n--;
+                LOG("[wipe] step %llu pass %llu %s t %.3f on %u rate %.4f speed %.4f", (unsigned long long)g_logic_steps,
+                    (unsigned long long)g_passes, g_hold_frame ? "hold " : "logic", display_t(), ld8(w + 0xC), (float)ldf32(w),
+                    (float)ldf32(w + 4));
+            }
+        }
+    } tr{trace, w};
+    if (!enabled() || off) {
+        f_0252F5A0_orig(c);
+        return;
+    }
+    static fade::RateGate gate;
+    fade::State s{(float)ldf32(w), (float)ldf32(w + 4), (uint8_t)ld8(w + 0xC)};
+    fade::rate_call(gate, g_logic_steps, !g_hold_frame, display_t(), s, [&](fade::State& v) {
+        stf32(w, v.rate);
+        stf32(w + 4, v.speed);
+        st8(w + 0xC, v.fade);
+        f_0252F5A0_orig(c);
+        v.rate = (float)ldf32(w);
+        v.speed = (float)ldf32(w + 4);
+        v.fade = (uint8_t)ld8(w + 0xC);
+    });
+    stf32(w, s.rate);
+    stf32(w + 4, s.speed);
+    st8(w + 0xC, s.fade);
+    if (!(s == gate.after)) {
+        uint32_t bits;
+        const float r = gate.after.rate;
+        memcpy(&bits, &r, 4);
+        exact_after_pass(w, bits, 4);
+        exact_after_pass(w + 0xC, gate.after.fade, 1);
     }
 }
 // mDoGph_calcMonotone (025F0840, from the environment's execute, once per logic step): its change of

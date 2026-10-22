@@ -37,32 +37,35 @@ Run fade_in(int frames) {
 }
 }  // namespace
 
-// the display fader's per-frame update (child 13): count up to the duration, alpha from the count
+// the display fader's per-frame update (child 13): count up to the duration, alpha (the colour word's
+// low byte) from the count
 void fader_child(Fader& f) {
     if (f.w[0] != 2 && f.w[0] != 3) return;  // idle (0, 1): nothing counts
     const uint32_t dur = f.w[1] >> 16, n = (f.w[1] & 0xFFFF) + 1;
     f.w[1] = (dur << 16) | n;
-    f.w[2] = n * 255 / dur;
+    f.w[2] = (f.w[2] & 0xFFFFFF00u) | (n * 255 / dur);
     if (n >= dur) f.w[0] = 0;
 }
 // a stage fade (26 frames at 30 fps) drawn with `frames` frames per step: steps until done, alphas shown.
 // `poke`: the game stores 255 into the alpha before the child, 1: on the logic pass (the title screen's
 // exit), 2: on every pass (scene changes) (#273); the fader idles at alpha 255 before the fade starts
-Run fader_run(int frames, int poke = 0) {
+// `rgb`: the fade colour (mDoGph_setFadeColor: 0 black, A0A0A0 the white fades of exits); shown: alpha
+Run fader_run(int frames, int poke = 0, uint32_t rgb = 0, std::vector<uint32_t>* words = nullptr) {
     FaderGate g;
     Fader f;
     f.w[0] = 1;
-    f.w[2] = poke ? 255 : 0;
+    f.w[2] = rgb << 8 | (poke ? 255 : 0);
     if (frames > 1) fader_call(g, 0, true, 1.0f / frames, f, fader_child);  // idle before the fade
     f.w[0] = 3;  // the game starts the fade-out
     f.w[1] = 26u << 16;
     Run r{-1, {}};
     for (uint64_t step = 1; step < 100 && r.steps_to_end < 0; step++)
         for (int k = 1; k <= frames; k++) {
-            if (f.w[0] && (poke == 2 || (poke == 1 && k == 1))) f.w[2] = 255;  // the game, before the child
+            if (f.w[0] && (poke == 2 || (poke == 1 && k == 1))) f.w[2] |= 255;  // the game, before the child
             if (frames == 1) fader_child(f);
             else fader_call(g, step, k == 1, (float)k / frames, f, fader_child);
-            r.shown.push_back((float)f.w[2]);
+            r.shown.push_back((float)(f.w[2] & 0xFF));
+            if (words) words->push_back(f.w[2]);
             if (k == frames && f.w[0] == 0 && r.steps_to_end < 0) r.steps_to_end = (int)step;
         }
     return r;
@@ -127,6 +130,19 @@ int main() {
             fader_call(g, 3, true, 0.5f, f, fader_child);
             assert(f.w[2] == 255);
         }
+        // #273: a white fade (colour A0A0A0, exits to the outside) looks like the black one: the same
+        // alphas on every pass, the colour kept (blended as one number, the colour word lost its low
+        // byte: every blended pass showed alpha 0 or 0x100, the fade flickered on and off)
+        for (int poke : {0, 1, 2})
+            for (int n : {1, 2, 3, 4, 8}) {
+                std::vector<uint32_t> words;
+                const Run w = fader_run(n, poke, 0xA0A0A0, &words), b = fader_run(n, poke);
+                assert(w.steps_to_end == 26 && w.shown == b.shown);
+                for (uint32_t x : words) assert(x >> 8 == 0xA0A0A0);
+            }
+        assert(blend_rgba(0xA0A0A009, 0xA0A0A013, 0.5f) == 0xA0A0A00E);
+        assert(blend_rgba(0x000000FF, 0xFFFFFF00, 0.5f) == 0x80808080);
+        assert(blend_rgba(0x12345678, 0x9ABCDEF0, 1.0f) == 0x9ABCDEF0 && blend_rgba(0x12345678, 0x9ABCDEF0, 0.0f) == 0x12345678);
         // ungated (the child on every pass), as before: 4 times as fast
         Fader f;
         f.w[0] = 3;
@@ -161,6 +177,49 @@ int main() {
         call(g, 2, 0.25f, s, calc_fade);
         assert(std::fabs(s.rate - 0.2f) < 1e-6f);                   // the next step advances once
         assert(std::fabs(g_shown - 0.125f) < 1e-6f);
+    }
+    // rate_call: the GameCube fade (0252F5A0: rate += speed, clamped to 0..1, off at the end) advances
+    // once per logic step at every frame rate; the logic of the next step always finds the 30 fps
+    // state; every drawn frame shows a new rate while it moves
+    {
+        auto gc_calc = [](State& s) {
+            if (!s.fade) return;
+            const float r = s.rate + s.speed;
+            if (r < 0.0f) s.rate = 0.0f;
+            else if (r <= 1.0f) s.rate = r;
+            else { s.rate = 1.0f; s.fade = 0; }
+        };
+        auto run = [&](int frames, std::vector<State>& logic_sees, std::vector<float>& shown) {
+            RateGate g;
+            State s{0.0f, 0.0f, 0};
+            for (uint64_t step = 1; step <= 40; step++) {
+                if (step == 3) s = State{0.0f, 0.06f, 1};  // the step's logic starts the fade (0252F54C)
+                logic_sees.push_back(s);
+                for (int k = 1; k <= frames; k++) {
+                    if (frames == 1) gc_calc(s);
+                    else rate_call(g, step, k == 1, (float)k / frames, s, gc_calc);
+                    shown.push_back(s.rate);
+                }
+            }
+        };
+        std::vector<State> l30, l60, l120, l40;
+        std::vector<float> s30, s60, s120;
+        run(1, l30, s30);
+        run(2, l60, s60);
+        run(4, l120, s120);
+        assert(l60 == l30 && l120 == l30);
+        for (size_t i = 0; i < s30.size(); i++) assert(s60[2 * i + 1] == s30[i] && s120[4 * i + 3] == s30[i]);
+        for (size_t i = 4 * 3 + 1; i < s120.size() && s120[i] < 1.0f; i++) assert(s120[i] > s120[i - 1]);
+        // the speed stays exact on every pass (the guest's), a fade the game starts mid-step restarts
+        RateGate g;
+        State s{0.0f, 0.1f, 1};
+        rate_call(g, 1, true, 0.5f, s, gc_calc);
+        assert(std::fabs(s.rate - 0.05f) < 1e-6f && s.speed == 0.1f && g.after.rate == 0.1f);
+        rate_call(g, 1, false, 1.0f, s, gc_calc);
+        assert(s.rate == 0.1f);
+        s = State{1.0f, -0.25f, 1};  // the next step's logic starts a fade-in
+        rate_call(g, 2, true, 0.5f, s, gc_calc);
+        assert(g.after.rate == 0.75f && std::fabs(s.rate - 0.875f) < 1e-6f);
     }
     // floats_call: a value eased once per call (the HD projection zoom, cLib_addCalc towards 1 by at
     // most 0.1 per call) advances once per logic step at every frame rate, and blended passes show it

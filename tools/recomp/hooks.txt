@@ -225,6 +225,7 @@
 02570210  # dKyr_drawLenzflare: lens flare from the eye the pass was drawn with (interp.cpp)
 02571B1C  # dKyr_drawSibuki: sea spray in the rain around the eye the pass was drawn with (interp.cpp)
 025F06A8  # mDoGph_calcFade: the screen fade advances once per logic step, shown at the pass fraction (interp.cpp)
+0252F5A0  # GC mDoGph calcFade (snapshot fade, event director fades): advanced once per logic step (interp.cpp)
 025F0840  # mDoGph_calcMonotone: trace only (WWHD_INTERP_FADE_TRACE)
 024142F0  # daPy_swBlur_c::draw: sword trail drawn at the pass fraction (interp_fx.cpp)
 020CDF78  # daBoomerang_blur_c::draw: boomerang trail drawn at the pass fraction (interp_fx.cpp)
