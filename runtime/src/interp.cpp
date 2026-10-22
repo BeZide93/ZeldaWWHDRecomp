@@ -1601,6 +1601,20 @@ static void trace_step(pace_clock::time_point now, pace_clock::time_point before
 // start of every pass: the last pass's own duration, and the wait before a logic pass that follows
 // a dropped in-between pass (and at 120/240 fps before every logic pass that comes early)
 static bool g_previous_record = false;  // the pass before this one was a record pass (or a record logic pass)
+static bool g_resume_step = false;
+static void restart_fast_forward_pacing(bool active) {
+    g_wait_step = g_drop_lead = g_previous_record = g_pass_was_hold = false;
+    g_last_entry = g_last_logic = {};
+    g_slept = {};
+    // The old estimates include waits at the previous rate and may suppress
+    // the first resumed step's in-between frames. Measure the new mode afresh.
+    g_logic_avg = g_hold_avg = vsync_tick();
+    g_last_hold = pace_clock::now();
+    g_probe = false;
+    g_probe_retry = {};
+    g_resume_step = !active && interp_on();
+    gx2::drop_step_slot();
+}
 static void paced_pass_start() {
     bool& previousRecord = g_previous_record;
     if (!paced() || !interp_on()) { g_exact_step = false; previousRecord = false;
@@ -1703,7 +1717,7 @@ static int plan_step_40() {
     g_step_capacity = n;
     g_step_holds = 0;
     if (paced()) g_paced_planned += n;
-    if (g_exact_step) n = 0;  // (drawn exactly, and recorded)
+    if (g_exact_step) n = pacing::exact_step_holds(n, true, g_resume_step);
     g_step40 = true;
     g_t40 = g_frac40.logic(n, g_exact_step);
     return n;
@@ -1721,7 +1735,7 @@ static int plan_step() {
             n = pacing::even_in_between(n, int(std::lround(display_hz() * std::chrono::duration<double>(kPacedStep).count())));
         g_paced_planned += n;
     }
-    if (g_exact_step) n = 1;  // drawn exactly; its record pass makes the next step blend again
+    if (g_exact_step) n = pacing::exact_step_holds(g_step_capacity, false, g_resume_step);
     g_step_holds = 0;
     return n;
 }
@@ -1757,6 +1771,7 @@ static void after_pass(int phase) {
     const bool pacing = paced() && interp_on();
     if (phase > 0) g_step_holds++;
     if (phase >= g_step_n) {  // the record pass ended the step
+        g_resume_step = false;
         g_hold_next = false;
         if (pacing) {
             paced_step_done(g_step_holds);
@@ -1940,6 +1955,7 @@ extern "C" void hook_0203593C(Cpu* c) {
     static uint64_t at60 = getenv("WWHD_TRUE60_AT_STEP") ? strtoull(getenv("WWHD_TRUE60_AT_STEP"), nullptr, 10) : 0;
     static uint64_t passes60 = 0;
     if (at60 && ++passes60 == at60) set_mode(2);
+    if (ff_transition) restart_fast_forward_pacing(mods::fast_forward_active());
     log_paced_start();
     paced_pass_start();
     true60::new_pass();
@@ -1952,6 +1968,8 @@ extern "C" void hook_0203593C(Cpu* c) {
         g_hold_next = false;
         g_phase = 0;
         g_step_n = 1;
+        g_steps40 = 0;
+        g_frac40 = {};
         fx_ss_reset();
         reticle_reset();
     }

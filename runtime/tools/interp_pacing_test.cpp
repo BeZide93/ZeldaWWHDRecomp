@@ -1151,7 +1151,33 @@ static void test_steps_40() {
     CHECK(adapt_resume_ms(60) == 14.0 && adapt_resume_ms(40) == 21.0);
 }
 
+static void test_fast_forward_resume() {
+    CHECK(exact_step_holds(0, true, true) == 0);  // no extra slot in this 40 fps step
+    constexpr vsync_pacing::Clock clock{16'683'333, 4};
+    for (int fps : {40, 60, 120, 240}) {
+        const bool forty = fps == 40;
+        const int planned = forty ? 1 : fps / 30 - 1;
+        const uint64_t granule = forty ? 6 : 8 / (planned + 1);
+        const auto frame = clock.time(granule, 0);
+        const auto nextLogic = clock.time((planned + 1) * granule, 0);
+        const int ordinary = exact_step_holds(planned, forty, false);
+        CHECK(ordinary == (forty ? 0 : 1));
+        if (fps != 60) CHECK(nextLogic - clock.time(ordinary * granule, 0) > frame);
+        const int resumed = exact_step_holds(planned, forty, true);
+        int64_t previous = 0;
+        for (int pass = 1; pass <= resumed + 1; ++pass) {
+            const auto at = clock.time(pass * granule, 0);
+            CHECK(at - previous <= frame);
+            previous = at;
+        }
+        CHECK(previous == nextLogic);
+        for (int pass = 0; pass <= resumed; ++pass)
+            CHECK(pass_fraction(pass, resumed, true) == 1.0f);  // no history: repeat exact poses
+    }
+}
+
 int main() {
+    test_fast_forward_resume();
     test_fractions();
     test_blends();
     test_slerp();

@@ -49,7 +49,8 @@ inline void slerp_weights(float cosang, float t, float& wa, float& wb) {
 // Blend fraction of a pass. phase 0 = logic pass, k = hold pass k; n = the step's in-between
 // frames; exact = the step is drawn without blending (no record pass before it).
 inline float pass_fraction(int phase, int n, bool exact) {
-    if (phase == 0) return exact ? 1.0f : 1.0f / float(n + 1);
+    if (exact) return 1.0f;
+    if (phase == 0) return 1.0f / float(n + 1);
     return phase < n ? float(phase + 1) / float(n + 1) : 1.0f;
 }
 
@@ -153,6 +154,14 @@ inline int even_in_between(int n, int refreshes) {
     for (int k = std::max(1, n); k > 1; --k)
         if (refreshes % (k + 1) == 0) return k;
     return 1;
+}
+
+// The first exact step normally needs only its record pass (at 40 fps the
+// logic frame itself records). After Fast Forward, fill the available slots
+// with exact frames instead: omitting them leaves a 50 ms gap at 40 fps or
+// three frame intervals at 120 fps before interpolation has history again.
+inline int exact_step_holds(int planned, bool forty, bool resuming) {
+    return resuming ? planned : forty ? 0 : 1;
 }
 
 // The running average of a pass duration (3/4 old, 1/4 new). A single sample counts at most twice
