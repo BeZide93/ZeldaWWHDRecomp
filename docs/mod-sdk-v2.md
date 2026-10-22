@@ -350,6 +350,8 @@ player's installed 2D pack, in the language the game uses, while the game runs:
   the centre and size in the layout's root coordinates, with +y up and the parents' translation and
   scale applied. It also gives the pane's own rotation and alpha, whether it and its parents are
   visible, and, for a picture pane, its texture's name. The result is a 64-byte `wwhd_game_pane`.
+  The key `layout-texture:<Layout>/<texture>` checks that a texture exists, without loading it. It
+  sets flag 4 and returns the texture's size in `w` and `h`.
 
 Names may contain letters, digits and `_ ^ + - .` only. A missing layout, texture or pane returns 0,
 with the reason in the Mods tab. Older hosts return 0 for both: the texture source and the query key

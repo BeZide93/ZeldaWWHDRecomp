@@ -53,6 +53,8 @@ bool split_spec(const std::string& spec, std::string& layout, std::string& item,
 void note_open(const std::string& guest_path, const std::string& host_path);
 // "<Layout>/<texture>[#<material>]" as RGBA (at most 2048 x 2048). False with a short reason.
 bool texture(const std::string& spec, Image& out, std::string& error);
+// "<Layout>/<texture>": whether the texture exists and its size, without decoding it.
+bool texture_size(const std::string& spec, uint32_t& width, uint32_t& height);
 // "<Layout>/<pane>". False when the pack, the layout or the pane is missing.
 bool pane(const std::string& spec, Pane& out);
 

@@ -378,7 +378,9 @@ static_assert(sizeof(wwhd_game_pane) == 64, "wwhd_game_pane layout");
 #else
 _Static_assert(sizeof(wwhd_game_pane) == 64, "wwhd_game_pane layout");
 #endif
-/* Structured query type 6: key "layout-pane:<Layout>/<pane>" (at most 63 bytes). */
+/* Structured query type 6: key "layout-pane:<Layout>/<pane>" (at most 63 bytes). The key
+ * "layout-texture:<Layout>/<texture>" instead checks that a texture exists without loading it:
+ * flags 4, w/h its size. */
 static inline u32 wwhd_game_pane_get(const char* key, wwhd_game_pane* pane) {
     return wwhd_setting_get(key, 6, pane, sizeof(*pane)) == sizeof(*pane);
 }

@@ -365,6 +365,19 @@ bool texture(const std::string& spec, Image& out, std::string& error) {
     return true;
 }
 
+bool texture_size(const std::string& spec, uint32_t& width, uint32_t& height) {
+    std::string layout, item, material, error;
+    if (!split_spec(spec, layout, item, material) || !material.empty()) return false;
+    std::lock_guard lock(g_mu);
+    Archive* a = archive(layout, error);
+    if (!a) return false;
+    const auto it = a->files.find("timg/" + item + ".bflim");
+    if (it == a->files.end() || it->second.size() < 0x28 || memcmp(&it->second[it->second.size() - 0x28], "FLIM", 4)) return false;
+    const size_t f = it->second.size() - 0x28;
+    width = be16(it->second, f + 0x1C), height = be16(it->second, f + 0x1E);
+    return true;
+}
+
 bool pane(const std::string& spec, Pane& out) {
     std::string layout, item, material, error;
     if (!split_spec(spec, layout, item, material) || !material.empty()) return false;

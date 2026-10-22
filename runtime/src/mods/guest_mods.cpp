@@ -649,13 +649,23 @@ std::string setting_key(const Loaded& mod,uint32_t address) {
     return {};
 }
 void query_dungeon_room(Cpu* c, uint32_t address);
-// "layout-pane:<Layout>/<pane>" (structured type 6): 64 bytes, see wwhd_game_pane in wwhd_guest.h
-void query_layout_pane(Cpu* c, const std::string& spec, uint32_t address) {
+// "layout-pane:<Layout>/<pane>" (structured type 6): 64 bytes, see wwhd_game_pane in wwhd_guest.h;
+// "layout-texture:<Layout>/<texture>" (same type and size): flags 4, the texture's width and height
+void query_layout_pane(Cpu* c, const std::string& key, uint32_t address) {
     auto& mod = owner(c);
     c->r[3] = 0;
     if (!setting_buffer(mod, address, 64)) return;
+    if (key.rfind("layout-texture:", 0) == 0) {
+        uint32_t w = 0, h = 0;
+        if (!game_layouts::texture_size(key.substr(15), w, h)) return;
+        for (uint32_t i = 0; i < 64; i += 4) st32(address + i, 0);
+        st32(address, 1); st32(address + 4, 4);
+        stf32(address + 16, float(w)); stf32(address + 20, float(h));
+        c->r[3] = 64;
+        return;
+    }
     game_layouts::Pane pane;
-    if (!game_layouts::pane(spec, pane)) return;
+    if (!game_layouts::pane(key.substr(12), pane)) return;
     const uint32_t flags = (pane.visible ? 1u : 0u) | (pane.kind == "pic1" ? 2u : 0u);
     st32(address, 1); st32(address + 4, flags);
     stf32(address + 8, pane.x); stf32(address + 12, pane.y);
@@ -673,10 +683,10 @@ void svc_setting_get(Cpu* c) {
         if (capacity >= 808) query_dungeon_room(c, destination);
         return;
     }
-    if (key.rfind("layout-pane:", 0) == 0 && expected == 6) {  // a pane of the game's layout art (game_layouts.h)
+    if ((key.rfind("layout-pane:", 0) == 0 || key.rfind("layout-texture:", 0) == 0) && expected == 6) {  // the game's layout art (game_layouts.h)
         c->r[3] = 0;
         if (!destination && !capacity) { c->r[3] = 64; return; }
-        if (capacity >= 64) query_layout_pane(c, key.substr(12), destination);
+        if (capacity >= 64) query_layout_pane(c, key, destination);
         return;
     }
     auto value=settings::read(key);c->r[3]=0;
