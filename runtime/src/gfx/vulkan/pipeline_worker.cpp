@@ -437,6 +437,7 @@ void run(Worker& w, std::vector<uint8_t> seed) {
     constexpr size_t kStartHead = 384;
     auto loop = [&] {
       host::set_thread_name("Vulkan warmup");
+      host::lower_thread_priority();  // the game's own threads (and its demand compiles) always win
       for (;;) {
         std::shared_ptr<PipelineRecipe> recipe;
         bool ahead = false, head = false;
@@ -483,7 +484,9 @@ void run(Worker& w, std::vector<uint8_t> seed) {
             // first; this work yields to the game's own compiles like the start queue.
             if (!backgroundPlanned) {
               backgroundPlanned = true;
-              if (w.recipes.size() + 64 <= maxUnusedWarmPipelines) {
+              // (debug: WWHD_VK_BACKGROUND_WARM=0 leaves it out, for measurements)
+              static const bool off = std::getenv("WWHD_VK_BACKGROUND_WARM") && !std::atoi(std::getenv("WWHD_VK_BACKGROUND_WARM"));
+              if (!off && w.recipes.size() + 64 <= maxUnusedWarmPipelines) {
                 std::vector<std::pair<uint64_t, std::string>> rest;
                 for (const auto& [key, r] : w.recipes)
                   if (!r->groups.empty()) {
