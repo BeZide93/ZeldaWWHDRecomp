@@ -209,6 +209,8 @@ PROGRESS_PREFIX = 'WWHD-PROGRESS '
 # (several renderers: each warm takes an equal part of the rest).
 ASSEMBLY_SHARE = 0.35
 ASSEMBLY_SHARE_SEVERAL = 0.25
+# Share of the bar "Preparing shaders: models" takes (all renderers) when it follows the warm.
+MODELS_SHARE = 0.5
 
 
 def parse_progress(line):
@@ -419,7 +421,7 @@ def merge_templates(package, base, extras, out, message):
 def prepare(game, template, executable, cache_root, package, renderer='vulkan',
             progress=lambda text: None, cancel=lambda: False, skip=False,
             runner=run_process, python=None, builder=None, runtime_identity=None, log=None,
-            renderers=None, extra_templates=None):
+            renderers=None, extra_templates=None, models=False, sweeper=None):
     """Return a nonfatal status. executable=None assembles Android's pending warm.
 
     renderers: the renderers the native warm runs for, one after the other, on one shared head
@@ -437,10 +439,16 @@ def prepare(game, template, executable, cache_root, package, renderer='vulkan',
     of the mod manager next to cache_root, package_templates); the identity names them, so a change of mods
     makes a new generation, while the launch record keeps the release template the game checks.
     builder(game, output, template[, progress=callback(done, total, detail)]) assembles in-process.
+    models: after the warm, "Preparing shaders: models" (model_sweep.py) for each ready renderer: the game draws
+    every object archive's models once, hidden, from its title screen, and records their pipelines in the live
+    caches. It resumes where a cancelled or crashed sweep stopped; cancelling it keeps the prepared generation
+    (result "models": {renderer: 'done'|'paused'|'failed'}). sweeper replaces model_sweep.run (tests).
     Paths are private local output only. No caller-supplied source is removed.
     """
     reporter = _Reporter(progress, log or progress, cancel)
     renderers = list(renderers or [renderer])
+    models = bool(models and executable)
+    warm_high = 1.0 - MODELS_SHARE if models else 1.0
     if not Path(template).is_file():
         message = 'Shader template unavailable; shaders will compile during play'
         progress(message)
@@ -482,6 +490,59 @@ def prepare(game, template, executable, cache_root, package, renderer='vulkan',
                                  'Preparing shaders for %s failed (%s); they compile during play' % (label, error))
         return states
 
+    def sweep_models(generation, states):
+        """Preparing shaders: models over [warm_high, 1] of the bar -> {renderer: state}; never raises. The
+        renderers' sweeps run at the same time (separate games and caches); the bar shows their archives together."""
+        import threading
+        import model_sweep
+        run = sweeper or model_sweep.run
+        names = [r for r in renderers if states.get(r) == 'ready']
+        out = {}
+        if not names:
+            return out
+        reporter.begin('Preparing shaders: models', warm_high, 1.0)
+        lock = threading.Lock()
+        counts = {name: None for name in names}
+        stop = threading.Event()
+
+        def line_for(name):
+            def line(text):
+                parsed = parse_progress(text)
+                with lock:
+                    if not parsed:
+                        reporter.log(text)
+                        return
+                    counts[name] = parsed[:2]
+                    if all(counts.values()):  # every renderer's total known: one bar for all of them
+                        reporter.update(sum(c[0] for c in counts.values()), sum(c[1] for c in counts.values()),
+                                        parsed[2])
+            return line
+
+        def stopped():
+            return stop.is_set() or cancel()
+
+        def work(name):
+            try:
+                out[name] = run(executable, game, root, name, model_sweep.identity_of(wanted, name),
+                                cache_environment(generation, game, name), line=line_for(name), cancel=stopped,
+                                log=reporter.log)
+            except InterruptedError:
+                out[name] = 'paused'
+                stop.set()
+            except Exception as error:  # the game and its prepared shaders stay usable
+                out[name] = 'failed'
+                with lock:
+                    reporter.log('Model preparation for %s failed: %s' % (name, error))
+
+        threads = [threading.Thread(target=work, args=(name,), daemon=True) for name in names]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+        if 'paused' in out.values():
+            reporter.message('Model preparation paused; it continues at the next setup')
+        return out
+
     extras = package_templates(cache_root) if extra_templates is None else [Path(p) for p in extra_templates]
     try:
         wanted = identity(game, template, package, renderer)
@@ -514,7 +575,7 @@ def prepare(game, template, executable, cache_root, package, renderer='vulkan',
                 missing = [r for r in renderers if r not in states] if executable else []
                 if missing:
                     try:
-                        states.update(warm(generation, missing, 0.0, 1.0, keep_going=True))
+                        states.update(warm(generation, missing, 0.0, warm_high, keep_going=True))
                     except InterruptedError:
                         # skipping the added renderer keeps the prepared ones in use
                         states.update({r: 'skipped' for r in missing if r not in states})
@@ -523,7 +584,16 @@ def prepare(game, template, executable, cache_root, package, renderer='vulkan',
                         if read_marker(active) == previous:
                             atomic_json(generation / 'manifest.json', updated)
                             atomic_json(active, updated)
-                return dict(status='ready', generation=str(generation), reused=True, renderers=states)
+                done = dict(status='ready', generation=str(generation), reused=True, renderers=states)
+                if models:
+                    import model_sweep
+                    if any(states.get(r) == 'ready' and model_sweep.status(root, r, model_sweep.identity_of(wanted, r)) != 'done'
+                           for r in renderers):
+                        done['models'] = sweep_models(generation, states)
+                return done
+        if models and (root / 'rebuild.request').exists():
+            import model_sweep
+            model_sweep.clear(root)  # Rebuild shader cache: the models are prepared again too
         failed = read_marker(root / 'failed.json')
         if not (root / 'rebuild.request').exists() and failed.get('identity') == wanted:
             return dict(status='skipped', message='Previous preparation failed; request Rebuild shader cache to retry')
@@ -560,7 +630,7 @@ def prepare(game, template, executable, cache_root, package, renderer='vulkan',
         status = 'warm_pending'
         states = None
         if executable:
-            states = warm(staging, renderers, assembly, 1.0, keep_going=len(renderers) > 1)
+            states = warm(staging, renderers, assembly, warm_high, keep_going=len(renderers) > 1)
             if not any(state == 'ready' for state in states.values()):
                 raise RuntimeError('no renderer could be prepared')
             status = 'ready'
@@ -579,6 +649,8 @@ def prepare(game, template, executable, cache_root, package, renderer='vulkan',
         done = dict(status=status, generation=str(staging), reused=False)
         if states is not None:
             done['renderers'] = states
+            if models:
+                done['models'] = sweep_models(staging, states)
         return done
     except Exception as error:
         if staging:

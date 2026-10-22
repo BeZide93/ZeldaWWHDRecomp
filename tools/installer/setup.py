@@ -2660,6 +2660,8 @@ def install(ctx, source, keys=None, info=None, ui=None, check_keys=None):
             renderer="metal" if IS_MAC else "vulkan", progress=shader_progress_callback(shader_progress), log=LOG.write,
             # macOS: the player chooses Metal or Vulkan (MoltenVK) in Graphics > Renderer: prepare both
             renderers=["metal", "vulkan"] if IS_MAC else ["vulkan"],
+            # "Preparing shaders: models" (model_sweep.py): macOS for now; WWHD_SETUP_MODEL_SWEEP=1/0 overrides
+            models=os.environ.get("WWHD_SETUP_MODEL_SWEEP", "1" if IS_MAC else "0") == "1",
             skip=bool(getattr(args, "skip_shader_prebuild", False)),
             cancel=lambda: bool(getattr(args, "shader_prebuild_cancel", None) and
                                 Path(args.shader_prebuild_cancel).exists()))

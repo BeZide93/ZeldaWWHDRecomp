@@ -72,6 +72,7 @@ INSTALLER_FILES = [
     "tools/installer/code_mods.py",
     "tools/installer/decomp_setup.py",
     "tools/installer/shader_prebuild.py",
+    "tools/installer/model_sweep.py",
     "tools/installer/toolchains.json",
     "tools/installer/README.md",
 ]
