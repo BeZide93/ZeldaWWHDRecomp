@@ -762,6 +762,7 @@ extern "C" void f_025D4654(Cpu* c);
 // packets that a draw list still holds (as true60.cpp does for its half-pass previews).
 namespace interp {
 struct ActorKeep { uint32_t actor; std::vector<uint32_t> words; };
+constexpr uint32_t kProcessBase = 0xB8;  // sizeof(base_process_class) in WWHD (f_pc_base.h)
 std::vector<ActorKeep> g_actor_kept;
 void actor_keep(uint32_t actor) {
     for (const auto& k : g_actor_kept)
@@ -792,7 +793,14 @@ void actors_put_back() {
         std::vector<uint32_t> keep;
         for (uint32_t i = 0x94 / 4; i < n; i++)
             if (cur[i] != it->words[i] && entered(i)) { keep.push_back(i); keep.push_back(i - (0x94 - 0x10) / 4); }
-        for (uint32_t i = 0; i < n; i++)
+        // (base_process_class, +0 .. +0xB8: the process manager's state and its queue tags. Logic after
+        // the draw in the same pass changes them: a scene change queues the room's actors for deletion
+        // (state, layer, line, delete and priority tags). Put back, the actor left the delete queue's
+        // view of it (delete tag cleared, still linked in the queue) and the next pass's deletion
+        // crashed on a null layer (fpcLy_DeletedMesg, 40/120 fps, a scene change at sea). No draw
+        // writes them: left alone. debug: WWHD_INTERP_KEEP_PROCESS_TAGS=0 puts them back too, as before)
+        static const bool tags_too = getenv("WWHD_INTERP_KEEP_PROCESS_TAGS") && !atoi(getenv("WWHD_INTERP_KEEP_PROCESS_TAGS"));
+        for (uint32_t i = tags_too ? 0 : kProcessBase / 4; i < n; i++)
             if (cur[i] != it->words[i] && std::find(keep.begin(), keep.end(), i) == keep.end()) cur[i] = it->words[i];
     }
     g_actor_kept.clear();
