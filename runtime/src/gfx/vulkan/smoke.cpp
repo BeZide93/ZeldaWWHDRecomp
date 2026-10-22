@@ -10,6 +10,7 @@
 #include "bc_reference.h"
 // No game assets: assertions inspect data returned by the actual Vulkan device.
 #include "backend.h"
+#include "gfx/depth_peek.h"
 #include "stereo.h"
 #include "../stereo_projection.h"
 #include "android_shared_image.h"
@@ -1449,6 +1450,10 @@ int renderer_smoke_test() {
    depth_copy_check();
    colour_comparison_check();
    {
+    // the peek checks read the answers as soon as each frame's fence retires (mode 0); the default
+    // (answers two game steps later, written at the game's swap) has no swaps here
+    ::gfx::depth_peek::force_mode_for_test(0);
+    struct RestorePeekMode { ~RestorePeekMode() { ::gfx::depth_peek::force_mode_for_test(-1); } } restorePeekMode;
     auto peek=std::make_unique<Surface>();
     peek->width=1280;peek->height=720;peek->pitch=1280;peek->format=0x11;peek->isDepth=true;peek->fmt=format_info(0x11,true);
     peek->addr=mem::host_alloc(256,256);create_surface_image(peek.get(),true,VkExtent3D{16,16,1});

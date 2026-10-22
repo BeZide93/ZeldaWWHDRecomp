@@ -74,7 +74,10 @@ void write_answer(uint64_t ticket, uint32_t dst, uint32_t depth) {  // under g_p
     if (log) LOG("[peekz] %08X: %06X", dst, depth);
 }
 }
+static std::atomic<int> g_forced_mode{-1};
+void force_mode_for_test(int m) { g_forced_mode = m; }
 int mode() {
+    if (const int f = g_forced_mode.load(); f >= 0) return f;
     static const int m = [] {
         const char* e = getenv("WWHD_PEEKZ_SYNC");
         const int v = e && *e ? atoi(e) : 3;

@@ -16,7 +16,9 @@ inline int pixel(uint32_t coordinate, uint32_t extent, uint32_t guestExtent) {
     return int(std::clamp(double(int32_t(coordinate)) * extent / guestExtent, 0.0, double(extent - 1)));
 }
 uint64_t next_ticket();  // one per request, in request order: the renderers take one for every peek
-int mode();  // WWHD_PEEKZ_SYNC: 3 (default) answers two steps after the request; tests: 1 one step after
+int mode();
+// tests only (renderer smoke): answer as each GPU frame completes (0) regardless of WWHD_PEEKZ_SYNC; -1 restores
+void force_mode_for_test(int m);  // WWHD_PEEKZ_SYNC: 3 (default) answers two steps after the request; tests: 1 one step after
              // (as on the Wii U), 2 one step after with a synchronous copy, 0 the former timing
 void publish(uint64_t ticket, const std::vector<uint32_t>& destinations, const std::vector<uint32_t>& depths);
 // On the Wii U the game reads a peek's answers one step after its request: peekData reads the depth
