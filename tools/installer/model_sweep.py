@@ -154,7 +154,10 @@ def environment(base, game, cache_env, renderer, state, archives, scratch, stage
         env['WWHD_DSWEEP_STAGES'] = str(stages)
         # then the title's scene at other times of day and in a storm, every actor the rooms place, and the file
         # select (dsweep.cpp)
-        env.update(WWHD_DSWEEP_ENV='1', WWHD_DSWEEP_PARTICLES='1', WWHD_DSWEEP_ACTORS='1', WWHD_DSWEEP_FILE_SELECT='1')
+        env.update(WWHD_DSWEEP_ENV='1', WWHD_DSWEEP_ACTORS='1', WWHD_DSWEEP_FILE_SELECT='1')
+        # the particle sweep (dsweep.cpp) only on request: measured on 19 places it recorded nothing they still build
+        if os.environ.get('WWHD_SETUP_MODEL_SWEEP_PARTICLES') == '1':
+            env['WWHD_DSWEEP_PARTICLES'] = '1'
     env['WWHD_HEADSTART'] = '0'  # the sweep records pipelines; it warms nothing (and holds no generation)
     return env
 
