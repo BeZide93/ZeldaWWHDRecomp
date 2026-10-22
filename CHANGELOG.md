@@ -23,7 +23,8 @@ what is on `devel` and not released yet (also in the
 - **Even more moves smoothly** with frame interpolation: camera shake, the sky's clouds, eye movements, lava, scene
   wipes, chains, the Swift Sail and boost blur, debris, Valoo, light beams and searchlights.
 - **Fixed: fade-ins and fade-outs flickered** with frame interpolation (#273). Fades between scenes are smooth again
-  at 40, 60 and 120 fps.
+  at 40, 60 and 120 fps, including fades to white (for example leaving the Forbidden Woods). Wipes in cutscenes keep
+  the same length at every frame rate.
 - **More moves smoothly** with frame interpolation: boss hit flashes, sand floors, cloth and flags, water masks, shadows
   and mod HUDs. Objects at the screen edge no longer pop in or out between the game's steps.
 - **Mods can use the game's own HUD art** (for mod makers): a guest mod can draw any texture or pane of the game's
