@@ -40,7 +40,7 @@ what is on `devel` and not released yet (also in the
   follow the game's steps exactly at every frame rate, so scene changes and distant islands play the same as at 30 fps.
 - **Fixed: the mouse camera's up/down was inverted in some interiors** (#274), for example Grandma's house and the
   Pictograph shop. Mouse and right stick now look up and down the same way everywhere, with and without "Invert camera
-  up/down".
+  up/down", and switching that setting while playing no longer leaves the camera inverted until a restart.
 - **World editor: custom items** (#269, #270, for mod makers): opening a chest with a custom item no longer crashes,
   and the item's own icon is held up over Link's head. New items and icon changes now work while the game runs (a chest
   with a new item appears at once); changes that still need a restart are marked "Takes effect after a restart", and
