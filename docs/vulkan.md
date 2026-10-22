@@ -378,7 +378,8 @@ shows every actor the rooms place for a few frames (made by the game, drawn, nev
 then removed) and the grass they plant with and without its wind animation, enters every stage at its first
 room and shows it under its own lighting, fog and sky (the game's own stage change, as starting a game does), and
 finally opens the file select, so the pipelines they need are recorded for this build and this computer
-(TIME_PLACEHOLDER; the game runs without a frame limit meanwhile). Metal builds the recorded pipelines in the
+(about 20 minutes on a recent Mac, Metal and Vulkan at the same time; the game runs without a frame limit
+meanwhile). Metal builds the recorded pipelines in the
 background at start; Vulkan builds an archive's pipelines when the game loads it (a room's when the room loads,
 a stage's when it is entered; the latest load first); pipelines of the title's own scene are built at start.
 Nothing from the game is shipped: the archive list is read from your own files and only names are stored.

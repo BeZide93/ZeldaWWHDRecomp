@@ -2395,8 +2395,9 @@ def decomp_wanted(ctx):
 
 
 MODEL_SWEEP_TEXT = (
-    "Experimental: after the shaders, start the game hidden and draw every model, room and placed actor once, "
-    "so their pipelines are ready before they first appear (fewer hitches in play). About 8 to 10 minutes on a Mac.")
+    "Experimental: after the shaders, start the game hidden, draw every model, room and placed actor once and "
+    "visit every stage, so their pipelines are ready before they first appear (fewer hitches in play). About 20 "
+    "minutes on a Mac.")
 
 
 def model_sweep_wanted(ctx, ui=None):
@@ -2799,7 +2800,7 @@ def main():
     ap.add_argument("--skip-shader-prebuild", action="store_true", help="skip optional shader preparation; compile during play")
     ap.add_argument("--model-sweep", dest="model_sweep", action="store_const", const=True, default=None,
                     help="experimental: also prepare the shaders of every model (Preparing shaders: models; about "
-                         "8 to 10 minutes on a Mac); remembered for repairs (WWHD_SETUP_MODEL_SWEEP=1/0 overrides)")
+                         "20 minutes on a Mac); remembered for repairs (WWHD_SETUP_MODEL_SWEEP=1/0 overrides)")
     ap.add_argument("--no-model-sweep", dest="model_sweep", action="store_const", const=False,
                     help="do not prepare model shaders (the default)")
     ap.add_argument("--shader-prebuild-cancel", help="skip shader preparation when this file exists")
