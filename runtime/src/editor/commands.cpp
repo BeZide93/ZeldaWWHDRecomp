@@ -1026,6 +1026,10 @@ const Value* Session::manifest(const std::string& mod) const {
     auto* p = find(mod);
     return p ? &p->manifest : nullptr;
 }
+const Value* Session::started(const std::string& mod) const {
+    auto* p = find(mod);
+    return p ? &p->started : nullptr;
+}
 std::string Session::package_dir(const std::string& mod) const {
     auto* p = find(mod);
     return p ? p->dir : std::string();

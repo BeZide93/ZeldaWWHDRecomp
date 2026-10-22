@@ -1813,6 +1813,13 @@ void status_bar(float w, float h) {
 
 void panels(float w, float h) {
     const editor_ui::Snapshot& snap = editor_ui::snapshot();
+    // test aid: WWHD_TEST_EDITOR_STORY=<kind>:<id> shows that letter, chart or item in the Story tab (screenshots)
+    static const bool story_test = [] {
+        if (const char* e = std::getenv("WWHD_TEST_EDITOR_STORY"); e && std::strchr(e, ':'))
+            editor_ui::show_story(std::string(e, std::strchr(e, ':')), std::strchr(e, ':') + 1);
+        return true;
+    }();
+    (void)story_test;
     if (S.outliner) {
         ImGui::SetNextWindowPos(ImVec2(8, 110), ImGuiCond_FirstUseEver);
         ImGui::SetNextWindowSize(ImVec2(300, h * 0.62f), ImGuiCond_FirstUseEver);

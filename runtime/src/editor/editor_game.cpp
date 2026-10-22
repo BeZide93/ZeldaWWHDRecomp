@@ -625,13 +625,27 @@ std::string joined(const std::vector<std::string>& list) {
     for (const auto& x : list) s += (s.empty() ? "" : ", ") + x;
     return s;
 }
+// The items of story_later, each "<id> (<why>)"
+std::vector<std::string> items_later(const Value& started, const Value& manifest) {
+    std::vector<std::string> out;
+    if (!story_items::installed_hooks()) {
+        // no item hooks this session: every item that changed waits
+        for (const auto& i : manifest.get("items").array) {
+            bool same = false;
+            for (const auto& j : started.get("items").array) same |= i == j;
+            if (!same) out.push_back(i.get("id").string() + " (the game had no mod items at start-up)");
+        }
+        return out;
+    }
+    return story_reload::restart_items(started, manifest);
+}
 // What of a story change waits for a restart (the note of apply_story)
 std::vector<std::string> story_later(const Value& started, const Value& manifest) {
     std::vector<std::string> later;
     const bool items_changed = !(started.get("items") == manifest.get("items"));
     if (items_changed && !story_items::installed_hooks()) later.push_back("the items (the game had no mod items at start-up)");
     else
-        for (const auto& i : story_reload::restart_items(started, manifest)) later.push_back("item " + i);
+        for (const auto& i : items_later(started, manifest)) later.push_back("item " + i);
     for (const auto& id : story_reload::gone(
              [&] {
                  std::vector<std::string> ids;
@@ -2134,6 +2148,15 @@ void camera_drawn(uint32_t cam) {
     for (int i = 0; i < 16; i++) v.proj[i] = float(ldf32(cam + 0x1A4 + 4 * i));
     std::lock_guard<std::mutex> lk(g_view_mu);
     g_camera = v;
+}
+std::vector<std::string> items_after_restart(const std::string& mod) {
+    static std::map<std::string, std::vector<std::string>> last;  // render thread
+    try_with_session([&](Session& session) {
+        const Value* started = session.started(mod);
+        const Value* now = session.manifest(mod);
+        last[mod] = started && now ? items_later(*started, *now) : std::vector<std::string>{};
+    });
+    return last[mod];
 }
 CameraView camera_view() {
     std::lock_guard<std::mutex> lk(g_view_mu);

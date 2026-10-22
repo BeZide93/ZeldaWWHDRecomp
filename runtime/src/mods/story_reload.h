@@ -126,6 +126,13 @@ inline std::vector<std::string> live_items(const Value& started, const Value& af
     return out;
 }
 
+// The id of a restart_items entry ("<id> (<why>)") and its reason
+inline std::string entry_id(const std::string& entry) { return entry.substr(0, entry.find(" (")); }
+inline std::string entry_why(const std::string& entry) {
+    const size_t a = entry.find(" (");
+    return a == std::string::npos || entry.size() < a + 3 ? std::string() : entry.substr(a + 2, entry.size() - a - 3);
+}
+
 // The letter ids a manifest declares: each quest's letter and the letters on their own.
 inline std::vector<std::string> letter_ids(const Value& m) {
     std::vector<std::string> out;

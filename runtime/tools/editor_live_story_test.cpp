@@ -69,6 +69,7 @@ void items_and_sections() {
                                    {"id": "map", "name": "Map", "icon": "icons/map.png"}]})");
     auto later = story_reload::restart_items(started, next);
     CHECK(later.size() == 2 && later[0] == "key (its icon)" && later[1] == "map (a new item)");
+    CHECK(story_reload::entry_id(later[1]) == "map" && story_reload::entry_why(later[1]) == "a new item");
     CHECK(story_reload::live_items(started, next) == std::vector<std::string>{"lamp"});
     next = json(R"({"items": [{"id": "key", "name": "Key", "icon": "icons/key.png", "held_model": "key"}]})");
     later = story_reload::restart_items(started, next);

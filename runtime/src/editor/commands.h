@@ -378,6 +378,7 @@ public:
     const std::deque<LogEntry>& log() const { return log_; }
     std::string open_mod() const { return open_; }
     const Value* manifest(const std::string& mod) const;
+    const Value* started(const std::string& mod) const;  // the manifest the game started with
     std::string package_dir(const std::string& mod) const;  // the package folder ("" unknown)
     bool dirty(const std::string& mod) const;
     std::vector<std::string> mods() const;

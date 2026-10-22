@@ -16,6 +16,7 @@
 
 #include "../editor/editor_game.h"
 #include "../editor/mcp_game.h"
+#include "../mods/story_reload.h"
 #include "editor_panel.h"
 #include "editor_shell.h"
 #include "hostui.h"
@@ -25,7 +26,8 @@
 
 namespace editor_ui {
 namespace {
-const ImVec4 kMuted(0.62f, 0.66f, 0.72f, 1), kBad(0.95f, 0.55f, 0.45f, 1), kHead(0.95f, 0.85f, 0.55f, 1);
+const ImVec4 kMuted(0.62f, 0.66f, 0.72f, 1), kBad(0.95f, 0.55f, 0.45f, 1), kHead(0.95f, 0.85f, 0.55f, 1), kLater(1.0f, 0.72f, 0.30f, 1);
+const char* const kAfterRestart = "Takes effect after a restart";
 const char* const kKinds[] = {"letter", "chart", "item"};
 const char* const kTabs[] = {"Letters", "Charts", "Items"};
 const char* const kGameItems[] = {"game:purple_rupee", "game:orange_rupee", "game:silver_rupee", "game:heart_piece", "game:heart_container"};
@@ -48,6 +50,12 @@ std::mutex g_pick_mu;
 std::string g_picked;  // a PNG a file chooser returned (any thread)
 int g_picked_for = 0;  // 1 the new item's icon, 2 the selected item's new icon
 
+// why the open mod's item waits for a restart ("" when its change is in the game already)
+std::string restart_why(const Value& m, const std::string& id) {
+    for (const auto& e : editor::items_after_restart(m.get("id").string()))
+        if (story_reload::entry_id(e) == id) return story_reload::entry_why(e);
+    return {};
+}
 void muted(const std::string& s) {
     ImGui::PushStyleColor(ImGuiCol_Text, kMuted);
     ImGui::TextWrapped("%s", s.c_str());
@@ -319,8 +327,13 @@ void item_fields(const Value& m, const Value& e) {
         }
     }
     if (action == "none") muted("Without a use the item stays in the bag (it can't go on a button).");
-    muted("Its name, description, how many and use change in the game at once; a new item, its icon, held model and hold_up "
-          "after a restart (save, then start the game again).");
+    // the notice of a change the running game can't take (#270): next to the item, in plain words
+    if (const std::string why = restart_why(m, id); !why.empty()) {
+        ImGui::PushStyleColor(ImGuiCol_Text, kLater);
+        ImGui::TextWrapped("%s: %s. Save, then start the game again.", kAfterRestart, why.c_str());
+        ImGui::PopStyleColor();
+    }
+    muted("Its name, description, how many and use change in the game at once; its held model and hold_up after a restart.");
 }
 
 void selected_entry(const Value& m, const std::string& kind, const Value& e) {
@@ -393,7 +406,14 @@ void kind_area(const Value& m, const std::string& kind) {
     for (const auto& e : list.array) {
         const std::string id = e.get("id").string();
         const std::string label = id + "   " + (kind == "letter" ? "from " + e.get("sender").string() : e.get("name").string());
-        if (ImGui::Selectable((label + "##" + kind).c_str(), sel == id)) sel = id;
+        const std::string later = kind == "item" ? restart_why(m, id) : std::string();
+        if (ImGui::Selectable((label + "##" + kind).c_str(), sel == id, 0, later.empty() ? ImVec2(0, 0) : ImVec2(ImGui::CalcTextSize(label.c_str()).x, 0)))
+            sel = id;
+        if (!later.empty()) {
+            ImGui::SameLine();
+            ImGui::TextColored(kLater, "%s", kAfterRestart);
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", later.c_str());
+        }
     }
     if (list.array.empty())
         muted(kind == "letter"  ? "No letters on their own yet. A letter's sender, text and what it encloses (charts, items): the postbox hands it out while the mod is on."
