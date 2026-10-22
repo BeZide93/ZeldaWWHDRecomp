@@ -31,8 +31,9 @@ what is on `devel` and not released yet (also in the
   2D layouts (map frames, icons, markers) from the player's own game files, check whether one exists first, and
   ask for it enlarged smoothly and sharpened.
 - **Fixed on Android: the "too warm" pause during setup could flash on and off in a loop** (#277) on some handhelds
-  (AYANEO Pocket EVO and Pocket S). A heat pause now needs a real temperature to confirm it, stays on screen, and setup
-  goes on by itself only after the device has stayed cool for a few seconds. Continue anyway still works right away.
+  (AYANEO Pocket EVO and Pocket S). A heat pause now needs a real temperature to confirm it and always waits for you:
+  **Continue anyway** works at any time, and **Continue** appears once the device has cooled down. Setup never goes on
+  by itself after a heat pause, also when the app was in the background.
 - **Fixed: some effects were drawn in the wrong place at aspect ratios other than 16:9** (#275): the elemental arrow
   glow and rupee sparkles now sit where they belong at every aspect ratio, also after switching it while playing or
   loading a save state.
