@@ -26,7 +26,8 @@ what is on `devel` and not released yet (also in the
 - **More moves smoothly** with frame interpolation: boss hit flashes, sand floors, cloth and flags, water masks, shadows
   and mod HUDs. Objects at the screen edge no longer pop in or out between the game's steps.
 - **Mods can use the game's own HUD art** (for mod makers): a guest mod can draw any texture or pane of the game's
-  2D layouts (map frames, icons, markers) from the player's own game files, and check whether one exists first.
+  2D layouts (map frames, icons, markers) from the player's own game files, check whether one exists first, and
+  ask for it enlarged smoothly and sharpened.
 - **New setting: Shader compile** (Settings → Graphics). **Off** (the default) draws everything exactly and waits for
   shaders that aren't ready yet, as before. **Fast** keeps playing while new shaders compile and may leave out a few
   objects for a frame or two, for fewer stutters on first visits.
