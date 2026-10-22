@@ -32,6 +32,9 @@ what is on `devel` and not released yet (also in the
 - **Fixed on Android: the "too warm" pause during setup could flash on and off in a loop** (#277) on some handhelds
   (AYANEO Pocket EVO and Pocket S). A heat pause now needs a real temperature to confirm it, stays on screen, and setup
   goes on by itself only after the device has stayed cool for a few seconds. Continue anyway still works right away.
+- **Fixed: some effects were drawn in the wrong place at aspect ratios other than 16:9** (#275): the elemental arrow
+  glow and rupee sparkles now sit where they belong at every aspect ratio, also after switching it while playing or
+  loading a save state.
 - **New setting: Shader compile** (Settings → Graphics). **Off** (the default) draws everything exactly and waits for
   shaders that aren't ready yet, as before. **Fast** keeps playing while new shaders compile and may leave out a few
   objects for a frame or two, for fewer stutters on first visits.
