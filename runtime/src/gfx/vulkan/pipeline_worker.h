@@ -12,6 +12,9 @@ struct WarmPipeline {
 };
 // The worker never accesses guest memory, R, a command buffer, or a render-thread
 // pipeline cache. Ready objects transfer to the render thread exactly once.
+// The device's memory budget in bytes (0: unknown), before start_pipeline_worker: it sizes the pool of unused warm
+// pipelines (the pool exists for memory only)
+void set_memory_budget(uint64_t bytes);
 void start_pipeline_worker(VkDevice device, PipelineRecipeFingerprint fingerprint,
     std::string path, std::vector<uint8_t> cacheSeed, std::string headstartPath);
 bool take_warm_pipeline(const std::vector<uint8_t>& key,
