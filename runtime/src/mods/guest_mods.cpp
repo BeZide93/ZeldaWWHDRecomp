@@ -1312,6 +1312,13 @@ void init() {
         if(!items.empty()){story_items::note_import();story_notebook::note_import();story_mail::note_import();}
         load_world(pkg.id,manifest,path.string(),packages::package_data_directory(pkg.id));
     }
+    // The world editor (--editor, #270): mod items and chests that hold them work while the game runs. The item
+    // hooks and the chest item hook are there from the start even when no package declared an item or such a
+    // chest, so an item or a chest added in the editor needs no restart (story_actors no longer leaves the
+    // chest out). Inert until something uses them; only with the Story Notebook (items need it).
+    if(editor::launch_mode()&&g_story_package){
+        story_items::note_import();story_notebook::note_import();story_mail::note_import();story_treasure_chest::note_placed_chests();
+    }
     // The item icons (item_icons.h): the notebook (key 0), then the mod items in declaration order (frames
     // 56...), built into the game's 2D pack before the game opens it; the mod items draw from those frames.
     // (test aid WWHD_TEST_ITEM_ICONS=a.png,b.png adds pictures as more items)

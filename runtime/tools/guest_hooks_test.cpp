@@ -200,6 +200,7 @@ bool installed() {return false;}
 namespace story_treasure_chest {
 void state_loaded() {}
 bool placed_chests() {return false;}
+void note_placed_chests() {}
 void set_placed_chest(bool (*)(uint32_t,std::string&,std::string&)) {}
 void set_item_hook_ready(bool) {}
 void set_item_get_next(void (*)(Cpu*),void (*)(Cpu*,uint32_t)) {}

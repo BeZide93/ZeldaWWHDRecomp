@@ -185,8 +185,8 @@ change only Link's rupees and hearts. No story or key item can be chosen, and th
 chest never sets one of the game's save bits: whether it is open is its mod `flag`.
 A piece of heart or a heart container changes Link's hearts for good (turning the mod off
 doesn't take them back), as one from a chart's chest does, so use them sparingly. A chest that holds one of your items needs the
-story system's chest hook: one added in the editor while the game runs appears after a
-restart.
+story system's chest hook; in the world editor (`--editor`) it is always there, so such a
+chest added while the game runs appears at once.
 
 `flag` is a symbolic ID in the declaring mod's story records. It is not a game
 save-bit number. Chest opening and sign reading use this namespace. The runtime

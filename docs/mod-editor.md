@@ -497,7 +497,8 @@ These wait for a restart (save, then start the game again); the status bar names
   list at once; its treasure's salvage point is set up when Link enters the sea room, so it follows
   there after **Reload room** or the next visit;
 - what the game did not run at start-up: the King of Red Lions' lines when no quest had one, items when
-  no mod had any, a chart's treasure when no mod had a chart, and all of the story when the Story
+  the Story Notebook package was off (with it on, the editor starts the item and chest hooks even when no mod
+  has items, so a chest that holds a new item appears at once), a chart's treasure when no mod had a chart, and all of the story when the Story
   Notebook package was not on;
 - scenes (see [Scenes](#scenes)).
 
