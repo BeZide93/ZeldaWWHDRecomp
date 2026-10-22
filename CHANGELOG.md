@@ -45,6 +45,10 @@ what is on `devel` and not released yet (also in the
   and the item's own icon is held up over Link's head. New items and icon changes now work while the game runs (a chest
   with a new item appears at once); changes that still need a restart are marked "Takes effect after a restart", and
   "Restart and return here" restarts the game and brings you back to the same spot.
+- **World editor: own 3D models** (#280, for mod makers): own models now work in the Windows release (their converter
+  could not start there before). A model built on an exported island stands exactly where it was modelled, the editor
+  says why a model can't be shown instead of asking for a restart, and the import fixes common Blender exports by itself
+  (several objects, quads, vertex colours, blended materials, large textures) with a note for each fix.
 - **New setting: Shader compile** (Settings → Graphics). **Off** (the default) draws everything exactly and waits for
   shaders that aren't ready yet, as before. **Fast** keeps playing while new shaders compile and may leave out a few
   objects for a frame or two, for fewer stutters on first visits.
