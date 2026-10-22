@@ -29,6 +29,9 @@ what is on `devel` and not released yet (also in the
 - **Mods can use the game's own HUD art** (for mod makers): a guest mod can draw any texture or pane of the game's
   2D layouts (map frames, icons, markers) from the player's own game files, check whether one exists first, and
   ask for it enlarged smoothly and sharpened.
+- **Fixed on Android: the "too warm" pause during setup could flash on and off in a loop** (#277) on some handhelds
+  (AYANEO Pocket EVO and Pocket S). A heat pause now needs a real temperature to confirm it, stays on screen, and setup
+  goes on by itself only after the device has stayed cool for a few seconds. Continue anyway still works right away.
 - **New setting: Shader compile** (Settings → Graphics). **Off** (the default) draws everything exactly and waits for
   shaders that aren't ready yet, as before. **Fast** keeps playing while new shaders compile and may leave out a few
   objects for a frame or two, for fewer stutters on first visits.
