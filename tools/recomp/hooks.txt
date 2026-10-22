@@ -247,6 +247,14 @@
 0252DA64  # dDlst_mirrorPacket::update: light beams (Mirror Shield, Medli's harp) from the blended base matrix (interp_fx.cpp)
 02466578  # daSalvage_c::calcAlpha: treasure light columns fade once per logic step (interp_fx.cpp)
 0238B258  # daObj_Search::Act_c::_draw: searchlight ground spot between the steps (interp_fx.cpp)
+02103B30  # daBwdg_packet_c::prepare: Molgera's sand floor heights between the steps (interp_fx.cpp)
+0239DD2C  # daObjTapestryPacket_c::setup_vtx: tapestry cloth between the steps (interp_fx.cpp)
+0215F9E4  # daGFlag_packet_c::update: boat-race goal flag cloth between the steps (interp_fx.cpp)
+025D39A8  # dWpotWater_c::execute: spilled water mask placement kept for the draw (interp_fx.cpp)
+025D3968  # dWpotWater_c::draw: spilled water mask with the view of the drawn pass (interp_fx.cpp)
+02736C10  # hdLayerShadow drawShadowPass: cascade split distances put back after the pass is painted (interp_fx.cpp)
+027987BC  # updateShadowSurface: shadow cascade split distances between the steps (interp_fx.cpp)
+027FB678  # uploadShadowEnvironment: shadow cascade fade ranges between the steps (interp_fx.cpp)
 024EC1C8  # dAttDraw_c::draw: in true 60, the attention arrow is built from halfway values and the current camera
 025615B8  # dScnKy_env_light_c::settingTevStruct_plightcol_plus: candle flicker held on frames without logic (interp_fx.cpp)
 020198D8  # cM_rndF: the flicker random value inside it

@@ -321,6 +321,7 @@ bool g_cam_blended = false; // camera_draw is drawing the blended camera
 uint32_t g_drawing_cam = 0; // the camera process camera_draw is drawing (zoom_ease)
 // exact culling on blended logic passes (exact_cull, below camera_draw)
 bool g_cam_prerun = false;          // camera_draw runs with the exact camera for the culling view
+uint64_t g_view_pass = ~0ull;       // the pass whose camera_draw set j3dSys's view (view_drawn_this_pass)
 uint64_t g_prerun_pass = ~0ull;     // the pass whose camera_draw had that run
 uint32_t g_exact_view[12];          // j3dSys's view matrix (104B45F8) of the exact camera, as drawn at 30 fps
 bool g_logic_pass = false;  // logic pass with interpolation on: camera drawn blended
@@ -419,6 +420,7 @@ bool g_record_logic = false;
 // the step's exact state is drawn and recorded (the "before" of the next step's blended frames): the
 // record pass, or an exact record logic pass at 40 fps
 bool record_pass() { return (g_hold && g_phase >= g_step_n) || (g_record_logic && g_exact_step); }
+bool view_drawn_this_pass() { return g_view_pass == g_passes; }  // j3dSys's view is this pass's camera's
 // a blended record pass (40 fps): drawn blended, its step recorded for the next step's frames. Its
 // records are stamped hold_pass_count() + 1 (record_stamp): the count goes up when the next pass
 // starts (g_record_pending), so that this pass's blends still see the records from before it.
@@ -564,6 +566,62 @@ struct ExactCullView {
     }
     ~ExactCullView() { if (on) memcpy(ppc_ptr(GD(0x104B45F8)), saved, sizeof saved); }
 };
+// The culling frustum (mDoLib_clipper: J3DUClipper mClipper 1048CFF0, mSystemFar 1048D04C, mFovyRate
+// 1048D050) is set up by the camera's execute (view_setup 024F8068) with the step's exact fovy, while
+// the blended frames are drawn with the blended fovy: during a zoom (telescope, events) things at the
+// edge of the screen popped in and out. Passes without logic cull with a frustum set up from the fovy
+// they draw with (mDoLib_clipper::setup 025F11AC), the exact one is back at the start of the next pass;
+// the logic pass keeps the exact frustum for its culling (the 30 fps game's) and its edge draws
+// (edge_draw) test with the blended one. debug: WWHD_INTERP_CLIPPER=0 keeps the exact frustum
+constexpr uint32_t kClipperBytes = 0x64;
+uint8_t g_clipper_exact[kClipperBytes], g_clipper_blended[kClipperBytes];
+uint64_t g_clipper_pass = ~0ull;  // the pass that has a blended frustum
+bool g_clipper_in_memory = false; // the blended frustum is in guest memory (a pass without logic)
+bool clipper_on() {
+    static const bool off = getenv("WWHD_INTERP_CLIPPER") && !atoi(getenv("WWHD_INTERP_CLIPPER"));
+    return !off;
+}
+void clipper_put_back() {
+    if (g_clipper_in_memory) memcpy(ppc_ptr(GD(0x1048CFF0)), g_clipper_exact, kClipperBytes);
+    g_clipper_in_memory = false;
+}
+// with the blended frustum (an edge draw's test on a logic pass)
+struct BlendedClipper {
+    bool on = false;
+    BlendedClipper() {
+        if (g_clipper_pass != g_passes || g_clipper_in_memory) return;
+        memcpy(ppc_ptr(GD(0x1048CFF0)), g_clipper_blended, kClipperBytes);
+        on = true;
+    }
+    ~BlendedClipper() { if (on) memcpy(ppc_ptr(GD(0x1048CFF0)), g_clipper_exact, kClipperBytes); }
+};
+}  // namespace interp
+extern "C" void f_025F11AC(Cpu* c);  // mDoLib_clipper::setup(fovy, aspect, near, far)
+namespace interp {
+// camera_draw drew camera `cam` blended with fovy `fovy` (its exact one `exact`)
+void clipper_blend(Cpu* c, uint32_t cam, float fovy, float exact) {
+    if (!clipper_on() || !(fovy == fovy) || fovy == exact || g_clipper_pass == g_passes) return;
+    const uint32_t a = GD(0x1048CFF0);
+    memcpy(g_clipper_exact, ppc_ptr(a), kClipperBytes);
+    const float far_plane = (float)ldf32(GD(0x1048D04C));  // (the far view_setup chose: the stage's cull point or the camera's)
+    const Cpu saved = *c;
+    c->f[1].ps0 = fovy;
+    c->f[2].ps0 = (float)ldf32(cam + 0xD8);
+    c->f[3].ps0 = (float)ldf32(cam + 0xCC);
+    c->f[4].ps0 = far_plane;
+    f_025F11AC(c);
+    *c = saved;
+    memcpy(g_clipper_blended, ppc_ptr(a), kClipperBytes);
+    g_clipper_pass = g_passes;
+    g_clipper_in_memory = g_hold;
+    if (!g_hold) memcpy(ppc_ptr(a), g_clipper_exact, kClipperBytes);
+    static int trace = getenv("WWHD_INTERP_CAM_TRACE") ? atoi(getenv("WWHD_INTERP_CAM_TRACE")) : 0;
+    if (trace > 0) {
+        trace--;
+        LOG("[interp] culling frustum step %llu t %.3f: fovy %.3f (exact %.3f), %s", (unsigned long long)g_logic_steps, pass_t(), fovy, exact,
+            g_hold ? "this pass culls with it" : "edge draws test with it");
+    }
+}
 }  // namespace interp
 // Light state of drawn things (dKy_tevstr_c, 0x1C8 bytes: actors +0x110, other processes and models
 // their own). settingTevStruct (025626A4, from the draws) eases it towards the lights around it and
@@ -723,8 +781,12 @@ void edge_draw(const Cpu& call, Cpu* c, uint32_t actor) {
     if (!(ld32(actor + 0x2E4) & 0x04) || !(ld32(actor + 0x2E0) & 0x100)) return;  // drawn, or not by culling
     const Cpu result = *c;
     *c = call;
-    f_025D6CE8_orig(c);  // (the check with the pass's own camera)
-    const bool culled = c->r[3] != 0;
+    bool culled;
+    {
+        BlendedClipper blended;
+        f_025D6CE8_orig(c);  // (the check with the pass's own camera)
+        culled = c->r[3] != 0;
+    }
     if (!culled) {
         static int trace = getenv("WWHD_INTERP_CULL_TRACE") ? atoi(getenv("WWHD_INTERP_CULL_TRACE")) : 0;
         if (trace > 0) {
@@ -822,6 +884,8 @@ static void camera_draw_body(Cpu* c) {
         f_024FFC40_orig(c);
         capture_projection(*p);
         g_cam_blended = false;
+        g_view_pass = g_passes;
+        if (p->valid && !true60::enabled()) clipper_blend(c, cam, (float)ldf32(cam + kFovy), cur.fovy);
         write_cam(cam, cur);
         if (trim_drawn == trim_drawn) stf32(cam + kCamBody + kTrimHeight, trim_drawn);  // (exact back)
         if (record_blended()) {  // 40 fps blended record pass: the step's camera for the next step's frames
@@ -882,6 +946,7 @@ static void camera_draw_body(Cpu* c) {
     }
     f_024FFC40_orig(c);
     capture_projection(*p);
+    g_view_pass = g_passes;
 }
 
 // The HD projection zoom (dCamera_c +0x730 mScale, +0x734 mTarget): camera_draw, which runs on every
@@ -1764,6 +1829,7 @@ extern "C" void hook_0203593C(Cpu* c) {
     if (!g_exact_writes.empty()) put_back_exact();
     if (!g_tev_kept.empty()) tevstr_put_back();
     if (!g_actor_kept.empty()) actors_put_back();
+    clipper_put_back();
     if (g_cam_exact_pending) {  // (the exact camera of a 40 fps blended record pass)
         g_cam_exact_pending = false;
         // (only the words the blended camera_draw changed, where nothing else changed them since)
