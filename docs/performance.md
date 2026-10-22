@@ -697,24 +697,23 @@ with and without an index buffer, counts 0–64); the new one is ~5× faster on 
 | renderer samples | 2,701 | 2,262 |
 | busy samples, whole process | 9,242 | 8,812 |
 
-## Sun check: answers one step later, every time (2026-10-22)
+## Sun check: the same answers every time (2026-10-22)
 
 The game checks whether the sun is hidden by reading the depth of five points around it (a "depth
 peek"). On the Wii U the game asks during one step and reads the answers at the start of the next:
 `peekData` reads the depth buffer on the CPU after the draw lists and writes the answers at once,
-and `dKyr_sun_move` reads them one step later before asking again. The port answered when the GPU
-finished the frame, which was usually in time and sometimes one step late. Then the sun's glare
-could differ between runs, even with Off, depending on load or frame dumps.
+and `dKyr_sun_move` reads them one step later before asking again. The port answered whenever the
+GPU finished the frame, usually two steps after the request and sometimes one. Then the sun's glare
+could differ between runs, even with Shader compile Off, depending on load or frame dumps.
 
-Now each renderer answers a peek at once (it waits for that small copy), and the game waits at the
-end of a frame that asked until its answers are in. `WWHD_PEEKZ_SYNC=0` restores the old timing.
-In 20 fixed-seed runs (Off with and without frame dumps, render load of 5 to 25 ms, Fast) the game
-saw the same answers and its state matched step for step, also over a full tour of 7,499 steps.
+Now the answers are written at a fixed point, the game's swap after the next one: the sun glare
+reacts one game step later than on the Wii U, for no measurable cost and fully deterministic. In
+fixed-seed runs (Off with and without frame dumps, 25 ms render load, Fast; Vulkan and Metal) the
+game saw the same answers and its state matched step for step.
 
-Cost, measured uncapped on the title screen (Mac, MoltenVK, 4 interleaved runs each): 9.0 → 9.8 ms
-per frame at 60 fps and 5.7 → 6.3 ms at 120 fps, while the sun is checked. At the normal 60 or
-120 fps limit (16.7 / 8.3 ms) there is headroom left on this Mac; slower machines may lose a little
-smoothness while the sun is on screen.
+`WWHD_PEEKZ_SYNC` selects other timings for tests: `1` answers one step later as on the Wii U (the
+game waits at its swap for the GPU; measured 3 to 15 % slower uncapped on a Mac), `2` the same with
+a synchronous copy (8 to 12 % slower), `0` the former timing (not deterministic).
 
 ## Open leads
 

@@ -310,8 +310,9 @@ What Fast still waits for, so nothing wrong lasts and game logic does not change
 Presentation and overlay never wait for game shaders.
 
 The game's sun check reads depth from the picture (a "depth peek"). Its answers now always reach
-the game one step after the request, as on the Wii U, whatever the timing: with Off and Fast, with
-or without load, the game sees the same answers (see [performance.md](performance.md)).
+the game two steps after the request, whatever the timing: with Off and Fast, with or without load,
+the game sees the same answers. The sun glare reacts one game step later than on the Wii U, for no
+cost (see [performance.md](performance.md)).
 
 In a test on a Mac (MoltenVK; title screen, Windfall, a Hyrule room and the open sea at dusk, each
 a first visit with empty game shader caches, two runs each), the frames waited 2.1 to 3.6 s in all
