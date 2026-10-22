@@ -1177,8 +1177,9 @@ Link's hand when used).
  "icon": "assets/crystal.png", "held_model": "crystal", "hold_up": true}
 ```
 
-Without `hold_up`, a get shows the item's caption with a small jingle, and a chest of
-one of your charts holds up a stand-in of the game's.
+Without `hold_up`, a get shows the item's caption with a small jingle, and a chest (a placed
+one or one of your charts') holds up the item's `icon` over Link's head, with the game's get
+message saying the item's name and description.
 
 ## Static mod actors
 

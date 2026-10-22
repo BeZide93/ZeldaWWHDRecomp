@@ -50,5 +50,8 @@ void set_items(const std::vector<Item>& items, const std::filesystem::path& cach
 std::string pack_for(const std::string& guest, const std::string& host_path);
 // The icon frame of an item in the served pack, or -1 (not served: the caller falls back).
 int frame(uint16_t key);
+// An item's picture as the icons are built from it: 128 x 128 RGBA, scaled to fit and centred. Throws
+// std::runtime_error (the file can't be read or isn't a PNG).
+Bytes picture(const std::string& png_path);
 
 }  // namespace item_icons

@@ -203,6 +203,7 @@ bool placed_chests() {return false;}
 void set_placed_chest(bool (*)(uint32_t,std::string&,std::string&)) {}
 void set_item_hook_ready(bool) {}
 void set_item_get_next(void (*)(Cpu*),void (*)(Cpu*,uint32_t)) {}
+void set_icon_presenter(void (*)(uint16_t,const std::string&,bool)) {}
 namespace hooks { void exec_item_get(Cpu*) {} }
 }
 // World runtime has its own actor/scene tests; loader tests only exercise registration.
@@ -413,7 +414,18 @@ namespace hooks { void exec_item_get(Cpu*) {} }
 namespace item_icons {
 void set_items(const std::vector<Item>&,const std::filesystem::path&) {}
 int frame(uint16_t) {return -1;}
+Bytes picture(const std::string&) {return {};}
 }
+// the item get's icon (story_item_get_icon_test has its own tests)
+namespace story_item_get_icon {
+void configure(void (*)(Cpu*,uint32_t),Camera (*)(),Picture (*)(const std::string&)) {}
+void show(uint16_t,const std::string&) {}
+void hide() {}
+bool install(const std::function<std::string(uint32_t)>&,const std::function<void(uint32_t,void (*)(Cpu*))>&) {return true;}
+void logic(uint64_t) {}
+void state_loaded() {}
+}
+namespace editor { CameraView camera_view() {return {};} }
 namespace game_layouts {
 bool texture(const std::string&,Image&,std::string& error) {error="no game layouts in this test";return false;}
 bool texture_size(const std::string&,uint32_t&,uint32_t&) {return false;}

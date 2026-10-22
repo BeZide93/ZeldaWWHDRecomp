@@ -522,6 +522,8 @@ std::string pack_for(const std::string& guest, const std::string& host_path) {
     return result;
 }
 
+Bytes picture(const std::string& png_path) { return icon_of(png_path); }
+
 int frame(uint16_t key) {
     std::lock_guard lock(g_mu);
     if (!g_served) return -1;

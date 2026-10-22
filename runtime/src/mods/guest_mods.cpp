@@ -70,6 +70,7 @@
 #include "story_notebook.h"
 #include "story_items.h"
 #include "story_item_models.h"
+#include "story_item_get_icon.h"
 #include "story_actor_textures.h"
 #include "story_prop_textures.h"
 #include "story_props.h"
@@ -1586,6 +1587,17 @@ void init() {
     story_items::set_get_text(story_mail::item_get_text);
     story_item_models::set_text(story_items::arm_get_text);
     if(!story_item_models::install([](uint32_t fn){auto it=g_chains.find(fn);return it==g_chains.end()?std::string():it->second.replace_mod;},[](uint32_t fn,PpcFunc hook){int i=ordinal_of(fn);if(i<0)fatal("item model hook missing");auto&ch=g_chains[fn];ch.addr=fn;ch.ordinal=uint32_t(i);ch.replace=hook;ch.replace_mod="the port's item models";g_mod_hook_flags[i]=1;}))exception_report::raise("Item model hook conflict");
+    // a mod item's get moment from a chest (story_item_get_icon.h): its icon over Link's head in the place of
+    // the stand-in's card; the demo item's draw hook also asks the held models first. With mod items, chests
+    // of them, or in the editor launch mode (an item added there gets its chest at once).
+    story_item_get_icon::configure(call_original,[]{
+        const editor::CameraView v=editor::camera_view();story_item_get_icon::Camera c;c.valid=v.valid;
+        for(int i=0;i<3;i++)c.eye[i]=v.eye[i],c.center[i]=v.center[i],c.up[i]=v.up[i];
+        c.fovy=v.fovy;c.aspect=v.aspect;for(int i=0;i<16;i++)c.proj[i]=v.proj[i];return c;
+    },item_icons::picture);
+    story_treasure_chest::set_icon_presenter([](uint16_t key,const std::string& png,bool on){if(on)story_item_get_icon::show(key,png);else story_item_get_icon::hide();});
+    if(story_items::imported()||story_treasure_chest::placed_chests()||story_item_models::declared()||editor::launch_mode())
+        story_item_get_icon::install([](uint32_t fn){auto it=g_chains.find(fn);return it==g_chains.end()?std::string():it->second.replace_mod;},[](uint32_t fn,PpcFunc hook){int i=ordinal_of(fn);if(i<0)fatal("[guestmods] item get: %08X is not a game function",fn);auto&ch=g_chains[fn];ch.addr=fn;ch.ordinal=uint32_t(i);ch.replace=hook;ch.replace_mod="the port's item get";g_mod_hook_flags[i]=1;});
     story_item_buttons::set_game_calls(call_original,[](Cpu* c,uint32_t fn,std::initializer_list<uint32_t> args){return guest_call(c,fn,args);});
     story_item_buttons::install([](uint32_t addr) {
         auto it=g_chains.find(addr);return it==g_chains.end()?std::string():it->second.replace_mod;
@@ -1790,7 +1802,7 @@ void logic_service(Cpu* c) {
             }
         }
     }
-    story_item_models::tick(c);mod_actor::heap_sample(c);actor_sweep(c);story_scenes::tick(c,false,2);story_actors::service(c);
+    story_item_models::tick(c);story_item_get_icon::logic(hud::store().step());mod_actor::heap_sample(c);actor_sweep(c);story_scenes::tick(c,false,2);story_actors::service(c);
     mod_stages::logic(c);
     story_native_wait_runtime::logic(c);
     story_scenes::demo_tick(c);
@@ -1804,6 +1816,7 @@ void state_loaded() {
     hud::store().reset();
     pcm::store().reset();
     story_item_models::state_loaded();
+    story_item_get_icon::state_loaded();
     story_mail::state_loaded();
     story_scenes::state_loaded();
     story_actors::state_loaded();

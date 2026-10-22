@@ -2116,8 +2116,10 @@ void toggle_play() {
 }
 std::mutex g_view_mu;
 CameraView g_camera;  // under g_view_mu
+// the game camera as drawn last: the editor's overlays project with it, and (in every launch mode) a mod
+// item's get icon (story_item_get_icon.h)
 void camera_drawn(uint32_t cam) {
-    if (!enabled() || !cam) return;
+    if (!cam) return;
     CameraView v;
     v.valid = true;
     for (int i = 0; i < 3; i++) {

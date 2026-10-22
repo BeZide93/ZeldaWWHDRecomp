@@ -1478,6 +1478,12 @@ add_executable(story_item_models_test runtime/tools/story_item_models_test.cpp r
 target_include_directories(story_item_models_test PRIVATE runtime/include runtime/src)
 target_compile_options(story_item_models_test PRIVATE -UNDEBUG)
 add_test(NAME story_item_models COMMAND story_item_models_test)
+# a mod item's get moment from a chest: its icon over Link's head instead of the stand-in's card (#269)
+add_executable(story_item_get_icon_test runtime/tools/story_item_get_icon_test.cpp runtime/src/mods/story_item_get_icon.cpp
+               runtime/src/mods/story_item_models.cpp runtime/src/guest_addr_identity.c)
+target_include_directories(story_item_get_icon_test PRIVATE runtime/include runtime/src)
+target_compile_options(story_item_get_icon_test PRIVATE -UNDEBUG)
+add_test(NAME story_item_get_icon COMMAND story_item_get_icon_test)
 add_executable(story_mod_combat_manifest_test runtime/tools/story_mod_combat_manifest_test.cpp)
 target_include_directories(story_mod_combat_manifest_test PRIVATE runtime/src)
 target_compile_options(story_mod_combat_manifest_test PRIVATE -UNDEBUG)
