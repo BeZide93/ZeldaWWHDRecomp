@@ -972,9 +972,14 @@ void track_events() {
     if (ld8(kEventRun)) g_event_wait = 5;
     else if (g_event_wait > 0) g_event_wait--;
 }
+// test aid: WWHD_TEST_WARP_FORCE=1 lets WWHD_TEST_WARP_AT warps through cutscenes, events and messages (a scripted
+// tour through many places must not stop at the first event a place starts)
+static bool g_warp_force = false;
 bool player_has_control(Cpu* c, std::string& why) {
-    if (ld8(kEventRun) || g_event_wait > 0) { why = "a cutscene or event is running"; return false; }
-    if (ld8(kMesgStatus) || ld8(kScopeMesgStatus)) { why = "a message or dialogue is open"; return false; }
+    if (!g_warp_force) {
+        if (ld8(kEventRun) || g_event_wait > 0) { why = "a cutscene or event is running"; return false; }
+        if (ld8(kMesgStatus) || ld8(kScopeMesgStatus)) { why = "a message or dialogue is open"; return false; }
+    }
     if (ld8(kMenuFlag)) { why = "a game menu is open"; return false; }
     if (ld8(kNextStage + 12)) { why = "a stage change is in progress"; return false; }
     if (ld32(kPlayerPtr) != ld32(kLinkPtr)) { why = "Link is not the controlled character"; return false; }
@@ -1945,9 +1950,12 @@ void service(Cpu* c) {
             } else if (!pending && f >= tried + 30) {
                 tried = f;
                 pending = true;
+                static const bool force = getenv("WWHD_TEST_WARP_FORCE") && atoi(getenv("WWHD_TEST_WARP_FORCE"));
+                g_warp_force = force;
                 request_warp(warps[next].second, [](bool ok, const std::string&) {
                     if (ok) done = true;
                     pending = false;
+                    g_warp_force = false;
                 });
             }
         }
