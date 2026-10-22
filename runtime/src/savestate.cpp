@@ -1912,6 +1912,46 @@ void service(Cpu* c) {
     track_events();
     service_at_start();
     service_auto_save();
+    // test aid: WWHD_TEST_WARP_AT=frame:stage:room:point[,...] enters that stage (the world editor's warp, the game's
+    // own stage change at a spawn point) at each TV frame; a warp the game refuses then (no control yet) is retried
+    // every 30 frames until the next one is due
+    static std::vector<std::pair<uint64_t, Warp>> warps = [] {
+        std::vector<std::pair<uint64_t, Warp>> v;
+        const char* e = getenv("WWHD_TEST_WARP_AT");
+        for (std::string all = e ? e : ""; !all.empty();) {
+            const size_t comma = all.find(',');
+            const std::string item = all.substr(0, comma);
+            all = comma == std::string::npos ? "" : all.substr(comma + 1);
+            unsigned long long frame = 0;
+            char stage[16] = {};
+            int room = 0, point = 0;
+            if (sscanf(item.c_str(), "%llu:%15[^:]:%d:%d", &frame, stage, &room, &point) == 4) {
+                Warp w;
+                w.stage = stage, w.room = room, w.point = point;
+                v.push_back({frame, w});
+            }
+        }
+        return v;
+    }();
+    if (!warps.empty()) {
+        static size_t next = 0;
+        static std::atomic<bool> pending{false}, done{false};
+        static uint64_t tried = 0;
+        const uint64_t f = fixed_seed::script_frame(render::frame_count());
+        if (next < warps.size() && f >= warps[next].first) {
+            if (done.exchange(false) || (next + 1 < warps.size() && f >= warps[next + 1].first)) {
+                pending = false;
+                ++next;
+            } else if (!pending && f >= tried + 30) {
+                tried = f;
+                pending = true;
+                request_warp(warps[next].second, [](bool ok, const std::string&) {
+                    if (ok) done = true;
+                    pending = false;
+                });
+            }
+        }
+    }
     service_warp(c);       // world editor
     service_file_save(c);  // world editor test states
     if (int slot = g_psave_req.exchange(0)) do_portable_save(c, slot);

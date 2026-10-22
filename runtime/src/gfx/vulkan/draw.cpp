@@ -892,7 +892,7 @@ Pipeline &pipeline(const uint32_t *r, vk::Shader *vs, vk::Shader *ps,
   if(preparation_stats_enabled())++R.cpuPreparation.pipelineLookups;
   const PipelineKey key = pipeline_key(r, vs, ps, fs, topology, colors, depth);
   // the setup's model sweep: every pipeline a swept archive's models use is filed under that archive (once each)
-  if (const uint32_t group = pipeline_groups::sweeping()) {
+  if (const uint32_t group = pipeline_groups::sweeping(); group && !pipeline_groups::sweeping_new_only()) {
     static std::unordered_set<uint64_t> noted;
     const uint64_t id = PipelineKeyHash{}(key) * 1099511628211ull ^ group;
     if (noted.insert(id).second) {

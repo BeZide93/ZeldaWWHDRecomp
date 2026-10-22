@@ -4,6 +4,7 @@ from pathlib import Path
 import struct
 import tempfile
 import unittest
+from unittest import mock
 
 import model_sweep
 import shader_prebuild as prebuild
@@ -119,6 +120,14 @@ class ModelSweepTests(unittest.TestCase):
         self.assertEqual(listed, ['A_mori Stage Room0', 'Name Stage', 'sea Stage Room1 Room10 LOD03 LODALL'])
         for key in ('WWHD_DSWEEP_ENV', 'WWHD_DSWEEP_ACTORS', 'WWHD_DSWEEP_FILE_SELECT'):
             self.assertEqual(game.calls[0][1][key], '1')
+        # stage visits (on unless WWHD_SETUP_MODEL_SWEEP_VISITS=0): each stage with rooms at its first room
+        self.assertEqual(Path(game.calls[0][1]['WWHD_DSWEEP_VISIT']).read_text().splitlines(), ['A_mori 0', 'sea 1'])
+        self.assertIn('visit-ENDumi', game.calls[0][1]['WWHD_DSWEEP_SKIP'].split(','))
+        with mock.patch.dict(os.environ, {'WWHD_SETUP_MODEL_SWEEP_VISITS': '0'}):
+            game = FakeGame(self, ['ok'])
+            model_sweep.clear(self.cache)
+            self.assertEqual(self.run_sweep(game), 'done')
+            self.assertNotIn('WWHD_DSWEEP_VISIT', game.calls[0][1])
 
     def test_sweep_runs_hidden_and_muted_with_its_own_settings(self):
         game = FakeGame(self, ['ok'])
