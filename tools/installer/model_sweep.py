@@ -28,6 +28,7 @@ MAX_ATTEMPTS_TOTAL = 1000  # attempts in all (actors that stop the game: a few s
 DEFAULT_SKIP = Path(__file__).with_name('model_sweep_skip.txt')
 # models drawn per batch (two frames each); WWHD_SETUP_MODEL_SWEEP_BATCH=n for measurements only
 MODELS_PER_BATCH = max(1, min(8, int(os.environ.get('WWHD_SETUP_MODEL_SWEEP_BATCH', '1') or 1)))
+STARTUP_SECONDS = 300     # until an attempt's first progress line (the game starting up)
 STALL_SECONDS = 60         # no new line in progress.txt for this long: the attempt counts as a crash (a model, room or
                            # actor takes well under a second; a stuck game writes nothing more)
 
@@ -216,7 +217,11 @@ def run(executable, game, cache_root, renderer, identity, cache_env, line=lambda
             child = popen([str(executable), '--game', str(game), '--save', str(scratch / 'save')], env=env,
                           stdout=output, stderr=subprocess.STDOUT, cwd=str(scratch))
             pending = b''
-            last_change, last_size = clock(), -1
+            last_change, last_size, started = clock(), -1, False
+            try:
+                last_size = progress_file.stat().st_size  # lines of earlier attempts are not this one's start
+            except OSError:
+                pass
 
             def forward(final=False):
                 nonlocal pending
@@ -239,7 +244,9 @@ def run(executable, game, cache_root, renderer, identity, cache_env, line=lambda
                         size = -1
                     if size != last_size:
                         last_size, last_change = size, clock()
-                    elif clock() - last_change > stall:
+                        started = True
+                    # (before the attempt's first line the game is still starting: a busy machine takes longer)
+                    elif clock() - last_change > (stall if started else max(stall, STARTUP_SECONDS)):
                         stalled = True
                         log('Model preparation: no progress for %d s; restarting' % stall)
                         break

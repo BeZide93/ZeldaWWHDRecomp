@@ -810,7 +810,7 @@ void begin_visits() {
         char stage[16] = {};
         int room = 0;
         if (std::sscanf(line.c_str(), "%15s %d", stage, &room) >= 1 && !g.done.count(std::string("visit-") + stage) &&
-            !g.skip.count(std::string("visit-") + stage))
+            !g.skip.count(std::string("visit-") + stage) && !g.skip.count(stage))
             g_visits.push_back({stage, room});
     }
     if (g_visits.empty()) return begin_file_select();
@@ -1262,10 +1262,31 @@ std::string describe_draw_context() {
         else if (mem2(w, 8)) {
             if (auto m = resources.find(ld32(w + 4)); m != resources.end()) what = "model of " + m->second;
         }
-        if (!what.empty() && seen.insert(what).second && seen.size() <= 8) objs += " [" + what + "]";
+        // else an object with a virtual table (its first word in the game's data, pointing to code): the class, by
+        // the code address of its first methods (names: build/names.tsv)
+        if (what.empty() && mem2(w, 8)) {
+            const uint32_t vt = ld32(w);
+            if (vt >= 0x10000000u && vt < 0x10800000u && mem2(vt, 0x18)) {
+                for (uint32_t o = 0; o < 0x18 && what.empty(); o += 4)
+                    if (const uint32_t f = ld32(vt + o); (f >> 24) == 2) {  // in the game's code
+                        char v[40];
+                        std::snprintf(v, sizeof v, "vt %08X:%08X", vt, f);
+                        what = v;
+                    }
+            }
+        }
+        if (!what.empty() && seen.insert(what).second && seen.size() <= 12) objs += " [" + what + "]";
     };
-    for (int i = 3; i < 32; ++i) look(c->r[i]);
-    for (uint32_t a = c->r[1]; a < c->r[1] + 0x3000 && mem2(a, 4); a += 4) look(ld32(a));
+    // the registers and the top of the stack, and one level deeper (the render thread replays command records that
+    // point to the drawing objects)
+    std::vector<uint32_t> roots;
+    for (int i = 3; i < 32; ++i) roots.push_back(c->r[i]);
+    for (uint32_t a = c->r[1]; a < c->r[1] + 0x3000 && mem2(a, 4); a += 4) roots.push_back(ld32(a));
+    for (uint32_t w : roots) look(w);
+    std::set<uint32_t> deeper;
+    for (uint32_t w : roots)
+        if (mem2(w, 0x80) && deeper.insert(w).second && deeper.size() < 4096)
+            for (uint32_t o = 0; o < 0x80; o += 4) look(ld32(w + o));
     return text + " | objs" + (objs.empty() ? std::string(" -") : objs);
 }
 void note_drawn_actor(uint32_t actor) {
@@ -1278,6 +1299,9 @@ void note_drawn_actor(uint32_t actor) {
     for (uint32_t i = 0; i < 809; ++i)
         if (ld16(names + i * 12 + 8) == profile) { name = name8(names + i * 12); break; }
     g_who_actors.emplace(actor, "actor " + std::to_string(profile) + " " + name);
+    // (and when it first draws, by the renderer's frame, to match pipelines made in the same frames)
+    LOG("[dsweep who] frame %llu first draw: actor %u %s", (unsigned long long)render::frame_count(), unsigned(profile),
+        name.c_str());
 }
 
 int tag() { return g_tag.load(std::memory_order_relaxed); }
