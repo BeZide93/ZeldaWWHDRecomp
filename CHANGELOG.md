@@ -8,8 +8,9 @@ what is on `devel` and not released yet (also in the
 ## Next update
 
 - **Experimental setup step: "Preparing shaders: models"** (off by default). When switched on in setup, it draws every
-  object model of your game once with the game's own code, so their shaders are ready before you play: far fewer
-  first-visit stutters for characters and objects. It takes about 6 minutes on a Mac.
+  object model, every stage's rooms and the characters and objects they place, the sky and weather at different times of
+  day, plants and the file select once with the game's own code, so their shaders are ready before you play: in our test
+  route, shaders compiled during play dropped from 277 to 33. It takes about 8 to 10 minutes on a Mac.
 - **Smaller, faster shader caches:** each shader is now stored once in the pipeline recipes and the SPIR-V cache (the
   SPIR-V cache had stopped growing at its size limit), and shaders of an object's models are prepared as soon as the
   game loads that object.
