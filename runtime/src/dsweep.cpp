@@ -20,13 +20,14 @@
 // material animation slots of the shared model data belong to the owning actors; they are off while the sweep's
 // instance is calculated.
 //
-// Room and stage models are not swept (yet). Their models are stage resources (dComIfG_getStageRes by the current
-// stage), loaded with a stage's rooms, and daBg_Create places each on its room's spot (dComIfGp_getMapTrans: sea rooms
-// sit on the sea's grid, e.g. Outset's at x -200000, z 300000). An instance left at the origin is far out of view and
-// enters no draw; given daBg's base matrix it draws exactly like daBg's own (WWHD_DSWEEP_ROOM below). Sweeping rooms
-// needs each stage's rooms loaded as stage resources, which the title does not do: left to a visit of the stages.
-//
-// Setup's progress: with WWHD_DSWEEP_ARCHIVES, "WWHD-PROGRESS <archives done> <listed> <archive>" on stdout.
+//  3. with WWHD_DSWEEP_STAGES=<file> ("<stage> <archive>..." per line), every stage resource (Stage, Room<n>, LOD<n>):
+//     requested on the game's resource load task as dComIfG_setStageRes does, but with that stage's name, swept,
+//     then released. Room models (model.bmd, model1..3.bmd) are made and drawn as daBg does (create flags with or
+//     without a texture SRT animation, the BG light types, the BG lists; model 1 on the invisible-model list), at
+//     the look-at point instead of the room's place on the sea's grid (dComIfGp_getMapTrans): no clipping, so
+//     every shape enters the lists. Their pipelines are filed under "<stage>_<archive>", the name the resident
+//     stage resources are published with in play (publish_resident), so they are compiled when the room loads.
+// Setup's progress: "WWHD-PROGRESS <archives done> <listed> <archive>" on stdout (object and stage archives).
 // Crash handling and resuming (WWHD_DSWEEP_STATE=<dir>): progress.txt gets "model <archive>:<name>" before a model is
 // first drawn, "load <archive>" before an archive is loaded and "archive-done <archive>" after it is released;
 // skip.txt holds archive or archive:model names to leave out. A supervisor that finds the process gone adds the
@@ -107,12 +108,21 @@ struct Model {
     std::string archive, name;
     uint32_t data = 0, model = 0, heap = 0;
     bool failed = false;
+    int room = -1;           // a room model (model.bmd, model1..3.bmd of a stage's Room<n>): daBg's index 0..3
+    int roomNo = 0;          // the room number (Room<n>)
+    uint32_t flags = 0x11000022;  // create flags (daBg: | 0x1200 with a texture SRT animation)
+};
+// An archive to sweep: an object archive (stage empty) or a stage resource (<stage>_<arc>: Stage, Room<n>, LOD..)
+struct Entry {
+    std::string stage, arc;
+    std::string id() const { return stage.empty() ? arc : stage + "_" + arc; }
 };
 
-enum class Phase { Start, Resident, NextArchive, Loading, Sweeping, Draining, Done };
+enum class Phase { Start, Resident, NextArchive, Loading, StageLoading, Sweeping, Draining, Done };
 constexpr int kHeaps = 6;   // solid heaps alive at once: a batch's models live until kHeaps batches later
 constexpr int kDrain = 6;   // frames between an archive's last draw and its release (frames in flight)
 constexpr int kLoadFrames = 900;
+constexpr unsigned kRelease = 4;  // frames between a stage resource's release and the next request
 
 struct State {
     Phase phase = Phase::Start;
@@ -122,11 +132,14 @@ struct State {
     size_t cursor = 0;               // first model of the current batch
     unsigned frames = 0;             // frames the current batch (or load, or drain) has had
     int batch = 0;                   // batches so far (the key log's tag)
-    std::vector<std::string> queue;  // object archives still to load
-    std::string archive;             // the archive being loaded or swept
+    std::vector<Entry> queue;        // archives still to load (object archives first, then stage resources)
+    std::string archive;             // the archive being loaded or swept (its id)
+    Entry entry;                     // ... as queued
+    bool requested = false;          // a stage resource: its load is requested
+    bool owned = false;              // ... loaded by the sweep (released after it)
     std::set<std::string> resident, skip, done;
     unsigned swept = 0, failed = 0, archives = 0, load_failed = 0;
-    size_t listed = 0;               // archives in WWHD_DSWEEP_ARCHIVES (progress total)
+    size_t listed = 0;               // archives in WWHD_DSWEEP_ARCHIVES and WWHD_DSWEEP_STAGES (progress total)
     int64_t started_ns = 0;
     std::string state_dir;
 } g;
@@ -207,6 +220,98 @@ std::vector<uint32_t> archive_infos() {
     }
     return out;
 }
+// Stage resources (dComIfG_setStageRes): ResourcePathInfoHD in the resource control's path pool (+0x1028, a
+// red-black tree: root +0, node left +0, right +4, the info at +0x18). Info: the stage (FixedSafeString, its text
+// at *(+0x10)), the archive name (*(+0x5C)), the archive (+0xA8) whose header (+0x14) lists the models (+0x20: a
+// relative offset to 16-byte dictionary entries, count +0x50).
+void path_infos(uint32_t node, std::vector<uint32_t>& out, int depth = 0) {
+    if (!mem2(node, 0x20) || depth > 40 || out.size() > 512) return;
+    const uint32_t info = ld32(node + 0x18);
+    if (mem2(info, 0xC8)) out.push_back(info);
+    path_infos(ld32(node), out, depth + 1);
+    path_infos(ld32(node + 4), out, depth + 1);
+}
+std::vector<uint32_t> path_infos() {
+    std::vector<uint32_t> out;
+    const uint32_t control = ld32(GD(0x101F4F28));
+    if (mem2(control, 0x1040)) path_infos(ld32(control + 0x1028), out);
+    return out;
+}
+std::string path_id(uint32_t info) {
+    const std::string stage = cstring(ld32(info + 0x10)), arc = cstring(ld32(info + 0x5C));
+    return arc.empty() || stage.empty() ? std::string() : stage + "_" + arc;
+}
+uint32_t find_path_info(const std::string& id) {
+    for (uint32_t info : path_infos())
+        if (path_id(info) == id) return info;
+    return 0;
+}
+// a relative offset field (the archive header's self-relative pointers)
+uint32_t rel(uint32_t at) {
+    const uint32_t v = mem2(at) ? ld32(at) : 0;
+    return v ? at + v : 0;
+}
+// SafeStrings for the stage resource calls in the sweep's scratch memory: the stage +0x800, the archive +0x840, a
+// resource name +0x880 (64 bytes each); SafeString {text, vtable} objects at +0x8C0 (stage), +0x8C8 (archive),
+// +0x8D0 (resource)
+uint32_t safe_strings(const std::string& stage, const std::string& arc, const std::string& res = {}) {
+    const uint32_t s = g.scratch;
+    std::memset(mem::ptr(s + 0x800), 0, 0xE0);
+    std::memcpy(mem::ptr(s + 0x800), stage.c_str(), std::min<size_t>(stage.size(), 63));
+    std::memcpy(mem::ptr(s + 0x840), arc.c_str(), std::min<size_t>(arc.size(), 63));
+    std::memcpy(mem::ptr(s + 0x880), res.c_str(), std::min<size_t>(res.size(), 63));
+    for (uint32_t i = 0; i < 3; ++i) {
+        st32(s + 0x8C0 + i * 8, s + 0x800 + i * 0x40);
+        st32(s + 0x8C4 + i * 8, GD(0x1004B8C0));  // SafeString vtable
+    }
+    return s + 0x8C0;
+}
+// dComIfG_getStageRes for any stage: ResourceControlHD::getPathRes(archive, path, resource)
+uint32_t stage_res(Cpu* c, const std::string& stage, const std::string& arc, const std::string& res) {
+    const uint32_t ss = safe_strings(stage, arc, res);
+    return call(c, GC(0x02606BEC), {ld32(GD(0x101F4F28)), ss + 8, ss, ss + 16});
+}
+
+// The models of a stage resource: each model of the archive's header ("<name>.bmd"). Room models (model.bmd,
+// model1..3.bmd of Room<n>) are made and drawn as daBg does.
+void add_stage_models(Cpu* c, uint32_t info, const Entry& e) {
+    const uint32_t archive = ld32(info + 0xA8);
+    const uint32_t header = mem2(archive, 0x18) ? ld32(archive + 0x14) : 0;
+    if (!mem2(header, 0x68)) return;
+    const uint32_t count = std::min<uint32_t>(ld16(header + 0x50), 256), models = rel(header + 0x20);
+    static const char* filter = std::getenv("WWHD_DSWEEP_FILTER");
+    const std::string id = e.id();
+    const bool room = e.arc.rfind("Room", 0) == 0;
+    unsigned found = 0;
+    for (uint32_t i = 0; i < count && mem2(models + i * 16, 0x28); ++i) {
+        const uint32_t resource = rel(models + i * 16 + 0x24);
+        const std::string name = cstring(rel(resource + 4), 128);
+        if (name.empty()) continue;
+        Model m;
+        m.archive = id;
+        m.name = name + ".bmd";
+        if (skipped(id, m.name) || (filter && *filter && (id + ":" + m.name).find(filter) == std::string::npos)) {
+            LOG("[dsweep] skipped %s:%s", id.c_str(), m.name.c_str());
+            continue;
+        }
+        m.data = stage_res(c, e.stage, e.arc, m.name);
+        if (!mem2(m.data)) continue;
+        if (room) {
+            static const char* names[4] = {"model", "model1", "model2", "model3"};
+            for (int k = 0; k < 4; ++k)
+                if (name == names[k]) m.room = k;
+            m.roomNo = std::atoi(e.arc.c_str() + 4);
+            if (m.room >= 0) {
+                m.flags = 0x11000022;
+                if (mem2(stage_res(c, e.stage, e.arc, std::string(names[m.room]) + ".btk"))) m.flags |= 0x1200;
+            }
+        }
+        g.models.push_back(m);
+        ++found;
+    }
+    LOG("[dsweep] stage archive %s: %u models", id.c_str(), found);
+}
+
 uint32_t find_info(const std::string& name) {
     for (uint32_t info : archive_infos())
         if (cstring(info + 0x1C) == name) return info;
@@ -281,13 +386,36 @@ void free_heaps(Cpu* c, int keep) {
     std::rotate(std::begin(g.heaps), std::begin(g.heaps) + (kHeaps - keep), std::end(g.heaps));
 }
 
+// A room model as daBg_c::draw draws it (no clipping: every shape enters the lists): calc, the BG light type of its
+// index (TEV_TYPE_BG0 + i), the BG lists (model 1: the invisible-model opaque list with the sea fog), modelEntryDL.
+void draw_room_model(Cpu* c, Model& m, uint32_t host) {
+    const uint32_t play = GD(0x1046F0B0);
+    const uint32_t tevstr = g.scratch;
+    call(c, GC(0x0255FFF4), {tevstr, uint32_t(int32_t(int8_t(m.roomNo))), 0xFF});  // dKy_tevstr_init
+    call(c, GC(0x027F4D5C), {m.model});                                         // J3DModel calc
+    const uint32_t env = call(c, GC(0x02555D0C));                                 // dKy_getEnvlight
+    call(c, GC(0x025626A4), {env, uint32_t(1 + m.room), 0, tevstr});  // settingTevStruct(TEV_TYPE_BG0 + i)
+    call(c, GC(0x02562F5C), {env, m.model, tevstr});                  // setLightTevColorType
+    const uint32_t opa = ld32(GD(0x104B4634)), xlu = ld32(GD(0x104B4638));
+    st32(GD(0x104B4634), ld32(play + (m.room == 1 ? 0x5DA0 : 0x5D70)));  // BG lists (model 1: invisible opaque)
+    st32(GD(0x104B4638), ld32(play + 0x5D74));
+    if (m.room == 1) call(c, GC(0x0255F8A0));  // the invisible model's fog (GxFog_sea_set)
+    call(c, GC(0x025E2E5C), {m.model});         // mDoExt_modelEntryDL
+    if (m.room == 1) call(c, GC(0x0255F84C));  // GxFog_set
+    st32(GD(0x104B4634), opa);
+    st32(GD(0x104B4638), xlu);
+    (void)host;
+}
+
 void draw_model(Cpu* c, Model& m, uint32_t host) {
     if (m.failed || !g.heap || !g.scratch) return;
     if (m.model && std::find(std::begin(g.heaps), std::end(g.heaps), m.heap) == std::end(g.heaps)) m.model = 0;
     if (!m.model) {
         progress("model " + m.archive + ":" + m.name);
         const uint32_t previous = call(c, GC(0x025E3570), {g.heap});  // mDoExt_setCurrentHeap
-        m.model = call(c, GC(0x025E38E0), {m.data, 0x80000u, 0x11000022u});  // mDoExt_J3DModel__create, as actors
+        // mDoExt_J3DModel__create: as actors do, room models as daBg does
+        m.model = m.room >= 0 ? call(c, GC(0x025E38E0), {m.data, 0u, m.flags})
+                              : call(c, GC(0x025E38E0), {m.data, 0x80000u, 0x11000022u});
         m.heap = g.heap;
         call(c, GC(0x025E3570), {previous});
         if (!m.model) {
@@ -305,6 +433,7 @@ void draw_model(Cpu* c, Model& m, uint32_t host) {
     const float matrix[12] = {1, 0, 0, x, 0, 1, 0, y, 0, 0, 1, z};
     for (int i = 0; i < 3; ++i) st32(m.model + 0xBC + i * 4, f32_as_u32(1.f));
     for (int i = 0; i < 12; ++i) st32(m.model + 0xC8 + i * 4, f32_as_u32(matrix[i]));
+    if (m.room >= 0) return draw_room_model(c, m, host);
     const uint32_t tevstr = g.scratch, position = g.scratch + 0x700;
     st32(position, f32_as_u32(x));
     st32(position + 4, f32_as_u32(y));
@@ -384,13 +513,33 @@ void begin(Cpu* c) {
     if (const char* list = std::getenv("WWHD_DSWEEP_ARCHIVES"))
         for (auto& name : lines(list)) {
             ++g.listed;
-            if (!g.done.count(name) && !g.skip.count(name)) g.queue.push_back(name);
+            if (!g.done.count(name) && !g.skip.count(name)) g.queue.push_back({{}, name});
             else g.done.insert(name);  // a skipped archive counts as done for the progress
+        }
+    // WWHD_DSWEEP_STAGES=<file>: "<stage> <archive> <archive>..." per line (Stage, Room<n>, LOD<n>...): each stage
+    // resource is loaded with the game's stage resource loader, its models swept, and released
+    if (const char* list = std::getenv("WWHD_DSWEEP_STAGES"))
+        for (auto& line : lines(list)) {
+            std::vector<std::string> words;
+            for (size_t at = 0; at < line.size();) {
+                const size_t end = std::min(line.find(' ', at), line.size());
+                if (end > at) words.push_back(line.substr(at, end - at));
+                at = end + 1;
+            }
+            for (size_t i = 1; i < words.size(); ++i) {
+                const Entry e{words[0], words[i]};
+                ++g.listed;
+                if (!g.done.count(e.id()) && !g.skip.count(e.id()) && !g.skip.count(e.stage) &&
+                    e.stage.size() < 32 && e.arc.size() < 32)
+                    g.queue.push_back(e);
+                else g.done.insert(e.id());
+            }
         }
     report_archives("archives");
     std::reverse(g.queue.begin(), g.queue.end());  // popped from the back, in file order
-    g.scratch = mem::host_alloc(0x800, 32);  // light state, position, archive name and load phase (host-only memory)
-    std::memset(mem::ptr(g.scratch), 0, 0x800);
+    // light state, position, archive name and load phase, stage resource names (host-only memory)
+    g.scratch = mem::host_alloc(0x1000, 32);
+    std::memset(mem::ptr(g.scratch), 0, 0x1000);
     choose_heaps(c);
     for (uint32_t info : archive_infos()) {
         g.resident.insert(cstring(info + 0x1C));
@@ -427,19 +576,65 @@ void step(Cpu* c, uint32_t host) {
         g.frames = 0;
         return;
     case Phase::NextArchive:
-        while (!g.queue.empty() && (g.resident.count(g.queue.back()) || g.queue.back().size() >= 0x40)) {
-            g.done.insert(g.queue.back());  // swept with the resident archives (or not loadable by name)
+        while (!g.queue.empty() && g.queue.back().stage.empty() &&
+               (g.resident.count(g.queue.back().arc) || g.queue.back().arc.size() >= 0x40)) {
+            g.done.insert(g.queue.back().arc);  // swept with the resident archives (or not loadable by name)
             g.queue.pop_back();
         }
         if (g.queue.empty()) return finish();
-        g.archive = g.queue.back();
+        g.entry = g.queue.back();
+        g.archive = g.entry.id();
         g.queue.pop_back();
         std::memset(mem::ptr(name), 0, 0x78);  // the name and the load phase
-        std::memcpy(mem::ptr(name), g.archive.c_str(), g.archive.size());
+        std::memcpy(mem::ptr(name), g.archive.c_str(), std::min<size_t>(g.archive.size(), 0x6F));
         progress("load " + g.archive);
-        g.phase = Phase::Loading;
+        g.phase = g.entry.stage.empty() ? Phase::Loading : Phase::StageLoading;
         g.frames = 0;
-        [[fallthrough]];
+        g.requested = g.owned = false;
+        return step(c, host);
+    case Phase::StageLoading: {
+        // the game's stage resource loader (dComIfG_setStageRes / syncStageRes, with any stage's name): the
+        // request on the resource load task (*101F4F54), then waiting while it is pending
+        const uint32_t task = ld32(GD(0x101F4F54));
+        const uint32_t ss = safe_strings(g.entry.stage, g.entry.arc);
+        if (!g.requested) {
+            if (g.frames++ < kRelease) return;  // the previous archive's release goes first (it frees its heap)
+            if (find_path_info(g.archive)) {  // loaded already (the title's own): swept, not released
+                g.requested = true;
+            } else if (call(c, GC(0x0260D618), {task, ss, ss + 8, 0})) {  // requestResource(stage, archive)
+                g.requested = g.owned = true;
+                return;
+            } else if (++g.frames > kLoadFrames) {
+                g.requested = true;  // the queue stays full: given up below
+            } else return;
+        }
+        if (g.owned && call(c, GC(0x0260F4CC), {task, ss, ss + 8}) && ++g.frames <= kLoadFrames) return;
+        const uint32_t info = find_path_info(g.archive);
+        if (!info) {
+            ++g.load_failed;
+            LOG("[dsweep] load failed %s (after %u frames)", g.archive.c_str(), g.frames);
+            static bool listed = false;
+            if (!listed) {  // what the path pool holds (names only)
+                listed = true;
+                std::string all;
+                for (uint32_t i : path_infos()) all += " [" + cstring(ld32(i + 0x10)) + "|" + cstring(ld32(i + 0x5C)) + "]";
+                LOG("[dsweep] stage resources loaded:%s (root %08X)", all.c_str(), ld32(ld32(GD(0x101F4F28)) + 0x1028));
+            }
+            progress("load-failed " + g.archive);
+            g.done.insert(g.archive);
+            if (g.owned) call(c, GC(0x0260E8A8), {task, ss, ss + 8});  // releaseResource
+            g.phase = Phase::NextArchive;
+            return;
+        }
+        ++g.archives;
+        g.models.clear();
+        g.cursor = 0;
+        g_tag = 0;
+        pipeline_groups::set_sweeping(0);
+        add_stage_models(c, info, g.entry);
+        g.phase = Phase::Sweeping;
+        return;
+    }
     case Phase::Loading: {
         const uint32_t result = call(c, GC(0x02520460), {phase, name});  // dComIfG_resLoad (cPhs: 4 complete)
         if (result == 4) {
@@ -474,7 +669,11 @@ void step(Cpu* c, uint32_t host) {
         free_heaps(c, 0);  // every instance goes before its archive does
         g.models.clear();
         if (!g.archive.empty()) {
-            call(c, GC(0x025204C8), {phase, name});  // dComIfG_resDelete
+            if (g.entry.stage.empty()) call(c, GC(0x025204C8), {phase, name});  // dComIfG_resDelete
+            else if (g.owned) {  // the stage resource loader's release (dComIfG_deleteStageRes)
+                const uint32_t ss = safe_strings(g.entry.stage, g.entry.arc);
+                call(c, GC(0x0260E8A8), {ld32(GD(0x101F4F54)), ss, ss + 8});
+            }
             progress("archive-done " + g.archive);
             g.done.insert(g.archive);
             report_archives(g.archive);
@@ -581,6 +780,9 @@ void publish_resident() {
         const std::string name = cstring(info + 0x1C);
         if (!name.empty()) groups.push_back(pipeline_groups::group_of(name.data(), name.size()));
     }
+    // and the stage resources (rooms, the stage archive, LODs) as <stage>_<archive>
+    for (uint32_t info : path_infos())
+        if (const std::string id = path_id(info); !id.empty()) groups.push_back(pipeline_groups::group_of(id.data(), id.size()));
     pipeline_groups::publish(std::move(groups));
 }
 

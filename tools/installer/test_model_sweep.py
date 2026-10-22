@@ -104,6 +104,20 @@ class ModelSweepTests(unittest.TestCase):
     def test_archive_names_come_from_the_players_files_without_rooms_or_layouts(self):
         self.assertEqual(model_sweep.object_archives(self.game), ['Always', 'Bk', 'Kn', 'Link'])
 
+    def test_stage_resources_come_from_the_players_files_by_stage(self):
+        stage = self.game / 'content' / 'Common' / 'Stage'
+        stage.mkdir()
+        for name in ('sea_Room10', 'sea_Stage', 'A_mori_Room0', 'A_mori_Stage', 'sea_LODALL', 'Room0'):
+            (stage / (name + '.szs')).write_bytes(b'Yaz0')
+        self.assertEqual(model_sweep.stage_archives(self.game), {
+            'A_mori': ['Stage', 'Room0'], 'Name': ['Stage'],
+            'sea': ['Stage', 'Room1', 'Room10', 'LOD03', 'LODALL']})
+        self.assertEqual(model_sweep.object_archives(self.game), ['Always', 'Bk', 'Kn', 'Link'])
+        game = FakeGame(self, ['ok'])
+        self.assertEqual(self.run_sweep(game), 'done')
+        listed = Path(game.calls[0][1]['WWHD_DSWEEP_STAGES']).read_text().splitlines()
+        self.assertEqual(listed, ['A_mori Stage Room0', 'Name Stage', 'sea Stage Room1 Room10 LOD03 LODALL'])
+
     def test_sweep_runs_hidden_and_muted_with_its_own_settings(self):
         game = FakeGame(self, ['ok'])
         self.assertEqual(self.run_sweep(game), 'done')

@@ -372,13 +372,13 @@ system: switch it on with "Also prepare model shaders (experimental)" in setup (
 question of the text setup, or `--model-sweep`); setup remembers the choice, so Repair (which also
 carries out Rebuild shader cache) runs it again. It runs for each prepared renderer (on macOS Metal and
 Vulkan at the same time, on one bar): the game starts hidden and muted from its title screen (no save is
-needed or touched), loads every object archive named in your game files and draws each of its models
-once, so the pipelines they need are recorded for this build and this computer (about 6 minutes on a
-recent Mac). Metal builds the recorded pipelines in the background at start; Vulkan builds an archive's
-pipelines when the game loads it. Nothing from the game is shipped: the archive list is read from your
+needed or touched), loads every object archive and every stage's rooms named in your game files and
+draws each of their models once, so the pipelines they need are recorded for this build and this
+computer (about 6 minutes on a recent Mac). Metal builds the recorded pipelines in the background at start; Vulkan builds an archive's
+pipelines when the game loads it (a room's when the room loads). Nothing from the game is shipped: the archive list is read from your
 own files and only names are stored. Cancelling keeps everything prepared so far; the next setup
 continues where it stopped. A model that makes the game stop is skipped the next time
-(`shader-prebuild/model-sweep/<renderer>/skip.txt`, names only). Rooms, the sea and particle effects
+(`shader-prebuild/model-sweep/<renderer>/skip.txt`, names only). The sea, the sky and particle effects
 are not part of it yet; they are prepared when first seen in play. `WWHD_SETUP_MODEL_SWEEP=1` (or `0`)
 overrides the choice.
 

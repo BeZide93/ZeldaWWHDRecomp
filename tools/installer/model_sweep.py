@@ -20,8 +20,9 @@ import tempfile
 import time
 
 SCHEMA = 1
-# Rooms, stages and the sea's island LODs are drawn by the stage's own loader in play, not swept here.
-NOT_OBJECTS = re.compile(r'(_Stage|_Room\d+|_LOD\d+)$')
+# Rooms, stages and the sea's island LODs are stage resources (<stage>_<archive>.szs), loaded by the stage loader.
+NOT_OBJECTS = re.compile(r'(_Stage|_Room\d+|_LOD\d+|_LODALL)$')
+STAGE_ARCHIVE = re.compile(r'^(.+)_(Stage|Room\d+|LOD\d+|LODALL)$')
 MAX_ATTEMPTS = 40          # each attempt skips the model or archive it crashed at
 STALL_SECONDS = 240        # no new line in progress.txt for this long: the attempt counts as a crash
 
@@ -66,6 +67,31 @@ def object_archives(game):
     return sorted(n for n in names if n and len(n) < 0x40 and n.isprintable() and not NOT_OBJECTS.search(n))
 
 
+def stage_archives(game):
+    """The stage resources of the player's game, {stage: [archive, ...]}: content/Common/Stage/<stage>_<archive>.szs
+    and those bundled in the packs (Stage, Room<n>, LOD<n>, LODALL); names only."""
+    common = Path(game) / 'content' / 'Common'
+    names = set()
+    stages = common / 'Stage'
+    if stages.is_dir():
+        names.update(p.stem for p in stages.iterdir() if p.suffix == '.szs' and p.is_file())
+    packs = common / 'Pack'
+    if packs.is_dir():
+        for pack in sorted(packs.glob('*.pack')):
+            if not pack.name.startswith('permanent_2d'):
+                names.update(e.rsplit('/', 1)[-1][:-4] for e in _pack_entries(pack) if e.endswith('.szs'))
+    out = {}
+    for name in names:
+        match = STAGE_ARCHIVE.match(name)
+        if match and len(name) < 0x40 and name.isprintable() and ' ' not in name:
+            out.setdefault(match.group(1), []).append(match.group(2))
+
+    def order(archive):  # the stage archive first, then rooms by number, then LODs (LODALL last)
+        digits = re.sub(r'\D', '', archive)
+        return (0 if archive == 'Stage' else 1 if archive.startswith('Room') else 2, int(digits) if digits else 1 << 30)
+    return {stage: sorted(archives, key=order) for stage, archives in sorted(out.items())}
+
+
 def _lines(path):
     try:
         return [l.strip() for l in Path(path).read_text(encoding='utf-8', errors='replace').splitlines() if l.strip()]
@@ -99,7 +125,7 @@ def status(cache_root, renderer, identity):
     return 'done' if 'sweep-done' in _lines(state / 'progress.txt') else 'partial'
 
 
-def environment(base, game, cache_env, renderer, state, archives, scratch):
+def environment(base, game, cache_env, renderer, state, archives, scratch, stages=None):
     """The sweep's environment: hidden, muted, no host input, settings and states in a scratch folder (the
     player's own are never touched), the shader caches of the preparation (cache_env)."""
     env = {k: v for k, v in base.items()
@@ -111,6 +137,8 @@ def environment(base, game, cache_env, renderer, state, archives, scratch):
                WWHD_CONTROLS=str(scratch / 'controls.json'), WWHD_STATE_DIR=str(scratch / 'states'),
                WWHD_DSWEEP='title,1,2', WWHD_DSWEEP_ARCHIVES=str(archives), WWHD_DSWEEP_STATE=str(state),
                WWHD_DSWEEP_EXIT='1')
+    if stages:
+        env['WWHD_DSWEEP_STAGES'] = str(stages)
     env['WWHD_HEADSTART'] = '0'  # the sweep records pipelines; it warms nothing (and holds no generation)
     return env
 
@@ -135,6 +163,9 @@ def run(executable, game, cache_root, renderer, identity, cache_env, line=lambda
         (state / 'identity.json').write_text(json.dumps(identity, sort_keys=True), encoding='utf-8')
     archives = state / 'archives.txt'
     archives.write_text(''.join(n + '\n' for n in object_archives(game)), encoding='utf-8')
+    stages = state / 'stages.txt'
+    stages.write_text(''.join('%s %s\n' % (stage, ' '.join(names)) for stage, names in stage_archives(game).items()),
+                      encoding='utf-8')
     progress_file = state / 'progress.txt'
     for attempt in range(1, attempts + 1):
         if 'sweep-done' in _lines(progress_file):
@@ -147,7 +178,7 @@ def run(executable, game, cache_root, renderer, identity, cache_env, line=lambda
             except TypeError:  # Python < 3.10
                 folder = tempfile.TemporaryDirectory(prefix='wwhd-model-sweep-')
             scratch = Path(stack.enter_context(folder))
-            env = environment(os.environ, game, cache_env, renderer, state, archives, scratch)
+            env = environment(os.environ, game, cache_env, renderer, state, archives, scratch, stages)
             (scratch / 'save').mkdir()
             output_path = scratch / 'output.log'
             output = stack.enter_context(output_path.open('wb'))
