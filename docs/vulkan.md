@@ -256,11 +256,19 @@ atomically after 120 frames without new pipelines. First-time shader translation
 and pipeline creation can still cause stalls.
 
 Successful guest pipelines also retain local, pointer-free recipes in
-`<pipeline-cache-file>.recipes`, bounded to 16,384 entries / 256 MiB. A background writer saves
+`<pipeline-cache-file>.recipes`, bounded to 16,384 entries / 256 MiB. The file (format version 2)
+stores each distinct SPIR-V program once, compressed, and recipes name it; in memory recipes share
+that compressed copy (a whole-game file from setup's model step: about 15 MB on disk, 11 MB of
+programs in memory). Version 1 files still load and are rewritten as version 2 at the next save.
+A background writer saves
 an atomic snapshot every two minutes while entries change, and a final checkpoint saves the latest
 entries at orderly shutdown or the scripted test endpoint. A crash can lose entries added since the
 last completed snapshot; the previous complete file remains usable. On the next start, a
-worker reads compatible recipes and compiles them while the title screen runs.
+worker reads compatible recipes and compiles them while the title screen runs. Recipes from setup's
+model step also name the object archives whose models use them: those wait until the game loads
+one of their archives, then a few compiler threads (one on Android) build them before the models
+first appear, giving way whenever the game needs a pipeline at once. When more unused pipelines are
+ready than the limit allows (1,024; 256 on Android), those of archives no longer loaded go first.
 It owns separate modules, descriptor layouts and a pipeline cache; the render
 thread takes a ready pipeline only after the exact key, both SPIR-V programs and
 descriptor layouts match. `WWHD_VK_PIPELINE_WARMUP=0` disables this recording and
@@ -359,6 +367,19 @@ refreshing. Player caches persist in `shader-prebuild/live` across preparation g
 lives under the host configuration directory's `shader-prebuild` folder; portable installations use their
 user directory. Cache overrides take precedence over this selection.
 
+On macOS setup then runs **Preparing shaders: models** for each prepared renderer (Metal and Vulkan
+at the same time, on one bar): the game starts hidden and muted from its title screen (no save is
+needed or touched), loads every object archive named in your game files and draws each of its models
+once, so the pipelines they need are recorded for this build and this computer (about 6 minutes on a
+recent Mac). Metal builds the recorded pipelines in the background at start; Vulkan builds an archive's
+pipelines when the game loads it. Nothing from the
+game is shipped: the archive list is read from your own files and only names are stored. Cancelling
+keeps everything prepared so far; the next setup continues where it stopped. A model that makes the
+game stop is skipped the next time (`shader-prebuild/model-sweep/<renderer>/skip.txt`, names only).
+Rebuild shader cache runs this step again. Rooms, the sea and particle effects are not part of it yet;
+they are prepared when first seen in play. `WWHD_SETUP_MODEL_SWEEP=1` turns the step on for setup on
+other systems (`0` turns it off).
+
 The template covers recorded states rather than every possible scene. Uncovered shaders and pipelines
 can still cause a first-use hitch. Pending draws wait for their exact state; the renderer can repeat the
 last complete picture during that wait. For local template selection and recording commands, see the
@@ -370,9 +391,11 @@ an isolated directory; `WWHD_VK_SHADER_CACHE=0` disables disk storage. An explic
 directory overrides `WWHD_SHADER_CACHE=0`. Canonical GLSL and stage deduplication
 remains active in memory when disk storage is disabled. Fresh decompiler metadata
 is kept for every guest variant; identical final shader programs share compilation.
-The file (format `WWVKSC03`) stores SPIR-V with a hash and the length of the GLSL it was
-compiled from, not the GLSL text; files from older versions (`WWVKSC02`) still load and are
-rewritten in the new format. In memory, shaders likewise keep the SPIR-V (shared with the
+The file (format `WWVKSC04`) stores each distinct SPIR-V program once (compressed) and, per
+translated shader, a hash and the length of the GLSL it was compiled from, not the GLSL text;
+shaders with the same final program share one copy, also in memory. Files from older versions
+(`WWVKSC03`, `WWVKSC02`) still load and are rewritten in the new format. The 128 MiB limit
+counts distinct programs. In memory, shaders likewise keep the SPIR-V (shared with the
 cache) and the GLSL hash; the text is released once its compilation has started.
 `WWHD_VK_SHADER_SOURCE_VERIFY=1` keeps it, confirms every hash match between translated
 shaders byte for byte and lets failed-pipeline captures include the GLSL. Key verification
