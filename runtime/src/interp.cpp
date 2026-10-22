@@ -824,6 +824,29 @@ static void camera_draw(Cpu* c) {
     camera_draw_body(c);
     interp::g_drawing_cam = saved;
 }
+// The play window (dComIfGp's dDlst_window_c 10474B7C, 0x2C bytes: view port, scissor +0x18..+0x27,
+// camera id): camera_draw sets its scissor from the letterbox height (dCamera_c mTrimHeight), and the
+// camera's next execute reads it (the lock-on camera's sight angle from the scissor's size). A
+// blended camera_draw sets it from the blended height. At 30/60/120 fps the step's last pass draws
+// the camera exactly; a 40 fps blended record pass has no exact pass after it, so the words its
+// camera_draw changed go back to the exact pre-run's (exact_after_pass) before the next step's logic:
+// a Z-target's bars easing in left the scissor 2 lines off and the 40 fps camera eye left the 30 fps
+// one. debug: WWHD_INTERP_WINDOW_EXACT=0 leaves the blended scissor in place as before
+namespace interp {
+static uint32_t window_ea() { return GD(0x10474B7C); }
+constexpr int kWindowWords = 0x2C / 4;
+static bool window_exact_on() {
+    static const bool off = getenv("WWHD_INTERP_WINDOW_EXACT") && !atoi(getenv("WWHD_INTERP_WINDOW_EXACT"));
+    return !off;
+}
+// after a blended record pass's camera_draw: the words it changed back to `exact` (the pre-run's) after the pass
+static void window_put_back(const uint32_t* exact) {
+    for (int i = 0; i < kWindowWords; i++) {
+        const uint32_t ea = window_ea() + 4 * i;
+        if (ld32(ea) != exact[i]) exact_after_pass(ea, exact[i], 4);
+    }
+}
+}  // namespace interp
 static void camera_draw_body(Cpu* c) {
     using namespace interp;
     uint32_t cam = c->r[3];
@@ -881,7 +904,12 @@ static void camera_draw_body(Cpu* c) {
         // (also on a snap: the sound listener keeps following only the record pass's camera)
         g_cam_blended = p->valid;
         cam_trace(cam, "blended");
+        uint32_t window_exact[kWindowWords];
+        const bool window_kept = window_exact_on() && record_blended() && g_prerun_pass == g_passes;
+        if (window_kept)
+            for (int i = 0; i < kWindowWords; i++) window_exact[i] = ld32(window_ea() + 4 * i);
         f_024FFC40_orig(c);
+        if (window_kept) window_put_back(window_exact);
         capture_projection(*p);
         g_cam_blended = false;
         g_view_pass = g_passes;
