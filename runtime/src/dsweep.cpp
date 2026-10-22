@@ -46,6 +46,7 @@
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
+#include <cctype>
 #include <cstring>
 #include <fstream>
 #include <map>
@@ -400,15 +401,16 @@ std::string name8(uint32_t at) {
     }
     return out;
 }
+std::set<std::string> g_places;  // "spawn <stage> <room> <point>", "layer <stage> <room|-1> <layer>" (places.txt)
 void harvest(Cpu* c, const Entry& e) {
-    static const bool on = std::getenv("WWHD_DSWEEP_ACTORS") != nullptr;
+    static const bool on = std::getenv("WWHD_DSWEEP_ACTORS") || std::getenv("WWHD_DSWEEP_VISIT");
     if (!on) return;
     const uint32_t data = stage_res(c, e.stage, e.arc, e.arc == "Stage" ? "stage.dzs" : "room.dzr");
     if (!mem2(data, 4)) return;
     const uint32_t chunks = std::min<uint32_t>(ld32(data), 64);
     std::map<std::string, size_t> perName;
     for (const auto& p : g.placed) ++perName[p.substr(0, p.find(' '))];
-    std::string added;
+    std::string added, places;
     for (uint32_t i = 0; i < chunks && mem2(data + 4 + i * 12, 12); ++i) {
         const uint32_t at = data + 4 + i * 12;
         char tag[5] = {char(ld8(at)), char(ld8(at + 1)), char(ld8(at + 2)), char(ld8(at + 3)), 0};
@@ -418,6 +420,27 @@ void harvest(Cpu* c, const Entry& e) {
             size = 0x20;
         else if (t == "SCOB" || t == "TGSC" || t == "DOOR" || t == "TGDR" || (t.size() == 4 && t.rfind("SCO", 0) == 0))
             size = 0x24;
+        // the places to visit: each room's player start (PLYR: room in the parameters' low 6 bits, the start point
+        // in angle z) and the scene layers its placements use (ACTn / SCOn / TREn, n = 0..b)
+        if (t == "PLYR") {
+            const uint32_t count = std::min<uint32_t>(ld32(at + 4), 256), base = data + ld32(at + 8);
+            for (uint32_t k = 0; k < count && mem2(base + k * 0x20, 0x20); ++k) {
+                const uint32_t a = base + k * 0x20;
+                const int room = e.arc == "Stage" ? int(ld32(a + 8) & 0x3F) : std::atoi(e.arc.c_str() + 4);
+                char line[64];
+                std::snprintf(line, sizeof line, "spawn %s %d %d", e.stage.c_str(), room, int(ld16(a + 0x1C) & 0xFF));
+                if (g_places.insert(line).second) places += std::string(line) + "\n";
+            }
+            continue;
+        }
+        if (t.size() == 4 && (t.rfind("ACT", 0) == 0 || t.rfind("SCO", 0) == 0 || t.rfind("TRE", 0) == 0) &&
+            std::isxdigit(uint8_t(t[3])) && ld32(at + 4)) {
+            const int layer = std::stoi(t.substr(3), nullptr, 16);
+            const int room = e.arc == "Stage" ? -1 : std::atoi(e.arc.c_str() + 4);
+            char line[64];
+            std::snprintf(line, sizeof line, "layer %s %d %d", e.stage.c_str(), room, layer);
+            if (g_places.insert(line).second) places += std::string(line) + "\n";
+        }
         if (!size) continue;
         const uint32_t count = std::min<uint32_t>(ld32(at + 4), 1024), base = data + ld32(at + 8);
         for (uint32_t k = 0; k < count && mem2(base + k * size, size); ++k) {
@@ -433,6 +456,11 @@ void harvest(Cpu* c, const Entry& e) {
     if (!added.empty() && !g.state_dir.empty())
         if (FILE* f = std::fopen((g.state_dir + "/actors.txt").c_str(), "a")) {
             std::fputs(added.c_str(), f);
+            std::fclose(f);
+        }
+    if (!places.empty() && !g.state_dir.empty())
+        if (FILE* f = std::fopen((g.state_dir + "/places.txt").c_str(), "a")) {
+            std::fputs(places.c_str(), f);
             std::fclose(f);
         }
 }
@@ -631,6 +659,7 @@ void begin(Cpu* c) {
     if (!g.state_dir.empty()) {
         for (auto& s : lines(g.state_dir + "/skip.txt")) g.skip.insert(s);
         for (auto& p : lines(g.state_dir + "/actors.txt")) g.placed.insert(p);
+        for (auto& p : lines(g.state_dir + "/places.txt")) g_places.insert(p);
         for (auto& l : lines(g.state_dir + "/progress.txt")) {
             if (l.rfind("archive-done ", 0) == 0) g.done.insert(l.substr(13));
             if (l == "resident-done") resident_done = true;
@@ -794,7 +823,11 @@ uint64_t g_file_select_from = 0, g_file_select_in = 0;
 // own environment (lighting, fog, sky, its actors) for kVisitSteps, filed under "<stage>_Stage". The file select
 // (reached from the title only) then follows in a new attempt ("restart" in progress.txt).
 constexpr unsigned kVisitSteps = 150, kVisitTimeout = 3000;
-struct Visit { std::string stage; int room = 0; };
+struct Visit {
+    std::string stage;
+    int room = 0, point = 0, layer = -1;
+    std::string id() const { return stage + ":" + std::to_string(room) + ":" + std::to_string(layer); }
+};
 std::vector<Visit> g_visits;
 size_t g_visit = 0;
 uint64_t g_visit_asked = 0, g_visit_in = 0;
@@ -806,12 +839,40 @@ void begin_visits() {
     static const char* list = std::getenv("WWHD_DSWEEP_VISIT");
     if (!list || !*list) return begin_file_select();
     g_visits.clear();
-    for (auto& line : lines(list)) {
-        char stage[16] = {};
-        int room = 0;
-        if (std::sscanf(line.c_str(), "%15s %d", stage, &room) >= 1 && !g.done.count(std::string("visit-") + stage) &&
-            !g.skip.count(std::string("visit-") + stage) && !g.skip.count(stage))
-            g_visits.push_back({stage, room});
+    auto add = [&](const Visit& v) {
+        if (v.stage == "sea_T" || v.stage == "Name" || g.done.count("visit-" + v.id()) || g.done.count("visit-" + v.stage) ||
+            g.skip.count("visit-" + v.stage) || g.skip.count(v.stage) || g.skip.count(v.id()))
+            return;
+        g_visits.push_back(v);
+    };
+    if (!std::strcmp(list, "all")) {
+        // every room with a player start (the rooms' places, places.txt), once with the layer the game picks and
+        // once per further scene layer its placements (or the stage's) use
+        std::map<std::pair<std::string, int>, int> spawn;
+        std::map<std::pair<std::string, int>, std::set<int>> layers;
+        std::map<std::string, std::set<int>> stageLayers;
+        if (!g.state_dir.empty())
+            for (auto& line : lines(g.state_dir + "/places.txt")) {
+                char kind[8] = {}, stage[16] = {};
+                int a = 0, b = 0;
+                if (std::sscanf(line.c_str(), "%7s %15s %d %d", kind, stage, &a, &b) != 4) continue;
+                if (!std::strcmp(kind, "spawn")) spawn.emplace(std::make_pair(std::string(stage), a), b);
+                else if (a < 0) stageLayers[stage].insert(b);
+                else layers[{stage, a}].insert(b);
+            }
+        for (const auto& [place, point] : spawn) {
+            add({place.first, place.second, point, -1});
+            std::set<int> all = layers[place];
+            all.insert(stageLayers[place.first].begin(), stageLayers[place.first].end());
+            for (int layer : all) add({place.first, place.second, point, layer});
+        }
+        LOG("[dsweep] visits: %zu places (rooms with a player start, per scene layer)", g_visits.size());
+    } else {
+        for (auto& line : lines(list)) {
+            char stage[16] = {};
+            int room = 0;
+            if (std::sscanf(line.c_str(), "%15s %d", stage, &room) >= 1) add({stage, room, 0, -1});
+        }
     }
     if (g_visits.empty()) return begin_file_select();
     phase_time("visits");
@@ -839,11 +900,11 @@ void visit_step(const std::string& current) {
     const uint32_t next = GD(0x1046F0B0) + 0x5140;  // dStage_nextStage_c: name[8], point, room, layer, enabled, wipe
     if (!g_visit_asked) {
         if (ld8(next + 12)) return;  // a stage change is in progress
-        progress("visit " + v.stage);
+        progress("visit " + v.id());
         for (int i = 0; i < 8; ++i) st8(next + i, i < int(v.stage.size()) ? uint8_t(v.stage[i]) : 0);
-        st16(next + 8, 0);
+        st16(next + 8, uint16_t(v.point));
         st8(next + 10, uint8_t(v.room));
-        st8(next + 11, 0xFF);
+        st8(next + 11, uint8_t(v.layer));
         st8(next + 13, 0);
         if (current == "sea_T") {
             // the title is not a play scene (its own next-stage check returns to the title): change to the play
@@ -862,11 +923,12 @@ void visit_step(const std::string& current) {
         // the way there (the scene change, the loading, the arrival) is not the stage's own: compiled at start
         pipeline_groups::set_sweeping(0);
         g_tag = ++g.batch;
-        LOG("[dsweep] batch %d step %llu ns %lld: visit %s room %d", g.batch, (unsigned long long)now, (long long)now_ns(),
-            v.stage.c_str(), v.room);
+        LOG("[dsweep] batch %d step %llu ns %lld: visit %s (point %d)", g.batch, (unsigned long long)now,
+            (long long)now_ns(), v.id().c_str(), v.point);
         return;
     }
-    if (current == v.stage && !g_visit_in) {
+    // there: the stage change done (the next-stage request taken) and the stage current
+    if (current == v.stage && !g_visit_in && !ld8(next + 12) && now - g_visit_asked > 30) {
         g_visit_in = now;
         // there: what the stage newly needs is filed under it (compiled when it loads); what it shares is not
         const std::string group = v.stage + "_Stage";
@@ -874,9 +936,9 @@ void visit_step(const std::string& current) {
     }
     const bool shown = g_visit_in && now - g_visit_in >= kVisitSteps;
     if (!shown && now - g_visit_asked < kVisitTimeout) return;
-    if (!shown) LOG("[dsweep] visit %s: not reached (now in %s)", v.stage.c_str(), current.c_str());
-    progress(std::string(shown ? "visit-done visit-" : "visit-failed visit-") + v.stage);
-    g.done.insert("visit-" + v.stage);
+    if (!shown) LOG("[dsweep] visit %s: not reached (now in %s)", v.id().c_str(), current.c_str());
+    progress(std::string(shown ? "visit-done visit-" : "visit-failed visit-") + v.id());
+    g.done.insert("visit-" + v.id());
     ++g_visit;
     g_visit_asked = 0;
 }

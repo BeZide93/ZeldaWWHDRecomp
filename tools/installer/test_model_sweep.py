@@ -121,7 +121,9 @@ class ModelSweepTests(unittest.TestCase):
         for key in ('WWHD_DSWEEP_ENV', 'WWHD_DSWEEP_ACTORS', 'WWHD_DSWEEP_FILE_SELECT'):
             self.assertEqual(game.calls[0][1][key], '1')
         # stage visits (on unless WWHD_SETUP_MODEL_SWEEP_VISITS=0): each stage with rooms at its first room
-        self.assertEqual(Path(game.calls[0][1]['WWHD_DSWEEP_VISIT']).read_text().splitlines(), ['A_mori 0', 'sea 1'])
+        self.assertEqual(game.calls[0][1]['WWHD_DSWEEP_VISIT'], 'all')
+        self.assertEqual((model_sweep.state_dir(self.cache, 'vulkan') / 'visits.txt').read_text().splitlines(),
+                         ['A_mori 0', 'sea 1'])
         self.assertIn('visit-ENDumi', game.calls[0][1]['WWHD_DSWEEP_SKIP'].split(','))
         with mock.patch.dict(os.environ, {'WWHD_SETUP_MODEL_SWEEP_VISITS': '0'}):
             game = FakeGame(self, ['ok'])
