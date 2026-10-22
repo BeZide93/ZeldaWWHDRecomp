@@ -16,15 +16,18 @@ inline int pixel(uint32_t coordinate, uint32_t extent, uint32_t guestExtent) {
     return int(std::clamp(double(int32_t(coordinate)) * extent / guestExtent, 0.0, double(extent - 1)));
 }
 uint64_t next_ticket();  // one per request, in request order: the renderers take one for every peek
-int mode();  // WWHD_PEEKZ_SYNC: 1 (default) submit and answer before the next step, 0 the former timing,
-             // 2 test: synchronous copy, 3 test: answers two steps after the request
+int mode();  // WWHD_PEEKZ_SYNC: 3 (default) answers two steps after the request; tests: 1 one step after
+             // (as on the Wii U), 2 one step after with a synchronous copy, 0 the former timing
 void publish(uint64_t ticket, const std::vector<uint32_t>& destinations, const std::vector<uint32_t>& depths);
-// The game reads a peek's answers one step after its request, as on the Wii U, where peekData reads
-// the depth buffer on the CPU and writes the answers at once (peekz.cpp). The renderers submit the
-// small copy at once and answer when it completes; the game thread waits at the end of its frame
-// (gx2 swap) until every peek of that frame has been answered, and while it waits, the idle render
-// thread retires the copy's submission on demand (render::peek_retire). WWHD_PEEKZ_SYNC=0 restores
-// the former timing (answers whenever the GPU frame completes; the game does not wait).
+// On the Wii U the game reads a peek's answers one step after its request: peekData reads the depth
+// buffer on the CPU and writes the answers at once (peekz.cpp). Here the renderers submit the small
+// copy at once and answer when it completes, and the answers are written at a fixed point: by
+// default (3) at the game's swap after the next one, so the game reads them two steps after it
+// asked. That needs no waiting in practice and gives the game the same answers whatever the timing
+// (the glare reacts one step later than on the Wii U). Test value 1 writes them before the next
+// step (exact): the game thread waits at its swap until that frame's answers are in, and the idle
+// render thread retires the copy's submission meanwhile (render::peek_retire); 2 does the same with
+// a synchronous copy; 0 is the former timing (whenever the GPU frame completes; not deterministic).
 // Counts requests (game thread) against handled requests (render thread, in command order).
 struct AnswerGate {
     std::mutex mutex;

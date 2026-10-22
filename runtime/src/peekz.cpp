@@ -64,7 +64,7 @@ AnswerGate g_gate;
 std::mutex g_publishMutex;
 std::unordered_map<uint32_t, uint64_t> g_completed;  // per destination: the newest ticket written
 struct Held { uint64_t ticket; uint32_t dst, depth; };
-std::vector<Held> g_held;  // mode 3: answers kept back until the game's swap after the next one
+std::vector<Held> g_held;  // the default (3): answers kept back until the game's swap after the next one
 void write_answer(uint64_t ticket, uint32_t dst, uint32_t depth) {  // under g_publishMutex
     // Submission drains can retire newer fences before older ones. Never overwrite a newer answer.
     if (!dst || g_completed[dst] >= ticket) return;
@@ -77,11 +77,11 @@ void write_answer(uint64_t ticket, uint32_t dst, uint32_t depth) {  // under g_p
 int mode() {
     static const int m = [] {
         const char* e = getenv("WWHD_PEEKZ_SYNC");
-        const int v = e && *e ? atoi(e) : 1;
-        if (v != 1) LOG("[peekz] WWHD_PEEKZ_SYNC=%d: %s", v, v == 0 ? "answers whenever the GPU frame completes (not deterministic)"
-                        : v == 2 ? "test: synchronous copy at each peek" : v == 3 ? "test: answers two steps after the request"
-                        : "unknown, using 1");
-        return v >= 0 && v <= 3 ? v : 1;
+        const int v = e && *e ? atoi(e) : 3;
+        if (v != 3) LOG("[peekz] WWHD_PEEKZ_SYNC=%d: %s", v, v == 0 ? "answers whenever the GPU frame completes (not deterministic)"
+                        : v == 1 ? "test: answers one step after the request, as on the Wii U"
+                        : v == 2 ? "test: one step after, with a synchronous copy at each peek" : "unknown, using 3");
+        return v >= 0 && v <= 3 ? v : 3;
     }();
     return m;
 }
