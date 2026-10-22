@@ -119,6 +119,8 @@ def main():
               value.get("updated", 0) > prior_update and
               adb("shell", "pidof", PACKAGE + ":setup", check=False).stdout.decode().strip() not in ("", old_pid), 60)
         no_wake()
+        # SEVERE counts only with a real temperature behind it (#254, #277): a warm battery (40.0 C) confirms it
+        shell("cmd", "battery", "set", "-f", "temp", "400")
         shell("cmd", "thermalservice", "override-status", "3")
         shell("cmd", "battery", "unplug", "-f")
         shell("cmd", "battery", "set", "-f", "level", "10")
@@ -142,6 +144,7 @@ def main():
         until("battery hysteresis", paused("battery"))
         no_wake()
         shell("cmd", "thermalservice", "override-status", "0")
+        shell("cmd", "battery", "set", "-f", "temp", "250")
         shell("cmd", "battery", "set", "-f", "level", "80")
         until("automatic resume", lambda value: value.get("state") == "preparing")
         if not wake_held(): raise AssertionError("Active setup did not acquire its wake lock")
