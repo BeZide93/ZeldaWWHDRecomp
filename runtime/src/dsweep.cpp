@@ -1,6 +1,6 @@
-// D-sweep (off by default; setup's "Preparing shaders: models" runs it hidden and muted, tools/installer/model_sweep.py):
-// prepare the pipelines of the game's models by drawing every model of every object archive once with the game's own
-// code, instead of playing. The renderer records each pipeline with the archive whose models used it
+// D-sweep (off by default; setup's opt-in step "Preparing shaders: models (experimental)" runs it hidden and muted,
+// tools/installer/model_sweep.py): prepare the pipelines of the game's models by drawing every model of every
+// object archive once with the game's own code, instead of playing. The renderer records each pipeline with the archive whose models used it
 // (pipeline_groups.h); in play the Vulkan renderer compiles them when that archive loads.
 //
 // WWHD_DSWEEP=<start step>[,<models per batch>[,<frames per batch>]] turns it on; WWHD_DSWEEP=title[,<per>[,<frames>]]

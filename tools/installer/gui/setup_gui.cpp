@@ -476,6 +476,8 @@ struct App {
     bool decomp_offered = false, decomp = false, start_decomp = false;
     std::string decomp_text, decomp_docs, decomp_exe, decomp_error;
     bool prepare_shaders = true;
+    bool model_sweep = false;  // "Preparing shaders: models (experimental)": opt-in, off by default
+    std::string model_sweep_text;
     bool shader_skip_requested = false;
     std::deque<std::pair<std::string, std::string>> queue;  // requests to send one after another
     std::string after;                                       // then: play | quit | open
@@ -839,6 +841,7 @@ static void start_install(const std::string& source) {
     if (A.decomp_offered) f += std::string(",\"decomp\":") + (A.decomp ? "true" : "false");
     if (source != "installed") f += ",\"path\":" + jstr(A.source_path);
     f += std::string(",\"skip_shader_prebuild\":") + (A.prepare_shaders ? "false" : "true");
+    f += std::string(",\"model_sweep\":") + (A.prepare_shaders && A.model_sweep ? "true" : "false");
     f += ",\"shader_prebuild_cancel\":" + jstr(A.data_dir + "/shader-prebuild-cancel");
     request("install", f);
     go(Screen::Installing);
@@ -946,6 +949,8 @@ static void handle_event(const J& ev) {
         A.log_path = ev.str("log");
         A.platform = ev.str("platform");
         A.code_mods = ev.boolean("code_mods");
+        A.model_sweep = ev.boolean("model_sweep");
+        A.model_sweep_text = ev.str("model_sweep_text");
         A.decomp_offered = ev.boolean("decomp_offered");
         A.decomp = ev.boolean("decomp");
         A.decomp_text = ev.str("decomp_text");
@@ -1212,6 +1217,10 @@ static void screen_welcome() {
 static void code_mods_choice() {
     checkbox("Prepare shaders now (recommended)", &A.prepare_shaders);
     muted("You can skip this and rebuild the shader cache later in Graphics settings.");
+    if (!A.prepare_shaders) ImGui::BeginDisabled();
+    checkbox("Also prepare model shaders (experimental)", &A.model_sweep);
+    if (!A.prepare_shaders) ImGui::EndDisabled();
+    muted(A.model_sweep_text);
     checkbox("Build with code-mod support", &A.code_mods);
     muted("For mods in the catalogue or Mods tab marked as code mods. Built-in mods, graphics packs and "
           "content mods do not need this. The game code gets a small check in every function, which can "
@@ -1906,7 +1915,7 @@ static void start_child() {
 // automation (tests): a JSON array of steps, each run when its screen is showing:
 //   {"screen": "keys", "set": {"common_mode": "file", "common_key_file": "..."}, "when_step": "compile",
 //    "idle": true, "shot": "03-keys.png", "click": "Check keys and install"}
-// "set" fields: code_mods (boolean), decomp (boolean), source (as if chosen in the dialog), disc_key_file, common_key_file, common_mode
+// "set" fields: code_mods (boolean), decomp (boolean), model_sweep (boolean), source (as if chosen in the dialog), disc_key_file, common_key_file, common_mode
 // (file|paste), save_kind (none|hd|gc|legacy|other), save_path, open_details (true). Screenshots are PNG files
 // of the window. The run ends (exit 0) after the last step, or with exit 2 on a 45-minute timeout.
 
@@ -1945,6 +1954,7 @@ static void automation_frame() {
             else if (k == "save_path") set_save_path(v);
             else if (k == "code_mods") A.code_mods = kv.second.t == J::Bool && kv.second.b;
             else if (k == "decomp") A.decomp = kv.second.t == J::Bool && kv.second.b;
+            else if (k == "model_sweep") A.model_sweep = kv.second.t == J::Bool && kv.second.b;
             else if (k == "open_details") details_open = true;
         }
     }

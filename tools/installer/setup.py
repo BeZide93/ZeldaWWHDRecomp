@@ -2394,6 +2394,28 @@ def decomp_wanted(ctx):
     return bool(ctx.state().get("decomp", False) if choice is None else choice)
 
 
+MODEL_SWEEP_TEXT = (
+    "Experimental: after the shaders, start the game hidden and draw every model of every object archive once, "
+    "so their pipelines are ready before they first appear (fewer hitches in play). About 6 minutes on a Mac.")
+
+
+def model_sweep_wanted(ctx, ui=None):
+    """Setup's optional, experimental step "Preparing shaders: models (experimental)" (model_sweep.py), off by
+    default everywhere: WWHD_SETUP_MODEL_SWEEP=1/0 overrides; else --model-sweep / --no-model-sweep (or the setup
+    window's choice); else the question (interactive), defaulting to what the last setup did."""
+    env = os.environ.get("WWHD_SETUP_MODEL_SWEEP")
+    if env in ("0", "1"):
+        return env == "1"
+    choice = getattr(ctx.args, "model_sweep", None)
+    if choice is not None:
+        return bool(choice)
+    default = bool(ctx.state().get("model_sweep", False))
+    if ui and ui.interactive and not getattr(ctx.args, "skip_shader_prebuild", False):
+        say(MODEL_SWEEP_TEXT)
+        return ui.yesno("Also prepare model shaders (experimental)?", default)
+    return default
+
+
 CODE_MODS_TEXT = (
     "For mods in the catalogue or Mods tab marked as code mods. Built-in mods, graphics packs and "
     "content mods do not need this. The game code gets a small check in every function, which can "
@@ -2487,6 +2509,7 @@ def install(ctx, source, keys=None, info=None, ui=None, check_keys=None):
     args, manifest, data_dir = ctx.args, ctx.manifest, ctx.data_dir
     args.code_mods = "1" if setup_code_mods(ctx, ui) else "0"
     kind = source[0]
+    want_models = kind != "gen" and model_sweep_wanted(ctx, ui)
     want_decomp = kind != "gen" and decomp_wanted(ctx)
     old_state = ctx.state()
     steps = plan_steps(kind, want_decomp)
@@ -2660,11 +2683,12 @@ def install(ctx, source, keys=None, info=None, ui=None, check_keys=None):
             renderer="metal" if IS_MAC else "vulkan", progress=shader_progress_callback(shader_progress), log=LOG.write,
             # macOS: the player chooses Metal or Vulkan (MoltenVK) in Graphics > Renderer: prepare both
             renderers=["metal", "vulkan"] if IS_MAC else ["vulkan"],
-            # "Preparing shaders: models" (model_sweep.py): macOS for now; WWHD_SETUP_MODEL_SWEEP=1/0 overrides
-            models=os.environ.get("WWHD_SETUP_MODEL_SWEEP", "1" if IS_MAC else "0") == "1",
+            # "Preparing shaders: models (experimental)" (model_sweep.py): opt-in, off by default everywhere
+            models=want_models,
             skip=bool(getattr(args, "skip_shader_prebuild", False)),
             cancel=lambda: bool(getattr(args, "shader_prebuild_cancel", None) and
                                 Path(args.shader_prebuild_cancel).exists()))
+        state["model_sweep"] = want_models  # remembered: a repair (Rebuild shader cache) offers it again
         prepared = state["shader_prebuild"]
         states = prepared.get("renderers") or {}
         ready = [name.capitalize() for name, value in sorted(states.items()) if value == "ready"]
@@ -2773,6 +2797,11 @@ def main():
     ap.add_argument("--repair-guest-python", action="store_true", help="upgrade local mod setup Python without rebuilding game code")
     ap.add_argument("--shader-template", help="local shader template (or WWHD_SHADER_TEMPLATE); optional")
     ap.add_argument("--skip-shader-prebuild", action="store_true", help="skip optional shader preparation; compile during play")
+    ap.add_argument("--model-sweep", dest="model_sweep", action="store_const", const=True, default=None,
+                    help="experimental: also prepare the shaders of every model (Preparing shaders: models; about "
+                         "6 minutes on a Mac); remembered for repairs (WWHD_SETUP_MODEL_SWEEP=1/0 overrides)")
+    ap.add_argument("--no-model-sweep", dest="model_sweep", action="store_const", const=False,
+                    help="do not prepare model shaders (the default)")
     ap.add_argument("--shader-prebuild-cancel", help="skip shader preparation when this file exists")
     ap.add_argument("--repair", action="store_true", help="rebuild the game code from the installed game files")
     ap.add_argument("--jobs", type=int, help="parallel compiler processes")
@@ -3113,6 +3142,8 @@ def gui_main(args):
                   "legacy": bool(legacy_save or legacy_items), "free_bytes": free_space(ctx.data_dir),
                   "language_sources": sources_reply(),
                   "code_mods": setup_code_mods(ctx),
+                  # "Preparing shaders: models (experimental)": opt-in, off by default
+                  "model_sweep": model_sweep_wanted(ctx), "model_sweep_text": MODEL_SWEEP_TEXT,
                   # the decomp version (decomp_setup.py): offered on macOS in development builds only
                   "decomp_offered": decomp_offered(ctx.manifest), "decomp": decomp_wanted(ctx),
                   "decomp_text": decomp_setup.DECOMP_TEXT, "decomp_docs": decomp_setup.DOCS_URL,
@@ -3225,6 +3256,10 @@ def gui_main(args):
             ctx.args.decomp = req["decomp"]
         if "skip_shader_prebuild" in req:
             ctx.args.skip_shader_prebuild = bool(req["skip_shader_prebuild"])
+        if "model_sweep" in req:
+            if not isinstance(req["model_sweep"], bool):
+                return fail(req, "bad_request", "model_sweep must be a boolean")
+            ctx.args.model_sweep = req["model_sweep"]
         if req.get("shader_prebuild_cancel"):
             # GUI marker is confined to this installation, not an arbitrary path.
             ctx.args.shader_prebuild_cancel = str(Path(ctx.data_dir) / "shader-prebuild-cancel")

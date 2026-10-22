@@ -209,7 +209,7 @@ PROGRESS_PREFIX = 'WWHD-PROGRESS '
 # (several renderers: each warm takes an equal part of the rest).
 ASSEMBLY_SHARE = 0.35
 ASSEMBLY_SHARE_SEVERAL = 0.25
-# Share of the bar "Preparing shaders: models" takes (all renderers) when it follows the warm.
+# Share of the bar "Preparing shaders: models (experimental)" takes (all renderers) when it follows the warm.
 MODELS_SHARE = 0.5
 
 
@@ -439,7 +439,7 @@ def prepare(game, template, executable, cache_root, package, renderer='vulkan',
     of the mod manager next to cache_root, package_templates); the identity names them, so a change of mods
     makes a new generation, while the launch record keeps the release template the game checks.
     builder(game, output, template[, progress=callback(done, total, detail)]) assembles in-process.
-    models: after the warm, "Preparing shaders: models" (model_sweep.py) for each ready renderer: the game draws
+    models (opt-in, experimental): after the warm, "Preparing shaders: models" (model_sweep.py) for each ready renderer: the game draws
     every object archive's models once, hidden, from its title screen, and records their pipelines in the live
     caches. It resumes where a cancelled or crashed sweep stopped; cancelling it keeps the prepared generation
     (result "models": {renderer: 'done'|'paused'|'failed'}). sweeper replaces model_sweep.run (tests).
@@ -500,7 +500,7 @@ def prepare(game, template, executable, cache_root, package, renderer='vulkan',
         out = {}
         if not names:
             return out
-        reporter.begin('Preparing shaders: models', warm_high, 1.0)
+        reporter.begin('Preparing shaders: models (experimental)', warm_high, 1.0)
         lock = threading.Lock()
         counts = {name: None for name in names}
         stop = threading.Event()

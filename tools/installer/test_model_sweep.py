@@ -202,9 +202,9 @@ class PrepareWithModelsTests(unittest.TestCase):
         fractions = [f for _, f in events if f is not None]
         self.assertEqual(fractions, sorted(fractions))
         self.assertAlmostEqual(fractions[-1], 1.0)
-        self.assertIn(('Preparing shaders: models', None), events)
+        self.assertIn(('Preparing shaders: models (experimental)', None), events)
         # one bar for both: progress shows once both games named their totals (2 + 2 of 2 + 2 archives)
-        self.assertIn(('Preparing shaders: models: Link', 1.0), events)
+        self.assertIn(('Preparing shaders: models (experimental): Link', 1.0), events)
 
     def test_a_paused_sweep_keeps_the_generation_and_resumes_at_the_next_setup(self):
         self.outcome['vulkan'] = 'cancel'

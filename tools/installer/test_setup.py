@@ -954,6 +954,49 @@ class LanguageSources(unittest.TestCase):
         self.assertEqual(setup.LANGUAGE_SOURCE_FILES, ["content/Common/Pack/permanent_2d_*.pack", "meta/meta.xml"])
 
 
+class ModelSweepOption(unittest.TestCase):
+    """"Preparing shaders: models (experimental)": opt-in, off by default on every platform."""
+
+    def ctx(self, state=None, **args):
+        from types import SimpleNamespace
+        values = dict(model_sweep=None, skip_shader_prebuild=False)
+        values.update(args)
+        return SimpleNamespace(args=SimpleNamespace(**values), state=lambda: dict(state or {}))
+
+    def test_off_by_default_on_every_platform(self):
+        with mock.patch.dict(os.environ, {}, clear=True):
+            for mac in (False, True):
+                with mock.patch.object(setup, "IS_MAC", mac):
+                    self.assertFalse(setup.model_sweep_wanted(self.ctx()))
+                    self.assertFalse(setup.model_sweep_wanted(self.ctx(), setup.UI(False)))
+
+    def test_question_marked_experimental_defaults_to_the_last_choice(self):
+        with mock.patch.dict(os.environ, {}, clear=True):
+            ui = mock.Mock(interactive=True)
+            ui.yesno.side_effect = lambda question, default: default
+            self.assertFalse(setup.model_sweep_wanted(self.ctx(), ui))
+            ui.yesno.assert_called_with("Also prepare model shaders (experimental)?", False)
+            self.assertTrue(setup.model_sweep_wanted(self.ctx({"model_sweep": True}), ui))
+            ui.yesno.assert_called_with("Also prepare model shaders (experimental)?", True)
+            ui.reset_mock()
+            self.assertFalse(setup.model_sweep_wanted(self.ctx(skip_shader_prebuild=True), ui))
+            ui.yesno.assert_not_called()
+        self.assertIn("Experimental", setup.MODEL_SWEEP_TEXT)
+        self.assertIn("6 minutes", setup.MODEL_SWEEP_TEXT)
+
+    def test_flag_window_choice_and_environment_override(self):
+        ui = mock.Mock(interactive=True)
+        with mock.patch.dict(os.environ, {}, clear=True):
+            self.assertTrue(setup.model_sweep_wanted(self.ctx(model_sweep=True), ui))
+            self.assertFalse(setup.model_sweep_wanted(self.ctx({"model_sweep": True}, model_sweep=False), ui))
+            ui.yesno.assert_not_called()
+        with mock.patch.dict(os.environ, {"WWHD_SETUP_MODEL_SWEEP": "1"}):
+            self.assertTrue(setup.model_sweep_wanted(self.ctx(model_sweep=False), ui))
+        with mock.patch.dict(os.environ, {"WWHD_SETUP_MODEL_SWEEP": "0"}):
+            self.assertFalse(setup.model_sweep_wanted(self.ctx({"model_sweep": True}, model_sweep=True), ui))
+        ui.yesno.assert_not_called()
+
+
 class CodeModsBuild(unittest.TestCase):
     def test_option_default_and_override(self):
         with mock.patch.dict(os.environ, {}, clear=True):

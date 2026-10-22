@@ -367,18 +367,20 @@ refreshing. Player caches persist in `shader-prebuild/live` across preparation g
 lives under the host configuration directory's `shader-prebuild` folder; portable installations use their
 user directory. Cache overrides take precedence over this selection.
 
-On macOS setup then runs **Preparing shaders: models** for each prepared renderer (Metal and Vulkan
-at the same time, on one bar): the game starts hidden and muted from its title screen (no save is
+**Preparing shaders: models (experimental)** is an optional setup step, off by default on every
+system: switch it on with "Also prepare model shaders (experimental)" in setup (the setup window, the
+question of the text setup, or `--model-sweep`); setup remembers the choice, so Repair (which also
+carries out Rebuild shader cache) runs it again. It runs for each prepared renderer (on macOS Metal and
+Vulkan at the same time, on one bar): the game starts hidden and muted from its title screen (no save is
 needed or touched), loads every object archive named in your game files and draws each of its models
 once, so the pipelines they need are recorded for this build and this computer (about 6 minutes on a
 recent Mac). Metal builds the recorded pipelines in the background at start; Vulkan builds an archive's
-pipelines when the game loads it. Nothing from the
-game is shipped: the archive list is read from your own files and only names are stored. Cancelling
-keeps everything prepared so far; the next setup continues where it stopped. A model that makes the
-game stop is skipped the next time (`shader-prebuild/model-sweep/<renderer>/skip.txt`, names only).
-Rebuild shader cache runs this step again. Rooms, the sea and particle effects are not part of it yet;
-they are prepared when first seen in play. `WWHD_SETUP_MODEL_SWEEP=1` turns the step on for setup on
-other systems (`0` turns it off).
+pipelines when the game loads it. Nothing from the game is shipped: the archive list is read from your
+own files and only names are stored. Cancelling keeps everything prepared so far; the next setup
+continues where it stopped. A model that makes the game stop is skipped the next time
+(`shader-prebuild/model-sweep/<renderer>/skip.txt`, names only). Rooms, the sea and particle effects
+are not part of it yet; they are prepared when first seen in play. `WWHD_SETUP_MODEL_SWEEP=1` (or `0`)
+overrides the choice.
 
 The template covers recorded states rather than every possible scene. Uncovered shaders and pipelines
 can still cause a first-use hitch. Pending draws wait for their exact state; the renderer can repeat the
