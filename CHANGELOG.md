@@ -7,6 +7,12 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Experimental setup step: "Preparing shaders: models"** (off by default). When switched on in setup, it draws every
+  object model of your game once with the game's own code, so their shaders are ready before you play: far fewer
+  first-visit stutters for characters and objects. It takes about 6 minutes on a Mac.
+- **Smaller, faster shader caches:** each shader is now stored once in the pipeline recipes and the SPIR-V cache (the
+  SPIR-V cache had stopped growing at its size limit), and shaders of an object's models are prepared as soon as the
+  game loads that object.
 - **Frame interpolation no longer changes the game** (40, 60, 120 and 240 fps). Extra frames drawn between the game's
   steps used up random numbers and decided what was visible with the blended camera, so enemies, effects and sounds
   could play out slightly differently than at 30 fps. The game now plays exactly as at 30 fps; only the picture is
