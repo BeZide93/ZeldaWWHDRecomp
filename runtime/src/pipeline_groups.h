@@ -24,6 +24,7 @@ struct Shared {
     std::atomic<bool> wanted{false};
     std::atomic<uint32_t> sweeping{0};
     std::atomic<bool> sweepingNewOnly{false};
+    std::atomic<bool> playing{false};
 };
 inline Shared& shared() { static Shared value; return value; }
 // worker: grouped recipes exist, start publishing
@@ -49,6 +50,10 @@ inline void set_sweeping(uint32_t group, bool new_only = false) {
 }
 inline uint32_t sweeping() { return shared().sweeping.load(std::memory_order_relaxed); }
 inline bool sweeping_new_only() { return shared().sweepingNewOnly.load(std::memory_order_relaxed); }
+// the game is in a play stage (past the boot, the title and the file select, and their loading): the background
+// compile then uses all its threads (before that one, so the loads into the first stage keep their CPU)
+inline void set_playing() { shared().playing.store(true, std::memory_order_relaxed); }
+inline bool playing() { return shared().playing.load(std::memory_order_relaxed); }
 inline uint64_t generation() { return shared().generation.load(std::memory_order_acquire); }
 inline std::vector<uint32_t> resident() {
     auto& s = shared();
