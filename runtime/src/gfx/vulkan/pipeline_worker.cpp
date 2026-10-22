@@ -8,6 +8,10 @@
 #include "shader_compiler.h"
 #include "platform/host.h"
 #include "stutter_trace.h"
+#include "platform/process_peak_rss.h"
+#ifdef __APPLE__
+#include <mach/mach.h>
+#endif
 #include "worker_metrics.h"
 #include "../../pipeline_groups.h"
 #include <deque>
@@ -88,10 +92,35 @@ Worker& worker() { static Worker value; return value; }
 // unused handles independently of the CPU recipe database; evicted recipes and
 // the driver cache remain available for a correct demand compile.
 #ifdef __ANDROID__
-constexpr size_t maxUnusedWarmPipelines = 256;
+constexpr size_t kMaxUnusedWarmPipelines = 256;
 #else
-constexpr size_t maxUnusedWarmPipelines = 1024;
+constexpr size_t kMaxUnusedWarmPipelines = 1024;
 #endif
+// debug: WWHD_VK_WARM_POOL=n overrides the limit (measurements)
+size_t max_unused_warm() {
+  static const size_t value = [] {
+    const char* e = std::getenv("WWHD_VK_WARM_POOL");
+    return e && *e ? std::clamp<size_t>(std::strtoul(e, nullptr, 10), 64, 65536) : kMaxUnusedWarmPipelines;
+  }();
+  return value;
+}
+#define maxUnusedWarmPipelines max_unused_warm()
+std::atomic<size_t> g_evictions{0};
+// the process's memory now (Apple: its physical footprint, which includes the GPU's allocations on unified memory;
+// elsewhere the peak resident size), for the warm's log lines
+uint64_t process_memory() {
+#ifdef __APPLE__
+  task_vm_info_data_t info{};
+  mach_msg_type_number_t count = TASK_VM_INFO_COUNT;
+  if (task_info(mach_task_self(), TASK_VM_INFO, reinterpret_cast<task_info_t>(&info), &count) == KERN_SUCCESS)
+    return info.phys_footprint;
+  return 0;
+#else
+  process_peak_rss::Sample sample;
+  uint64_t bytes = 0;
+  return process_peak_rss::query(sample) && process_peak_rss::bytes(sample, bytes) ? bytes : 0;
+#endif
+}
 // Archive prefetch compilers: a few on desktops (an archive brings up to dozens of pipelines a few frames before its
 // first draw), one on phones (memory, few big cores).
 size_t prefetch_threads() {
@@ -136,6 +165,8 @@ void retain_ready(Worker& w, const std::string& key, WarmPipeline handles,
         victim=it, victimRank=itRank;
     }
     destroy(w.device,victim->second.handles); w.ready.erase(victim);
+    ++g_evictions;
+    stutter::trace().add("warm_evicted", 0, 0, 0, 0, 0);
   }
   w.ready.emplace(key,Ready{handles,recipe,++w.readySequence});
 }
@@ -379,8 +410,9 @@ void run(Worker& w, std::vector<uint8_t> seed) {
     }
     { std::unique_lock lock(w.cacheMutex); w.cache = cache; }
     std::vector<uint8_t>().swap(seed); // Vulkan copied initial cache data during creation.
-    std::fprintf(stderr, "[vulkan warmup] %zu exact pipeline recipes queued, %zu wait for their object archives\n",
-                 startup.size(), grouped);
+    std::fprintf(stderr, "[vulkan warmup] %zu exact pipeline recipes queued, %zu wait for their object archives "
+                 "(pool %zu; process memory %.0f MB)\n", startup.size(), grouped, maxUnusedWarmPipelines,
+                 process_memory() / 1e6);
     // Several compilers for archive prefetch (an archive's models are drawn a few frames after it loads); the
     // driver pipeline cache is internally synchronized. Startup work stays one at a time and yields to demand.
     std::atomic<size_t> prefetched{0}, done{0}, failures{0}, cancels{0};
@@ -418,7 +450,13 @@ void run(Worker& w, std::vector<uint8_t> seed) {
               recipe = found->second; ahead = true;
             }
             if (recipe) break;
-            if (!startup.empty()) { recipe = std::move(startup.front()); startup.pop_front(); break; }
+            if (!startup.empty()) {
+              recipe = std::move(startup.front()); startup.pop_front();
+              if (startup.empty())  // (the last one is still compiling: the size is close, not exact)
+                std::fprintf(stderr, "[vulkan warmup] start queue taken: %zu ready; process memory %.0f MB\n",
+                             w.ready.size(), process_memory() / 1e6);
+              break;
+            }
             if (w.drainExit || w.byGroup.empty()) break;
             w.workWake.wait_for(lock, std::chrono::milliseconds(50));
           }
@@ -469,7 +507,9 @@ void run(Worker& w, std::vector<uint8_t> seed) {
     for (auto& thread : pool) thread.join();
     completed += done; failed += failures; cancelled += cancels;
     if (grouped) std::fprintf(stderr, "[vulkan warmup] %zu compiled ahead for loaded object archives\n", prefetched.load());
-    std::fprintf(stderr, "[vulkan warmup] %zu ready, %zu failed, %zu cancelled\n", completed, failed, cancelled);
+    std::fprintf(stderr, "[vulkan warmup] %zu ready, %zu failed, %zu cancelled; %zu evicted from the pool of %zu; process "
+                 "memory %.0f MB\n", completed, failed, cancelled, g_evictions.load(), maxUnusedWarmPipelines,
+                 process_memory() / 1e6);
   } catch (const std::exception& error) {
     ++failed;
     std::fprintf(stderr, "[vulkan warmup] skipped: %s\n", error.what());

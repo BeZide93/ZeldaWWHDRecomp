@@ -23,6 +23,7 @@ struct Shared {
     std::atomic<uint64_t> generation{0};
     std::atomic<bool> wanted{false};
     std::atomic<uint32_t> sweeping{0};
+    std::atomic<bool> sweepingNewOnly{false};
 };
 inline Shared& shared() { static Shared value; return value; }
 // worker: grouped recipes exist, start publishing
@@ -40,8 +41,14 @@ inline void publish(std::vector<uint32_t> groups) {
 }
 // the setup's model sweep: the group of the archive whose models are being drawn (0: none); the renderer files the
 // pipelines it creates or uses meanwhile under it
-inline void set_sweeping(uint32_t group) { shared().sweeping.store(group, std::memory_order_relaxed); }
+// new_only (stage visits): only pipelines created meanwhile are filed under it, not the ones a visited stage merely
+// uses (those are shared by many places; filing them under every stage would have each stage load compile them again)
+inline void set_sweeping(uint32_t group, bool new_only = false) {
+    shared().sweepingNewOnly.store(new_only, std::memory_order_relaxed);
+    shared().sweeping.store(group, std::memory_order_relaxed);
+}
 inline uint32_t sweeping() { return shared().sweeping.load(std::memory_order_relaxed); }
+inline bool sweeping_new_only() { return shared().sweepingNewOnly.load(std::memory_order_relaxed); }
 inline uint64_t generation() { return shared().generation.load(std::memory_order_acquire); }
 inline std::vector<uint32_t> resident() {
     auto& s = shared();

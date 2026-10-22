@@ -859,14 +859,19 @@ void visit_step(const std::string& current) {
         }
         g_visit_asked = now;
         g_visit_in = 0;
-        const std::string group = v.stage + "_Stage";
-        pipeline_groups::set_sweeping(pipeline_groups::group_of(group.data(), group.size()));
+        // the way there (the scene change, the loading, the arrival) is not the stage's own: compiled at start
+        pipeline_groups::set_sweeping(0);
         g_tag = ++g.batch;
         LOG("[dsweep] batch %d step %llu ns %lld: visit %s room %d", g.batch, (unsigned long long)now, (long long)now_ns(),
             v.stage.c_str(), v.room);
         return;
     }
-    if (current == v.stage && !g_visit_in) g_visit_in = now;
+    if (current == v.stage && !g_visit_in) {
+        g_visit_in = now;
+        // there: what the stage newly needs is filed under it (compiled when it loads); what it shares is not
+        const std::string group = v.stage + "_Stage";
+        pipeline_groups::set_sweeping(pipeline_groups::group_of(group.data(), group.size()), true);
+    }
     const bool shown = g_visit_in && now - g_visit_in >= kVisitSteps;
     if (!shown && now - g_visit_asked < kVisitTimeout) return;
     if (!shown) LOG("[dsweep] visit %s: not reached (now in %s)", v.stage.c_str(), current.c_str());

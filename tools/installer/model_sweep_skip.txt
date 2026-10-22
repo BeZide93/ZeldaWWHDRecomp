@@ -1,6 +1,7 @@
 # Names the model sweep leaves out from the start (names only): actors that stop the game when made outside their
 # room (doors, shutters and others that need their room's data), and archives the title cannot load. Anything else
 # that stops the game is found and skipped by the sweep itself (shader-prebuild/model-sweep/<renderer>/skip.txt).
+# visit-<stage>: stages whose visit (entered from the title, no save loaded) stops the game.
 BFlower
 BigElf
 Bj8
@@ -40,5 +41,15 @@ spotbx1
 Svsp
 Tc
 VigaH
+visit-ADMumi
+visit-Cave08
+visit-E3ROOP
+visit-ENDumi
+visit-GanonK
+visit-I_SubAN
+visit-M2ganon
+visit-M2tower
+visit-Mjtower
+visit-sea_E
 Yfrlt00
 Zenshut

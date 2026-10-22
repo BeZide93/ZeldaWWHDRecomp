@@ -179,10 +179,10 @@ def run(executable, game, cache_root, renderer, identity, cache_env, line=lambda
         (state / 'identity.json').write_text(json.dumps(identity, sort_keys=True), encoding='utf-8')
     archives = state / 'archives.txt'
     archives.write_text(''.join(n + '\n' for n in object_archives(game)), encoding='utf-8')
-    # measurements only (WWHD_SETUP_MODEL_SWEEP_VISITS=1): enter every stage at its first room and draw it under its own
-    # environment (dsweep.cpp, stage visits)
+    # stage visits: enter every stage at its first room and draw it under its own environment (dsweep.cpp);
+    # WWHD_SETUP_MODEL_SWEEP_VISITS=0 leaves them out
     visits = None
-    if os.environ.get('WWHD_SETUP_MODEL_SWEEP_VISITS') == '1':
+    if os.environ.get('WWHD_SETUP_MODEL_SWEEP_VISITS', '1') != '0':
         visits = state / 'visits.txt'
         rooms = {s: sorted(int(a[4:]) for a in names if a.startswith('Room')) for s, names in stage_archives(game).items()}
         visits.write_text(''.join('%s %d\n' % (s, r[0]) for s, r in rooms.items() if r and s not in ('sea_T', 'Name')),

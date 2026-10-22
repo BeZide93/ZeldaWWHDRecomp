@@ -375,17 +375,19 @@ Vulkan at the same time, on one bar): the game starts hidden and muted from its 
 needed or touched), loads every object archive and every stage's rooms named in your game files and
 draws each of their models once, shows the title's sea and sky at other times of day and in a storm,
 shows every actor the rooms place for a few frames (made by the game, drawn, never running its logic,
-then removed) and the grass they plant with and without its wind animation, and finally opens the file
-select, so the pipelines they need are recorded for this build and this computer (about 8 to 10 minutes on
-a recent Mac; the game runs without a frame limit meanwhile). Metal builds the recorded pipelines in the background at start; Vulkan builds an archive's
-pipelines when the game loads it (a room's when the room loads; the latest load first); pipelines of
-the title's own scene are built at start. Nothing from the game is shipped: the archive list is read from your
-own files and only names are stored. Cancelling keeps everything prepared so far; the next setup
-continues where it stopped. A model or actor that makes the game stop is skipped the next time
-(`shader-prebuild/model-sweep/<renderer>/skip.txt`, names only; `tools/installer/model_sweep_skip.txt` lists
-those known already). The actor placements read from the rooms stay in that folder too (`actors.txt`). The sea, the sky and particle effects
-are not part of it yet; they are prepared when first seen in play. `WWHD_SETUP_MODEL_SWEEP=1` (or `0`)
-overrides the choice.
+then removed) and the grass they plant with and without its wind animation, enters every stage at its first
+room and shows it under its own lighting, fog and sky (the game's own stage change, as starting a game does), and
+finally opens the file select, so the pipelines they need are recorded for this build and this computer
+(TIME_PLACEHOLDER; the game runs without a frame limit meanwhile). Metal builds the recorded pipelines in the
+background at start; Vulkan builds an archive's pipelines when the game loads it (a room's when the room loads,
+a stage's when it is entered; the latest load first); pipelines of the title's own scene are built at start.
+Nothing from the game is shipped: the archive list is read from your own files and only names are stored.
+Cancelling keeps everything prepared so far; the next setup continues where it stopped. A model, actor or stage
+that makes the game stop is skipped the next time (`shader-prebuild/model-sweep/<renderer>/skip.txt`, names
+only; `tools/installer/model_sweep_skip.txt` lists those known already). The actor placements read from the rooms
+stay in that folder too (`actors.txt`). Particle effects, Link's own drawing while he moves and sailing are not
+part of it yet; they are prepared when first seen in play. `WWHD_SETUP_MODEL_SWEEP=1` (or `0`) overrides the
+choice; `WWHD_SETUP_MODEL_SWEEP_VISITS=0` leaves the stage visits out.
 
 The template covers recorded states rather than every possible scene. Uncovered shaders and pipelines
 can still cause a first-use hitch. Pending draws wait for their exact state; the renderer can repeat the
