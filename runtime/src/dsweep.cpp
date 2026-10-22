@@ -122,7 +122,8 @@ struct Entry {
     std::string id() const { return stage.empty() ? arc : stage + "_" + arc; }
 };
 
-enum class Phase { Start, Resident, NextArchive, Loading, StageLoading, Sweeping, Draining, Environment, Actors, Plants,
+enum class Phase { Start, Resident, NextArchive, Loading, StageLoading, Sweeping, Draining, Environment, Particles, Actors,
+                   Plants,
                    FileSelect, Visits, Done };
 constexpr int kHeaps = 6;   // solid heaps alive at once: a batch's models live until kHeaps batches later
 constexpr int kDrain = 6;   // frames between an archive's last draw and its release (frames in flight)
@@ -170,6 +171,7 @@ struct State {
 std::atomic<bool> g_abort{false};  // an actor changed the stage: orderly exit, the supervisor skips it
 std::atomic<bool> g_file_select{false}, g_in_file_select{false};  // the last part: the title's file select
 bool g_file_select_seen = false;  // ... done in an earlier attempt
+bool g_particles_seen = false;     // the particle sweep, done in an earlier attempt
 
 std::string State::Spawn::id() const {
     char b[64];
@@ -666,6 +668,7 @@ void begin(Cpu* c) {
             if (l.rfind("actor-done ", 0) == 0) g.done.insert(l.substr(11));
             if (l.rfind("env-done ", 0) == 0) g.done.insert(l.substr(9));
             if (l == "file-select") g_file_select_seen = true;
+            if (l == "particles-done") g_particles_seen = true;
             if (l.rfind("visit-done ", 0) == 0) g.done.insert(l.substr(11));
         }
     }
@@ -760,6 +763,7 @@ struct EnvSaved {
     unsigned frames = 0;
 } g_env;
 void begin_actors(Cpu* c);
+void begin_particles(Cpu* c);
 void env_apply(Cpu* c, const EnvState& e) {
     const uint32_t info = ld32(GD(0x101F84DC));
     if (mem2(info, 0x48)) st32(info + 0x44, f32_as_u32(e.degrees));
@@ -811,7 +815,7 @@ void environment_step(Cpu* c) {
     call(c, GC(0x0257E7C0), {g_env.rainOrig});
     if (mem2(env, 0xAC0)) st32(env + 0xAB4, g_env.thunder);
     g_tag = 0;
-    begin_actors(c);
+    begin_particles(c);
 }
 // The file select (WWHD_DSWEEP_FILE_SELECT=1, last): A on the title opens it (the "Name" stage: its 2D screens,
 // backdrop and the transitions on the way); after kFileSelectSteps there the sweep ends. Nothing is chosen there
@@ -992,6 +996,62 @@ void plants_step(Cpu* c) {
         if (ld32(packet + 0x1A5CC + room * 4)) call(c, GC(0x0254AC50), {packet + 0x1A5CC + room * 4});  // deleteData
     g_tag = 0;
     begin_visits();
+}
+// The particle sweep (WWHD_DSWEEP_PARTICLES=1, after the environment, on the title): every particle effect of the
+// loaded particle resources (the common ones and the title's scene ones) created with the game's own emitter
+// manager (*1047B2D4: JPAEmitterManager::createSimpleEmitterID(position, id, group, resource), the resource by
+// the game's own id lookup) at the look-at point, in each draw group the game uses for 3D effects, kParticleBatch at
+// a time, drawn for kParticleFrames, then all emitters removed (forceDeleteAllEmitter). Effects are what actors
+// and the world spawn while running, which the actor sweep (no logic) never shows. Not filed under any archive.
+constexpr unsigned kParticleBatch = 48, kParticleFrames = 6;
+constexpr uint32_t kParticleGroups[] = {0, 2, 4, 1, 3};  // (5 ship tail and 6 wind need their owners: assert)
+struct ParticleState { size_t group = 0; uint32_t id = 0; unsigned frames = 0; bool alive = false; unsigned made = 0; } g_pa;
+void begin_particles(Cpu* c) {
+    static const bool on = std::getenv("WWHD_DSWEEP_PARTICLES") != nullptr;
+    if (!on || g_particles_seen || !mem2(ld32(GD(0x1047B2D4)))) return begin_actors(c);
+    phase_time("particles");
+    g.phase = Phase::Particles;
+    g_pa = {};
+    g_tag = 0;
+    pipeline_groups::set_sweeping(0);
+}
+void particles_step(Cpu* c) {
+    const uint32_t manager = ld32(GD(0x1047B2D4));
+    if (g_pa.alive && ++g_pa.frames < kParticleFrames) return;
+    if (g_pa.alive) call(c, GC(0x0282228C), {manager});  // forceDeleteAllEmitter
+    g_pa.alive = false;
+    if (g_pa.group >= std::size(kParticleGroups)) {
+        LOG("[dsweep] particles: %u effects shown", g_pa.made);
+        progress("particles-done");
+        return begin_actors(c);
+    }
+    const uint32_t group = kParticleGroups[g_pa.group];
+    const uint32_t camera = call(c, GC(0x024F8044));
+    const uint32_t pos = g.scratch + 0x9C0;
+    for (int i = 0; i < 3; ++i) st32(pos + i * 4, mem2(camera, 0x20) ? ld32(camera + 0x10 + i * 4) : 0);
+    char line[48];
+    std::snprintf(line, sizeof line, "%u:%04X", group, g_pa.id);
+    if (g.skip.count(line)) {  // a batch that stopped the game: its range of 256 ids is left out
+        g_pa.id = (g_pa.id | 0xFF) + 1;
+        if (g_pa.id > 0xFFFF) g_pa.id = 0, ++g_pa.group;
+        return;
+    }
+    progress(std::string("particles ") + line);
+    unsigned made = 0;
+    while (made < kParticleBatch && g_pa.id <= 0xFFFF) {
+        const uint32_t id = g_pa.id++;
+        const uint32_t resource = call(c, GC(0x025A4D40), {id});  // pa_getRM_ID
+        if (call(c, GC(0x02821448), {manager, pos, id, group, resource, 0, 0})) ++made;  // createSimpleEmitterID
+    }
+    g_pa.made += made;
+    if (g_pa.id > 0xFFFF) g_pa.id = 0, ++g_pa.group;
+    g_pa.alive = made > 0;
+    g_pa.frames = 0;
+    if (made) {
+        g_tag = ++g.batch;
+        LOG("[dsweep] batch %d step %llu ns %lld: %u particle effects (group %u, up to %04X)", g.batch,
+            (unsigned long long)interp::executed_steps(), (long long)now_ns(), made, group, g_pa.id);
+    }
 }
 void begin_actors(Cpu* c) {
     static const bool on = std::getenv("WWHD_DSWEEP_ACTORS") != nullptr;
@@ -1223,6 +1283,8 @@ void step(Cpu* c, uint32_t host) {
         return;
     case Phase::Environment:
         return environment_step(c);
+    case Phase::Particles:
+        return particles_step(c);
     case Phase::Actors:
         return actor_step(c);
     case Phase::Plants:
