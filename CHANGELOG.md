@@ -7,6 +7,12 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **New setting: Shader compile** (Settings → Graphics). **Off** (the default) draws everything exactly and waits for
+  shaders that aren't ready yet, as before. **Fast** keeps playing while new shaders compile and may leave out a few
+  objects for a frame or two, for fewer stutters on first visits.
+- **Fixed: the sun's glare could make the game behave slightly differently from run to run.** The game's check whether
+  the sun is hidden got its answer whenever the GPU finished; it now arrives at a fixed point, so the game behaves the
+  same regardless of timing (the glare reacts one game step later than on the Wii U; no cost).
 - **The Goron merchants for mods** (for mod makers): the three Goron traders can be placed on a mod island and talk
   with your own text. Also new in the catalogue: torches, flames, fire jets and lava bubbles, Dragon Roost's bomb flower,
   the dungeons' stone block, rocks, boulders and blocks that break (and stay broken until the room loads again), more of
