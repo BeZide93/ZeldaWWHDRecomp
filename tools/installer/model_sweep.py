@@ -209,9 +209,9 @@ def run(executable, game, cache_root, renderer, identity, cache_env, line=lambda
             scratch = Path(stack.enter_context(folder))
             env = environment(os.environ, game, cache_env, renderer, state, archives, scratch, stages)
             if visits:
-                # every room with a player start, per scene layer (the game's own list, read while the rooms are
-                # swept); visits.txt (each stage's first room) only with WWHD_SETUP_MODEL_SWEEP_VISITS=first
-                env['WWHD_DSWEEP_VISIT'] = str(visits) if os.environ.get('WWHD_SETUP_MODEL_SWEEP_VISITS') == 'first' else 'all'
+                # each stage's first room; WWHD_SETUP_MODEL_SWEEP_VISITS=all: every room with a player start, once per
+                # scene layer (measured on 19 places: no gain over the first rooms, 22 more minutes)
+                env['WWHD_DSWEEP_VISIT'] = 'all' if os.environ.get('WWHD_SETUP_MODEL_SWEEP_VISITS') == 'all' else str(visits)
             (scratch / 'save').mkdir()
             output_path = scratch / 'output.log'
             output = stack.enter_context(output_path.open('wb'))
