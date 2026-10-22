@@ -632,6 +632,10 @@ bool zoom_ease(Cpu* c, void (*orig)(Cpu*)) {
     });
     stf32(v, x);
     c->f[1].ps0 = ret;
+    // (camera_draw stores the drawn zoom in mScale/mTarget, dCamera_c +0x730/+0x734: exact again before
+    // the next step's logic after a 40 fps blended record pass)
+    if (x != p->zoom.after[0])
+        for (uint32_t o : {0x730u, 0x734u}) exact_after_pass(g_drawing_cam + kCamBody + o, f32_as_u32(p->zoom.after[0]), 4);
     static int trace = getenv("WWHD_INTERP_CAM_TRACE") ? atoi(getenv("WWHD_INTERP_CAM_TRACE")) : 0;
     if (trace > 0 && (before != 1.0f || x != 1.0f)) {
         trace--;

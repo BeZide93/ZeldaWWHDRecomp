@@ -1896,9 +1896,10 @@ extern "C" void hook_024D1D44(Cpu* c) {
     g_sky.touched.clear();
     f_024D1D44_orig(c);
     g_sky.active = false;
-    if (interp::record_pass()) {
+    // (40 fps blended record pass: drawn blended above, recorded here for the next step)
+    if (interp::record_pass() || interp::record_blended()) {
         if (g_sky_rec.size() > 64) g_sky_rec.clear();
-        for (const auto& t : g_sky.touched) g_sky_rec[t.addr] = SkyRec{interp::hold_pass_count(), t.exact};
+        for (const auto& t : g_sky.touched) g_sky_rec[t.addr] = SkyRec{interp::record_stamp(), t.exact};
     }
 }
 // texScrollCheck(f32* v): the wrap after each scroll
@@ -1969,7 +1970,17 @@ extern "C" void hook_0258CA60(Cpu* c) {
         f_0258CA60_orig(c);
         return;
     }
-    if (!halfway() || g_magma.pkt != pk || g_magma.record != interp::hold_pass_count()) { f_0258CA60_orig(c); return; }
+    // (40 fps blended record pass: drawn blended from the last record, then recorded)
+    auto record_blended = [&] {
+        if (!interp::record_blended()) return;
+        g_magma.record = interp::record_stamp();
+        g_magma.pkt = pk;
+        g_magma.scroll[0] = scroll[0];
+        g_magma.scroll[1] = scroll[1];
+        g_magma.balls.clear();
+        magma_balls(pk, [&](uint32_t b) { g_magma.balls[b] = {(float)ldf32(b + 0xD50), (float)ldf32(b + 0xD54), (float)ldf32(b + 0xD58)}; });
+    };
+    if (!halfway() || g_magma.pkt != pk || g_magma.record != interp::hold_pass_count()) { f_0258CA60_orig(c); record_blended(); return; }
     const float t = interp::pass_t();
     for (int k = 0; k < 2; k++) {
         const float prev = interp::fade::unwrap_near(g_magma.scroll[k], scroll[k], 1.0f);
@@ -1994,6 +2005,7 @@ extern "C" void hook_0258CA60(Cpu* c) {
     for (const auto& m : moved) stf32(m.first + 0xD54, m.second);
     stf32(kuro + 0x0C, scroll[0]);
     stf32(kuro + 0x1C, scroll[1]);
+    record_blended();
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -2016,17 +2028,19 @@ extern "C" void hook_025A1D10(Cpu* c) {
         f_025A1D10_orig(c);
         return;
     }
-    if (!halfway() || g_wipe.self != self || g_wipe.record != interp::hold_pass_count() || (g_wipe.rot == rot && g_wipe.scale == scale)) {
+    const WipeRec from = g_wipe;
+    if (interp::record_blended()) g_wipe = WipeRec{interp::record_stamp(), self, rot, scale};  // (40 fps: recorded, drawn blended from the last record)
+    if (!halfway() || from.self != self || from.record != interp::hold_pass_count() || (from.rot == rot && from.scale == scale)) {
         f_025A1D10_orig(c);
         return;
     }
     const float t = interp::pass_t();
-    st16(self + 0x114, (uint16_t)lerp_s16(g_wipe.rot, rot, t));
-    stf32(self + 0x118, lerp_f(g_wipe.scale, scale, t));
+    st16(self + 0x114, (uint16_t)lerp_s16(from.rot, rot, t));
+    stf32(self + 0x118, lerp_f(from.scale, scale, t));
     static int tr = trace_left(10);
     if (tr) {
         tr--;
-        LOG("[interp-fx] swirl wipe t %.3f: angle %d -> %d, scale %.3f -> %.3f", t, g_wipe.rot, rot, g_wipe.scale, scale);
+        LOG("[interp-fx] swirl wipe t %.3f: angle %d -> %d, scale %.3f -> %.3f", t, from.rot, rot, from.scale, scale);
     }
     f_025A1D10_orig(c);
     st16(self + 0x114, (uint16_t)rot);
@@ -2150,14 +2164,15 @@ static void eye_copy(Cpu* c, void (*orig)(Cpu*)) {
         return;
     }
     auto it = g_eye_copies.find(self);
-    if (!halfway() || !ld8(self + 0x7C) || it == g_eye_copies.end() || it->second.record != interp::hold_pass_count() ||
-        (it->second.off[0] == off[0] && it->second.off[1] == off[1])) {
+    const EyeCopyRec from = it != g_eye_copies.end() ? it->second : EyeCopyRec{};
+    if (interp::record_blended()) g_eye_copies[self] = EyeCopyRec{interp::record_stamp(), {off[0], off[1]}};  // (40 fps)
+    if (!halfway() || !ld8(self + 0x7C) || from.record != interp::hold_pass_count() || (from.off[0] == off[0] && from.off[1] == off[1])) {
         orig(c);
         return;
     }
     const float t = interp::pass_t();
-    stf32(self + 0x6C, lerp_f(it->second.off[0], off[0], t));
-    stf32(self + 0x70, lerp_f(it->second.off[1], off[1], t));
+    stf32(self + 0x6C, lerp_f(from.off[0], off[0], t));
+    stf32(self + 0x70, lerp_f(from.off[1], off[1], t));
     orig(c);
     stf32(self + 0x6C, off[0]);
     stf32(self + 0x70, off[1]);
@@ -2262,20 +2277,22 @@ extern "C" void hook_0251AE90(Cpu* c) {
     }
     const float t = interp::display_t();
     auto it = g_chains.find(pk);
-    if (t >= 1.0f || it == g_chains.end() || it->second.record != interp::hold_pass_count() || it->second.p.size() != cur.size() || it->second.p == cur) {
+    const ChainRec from = it != g_chains.end() ? it->second : ChainRec{};
+    if (interp::display_record_blended()) g_chains[pk] = ChainRec{interp::display_record_stamp(), cur};  // (40 fps)
+    if (t >= 1.0f || from.record != interp::hold_pass_count() || from.p.size() != cur.size() || from.p == cur) {
         f_0251AE90_orig(c);
         return;
     }
     for (uint32_t i = 0; i < n; i++) {
         float d2 = 0;
-        for (int k = 0; k < 3; k++) d2 += (cur[3 * i + k] - it->second.p[3 * i + k]) * (cur[3 * i + k] - it->second.p[3 * i + k]);
+        for (int k = 0; k < 3; k++) d2 += (cur[3 * i + k] - from.p[3 * i + k]) * (cur[3 * i + k] - from.p[3 * i + k]);
         if (!(d2 < 500.0f * 500.0f)) { f_0251AE90_orig(c); return; }  // a jump: drawn as it is
     }
-    for (uint32_t i = 0; i < 3 * n; i++) stf32(pt + 4 * i, lerp_f(it->second.p[i], cur[i], t));
+    for (uint32_t i = 0; i < 3 * n; i++) stf32(pt + 4 * i, lerp_f(from.p[i], cur[i], t));
     static int tr = trace_left(12);
     if (tr) {
         tr--;
-        LOG("[interp-fx] chain %08X t %.3f: %u points, point 1 y %.2f -> %.2f", pk, t, n, it->second.p[n > 1 ? 4 : 1], cur[n > 1 ? 4 : 1]);
+        LOG("[interp-fx] chain %08X t %.3f: %u points, point 1 y %.2f -> %.2f", pk, t, n, from.p[n > 1 ? 4 : 1], cur[n > 1 ? 4 : 1]);
     }
     f_0251AE90_orig(c);
     for (uint32_t i = 0; i < 3 * n; i++) stf32(pt + 4 * i, cur[i]);
