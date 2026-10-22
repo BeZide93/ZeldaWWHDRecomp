@@ -532,6 +532,10 @@ int main(int argc, char** argv) {
 #endif
 #endif
     }
+    // test aids (phone runs: no console, no arguments over adb): WWHD_TEST_STDERR=<path> writes stderr to that file
+    // (the Vulkan warm's and the model sweep's lines); WWHD_TEST_WARM_SHADERS=1 is --warm-shaders
+    if (const char* e = getenv("WWHD_TEST_STDERR"); e && *e && freopen(e, "a", stderr)) setvbuf(stderr, nullptr, _IOLBF, 0);
+    if (const char* e = getenv("WWHD_TEST_WARM_SHADERS"); e && !strcmp(e, "1")) warm_shaders = true;
     crash_context::initialize();
     editor_ui::register_tab();  // the world editor's Editor tab (only with --editor)
     index_game_functions();
