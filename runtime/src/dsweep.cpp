@@ -1,8 +1,14 @@
-// D-sweep (debug, off by default): prepare the pipelines of the game's models by drawing every model of every
-// object archive once with the game's own code, instead of playing.
+// D-sweep (off by default; setup's "Preparing shaders: models" runs it hidden and muted, tools/installer/model_sweep.py):
+// prepare the pipelines of the game's models by drawing every model of every object archive once with the game's own
+// code, instead of playing. The renderer records each pipeline with the archive whose models used it
+// (pipeline_groups.h); in play the Vulkan renderer compiles them when that archive loads.
 //
-// WWHD_DSWEEP=<start step>[,<models per batch>[,<frames per batch>]] turns it on. From the given logic step on, the
-// first actor draw (fopAc_Draw) of every logic step also draws a batch of models at the camera's look-at point:
+// WWHD_DSWEEP=<start step>[,<models per batch>[,<frames per batch>]] turns it on; WWHD_DSWEEP=title[,<per>[,<frames>]]
+// hosts it from the title screen (no save needed): it presses A on the boot's notice screen until the title is up,
+// and in the title's idle story intro (where no actor draws and the sweep pauses) to return to the title.
+// It only runs in a settled stage (the same stage for 120 steps; never the boot's or the file select's "Name"). From
+// the given logic step on, the first actor draw (fopAc_Draw) of every logic step also draws a batch of models at the
+// camera's look-at point:
 //  1. the models of the archives loaded already (object archives through the archive resource table:
 //     dRes_info_c::loadResourceTable entries whose loader is loadModel or loadMaterialModel);
 //  2. with WWHD_DSWEEP_ARCHIVES=<file> (one archive name per line), every listed object archive in turn: loaded
@@ -14,9 +20,13 @@
 // material animation slots of the shared model data belong to the owning actors; they are off while the sweep's
 // instance is calculated.
 //
-// Room and stage models are not swept: an instance of them made here draws nothing (the same model data draws
-// through daBg_c's own instance; cause not found, see the D-sweep notes). Rooms are prepared by daBg itself.
+// Room and stage models are not swept (yet). Their models are stage resources (dComIfG_getStageRes by the current
+// stage), loaded with a stage's rooms, and daBg_Create places each on its room's spot (dComIfGp_getMapTrans: sea rooms
+// sit on the sea's grid, e.g. Outset's at x -200000, z 300000). An instance left at the origin is far out of view and
+// enters no draw; given daBg's base matrix it draws exactly like daBg's own (WWHD_DSWEEP_ROOM below). Sweeping rooms
+// needs each stage's rooms loaded as stage resources, which the title does not do: left to a visit of the stages.
 //
+// Setup's progress: with WWHD_DSWEEP_ARCHIVES, "WWHD-PROGRESS <archives done> <listed> <archive>" on stdout.
 // Crash handling and resuming (WWHD_DSWEEP_STATE=<dir>): progress.txt gets "model <archive>:<name>" before a model is
 // first drawn, "load <archive>" before an archive is loaded and "archive-done <archive>" after it is released;
 // skip.txt holds archive or archive:model names to leave out. A supervisor that finds the process gone adds the
@@ -25,7 +35,9 @@
 //
 // Debug: WWHD_DSWEEP_SKIP=a:b,... (more names to skip), WWHD_DSWEEP_FILTER=text (only matching models),
 // WWHD_DSWEEP_ONLY=<step>[:<profile>...] (no actor draws itself from that step on, except the listed profiles, so a
-// run's pipelines belong to the sweep), WWHD_DSWEEP_TIME=step:degrees,... (time of day for reference runs).
+// run's pipelines belong to the sweep), WWHD_DSWEEP_TIME=step:degrees,... (time of day for reference runs),
+// WWHD_DSWEEP_PROFILES=1 (logs each actor profile drawing in a stage, with its method addresses), WWHD_DSWEEP_ROOM
+// (one more instance of a room model, made and drawn as daBg does; see room_test).
 // With WWHD_VK_KEY_LOG the Vulkan renderer writes the batch number next to every pipeline it creates.
 #include "dsweep.h"
 #include <algorithm>
@@ -42,14 +54,19 @@
 #include "runtime.h"
 #include "guest_addr.h"
 #include "mods/guest_heap_query.h"
+#include "pipeline_groups.h"
+
 
 namespace dsweep {
 extern std::atomic<bool> g_finished;
 namespace {
 std::atomic<int> g_tag{0};
+std::atomic<bool> g_title_seen{false};
+std::atomic<int64_t> g_last_draw_ns{0};  // the last actor draw (a title sweep: the title's idle intro draws none)
 
 struct Config {
     bool on = false;
+    bool title = false;  // WWHD_DSWEEP=title[,...]: hosted from the title screen (setup: no save needed)
     uint64_t start = 0;
     unsigned per = 1, hold = 2;
 };
@@ -60,6 +77,19 @@ const Config& config() {
         if (!e || !*e) return c;
         unsigned long v[3] = {0, 1, 2};
         char* p = const_cast<char*>(e);
+        if (!std::strncmp(p, "title", 5)) {
+            c.title = true;
+            p += 5;
+            if (*p == ',') ++p;
+            for (int i = 1; i < 3 && *p; ++i) {
+                v[i] = std::strtoul(p, &p, 10);
+                if (*p == ',') ++p;
+            }
+            c.on = true;
+            c.per = v[1] ? unsigned(v[1]) : 1;
+            c.hold = v[2] ? unsigned(v[2]) : 1;
+            return c;
+        }
         for (int i = 0; i < 3 && *p; ++i) {
             v[i] = std::strtoul(p, &p, 10);
             if (*p == ',') ++p;
@@ -96,6 +126,7 @@ struct State {
     std::string archive;             // the archive being loaded or swept
     std::set<std::string> resident, skip, done;
     unsigned swept = 0, failed = 0, archives = 0, load_failed = 0;
+    size_t listed = 0;               // archives in WWHD_DSWEEP_ARCHIVES (progress total)
     int64_t started_ns = 0;
     std::string state_dir;
 } g;
@@ -117,8 +148,26 @@ std::string cstring(uint32_t a, unsigned max = 64) {
     }
     return {};
 }
+// the current stage (dComIfG_gameInfo.play dStage_startStage_c name, 8 chars), as savestate.cpp reads it
+std::string stage_name() {
+    const uint32_t at = GD(0x1046F0B0) + 0x5134;
+    std::string s;
+    for (unsigned i = 0; i < 8; ++i) {
+        const uint8_t ch = ld8(at + i);
+        if (!ch) break;
+        if (ch < 0x20 || ch > 0x7E) return {};
+        s.push_back(char(ch));
+    }
+    return s;
+}
 int64_t now_ns() {
     return std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
+}
+// setup's progress line (tools/installer/shader_prebuild.py parse_progress): archives done of the list
+void report_archives(const std::string& detail) {
+    if (!g.listed) return;
+    std::printf("WWHD-PROGRESS %zu %zu %s\n", std::min(g.done.size(), g.listed), g.listed, detail.c_str());
+    std::fflush(stdout);
 }
 void progress(const std::string& line) {
     if (g.state_dir.empty()) return;
@@ -296,6 +345,10 @@ bool sweep_frame(Cpu* c, uint32_t host) {
         g.heaps[kHeaps - 1] = g.heap = g.parent && g.heap_size ? call(c, GC(0x025E33A8), {g.heap_size, g.parent, 0x20}) : 0;
         if (!g.heap) LOG("[dsweep] no heap for batch %d", g.batch + 1);
         g_tag = ++g.batch;
+        if (g.cursor < g.models.size()) {
+            const std::string& a = g.models[g.cursor].archive;
+            pipeline_groups::set_sweeping(pipeline_groups::group_of(a.data(), a.size()));
+        }
         g.frames = 0;
         std::string names;
         for (size_t i = g.cursor; i < g.models.size() && i < g.cursor + cfg.per; ++i)
@@ -329,8 +382,12 @@ void begin(Cpu* c) {
         }
     }
     if (const char* list = std::getenv("WWHD_DSWEEP_ARCHIVES"))
-        for (auto& name : lines(list))
+        for (auto& name : lines(list)) {
+            ++g.listed;
             if (!g.done.count(name) && !g.skip.count(name)) g.queue.push_back(name);
+            else g.done.insert(name);  // a skipped archive counts as done for the progress
+        }
+    report_archives("archives");
     std::reverse(g.queue.begin(), g.queue.end());  // popped from the back, in file order
     g.scratch = mem::host_alloc(0x800, 32);  // light state, position, archive name and load phase (host-only memory)
     std::memset(mem::ptr(g.scratch), 0, 0x800);
@@ -347,6 +404,7 @@ void begin(Cpu* c) {
 void finish() {
     g.phase = Phase::Done;
     g_tag = 0;
+    pipeline_groups::set_sweeping(0);
     progress("sweep-done");
     g_finished = true;
     LOG("[dsweep] done: %u models swept, %u create failures, %u archives loaded, %u load failures, %.1f s", g.swept,
@@ -361,13 +419,18 @@ void step(Cpu* c, uint32_t host) {
         return step(c, host);
     case Phase::Resident:
         if (sweep_frame(c, host)) return;
+        g_tag = 0;
+        pipeline_groups::set_sweeping(0);
         progress("resident-done");
         g.phase = Phase::Draining;
         g.archive.clear();
         g.frames = 0;
         return;
     case Phase::NextArchive:
-        while (!g.queue.empty() && (g.resident.count(g.queue.back()) || g.queue.back().size() >= 0x40)) g.queue.pop_back();
+        while (!g.queue.empty() && (g.resident.count(g.queue.back()) || g.queue.back().size() >= 0x40)) {
+            g.done.insert(g.queue.back());  // swept with the resident archives (or not loadable by name)
+            g.queue.pop_back();
+        }
         if (g.queue.empty()) return finish();
         g.archive = g.queue.back();
         g.queue.pop_back();
@@ -384,6 +447,7 @@ void step(Cpu* c, uint32_t host) {
             g.models.clear();
             g.cursor = 0;
             g_tag = 0;
+            pipeline_groups::set_sweeping(0);
             if (const uint32_t info = find_info(g.archive)) add_models(c, info);
             g.phase = Phase::Sweeping;
             return;
@@ -392,6 +456,7 @@ void step(Cpu* c, uint32_t host) {
             ++g.load_failed;
             LOG("[dsweep] load failed %s (phase %u after %u frames)", g.archive.c_str(), result, g.frames);
             progress("load-failed " + g.archive);
+            g.done.insert(g.archive);
             call(c, GC(0x025204C8), {phase, name});  // dComIfG_resDelete
             g.phase = Phase::NextArchive;
         }
@@ -402,6 +467,7 @@ void step(Cpu* c, uint32_t host) {
         g.phase = Phase::Draining;
         g.frames = 0;
         g_tag = 0;
+        pipeline_groups::set_sweeping(0);
         return;
     case Phase::Draining:
         if (++g.frames < kDrain) return;
@@ -410,6 +476,8 @@ void step(Cpu* c, uint32_t host) {
         if (!g.archive.empty()) {
             call(c, GC(0x025204C8), {phase, name});  // dComIfG_resDelete
             progress("archive-done " + g.archive);
+            g.done.insert(g.archive);
+            report_archives(g.archive);
         }
         g.phase = Phase::NextArchive;
         return;
@@ -420,10 +488,43 @@ void step(Cpu* c, uint32_t host) {
 }  // namespace
 
 int tag() { return g_tag.load(std::memory_order_relaxed); }
+uint32_t pad_buttons(uint64_t frame) {
+    // a title sweep: the boot's notice screen waits for A; pulse it until the title stage is up. Later the idle title
+    // plays its story intro (no actor draws, so the sweep pauses): A there returns to the title. Never while the title
+    // itself is up (A there opens the file select).
+    if (!config().title || g_finished || frame % 60 >= 6) return 0;
+    if (!g_title_seen.load(std::memory_order_relaxed)) return frame >= 120 ? 0x8000u : 0u;
+    const int64_t last = g_last_draw_ns.load(std::memory_order_relaxed);
+    return last && now_ns() - last > 2'000'000'000 ? 0x8000u : 0u;
+}
 std::atomic<bool> g_finished{false};
 bool exit_requested() { return g_finished && std::getenv("WWHD_DSWEEP_EXIT"); }
 
 bool hide_actor_draw(uint32_t actor) {
+    // debug (attribution runs): WWHD_DSWEEP_PROFILES=1 logs each actor profile the first time it draws in a stage
+    static const bool profiles = std::getenv("WWHD_DSWEEP_PROFILES") != nullptr;
+    if (profiles && mem2(actor, 0x10)) {
+        static std::set<std::string> seen;
+        const std::string id = stage_name() + ":" + std::to_string(ld16(actor + 0xE));
+        if (seen.insert(id).second) {
+            // the profile definition (base_process_class +0x10) and the code addresses of the method tables it names
+            // (the actor's own draw is one of them), to look the actor up by function address
+            const uint32_t prof = ld32(actor + 0x10);
+            std::string methods;
+            for (uint32_t o = 0; o < 0x40 && mem2(prof + o); o += 4) {
+                const uint32_t v = ld32(prof + o);
+                if (!mem2(v, 0x18)) continue;
+                for (uint32_t m = 0; m < 0x18; m += 4)
+                    if ((ld32(v + m) >> 24) == 2) {  // in the game's code
+                        char b[24];
+                        std::snprintf(b, sizeof b, " +%X.%X:%08X", o, m, ld32(v + m));
+                        methods += b;
+                    }
+            }
+            LOG("[dsweep] profile %u draws in %s (step %llu):%s", unsigned(ld16(actor + 0xE)), stage_name().c_str(),
+                (unsigned long long)interp::executed_steps(), methods.c_str());
+        }
+    }
     static const char* e = std::getenv("WWHD_DSWEEP_ONLY");
     static uint64_t from = 0;
     static std::vector<uint32_t> keep;
@@ -465,16 +566,166 @@ void time_of_day(uint32_t actor) {
     }
 }
 
+// The object archives in the resource table (requested or loaded), published as pipeline groups once a recipe
+// database with groups is loaded (pipeline_groups.h): the renderer compiles their pipelines ahead. Reads only.
+void publish_resident() {
+    static uint64_t last = ~0ull;
+    const uint64_t now = interp::executed_steps();
+    if (!pipeline_groups::wanted() || now == last) return;
+    last = now;
+    std::vector<uint32_t> groups;
+    const uint32_t control = ld32(GD(0x101F4F28));
+    for (unsigned i = 0; i < 128 && mem2(control, 0x28 + 128 * 0x20); ++i) {
+        const uint32_t info = ld32(control + 0x28 + i * 0x20 + 0x18);
+        if (!mem2(info, 0x8C)) continue;
+        const std::string name = cstring(info + 0x1C);
+        if (!name.empty()) groups.push_back(pipeline_groups::group_of(name.data(), name.size()));
+    }
+    pipeline_groups::publish(std::move(groups));
+}
+
+// debug (rooms): WWHD_DSWEEP_ROOM=<room archive>|-:<file>[:<tev type>] draws one more instance of a room model right
+// after its room's daBg draw (in the stage WWHD_DSWEEP_ROOM_STAGE, default "sea"), made and drawn as daBg_c does:
+// mDoExt_J3DModel__create(data, 0, 0x11000022), daBg's base matrix (the room's map transform), J3DModel calc,
+// settingTevStruct(BG type), setLightTevColorType, BG lists, modelEntryDL. With WWHD_DSWEEP_ONLY=1000 (daBg hidden)
+// the room appears as with daBg's own draw. WWHD_DSWEEP_ROOM_CLIP=1 adds daBg's clipper call, WWHD_DSWEEP_ROOM_ZERO=1
+// zeroes the instance's heap first, WWHD_DSWEEP_ROOM_DIFF=<n> logs where the two instances differ at the n-th draw
+// (all three ruled out as causes; the base matrix was it).
+void room_test(Cpu* c, uint32_t actor) {
+    static const char* e = std::getenv("WWHD_DSWEEP_ROOM");
+    if (!e || !*e || ld16(actor + 0xE) != 439) return;
+    // only once the test's stage (WWHD_DSWEEP_ROOM_STAGE, default "sea") has run for 120 steps (its rooms are loaded)
+    static const std::string want = std::getenv("WWHD_DSWEEP_ROOM_STAGE") ? std::getenv("WWHD_DSWEEP_ROOM_STAGE") : "sea";
+    static uint64_t since = ~0ull;
+    const uint64_t now = interp::executed_steps();
+    if (stage_name() != want) { since = ~0ull; return; }
+    if (since == ~0ull) since = now;
+    if (now - since < 120) return;
+    static uint32_t model = 0, tevstr = 0, scratch = 0, heap = 0, host = 0;
+    static bool failed = false;
+    if (failed || (host && actor != host)) return;  // drawn once per frame, after its own room's daBg
+    const uint32_t play = GD(0x1046F0B0);
+    if (!model) {
+        std::string spec = e, arc = spec.substr(0, spec.find(':')), file = spec.substr(spec.find(':') + 1);
+        file = file.substr(0, file.find(':'));
+        if (!scratch) {
+            scratch = mem::host_alloc(0x900, 32);
+            std::memset(mem::ptr(scratch), 0, 0x900);
+        }
+        std::memcpy(mem::ptr(scratch + 0x800), arc.c_str(), arc.size());
+        std::memcpy(mem::ptr(scratch + 0x880), file.c_str(), file.size());
+        // the drawing daBg's own archive name (daBg_setArcName, as its createHeap does): only this room's daBg
+        const uint32_t arcName = call(c, GC(0x02077E30), {actor});
+        if (arc != "-" && cstring(arcName) != arc) return;
+        arc = cstring(arcName);
+        LOG("[dsweep room] daBg %08X archive %s, model %s", actor, arc.c_str(), file.c_str());
+        uint32_t data = call(c, GC(0x0252447C), {arcName, scratch + 0x880});  // dComIfG_getStageRes
+        if (!mem2(data)) {
+            // the resource table's own names (as the sweep lists models): <archive>:<entry name>
+            const uint32_t info = find_info(arc);
+            if (info) {
+                const size_t before = g.models.size();
+                add_models(c, info);
+                for (size_t i = before; i < g.models.size(); ++i) {
+                    LOG("[dsweep room] %s has %s", arc.c_str(), g.models[i].name.c_str());
+                    if (g.models[i].name == file) data = g.models[i].data;
+                }
+                g.models.resize(before);
+            } else LOG("[dsweep room] no archive %s in the resource table", arc.c_str());
+        }
+        if (!mem2(data)) { LOG("[dsweep room] %s not loaded", e); failed = true; return; }
+        choose_heaps(c);
+        heap = g.parent && g.heap_size ? call(c, GC(0x025E33A8), {g.heap_size, g.parent, 0x20}) : 0;
+        if (!heap) { LOG("[dsweep room] no heap"); failed = true; return; }
+        if (std::getenv("WWHD_DSWEEP_ROOM_ZERO")) {  // the solid heap's free area (head +0x94, tail +0x98) zeroed
+            const uint32_t head = ld32(heap + 0x94), tail = ld32(heap + 0x98);
+            LOG("[dsweep room] heap %08X free %08X..%08X", heap, head, tail);
+            if (mem2(head) && tail > head && mem2(tail - 1, 1) && tail - head <= (8u << 20)) std::memset(mem::ptr(head), 0, tail - head);
+        }
+        const uint32_t previous = call(c, GC(0x025E3570), {heap});
+        model = call(c, GC(0x025E38E0), {data, 0u, 0x11000022u});  // mDoExt_J3DModel__create, as daBg
+        call(c, GC(0x025E3570), {previous});
+        if (!model) { LOG("[dsweep room] create failed"); failed = true; return; }
+        tevstr = scratch;
+        call(c, GC(0x0255FFF4), {tevstr, uint32_t(int32_t(int8_t(ld8(actor + 0x326)))), 0xFF});  // dKy_tevstr_init
+        host = actor;
+        LOG("[dsweep room] %s: data %08X model %08X", e, data, model);
+    }
+    // WWHD_DSWEEP_ROOM_DIFF=<frames>: after that many draws, log the words of daBg's own model 0 instance and ours
+    // that differ (and, one level deep, the first 0x60 bytes of the blocks their pointer fields name)
+    static const unsigned diffAt = std::getenv("WWHD_DSWEEP_ROOM_DIFF") ? unsigned(std::atoi(std::getenv("WWHD_DSWEEP_ROOM_DIFF"))) : 0;
+    static unsigned draws = 0;
+    if (diffAt && ++draws == diffAt) {
+        const uint32_t own = ld32(actor + 0x3B4);
+        LOG("[dsweep room diff] daBg model %08X, ours %08X (model data %08X / %08X)", own, model, ld32(own + 4), ld32(model + 4));
+        for (uint32_t off = 0; off < 0x300 && mem2(own + off) && mem2(model + off); off += 4) {
+            const uint32_t a = ld32(own + off), b = ld32(model + off);
+            const bool pa = mem2(a, 0x60) && a >= 0x10000000, pb = mem2(b, 0x60) && b >= 0x10000000;
+            if (a != b && !(pa && pb)) LOG("[dsweep room diff] +%03X daBg %08X ours %08X", off, a, b);
+            if (pa && pb && a != b) {
+                std::string d;
+                for (uint32_t o = 0; o < 0x60; o += 4)
+                    if (ld32(a + o) != ld32(b + o) && !(mem2(ld32(a + o)) && mem2(ld32(b + o))))
+                        d += " +" + std::to_string(o) + ":" + std::to_string(ld32(a + o)) + "/" + std::to_string(ld32(b + o));
+                if (!d.empty()) LOG("[dsweep room diff] +%03X -> %08X / %08X:%s", off, a, b, d.c_str());
+            }
+        }
+    }
+    const unsigned type = std::strchr(std::strchr(e, ':') + 1, ':') ? std::atoi(std::strchr(std::strchr(e, ':') + 1, ':') + 1) : 1;
+    // the room's place: daBg_Create sets each model's base matrix from dComIfGp_getMapTrans (sea rooms sit on the
+    // sea's grid; a model left at the origin is far out of view): copy daBg's own model 0 base matrix (+0xC8)
+    if (const uint32_t own = ld32(actor + 0x3B4); mem2(own, 0x100))
+        for (int i = 0; i < 12; ++i) st32(model + 0xC8 + i * 4, ld32(own + 0xC8 + i * 4));
+    call(c, GC(0x027F4D5C), {model});  // J3DModel calc
+    static const bool clip = std::getenv("WWHD_DSWEEP_ROOM_CLIP") != nullptr;
+    if (clip) {  // mDoLib_clipper (1048CFF0): far 100000, the model's shapes against the view, far reset
+        const uint32_t clipper = GD(0x1048CFF0);
+        const uint32_t savedFar = ld32(clipper + 0x54);  // (not "far": a Windows macro)
+        st32(clipper + 0x54, f32_as_u32(100000.f));
+        call(c, GC(0x0283801C), {clipper});
+        call(c, GC(0x02838524), {clipper, model});
+        st32(clipper + 0x54, ld32(clipper + 0x5C));
+        call(c, GC(0x0283801C), {clipper});
+        (void)savedFar;
+    }
+    const uint32_t env = call(c, GC(0x02555D0C));
+    call(c, GC(0x025626A4), {env, type, 0, tevstr});  // settingTevStruct(TEV_TYPE_BG0 + i)
+    call(c, GC(0x02562F5C), {env, model, tevstr});    // setLightTevColorType
+    const uint32_t opa = ld32(GD(0x104B4634)), xlu = ld32(GD(0x104B4638));
+    st32(GD(0x104B4634), ld32(play + 0x5D70));  // dComIfGd_setListBG
+    st32(GD(0x104B4638), ld32(play + 0x5D74));
+    call(c, GC(0x025E2E5C), {model});  // mDoExt_modelEntryDL
+    st32(GD(0x104B4634), opa);
+    st32(GD(0x104B4638), xlu);
+}
+
 void after_actor_draw(Cpu* c, uint32_t actor) {
     if (!mem2(actor, 0x330)) return;
-    time_of_day(actor);
+    room_test(c, actor);
+    publish_resident();
     const Config& cfg = config();
+    if (cfg.title) g_last_draw_ns.store(now_ns(), std::memory_order_relaxed);
+    time_of_day(actor);
     const uint64_t now = interp::executed_steps();
     if (!cfg.on || now < cfg.start) return;
     // once per logic step, from the first actor drawn (the camera and the frame's draw lists are set up then)
     static uint64_t last = ~0ull;
     if (now == last) return;
     last = now;
+    // only in a settled stage (the title "sea_T" or a game stage, the same one for kSettle steps): the stage's light
+    // and environment state, which the models' light setup reads, is ready then; the sweep pauses while a stage
+    // changes (it never changes during a setup sweep from the title)
+    constexpr uint64_t kSettle = 120;
+    static std::string stage;
+    static uint64_t since = 0;
+    const std::string current = stage_name();
+    if (current != stage) {
+        stage = current, since = now;
+        if (current == "sea_T") g_title_seen = true;
+        LOG("[dsweep] stage \"%s\" at step %llu", current.c_str(), (unsigned long long)now);
+    }
+    if (current.empty() || current == "Name" || now - since < kSettle) return;
+    if (cfg.title && current != "sea_T") return;  // a title sweep never sweeps elsewhere
     step(c, actor);
 }
 }  // namespace dsweep

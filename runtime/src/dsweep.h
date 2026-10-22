@@ -1,6 +1,7 @@
 #pragma once
-// D-sweep proof of concept (debug, off by default): draw every model of the loaded archives once with the game's
-// own model and material code, so the renderer creates the pipelines those models need. See dsweep.cpp.
+// D-sweep (off by default; setup's "Preparing shaders: models" runs it, tools/installer/model_sweep.py): draw every
+// model of every object archive once with the game's own model and material code, so the renderer creates (and
+// records, with the archive) the pipelines those models need. See dsweep.cpp.
 #include <cstdint>
 struct Cpu;
 namespace dsweep {
@@ -13,4 +14,7 @@ void after_actor_draw(Cpu* c, uint32_t actor);
 // WWHD_DSWEEP_ONLY=<step>: from that logic step on no actor draws itself (the sweep's models are the only models in
 // the frame's draw lists), so the pipelines of a run belong to the sweep, not the scene
 bool hide_actor_draw(uint32_t actor);
+// VPAD buttons a title sweep (WWHD_DSWEEP=title, setup's "Preparing shaders: models") holds at this script frame: A on
+// the boot's notice screen and in the title's idle story intro (back to the title), 0 otherwise
+uint32_t pad_buttons(uint64_t frame);
 }  // namespace dsweep

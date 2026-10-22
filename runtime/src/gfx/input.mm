@@ -35,6 +35,7 @@ namespace gx2 { void checkpoint_vulkan_caches(); void checkpoint_present_observe
 #include "../overlay/overlay.h"
 #include "../overlay/release_gate.h"
 #include "../fixed_seed.h"
+#include "../dsweep.h"
 
 #include <memory>
 #include <string>
@@ -733,6 +734,7 @@ PadState read() {
     if (no_host) s = PadState{};
     for (auto& p : script)
         if (frame >= p.from && frame <= p.to) s.buttons |= p.bits;
+    s.buttons |= dsweep::pad_buttons(frame);  // a title D-sweep (setup) passes the boot's notice screen
     for (auto& p : sticks)
         if (frame >= p.from && frame <= p.to) { s.lx = p.x; s.ly = p.y; }
     for (auto& p : rsticks)
