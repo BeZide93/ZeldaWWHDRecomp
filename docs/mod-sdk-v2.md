@@ -336,6 +336,26 @@ unknown key/type, so the guest keeps working with no new import or translator
 requirement. Querying a null buffer with zero capacity reports 808 on hosts that
 support the query. The guest module ABI remains unchanged.
 
+### The game's layout art
+
+A mod can draw with the game's own 2D art without shipping it. The port reads that art from the
+player's installed 2D pack, in the language the game uses, while the game runs:
+
+- `wwhd_hud_texture(WWHD_HUD_GAME, "<Layout>/<texture>")` loads a texture of one of the game's layout
+  archives as an owned HUD image (for example `"Map_00/MapShip_00^t"`). Add `#<material>`
+  (`"BtnMapBalloon_00/r2c_b^t#P_DummyMapBig_00"`) to colour it with that material's black and white
+  colours, the way the game draws it. Images count towards the usual per-mod limits; release them as
+  usual.
+- `wwhd_game_pane_get("layout-pane:<Layout>/<pane>", &pane)` reads a pane of such a layout. It gives
+  the centre and size in the layout's root coordinates, with +y up and the parents' translation and
+  scale applied. It also gives the pane's own rotation and alpha, whether it and its parents are
+  visible, and, for a picture pane, its texture's name. The result is a 64-byte `wwhd_game_pane`.
+
+Names may contain letters, digits and `_ ^ + - .` only. A missing layout, texture or pane returns 0,
+with the reason in the Mods tab. Older hosts return 0 for both: the texture source and the query key
+are unknown to them, and nothing new is imported. Only the names belong in your mod; never copy the
+pictures or layout data into a package. The example is `hd-minimap` in the mod repository.
+
 ## Letters
 
 A story mod (a mod that adds a quest) can announce itself the way Wind Waker does: with a
