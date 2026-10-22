@@ -110,7 +110,7 @@ def culprit(progress_lines, skip):
     already."""
     start = len(progress_lines) - 1 - progress_lines[::-1].index('start') if 'start' in progress_lines else 0
     for line in reversed(progress_lines[start:]):
-        if line.startswith(('model ', 'load ', 'actor ', 'env ', 'visit ')):
+        if line.startswith(('model ', 'load ', 'actor ', 'env ', 'visit ', 'particles ')):
             name = line.split(' ', 1)[1]
             return None if name in skip else name
     return None
@@ -154,7 +154,7 @@ def environment(base, game, cache_env, renderer, state, archives, scratch, stage
         env['WWHD_DSWEEP_STAGES'] = str(stages)
         # then the title's scene at other times of day and in a storm, every actor the rooms place, and the file
         # select (dsweep.cpp)
-        env.update(WWHD_DSWEEP_ENV='1', WWHD_DSWEEP_ACTORS='1', WWHD_DSWEEP_FILE_SELECT='1')
+        env.update(WWHD_DSWEEP_ENV='1', WWHD_DSWEEP_PARTICLES='1', WWHD_DSWEEP_ACTORS='1', WWHD_DSWEEP_FILE_SELECT='1')
     env['WWHD_HEADSTART'] = '0'  # the sweep records pipelines; it warms nothing (and holds no generation)
     return env
 
