@@ -96,11 +96,23 @@ constexpr size_t kMaxUnusedWarmPipelines = 256;
 #else
 constexpr size_t kMaxUnusedWarmPipelines = 1024;
 #endif
-// debug: WWHD_VK_WARM_POOL=n overrides the limit (measurements)
+// The limit exists for memory only. From the device's memory budget (VK_EXT_memory_budget's heap budget, else the
+// device-local heap size; MoltenVK reports Metal's recommendedMaxWorkingSetSize there): a small share of it at a
+// measured ~25 KB per ready pipeline on MoltenVK (64 KB assumed for headroom), within [kMin, kMax]; without a budget
+// the fixed value above. WWHD_VK_WARM_POOL=n overrides it (measurements).
+std::atomic<uint64_t> g_memoryBudget{0};
 size_t max_unused_warm() {
   static const size_t value = [] {
-    const char* e = std::getenv("WWHD_VK_WARM_POOL");
-    return e && *e ? std::clamp<size_t>(std::strtoul(e, nullptr, 10), 64, 65536) : kMaxUnusedWarmPipelines;
+    if (const char* e = std::getenv("WWHD_VK_WARM_POOL"); e && *e)
+      return std::clamp<size_t>(std::strtoul(e, nullptr, 10), 64, 65536);
+#ifdef __ANDROID__
+    constexpr double kShare = 0.01; constexpr size_t kMin = 256, kMax = 1024;
+#else
+    constexpr double kShare = 0.03; constexpr size_t kMin = 1024, kMax = 16384;
+#endif
+    const uint64_t budget = g_memoryBudget.load();
+    if (!budget) return kMaxUnusedWarmPipelines;
+    return std::clamp<size_t>(size_t(double(budget) * kShare / (64.0 * 1024)), kMin, kMax);
   }();
   return value;
 }
@@ -376,6 +388,8 @@ void run(Worker& w, std::vector<uint8_t> seed) {
     }
   } metrics{completed, failed};
   try {
+    const auto began = std::chrono::steady_clock::now();
+    auto msSince = [&] { return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - began).count(); };
     std::vector<std::shared_ptr<PipelineRecipe>> loaded;
     std::unordered_set<std::string> seen;
     for (bool headstart : {false, true}) {
@@ -388,6 +402,7 @@ void run(Worker& w, std::vector<uint8_t> seed) {
       }
     }
     if (loaded.empty()) { w.result = {0, failed}; return; }
+    const double readMs = msSince();
     std::deque<std::shared_ptr<PipelineRecipe>> startup;
     size_t grouped = 0;
     {
@@ -411,16 +426,18 @@ void run(Worker& w, std::vector<uint8_t> seed) {
     { std::unique_lock lock(w.cacheMutex); w.cache = cache; }
     std::vector<uint8_t>().swap(seed); // Vulkan copied initial cache data during creation.
     std::fprintf(stderr, "[vulkan warmup] %zu exact pipeline recipes queued, %zu wait for their object archives "
-                 "(pool %zu; process memory %.0f MB)\n", startup.size(), grouped, maxUnusedWarmPipelines,
-                 process_memory() / 1e6);
+                 "(pool %zu; process memory %.0f MB; read %.0f ms, ready to compile after %.0f ms)\n", startup.size(),
+                 grouped, maxUnusedWarmPipelines, process_memory() / 1e6, readMs, msSince());
     // Several compilers for archive prefetch (an archive's models are drawn a few frames after it loads); the
     // driver pipeline cache is internally synchronized. Startup work stays one at a time and yields to demand.
     std::atomic<size_t> prefetched{0}, done{0}, failures{0}, cancels{0};
+    size_t startupTaken = 0;  // (under w.mutex)
+    constexpr size_t kStartHead = 384;
     auto loop = [&] {
       host::set_thread_name("Vulkan warmup");
       for (;;) {
         std::shared_ptr<PipelineRecipe> recipe;
-        bool ahead = false;
+        bool ahead = false, head = false;
         {
           std::unique_lock lock(w.mutex);
           for (;;) {
@@ -452,6 +469,7 @@ void run(Worker& w, std::vector<uint8_t> seed) {
             if (recipe) break;
             if (!startup.empty()) {
               recipe = std::move(startup.front()); startup.pop_front();
+              head = startupTaken++ < kStartHead;
               if (startup.empty())  // (the last one is still compiling: the size is close, not exact)
                 std::fprintf(stderr, "[vulkan warmup] start queue taken: %zu ready; process memory %.0f MB\n",
                              w.ready.size(), process_memory() / 1e6);
@@ -467,7 +485,9 @@ void run(Worker& w, std::vector<uint8_t> seed) {
         auto finished = [&] { std::lock_guard lock(w.mutex); w.compiling.erase(key); };
         // Demand has its own single compiler; startup work waits while it is busy. A driver call already in
         // flight cannot be cancelled.
-        while ((!ahead || prefetch_yields()) && (pipeline_demand_active() || vk::shader_compiler_active())) {
+        // (the head of the start queue - in first-seen order the boot's, title's and file select's - never waits:
+        // the game is about to draw it)
+        while (!head && (!ahead || prefetch_yields()) && (pipeline_demand_active() || vk::shader_compiler_active())) {
           { std::lock_guard lock(w.mutex); if (w.stopped) break; }
           std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
@@ -518,6 +538,7 @@ void run(Worker& w, std::vector<uint8_t> seed) {
 }
 
 }
+void set_memory_budget(uint64_t bytes) { g_memoryBudget.store(bytes); }
 void start_pipeline_worker(VkDevice device, PipelineRecipeFingerprint fingerprint,
     std::string path, std::vector<uint8_t> cacheSeed, std::string headstartPath) {
   // Construct the trace first so it outlives a worker still finishing during

@@ -315,6 +315,39 @@ bool unpack_pipeline_cache(std::vector<uint8_t>& file) {
   file.erase(file.begin(),file.begin()+pipelineCacheWrapperSize);
   return compatible_pipeline_cache(file);
 }
+
+// The device's memory budget for the warm pipeline pool (pipeline_worker.cpp): VK_EXT_memory_budget's budget of the
+// largest device-local heap when the device has the extension, else that heap's size (MoltenVK: Metal's
+// recommendedMaxWorkingSetSize); 0 when unknown.
+static uint64_t device_memory_budget() {
+  VkPhysicalDeviceMemoryProperties p{};
+  vkGetPhysicalDeviceMemoryProperties(R.physicalDevice, &p);
+  uint32_t heap = UINT32_MAX;
+  for (uint32_t i = 0; i < p.memoryHeapCount; ++i)
+    if ((p.memoryHeaps[i].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) &&
+        (heap == UINT32_MAX || p.memoryHeaps[i].size > p.memoryHeaps[heap].size)) heap = i;
+  if (heap == UINT32_MAX) return 0;
+  uint64_t budget = p.memoryHeaps[heap].size;
+  uint32_t n = 0;
+  vkEnumerateDeviceExtensionProperties(R.physicalDevice, nullptr, &n, nullptr);
+  std::vector<VkExtensionProperties> extensions(n);
+  if (n) vkEnumerateDeviceExtensionProperties(R.physicalDevice, nullptr, &n, extensions.data());
+  const bool hasBudget = std::any_of(extensions.begin(), extensions.end(), [](const VkExtensionProperties& e) {
+    return !std::strcmp(e.extensionName, VK_EXT_MEMORY_BUDGET_EXTENSION_NAME);
+  });
+  auto properties2 = reinterpret_cast<PFN_vkGetPhysicalDeviceMemoryProperties2>(
+      vkGetInstanceProcAddr(R.instance, "vkGetPhysicalDeviceMemoryProperties2"));
+  if (hasBudget && properties2) {
+    VkPhysicalDeviceMemoryBudgetPropertiesEXT b{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_BUDGET_PROPERTIES_EXT};
+    VkPhysicalDeviceMemoryProperties2 q{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_PROPERTIES_2};
+    q.pNext = &b;
+    properties2(R.physicalDevice, &q);
+    if (b.heapBudget[heap]) budget = b.heapBudget[heap];
+  }
+  LOG("[vulkan warmup] device memory budget %.0f MB (%s)", budget / 1e6, hasBudget && properties2 ? "VK_EXT_memory_budget" : "heap size");
+  return budget;
+}
+
 void init_pipeline_cache() try {
   const auto explicitStorage=path_environment_utf8("WWHD_VK_PIPELINE_CACHE");
   const auto shaderStorage=path_environment_utf8("WWHD_SHADER_CACHE");
@@ -424,6 +457,7 @@ void init_pipeline_cache() try {
     const char* warmup = std::getenv("WWHD_VK_PIPELINE_WARMUP");
     if (!warmup || std::strcmp(warmup, "0")) try {
       const auto headstart=path_environment_utf8("WWHD_HEADSTART");
+      set_memory_budget(device_memory_budget());
       start_pipeline_worker(R.device, fingerprint, pipelineCachePath + ".recipes", bytes,
           headstart ? *headstart : config::game_dir + "/shadercache/headstart.bin");
     } catch (const std::exception& error) {

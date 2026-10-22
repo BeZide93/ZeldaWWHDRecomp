@@ -10,6 +10,7 @@ BLK_CR
 Bm1
 Bm2
 Bm3
+Bm4
 Bst
 CmTrap
 door10
@@ -20,6 +21,7 @@ Ecube
 Fmastr1
 Gflag
 Hdai3
+Hi
 Humi5z
 ikada_h
 ikada_u
@@ -53,3 +55,4 @@ visit-Mjtower
 visit-sea_E
 Yfrlt00
 Zenshut
+zouK4
