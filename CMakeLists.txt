@@ -582,6 +582,7 @@ add_test(NAME controller_reapply COMMAND controller_reapply_test)
 
 add_executable(input_map_test runtime/tools/input_map_test.cpp runtime/src/input_map.cpp)
 target_include_directories(input_map_test PRIVATE runtime/src)
+target_link_libraries(input_map_test PRIVATE Threads::Threads)
 # issue #153: what the game gets back after the settings overlay or the text prompt (overlay/release_gate.h)
 add_executable(release_gate_test runtime/tools/release_gate_test.cpp)
 target_include_directories(release_gate_test PRIVATE runtime/src)

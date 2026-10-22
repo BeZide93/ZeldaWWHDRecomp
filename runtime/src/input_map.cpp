@@ -1082,9 +1082,13 @@ void set_current(const Mapping& requested, bool save) {
     {
         std::lock_guard<std::mutex> lk(g_mu);
         g_map = m;
+        // Publish the camera's cached option in the same writer order as the
+        // mapping shown by Controls. Publishing after unlocking lets an older
+        // writer overwrite a newer value, leaving the camera inverted while
+        // current().invert_camera_y is false until another mapping update.
+        g_invert_camera_y = m.invert_camera_y;
     }
     g_skip_controller_selection = m.skip_controller_selection;
-    g_invert_camera_y = m.invert_camera_y;
     g_gen++;
     if (save && !save_file(default_path(), m))
         fprintf(stderr, "[input] could not save controls to %s\n", default_path().c_str());
