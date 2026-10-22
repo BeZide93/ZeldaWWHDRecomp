@@ -2229,6 +2229,10 @@ extern "C" void hook_023086FC(Cpu* c) { eye_copy(c, f_023086FC_orig); }
 //   King of Red Lions (daShip, 0247AE78): the HD sea shadow's fade (+0x630, chaseUC by 10 per draw)
 //   Forest Firefly (nh, 021E1338): its light blend (+0x834, chaseF per draw)
 //   Ganondorf (gnd, 02154EE0): the flash colour and fog (+0x1786 s16, +0x1788)
+//   Helmaroc King (bdk, 02066A38): the tail-hide countdown (+0x40A, -1 per tail per draw)
+//   Puppet Ganon (bgn, 0207E7B4): the arrow-hit fog flash (+0x4B4, +0x4B8)
+//   Forsaken Fortress searchlights (obj_search, 0238DB44): the culling results its draw stores
+//     (+0x8D6 the two beams, +0x8D8 the lamp; its execute reads the lamp's)
 // Morth (ks, 021A7F94) is game logic: its execute calls draw_SUB (the wobble angle +0x576, the
 // burning-enemy update enemy_fire of +0xCDC: fire timers, damage) and sets +0x549, and its Draw calls
 // draw_SUB itself when +0x549 is clear, then clears it: once per step at 30 fps, but every later
@@ -2243,6 +2247,9 @@ const std::vector<DrawKeepSpec>& draw_keep_specs() {
         {GC(0x021E1338), {{0x834, 4}}},
         {GC(0x02154EE0), {{0x1786, 2}, {0x1788, 4}}},
         {GC(0x021A7F94), {{0x576, 2}}},
+        {GC(0x0238DB44), {{0x8D6, 3}}},
+        {GC(0x02066A38), {{0x40A, 2}}},
+        {GC(0x0207E7B4), {{0x4B4, 2}, {0x4B8, 4}}},
     };
     return specs;
 }
@@ -2367,3 +2374,162 @@ void fx_ss_reset() {
     g_sea_scroll_half = false;
 }
 }  // namespace interp
+
+// ---------------------------------------------------------------------------------------------
+// The frame blur (Swift Sail, camera shakes with blur, some boss attacks): the HD 3D layer's overlay
+// pass (02732D3C, painted with every drawn frame) lays the previous frame's image over the new one
+// with the alpha the game sets (101F4826, 0..255) through the blur matrix (1048CF84: a slight zoom or
+// turn). It is a feedback effect: with N drawn frames per logic step the trail faded N times per
+// step instead of once and the zoom compounded N times (shorter, stronger-zooming trails at 120 fps).
+// Each frame uses the per-frame share of the step's blur: alpha (a/255)^(1/N) and the matrix 1/N of
+// the way from the identity, N the drawn frames per step (4/3 at 40 fps).
+// debug: WWHD_INTERP_BLUR=0 draws it as the game sets it (WWHD_INTERP_FX bit 32 too)
+namespace interp { int output_fps(); }
+extern "C" void f_02732D3C_orig(Cpu*);
+extern "C" void hook_02732D3C(Cpu* c) {
+    static const bool off = getenv("WWHD_INTERP_BLUR") && !atoi(getenv("WWHD_INTERP_BLUR"));
+    const uint32_t enabled = GD(0x101F4825), alpha_a = GD(0x101F4826), mtx = GD(0x1048CF84);
+    const float n = interp::enabled() && !true60::enabled() ? interp::output_fps() / 30.0f : 1.0f;
+    if (off || !on(32) || !(n > 1.0f) || !ld8(enabled)) { f_02732D3C_orig(c); return; }
+    const uint8_t alpha = ld8(alpha_a);
+    uint32_t saved[12];
+    for (int k = 0; k < 12; k++) saved[k] = ld32(mtx + 4 * k);
+    const uint8_t a = (uint8_t)std::lround(255.0 * std::pow(alpha / 255.0, 1.0 / n));
+    st8(alpha_a, a);
+    for (int r = 0; r < 3; r++)
+        for (int k = 0; k < 4; k++) {
+            const float m = u32_as_f32(saved[4 * r + k]), id = (r == k) ? 1.0f : 0.0f;
+            stf32(mtx + 4 * (4 * r + k), id + (m - id) / n);
+        }
+    static int tr = trace_left(15);
+    if (tr) {
+        tr--;
+        LOG("[interp-fx] frame blur at %.2f frames per step: alpha %u -> %u, zoom %.4f -> %.4f", n, alpha, a, u32_as_f32(saved[0]), (float)ldf32(mtx));
+    }
+    f_02732D3C_orig(c);
+    st8(alpha_a, alpha);
+    for (int k = 0; k < 12; k++) st32(mtx + 4 * k, saved[k]);
+}
+
+// ---------------------------------------------------------------------------------------------
+// Morph animations played from a draw (mDoExt_McaMorf::play 025E535C, mDoExt_McaMorf2::play 025E65FC;
+// Valoo in the Gohma fight plays his in his draw): the frame update inside is already held on passes
+// without logic (J3DFrameCtrl::update, fx_hold_anim), but the morph between two animations (mCurMorf
+// chased towards 1 by mMorfStep) advanced on every drawn frame: 2x/4x/8x as fast. On those passes
+// play does nothing and answers as the game's would (the animation stopped or its rate 0).
+// debug: WWHD_INTERP_MORF_HOLD=0 lets them play (WWHD_INTERP_FX bit 8 too)
+namespace {
+void morf_play(Cpu* c, void (*orig)(Cpu*), uint32_t frame_ctrl) {
+    static const bool off = getenv("WWHD_INTERP_MORF_HOLD") && !atoi(getenv("WWHD_INTERP_MORF_HOLD"));
+    if (off || !interp::fx_hold_anim()) { orig(c); return; }
+    const uint32_t o = c->r[3];
+    const bool stopped = (ld8(o + frame_ctrl + 0xF) & 1) || ldf32(o + frame_ctrl) == 0.0;  // (mState bit 1, mRate)
+    c->r[3] = stopped ? 1 : 0;
+}
+}  // namespace
+extern "C" void f_025E535C_orig(Cpu*);
+extern "C" void f_025E65FC_orig(Cpu*);
+extern "C" void hook_025E535C(Cpu* c) { morf_play(c, f_025E535C_orig, 0x98); }
+extern "C" void hook_025E65FC(Cpu* c) { morf_play(c, f_025E65FC_orig, 0xA4); }
+
+// ---------------------------------------------------------------------------------------------
+// Light beams (dDlst_mirrorPacket::update 0252DA64: the Mirror Shield's beam from Link's draw, Medli's
+// harp beam from hers): the beam's quad is built on every draw from the matrix the draw passes (the
+// shield's or harp's base matrix, exact), with collision line checks for where it ends, while the
+// shield is drawn blended. Blended passes build it from the matrix between the record pass's and the
+// step's (interp_world blend: rotation slerp, translation lerp); a jump (>400) is drawn as it is.
+namespace {
+struct BeamRec { uint64_t record = ~0ull; float m[12] = {}; };
+std::unordered_map<uint32_t, BeamRec> g_beams;
+}  // namespace
+extern "C" void f_0252DA64_orig(Cpu*);
+extern "C" void hook_0252DA64(Cpu* c) {
+    const uint32_t pkt = c->r[3], mtx = c->r[4];
+    if (!on(16) || true60::enabled() || mtx < 0x10000000 || mtx >= 0x50000000) { f_0252DA64_orig(c); return; }
+    float cur[12];
+    for (int k = 0; k < 12; k++) cur[k] = (float)ldf32(mtx + 4 * k);
+    if (interp::record_pass()) {
+        if (g_beams.size() > 16) g_beams.clear();
+        BeamRec& r = g_beams[pkt];
+        r.record = interp::hold_pass_count();
+        memcpy(r.m, cur, sizeof cur);
+        f_0252DA64_orig(c);
+        return;
+    }
+    auto it = g_beams.find(pkt);
+    const BeamRec from = it != g_beams.end() ? it->second : BeamRec{};
+    if (interp::record_blended()) {  // (40 fps: recorded, drawn blended from the last record)
+        BeamRec& r = g_beams[pkt];
+        r.record = interp::record_stamp();
+        memcpy(r.m, cur, sizeof cur);
+    }
+    const float t = interp::pass_t();
+    bool same = memcmp(from.m, cur, sizeof cur) == 0;
+    const float dx = cur[3] - from.m[3], dy = cur[7] - from.m[7], dz = cur[11] - from.m[11];
+    if (!halfway() || t >= 1.0f || from.record != interp::hold_pass_count() || same || !(dx * dx + dy * dy + dz * dz < 400.0f * 400.0f)) {
+        f_0252DA64_orig(c);
+        return;
+    }
+    float m[12];
+    interp::blend_world_matrix(from.m, cur, m, t);
+    for (int k = 0; k < 12; k++) stf32(mtx + 4 * k, m[k]);
+    static int tr = trace_left(12);
+    if (tr) {
+        tr--;
+        LOG("[interp-fx] light beam %08X t %.3f: origin %.1f %.1f %.1f -> %.1f %.1f %.1f", pkt, t, from.m[3], from.m[7], from.m[11], cur[3], cur[7], cur[11]);
+    }
+    f_0252DA64_orig(c);
+    for (int k = 0; k < 12; k++) stf32(mtx + 4 * k, cur[k]);
+}
+
+// ---------------------------------------------------------------------------------------------
+// Sunken-treasure light columns (daSalvage_c::calcAlpha 02466578, from the actor's draw): fades the
+// columns of the 160 salvage points in and out (cLib_chaseUC by 255/frames per call), counts down a
+// delay and sets their draw modes on every draw: 2x/4x/8x as fast. On passes without logic it does
+// not run: once per logic step, as at 30 fps. debug: WWHD_INTERP_FX bit 8
+extern "C" void f_02466578_orig(Cpu*);
+extern "C" void hook_02466578(Cpu* c) {
+    if (interp::fx_hold_anim() && !true60::enabled()) return;
+    f_02466578_orig(c);
+}
+
+// Forsaken Fortress searchlights (daObj_Search::Act_c::_draw 0238B258): the light spot on the ground
+// is drawn from the beam's start and end (+0x740 / +0x758, two of each, set by the execute) while the
+// lamp and beam models are drawn blended. Blended passes draw it between the record pass's and the
+// step's ends.
+namespace {
+struct SearchRec { uint64_t record = ~0ull; float p[12] = {}; };
+std::unordered_map<uint32_t, SearchRec> g_search;
+}  // namespace
+extern "C" void f_0238B258_orig(Cpu*);
+extern "C" void hook_0238B258(Cpu* c) {
+    const uint32_t a = c->r[3], base = a + 0x740;
+    if (!on(16) || true60::enabled()) { f_0238B258_orig(c); return; }
+    float cur[12];
+    for (int k = 0; k < 12; k++) cur[k] = (float)ldf32(base + 4 * k);
+    if (interp::record_pass()) {
+        if (g_search.size() > 16) g_search.clear();
+        SearchRec& r = g_search[a];
+        r.record = interp::hold_pass_count();
+        memcpy(r.p, cur, sizeof cur);
+        f_0238B258_orig(c);
+        return;
+    }
+    auto it = g_search.find(a);
+    const SearchRec from = it != g_search.end() ? it->second : SearchRec{};
+    if (interp::record_blended()) {  // (40 fps)
+        SearchRec& r = g_search[a];
+        r.record = interp::record_stamp();
+        memcpy(r.p, cur, sizeof cur);
+    }
+    const float t = interp::pass_t();
+    float d2 = 0;
+    for (int k = 0; k < 12; k++) d2 = std::max(d2, std::fabs(cur[k] - from.p[k]));
+    if (!halfway() || t >= 1.0f || from.record != interp::hold_pass_count() || d2 == 0.0f || !(d2 < 2000.0f)) {
+        f_0238B258_orig(c);
+        return;
+    }
+    for (int k = 0; k < 12; k++) stf32(base + 4 * k, lerp_f(from.p[k], cur[k], t));
+    f_0238B258_orig(c);
+    for (int k = 0; k < 12; k++) stf32(base + 4 * k, cur[k]);
+}

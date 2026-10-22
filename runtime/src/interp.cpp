@@ -1138,11 +1138,26 @@ extern "C" void hook_021C4BB4(Cpu* c) {
     g_sploosh_markers = previous;
 }
 
+// Model particles (pot shards, rock and barrel debris: dPa_modelEmitterDraw 025A4204) take a model from
+// a pool for each particle on every draw and place it from the particle, which is already drawn
+// blended (interp_fx.cpp). Blending those models again would mix two particles' matrices (the pool
+// hands its models out in particle order, which changes as particles are born and die) and blend a
+// blended value a second time: they are drawn as placed. debug: WWHD_INTERP_PTCL_MODELS=1 blends them
+namespace interp { bool g_ptcl_model_draw = false; }
+extern "C" void f_025A4204_orig(Cpu* c);
+extern "C" void hook_025A4204(Cpu* c) {
+    static const bool blend = getenv("WWHD_INTERP_PTCL_MODELS") && atoi(getenv("WWHD_INTERP_PTCL_MODELS"));
+    if (blend) { f_025A4204_orig(c); return; }
+    const bool saved = interp::g_ptcl_model_draw;
+    interp::g_ptcl_model_draw = true;
+    f_025A4204_orig(c);
+    interp::g_ptcl_model_draw = saved;
+}
 // J3DModel::viewCalc(J3DModel*)
 extern "C" void hook_027F55FC(Cpu* c) {
     using namespace interp;
     static const bool off = getenv("WWHD_INTERP_MODELS") && !atoi(getenv("WWHD_INTERP_MODELS"));  // debug
-    if (!enabled() || off || (!g_hold && !g_record_logic && (true60::drawing_60() || g_exact_step))) {
+    if (!enabled() || off || g_ptcl_model_draw || (!g_hold && !g_record_logic && (true60::drawing_60() || g_exact_step))) {
         f_027F55FC_orig(c);
         return;
     }
@@ -2410,4 +2425,3 @@ extern "C" void hook_025F0840(Cpu* c) {
             (unsigned long long)interp::g_passes, before, (int16_t)ld16(g + 0x18));
     }
 }
-

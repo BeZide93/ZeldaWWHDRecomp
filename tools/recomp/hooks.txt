@@ -240,6 +240,13 @@
 02281564  # daNpc_Ls1_matAnm_c::calc: Aryll's eye offset drawn between the steps (interp_fx.cpp)
 023086FC  # daNpc_Zl1_matAnm_c::calc: Zelda's eye offset drawn between the steps (interp_fx.cpp)
 0251AE90  # dChain_packet_c::draw: balance-lift chains between the steps (interp_fx.cpp)
+02732D3C  # HD 3D layer overlay pass: the frame blur's per-frame share of a logic step (interp_fx.cpp)
+025A4204  # dPa_modelEmitterDraw: model particles placed from the blended particles, not blended again (interp.cpp)
+025E535C  # mDoExt_McaMorf::play: from a draw on a pass without logic, held (interp_fx.cpp)
+025E65FC  # mDoExt_McaMorf2::play: from a draw on a pass without logic, held (interp_fx.cpp)
+0252DA64  # dDlst_mirrorPacket::update: light beams (Mirror Shield, Medli's harp) from the blended base matrix (interp_fx.cpp)
+02466578  # daSalvage_c::calcAlpha: treasure light columns fade once per logic step (interp_fx.cpp)
+0238B258  # daObj_Search::Act_c::_draw: searchlight ground spot between the steps (interp_fx.cpp)
 024EC1C8  # dAttDraw_c::draw: in true 60, the attention arrow is built from halfway values and the current camera
 025615B8  # dScnKy_env_light_c::settingTevStruct_plightcol_plus: candle flicker held on frames without logic (interp_fx.cpp)
 020198D8  # cM_rndF: the flicker random value inside it
