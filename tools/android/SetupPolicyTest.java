@@ -8,6 +8,12 @@ public final class SetupPolicyTest {
     private static String sample(SetupPolicy p, long now, int status, int battery, float core) {
         return p.update(status, battery, core, 80, true, false, false, false, now);
     }
+    /** The reason after one sample, with "heat+cooled" where the heat pause offers Continue. */
+    private static String shown(SetupPolicy p, long now, int status, int battery, float core) {
+        String reason = sample(p, now, status, battery, core);
+        if (p.heatCooled() && !"heat".equals(reason)) throw new AssertionError("cooled outside a heat pause");
+        return p.heatCooled() ? reason + "+cooled" : reason;
+    }
     public static void main(String[] args) {
         // #277: SEVERE at normal temperatures, including intermittent missing battery data.
         // Baseline 921afe40a5 returned heat/null/heat/null at one-second intervals here.
@@ -41,22 +47,80 @@ public final class SetupPolicyTest {
         expect("heat", sample(policy, 6000, 2, 410, 79f));
         for (long t = 7000; t < 12000; t += 1000)
             expect("heat", sample(policy, t, 0, 410, 79f));
-        expect("heat", sample(policy, 11999, 0, 410, 79f));
-        expect(null, sample(policy, 12000, 0, 410, 79f));
-        // Sampling gaps restart the cooling interval instead of counting unsampled time.
-        expect("heat", sample(policy, 13000, 0, 450, 70f));
-        expect("heat", sample(policy, 14000, 0, 300, 70f));
-        expect("heat", sample(policy, 24000, 0, 300, 70f));
+        expect("heat", shown(policy, 11999, 0, 410, 79f));
+        // #277: cooled down by the hysteresis rule, the pause stays and now offers Continue
+        expect("heat+cooled", shown(policy, 12000, 0, 410, 79f));
+        // Sampling gaps restart the cooling interval instead of counting unsampled time;
+        // renewed heat takes Continue away again.
+        expect("heat", shown(policy, 13000, 0, 450, 70f));
+        expect("heat", shown(policy, 14000, 0, 300, 70f));
+        expect("heat", shown(policy, 24000, 0, 300, 70f));
         for (long t = 25000; t < 29000; t += 1000)
-            expect("heat", sample(policy, t, 0, 300, 70f));
-        expect(null, sample(policy, 29000, 0, 300, 70f));
+            expect("heat", shown(policy, t, 0, 300, 70f));
+        expect("heat+cooled", shown(policy, 29000, 0, 300, 70f));
+        // Continue resumes setup once cooled; a later real heat condition pauses again.
+        if (!policy.continueAfterCooling()) throw new AssertionError("Continue after cooling");
+        if (policy.heatWaiting() || policy.continueAfterCooling()) throw new AssertionError("Continue twice");
+        expect(null, shown(policy, 30000, 0, 300, 70f));
+        expect(null, shown(policy, 31000, 3, 300, 77.2f));   // #277 false SEVERE: still no pause
+        expect("heat", shown(policy, 32000, 0, 450, 70f));
+        if (policy.continueAfterCooling()) throw new AssertionError("Continue while hot");
+        expect("heat", shown(policy, 33000, 0, 300, 70f));
+
+        // #277: a heat pause never resumes by itself, even after an hour of cool readings.
+        SetupPolicy waits = new SetupPolicy();
+        expect("heat", shown(waits, 0, 3, 450, 92f));
+        for (long t = 1000; t < 5000; t += 1000) {
+            expect("heat", shown(waits, t, 0, 300, 50f));
+            if (waits.continueAfterCooling()) throw new AssertionError("Continue before the cool-down rule held");
+        }
+        for (long t = 6000; t <= 3600000; t += 1000)
+            expect("heat+cooled", shown(waits, t, 0, 300, 50f));
+        // Continue anyway is available at any time: while hot, and after cooling down.
+        SetupPolicy hotAnyway = new SetupPolicy();
+        expect("heat", shown(hotAnyway, 0, 0, 470, 70f));
+        expect(null, hotAnyway.update(0, 470, 70f, 80, true, false, true, false, 1000));
+        if (hotAnyway.heatWaiting() || hotAnyway.heatCooled()) throw new AssertionError("Continue anyway while hot");
+        SetupPolicy cooledAnyway = new SetupPolicy();
+        expect("heat", shown(cooledAnyway, 0, 0, 470, 70f));
+        for (long t = 1000; t <= 7000; t += 1000) shown(cooledAnyway, t, 0, 300, 50f);
+        expect("heat+cooled", shown(cooledAnyway, 8000, 0, 300, 50f));
+        expect(null, cooledAnyway.update(0, 300, 50f, 80, true, false, true, false, 9000));
+        expect(null, cooledAnyway.update(0, 470, 70f, 80, true, false, true, false, 10000));
+        // A manual pause or CRITICAL status shows first; the heat pause is still there afterwards.
+        SetupPolicy layered = new SetupPolicy();
+        expect("critical", layered.update(4, 470, 95f, 80, true, false, false, false, 0));
+        expect("manual", layered.update(0, 300, 50f, 80, true, true, false, false, 1000));
+        for (long t = 2000; t <= 9000; t += 1000) expect("heat", sample(layered, t, 0, 300, 50f));
+        if (!layered.heatCooled()) throw new AssertionError("layered cooled");
+
+        // The service records the pause (heat-pause.json) and restores it after a restart: the
+        // new policy keeps waiting, and offers Continue only after cooling down again.
+        SetupPolicy restarted = new SetupPolicy();
+        restarted.restoreHeatWait(true);
+        if (restarted.heatCooled() || restarted.continueAfterCooling()) throw new AssertionError("restored cooled");
+        expect("heat", shown(restarted, 100000, 0, 300, 50f));
+        for (long t = 101000; t < 105000; t += 1000) expect("heat", shown(restarted, t, 0, 300, 50f));
+        expect("heat+cooled", shown(restarted, 105000, 0, 300, 50f));
+        expect("heat+cooled", shown(restarted, 400000, 0, 300, 50f));  // the screen was off: a long gap
+        expect("heat+cooled", shown(restarted, 401000, 0, 300, 50f));
+        if (!restarted.continueAfterCooling()) throw new AssertionError("restored Continue");
+        expect(null, shown(restarted, 402000, 0, 300, 50f));
+        SetupPolicy notRestored = new SetupPolicy();
+        notRestored.restoreHeatWait(false);
+        expect(null, shown(notRestored, 0, 0, 300, 50f));
+
         // Core-only devices can prove cooling; fully missing temperatures cannot.
         SetupPolicy coreOnly = new SetupPolicy();
-        expect("heat", sample(coreOnly, 0, 3, -1, 92f));
-        expect("heat", sample(coreOnly, 1000, 3, -1, Float.NaN));
+        expect("heat", shown(coreOnly, 0, 3, -1, 92f));
+        expect("heat", shown(coreOnly, 1000, 3, -1, Float.NaN));
         for (long t = 2000; t < 7000; t += 1000)
-            expect("heat", sample(coreOnly, t, 3, -1, 77f));
-        expect(null, sample(coreOnly, 7000, 3, -1, 77f));
+            expect("heat", shown(coreOnly, t, 3, -1, 77f));
+        expect("heat+cooled", shown(coreOnly, 7000, 3, -1, 77f));
+        SetupPolicy noTemps = new SetupPolicy();
+        expect("heat", shown(noTemps, 0, 3, -1, 92f));
+        for (long t = 1000; t < 60000; t += 1000)
+            expect("heat", shown(noTemps, t, 0, -1, Float.NaN));
         // Continue anyway works immediately and skips later heat, while critical/manual still win.
         SetupPolicy anyway = new SetupPolicy();
         expect("heat", sample(anyway, 0, 3, 450, 92f));
@@ -168,6 +232,9 @@ public final class SetupPolicyTest {
         expect("battery 44.0 °C, thermal status: severe", SetupPolicy.readings(3, 440, nan));
         expect("Waiting for the Android device to cool down (battery 44.0 °C, thermal status: severe, CPU/GPU 61.5 °C)",
             SetupPolicy.description("heat", 3, 440, 61.5f));
+        expect("The Android device has cooled down (battery 30.0 °C, thermal status: none, CPU/GPU 50.0 °C)",
+            SetupPolicy.description("heat", 0, 300, 50f, true));
+        expect("Paused by you", SetupPolicy.description("manual", 0, 300, 50f, true));
         // CPU/GPU sensors from a sysfs copy: only cpu/gpu zones, millidegrees, junk skipped
         try {
             java.io.File root = java.nio.file.Files.createTempDirectory("thermal").toFile();

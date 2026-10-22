@@ -5,10 +5,11 @@ package org.wwhdrecomp.wwhd;
  *
  * Heat: pause at Android thermal status SEVERE, at a battery temperature of 45.0 °C, or at
  * 42.0 °C while Android also reports MODERATE or higher; resume at LIGHT or lower and at most
- * 41.0 °C for five seconds, with any readable CPU/GPU sensor below 80 °C. The user may continue
- * anyway (heat override), which skips that pause for the rest of the setup run. Android thermal
- * status CRITICAL or higher always pauses: the phone throttles hard or shuts down at that level
- * whatever setup does.
+ * 41.0 °C for five seconds, with any readable CPU/GPU sensor below 80 °C. A heat pause never ends
+ * on its own (#277): once that cool-down rule holds the user may Continue
+ * ({@link #continueAfterCooling}), and at any time the user may continue anyway (heat override),
+ * which skips heat pauses for the rest of the setup run. Android thermal status CRITICAL or higher
+ * always pauses: the phone throttles hard or shuts down at that level whatever setup does.
  *
  * A SEVERE status that no temperature backs up is ignored (see {@link #thermalStatusUnreliable}).
  */
@@ -17,7 +18,34 @@ public final class SetupPolicy {
     public static final long HEAT_CLEAR_MILLIS = 5000;
     private long coolSince = -1, lastSample = -1;
     private boolean hot;
+    /** A heat pause that waits for the user's tap (#277); it survives cooling down. */
+    private boolean heatWait;
     private boolean low;
+
+    /** Whether setup is held by a heat pause that waits for the user. */
+    public boolean heatWaiting() { return heatWait; }
+
+    /** Whether the held heat pause may end with Continue: the cool-down rule holds. */
+    public boolean heatCooled() { return heatWait && !hot; }
+
+    /**
+     * The user's Continue on a heat pause: ends it once the device has cooled down (true); while
+     * still hot it changes nothing (false). A later real heat condition pauses again.
+     */
+    public boolean continueAfterCooling() {
+        if (!heatCooled()) return false;
+        heatWait = false;
+        return true;
+    }
+
+    /**
+     * Restores a heat pause recorded before the setup service restarted. The device then has to
+     * meet the cool-down rule again before Continue is offered.
+     */
+    public void restoreHeatWait(boolean waiting) {
+        heatWait = waiting;
+        if (waiting) { hot = true; coolSince = -1; }
+    }
 
     /** Readable PowerManager thermal status (none ... shutdown), "n/a" when unknown. */
     public static String thermalName(int status) {
@@ -139,11 +167,18 @@ public final class SetupPolicy {
     }
 
     public static String description(String reason, int thermal, int temperatureTenths, float hottestCore) {
+        return description(reason, thermal, temperatureTenths, hottestCore, false);
+    }
+
+    /** As above; cooled: a heat pause whose device has cooled down and now waits for Continue. */
+    public static String description(String reason, int thermal, int temperatureTenths, float hottestCore,
+                                     boolean cooled) {
         if ("heat".equals(reason))
-            return description(reason) + " (" + readings(thermal, temperatureTenths, hottestCore) + ")";
+            return (cooled ? "The Android device has cooled down" : description(reason)) +
+                " (" + readings(thermal, temperatureTenths, hottestCore) + ")";
         if ("critical".equals(reason))
             return description(reason) + " (" + readings(thermal, temperatureTenths, hottestCore) + "). " +
-                "Setup continues once it cools down. Continue anyway does not apply here: " +
+                "Setup waits until it cools down. Continue anyway does not apply here: " +
                 "at this level the Android device throttles hard or shuts down regardless.";
         return description(reason);
     }
@@ -184,6 +219,7 @@ public final class SetupPolicy {
     /**
      * The pause reason, or null to run. heatOverride and batteryOverride are the user's
      * "Continue anyway" for this setup run; they never skip a manual pause or CRITICAL status.
+     * A heat pause stays until {@link #continueAfterCooling} or heatOverride ends it.
      */
     public String update(int thermal, int temperatureTenths, int batteryPercent,
                          boolean charging, boolean manual, boolean heatOverride, boolean batteryOverride) {
@@ -214,11 +250,14 @@ public final class SetupPolicy {
             }
         }
         lastSample = now;
+        // A heat pause holds until the user taps (#277); Continue anyway drops it for this run.
+        if (heatOverride) heatWait = false;
+        else if (hot) heatWait = true;
         if (charging || batteryPercent >= 30) low = false;
         else if (batteryPercent >= 0 && batteryPercent <= 20) low = true;
         if (manual) return "manual";
         if (thermal >= THERMAL_CRITICAL) return "critical";
-        if (hot && !heatOverride) return "heat";
+        if (heatWait) return "heat";
         if (batteryOverride) return null;
         if (low) return "battery";
         if (!charging && batteryPercent < 0) return "battery_unknown";
