@@ -63,6 +63,8 @@ const std::vector<CommandInfo> kCommands = {
     {"history", "The undo and redo steps.", {}},
     {"validate", "Checks the open mod as the mod manager does.", {{"mod", "string", ""}}},
     {"save_package", "Writes the open mod's manifest into its package folder (replaces manifest.json).", {{"mod", "string", ""}, {"confirm", "boolean", "must be true: the file is replaced", true}}, false, true},
+    {"restart_and_return", "Saves every changed package, then starts the game again with the same arguments and puts Link back where he is now (after the Quest Log is picked on the title screen), in Play or test mode as before: for changes that take effect only after a restart.",
+     {{"confirm", "boolean", "must be true: the game restarts", true}}, false, true},
     {"revert_package", "Forgets the unsaved changes (an undo step).", {{"mod", "string", ""}, {"confirm", "boolean", "must be true", true}}, true, true},
     {"reload_room", "Leaves and enters the current room again (Link stays where he is): every actor of the room is created again.", {}},
     {"list_locations", "Warp destinations: the islands, the game's stages and rooms, the installed packages' stages, and the open mod's actors and quest places.", {{"group", "string", "Islands, Rooms, Mod stages or Quest"}}},
@@ -1583,6 +1585,28 @@ Value Session::dispatch(const std::string& command, const Value& p, std::string&
         const bool valid = validate_package(pkg->mod, pkg->manifest, all_manifests(), problem) && model_files(pkg->dir, pkg->manifest, problem) && world_placements(host_, pkg->mod, pkg->manifest, pkg->manifest, true, problem);
         r["valid"] = valid;
         if (!valid) r["problem"] = problem;
+        ok = true;
+        return r;
+    }
+    if (command == "restart_and_return") {
+        if (!host_) return why = "the game is not running", r;
+        if (!p.get("confirm").boolean) return why = "needs \"confirm\": true (the game restarts)", r;
+        // the changes that wait for a restart are in the packages: saved first
+        Value saved;
+        saved.type = Value::Array;
+        for (const auto& pkg : packages_) {
+            if (!dirty(pkg.mod)) continue;
+            Value sp;
+            sp["mod"] = pkg.mod, sp["confirm"] = true;
+            std::string w;
+            bool sok = false;
+            dispatch("save_package", sp, w, sok);
+            if (!sok) return why = "not restarted: " + pkg.mod + " could not be saved (" + w + ")", r;
+            saved.array.push_back(Value(pkg.mod));
+        }
+        if (!host_->restart_and_return(why)) return r;
+        r["saved"] = saved;
+        r["requested"] = true;
         ok = true;
         return r;
     }

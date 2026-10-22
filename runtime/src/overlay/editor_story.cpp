@@ -50,6 +50,28 @@ std::mutex g_pick_mu;
 std::string g_picked;  // a PNG a file chooser returned (any thread)
 int g_picked_for = 0;  // 1 the new item's icon, 2 the selected item's new icon
 
+// "Restart and return here" (#270): saves the packages, starts the game again and puts Link back where he is
+void restart_return_button(const char* id) {
+    ImGui::PushID(id);
+    if (ImGui::Button("Restart and return here")) ImGui::OpenPopup("restart_return");
+    if (ImGui::BeginPopup("restart_return")) {
+        ImGui::PushTextWrapPos(ImGui::GetFontSize() * 24);
+        ImGui::TextWrapped("The game saves your changed packages, starts again and, once you choose your Quest Log, puts Link "
+                           "back where he is now (in Play or test mode as before). Progress since your last save is kept in "
+                           "the return state only.");
+        ImGui::PopTextWrapPos();
+        if (ImGui::Button("Restart now")) {
+            Value p;
+            p["confirm"] = true;
+            command("restart_and_return", p);
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel")) ImGui::CloseCurrentPopup();
+        ImGui::EndPopup();
+    }
+    ImGui::PopID();
+}
 // why the open mod's item waits for a restart ("" when its change is in the game already)
 std::string restart_why(const Value& m, const std::string& id) {
     for (const auto& e : editor::items_after_restart(m.get("id").string()))
@@ -330,8 +352,9 @@ void item_fields(const Value& m, const Value& e) {
     // the notice of a change the running game can't take (#270): next to the item, in plain words
     if (const std::string why = restart_why(m, id); !why.empty()) {
         ImGui::PushStyleColor(ImGuiCol_Text, kLater);
-        ImGui::TextWrapped("%s: %s. Save, then start the game again.", kAfterRestart, why.c_str());
+        ImGui::TextWrapped("%s: %s.", kAfterRestart, why.c_str());
         ImGui::PopStyleColor();
+        restart_return_button("item");
     }
     muted("Its name, description, how many, use and icon change in the game at once, and a new item works at once while the "
           "spare icon places last (eight per start); its held model and hold_up, and a removed item, after a restart.");
@@ -415,6 +438,12 @@ void kind_area(const Value& m, const std::string& kind) {
             ImGui::TextColored(kLater, "%s", kAfterRestart);
             if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", later.c_str());
         }
+    }
+    if (kind == "item" && !editor::items_after_restart(m.get("id").string()).empty()) {
+        ImGui::PushStyleColor(ImGuiCol_Text, kLater);
+        ImGui::TextWrapped("Some item changes take effect after a restart.");
+        ImGui::PopStyleColor();
+        restart_return_button("items");
     }
     if (list.array.empty())
         muted(kind == "letter"  ? "No letters on their own yet. A letter's sender, text and what it encloses (charts, items): the postbox hands it out while the mod is on."

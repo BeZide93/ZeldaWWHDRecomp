@@ -495,7 +495,9 @@ These wait for a restart (save, then start the game again); the status bar names
   change at once. A new item works at once too (its icon in the Delivery Bag, on the buttons and over Link's
   head when he gets it): the editor starts the game with eight spare icon places, so up to eight items can be
   added per start; the ninth waits for a restart. The Story tab says **Takes effect after a restart** next to
-  an item whose change waits;
+  an item whose change waits, with **Restart and return here**: the editor saves the changed packages, the
+  game starts again and, once you choose your Quest Log on the title screen, Link is back where he was (in
+  Play or test mode as before; a portable state, so enemies and running scenes start fresh);
 - a removed chart: the chart list keeps it until a restart. A new or changed chart shows in the chart
   list at once; its treasure's salvage point is set up when Link enters the sea room, so it follows
   there after **Reload room** or the next visit;
@@ -832,6 +834,7 @@ separated by `;`, or `@file` with one such line per row. Results go to the log.
 | `undo`, `redo`, `history` | | |
 | `validate` | `mod`? | the checks, with the first problem |
 | `check_package` | `mod`? | every problem, each with what it is about |
+| `restart_and_return` | `confirm` | save every changed package, start the game again with the same arguments and put Link back where he is (after you choose the Quest Log), in Play or test mode as before (needs `"confirm": true`; not on Android) |
 | `save_package` | `confirm`, `mod`? | write `manifest.json` (needs `"confirm": true`) |
 | `revert_package` | `confirm`, `mod`? | forget unsaved changes (needs `"confirm": true`) |
 | `export_package` | `path`, `confirm`, `mod`? | check, then write the package into a new or empty folder |

@@ -222,6 +222,11 @@ public:
     // Play: the editor hides, Link plays from the camera's place or his own, in test mode; Stop goes back.
     virtual bool play(bool from_camera, bool restore, std::string& why) { return why = "the game is not running", false; }
     virtual bool stop(std::string& why) { return why = "the game is not running", false; }
+    // Restart and return here: the game saves where Link is (a portable state), starts again with the same
+    // arguments and, once the player picks the Quest Log, puts him back there (and back in Play or test
+    // mode). For what the running game can't take (a removed item, a held model). The packages are saved
+    // before (the command does that). False when the game can't start itself here.
+    virtual bool restart_and_return(std::string& why) { return why = "the game is not running", false; }
     virtual bool playing() { return false; }
 
     // ---- quests and flags (each optional) ----

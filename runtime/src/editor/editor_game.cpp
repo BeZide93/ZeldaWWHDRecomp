@@ -33,6 +33,7 @@
 #include "../hle/save_root.h"
 #include "../input.h"
 #include "../mods/guest_mods.h"
+#include "../mods/code_mods.h"
 #include "../mods/mod_actor.h"
 #include "../mods/actor_model_cache.h"
 #include "../mods/packages.h"
@@ -580,6 +581,15 @@ void scene_preview_end(const std::string& status);
 std::atomic<bool> g_test{false};
 std::vector<uint8_t> g_story_before;  // game thread
 fs::path editor_dir() { return fs::path(ss::states_dir()) / "editor-test"; }
+// the environment of this process and the one it starts (Restart and return)
+void set_env(const char* name, const std::string& value) {
+#ifdef _WIN32
+    _putenv_s(name, value.c_str());
+#else
+    setenv(name, value.c_str(), 1);
+#endif
+}
+
 std::string safe(const std::string& id) {
     std::string s;
     for (char ch : id) s += (std::isalnum((unsigned char)ch) || ch == '-' || ch == '_') ? ch : '_';
@@ -1577,6 +1587,29 @@ public:
         return g_scene_state;
     }
     bool play(bool from_camera, bool restore, std::string& why) override { return request_play(from_camera, restore, why); }
+    bool restart_and_return(std::string& why) override {
+        if (!ss::in_gameplay()) return why = "no Quest Log is being played (nothing to return to)", false;
+        const std::string path = (editor_dir() / "return.wwstate").string();
+        const bool playing = g_playing.load(), test = g_test.load();
+        std::error_code ec;
+        fs::create_directories(editor_dir(), ec);
+        set_status("Restart and return: saving where Link is...");
+        ss::request_save_portable_file(path, [path, playing, test](bool ok, const std::string& w) {
+            if (!ok) {
+                set_status("Restart and return: not restarted, the place could not be saved (" + w + ")");
+                return;
+            }
+            // the next start finds it (the environment is the new process's): return_tick() below
+            set_env("WWHD_EDITOR_RETURN", path);
+            set_env("WWHD_EDITOR_RETURN_MODE", playing ? "play" : test ? "test" : "edit");
+            LOG("[editor] restart and return: %s saved, starting again", path.c_str());
+            hostui::post([] {
+                std::string e;
+                if (!mods::code::relaunch(e)) set_status("Restart and return: the game could not start again (" + e + ")");
+            });
+        });
+        return true;
+    }
     bool stop(std::string& why) override;
     bool playing() override { return g_playing; }
     // any thread, cheap: the game thread's last copy of the story area (records_tick)
@@ -2077,8 +2110,52 @@ void villagers_tick() {
 }
 }  // namespace
 
+namespace {
+// Restart and return (Host::restart_and_return): after the start, once the player picked the Quest Log and the
+// editor's view is up, the saved place is loaded, then Play or test mode as before. Game thread.
+void return_tick() {
+    static std::string path = [] {
+        const char* e = std::getenv("WWHD_EDITOR_RETURN");
+        return std::string(e ? e : "");
+    }();
+    static const std::string mode = [] {
+        const char* e = std::getenv("WWHD_EDITOR_RETURN_MODE");
+        return std::string(e ? e : "edit");
+    }();
+    static bool told = false;
+    if (path.empty()) return;
+    if (!told) {
+        told = true;
+        set_status("Restart and return: choose your Quest Log; the game puts Link back where he was");
+        // a later restart of this process starts as usual
+        set_env("WWHD_EDITOR_RETURN", "");
+    }
+    if (!ss::in_gameplay() || !g_flying || !g_free_jobs.empty()) return;
+    const std::string file = path;
+    path.clear();
+    LOG("[editor] restart and return: loading %s (%s)", file.c_str(), mode.c_str());
+    ss::request_load_portable_file(file, [](bool ok, const std::string& why) {
+        if (!ok) {
+            set_status("Restart and return: the saved place could not be loaded (" + why + ")");
+            return;
+        }
+        set_status("Restart and return: back where you were");
+        if (mode == "play") g_play_after = 1;  // Play from Link once the editor's view is back
+        else {
+            std::string w;
+            if (mode == "test" && !g_host.set_test_mode(true, w)) set_status("Restart and return: test mode: " + w);
+            // the fly camera starts again at the game camera, behind Link at his place
+            run_async("fly_camera", mods::json::parse(R"({"on": false})"), [](const Value&) {
+                run_async("fly_camera", mods::json::parse(R"({"on": true})"), nullptr);
+            });
+        }
+    });
+}
+}  // namespace
+
 void logic_service(Cpu* c) {
     if (!enabled()) return;
+    return_tick();
     t_game = c;
     records_tick();
     villagers_tick();
