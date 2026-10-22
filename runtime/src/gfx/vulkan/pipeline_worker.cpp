@@ -432,6 +432,8 @@ void run(Worker& w, std::vector<uint8_t> seed) {
     // driver pipeline cache is internally synchronized. Startup work stays one at a time and yields to demand.
     std::atomic<size_t> prefetched{0}, done{0}, failures{0}, cancels{0};
     size_t startupTaken = 0;  // (under w.mutex)
+    std::deque<std::string> background;
+    bool backgroundPlanned = false;
     constexpr size_t kStartHead = 384;
     auto loop = [&] {
       host::set_thread_name("Vulkan warmup");
@@ -475,6 +477,36 @@ void run(Worker& w, std::vector<uint8_t> seed) {
                              w.ready.size(), process_memory() / 1e6);
               break;
             }
+            // Then, when the pool can hold every recipe (desktops: the pool is sized by the memory budget), the
+            // grouped rest in first-seen order: compiled ahead in the background, so a place whose archives load
+            // with many pipelines at once does not have to wait for its prefetch. Newly loaded archives still go
+            // first; this work yields to the game's own compiles like the start queue.
+            if (!backgroundPlanned) {
+              backgroundPlanned = true;
+              if (w.recipes.size() + 64 <= maxUnusedWarmPipelines) {
+                std::vector<std::pair<uint64_t, std::string>> rest;
+                for (const auto& [key, r] : w.recipes)
+                  if (!r->groups.empty()) {
+                    auto at = w.order.find(key);
+                    rest.emplace_back(at == w.order.end() ? UINT64_MAX : at->second, key);
+                  }
+                std::sort(rest.begin(), rest.end());
+                for (auto& entry : rest) background.push_back(std::move(entry.second));
+                std::fprintf(stderr, "[vulkan warmup] %zu grouped recipes compiled in the background (pool %zu)\n",
+                             background.size(), maxUnusedWarmPipelines);
+              }
+            }
+            while (!background.empty() && !recipe) {
+              auto key = std::move(background.front()); background.pop_front();
+              auto found = w.recipes.find(key);
+              if (found == w.recipes.end() || w.consumed.contains(key) || w.ready.contains(key) ||
+                  w.compiling.contains(key)) continue;
+              recipe = found->second;
+              if (background.empty())
+                std::fprintf(stderr, "[vulkan warmup] background taken: %zu ready; process memory %.0f MB\n",
+                             w.ready.size(), process_memory() / 1e6);
+            }
+            if (recipe) break;
             if (w.drainExit || w.byGroup.empty()) break;
             w.workWake.wait_for(lock, std::chrono::milliseconds(50));
           }
