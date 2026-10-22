@@ -25,6 +25,7 @@
 #include "background_shaders.h"
 #include "runtime.h"
 #include "gx2/gx2.h"
+#include "gx2/gx2_cmd.h"
 #include "shaders.h"
 #include "shader_binary.h"
 #include "stutter_trace.h"
@@ -982,6 +983,14 @@ Pipeline &pipeline(const uint32_t *r, vk::Shader *vs, vk::Shader *ps,
         (long long)std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch()).count(),
         (unsigned long long)R.frame, (unsigned long long)digest, (unsigned long long)PipelineKeyHash{}(key), dsweep::tag());
     std::fflush(keyLog);
+  }
+  // debug: WWHD_VK_PIPELINE_WHO=file: per pipeline created, the renderer frame, the key hash (as in the stutter trace)
+  // and what draws it (gx2::current_draw_context, described by dsweep.cpp: guest call chain, archive resources, actors)
+  static FILE* whoLog = [] { const char* p = getenv("WWHD_VK_PIPELINE_WHO"); return p && *p ? std::fopen(p, "a") : nullptr; }();
+  if (whoLog) {
+    std::fprintf(whoLog, "%llu %016llx %s\n", (unsigned long long)R.frame, (unsigned long long)PipelineKeyHash{}(key),
+                 gx2::current_draw_context().c_str());
+    std::fflush(whoLog);
   }
   // Own prerequisite identities independently of the mutable shader cache.
   const std::array<std::shared_ptr<vk::ShaderBinary>, 2> shaderBinaries{vs->binary, ps->binary};
