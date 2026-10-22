@@ -406,7 +406,7 @@ std::vector<BuildResult> rebuild(const std::string& mod, const Value& manifest, 
     std::string tool;
     try {
         const auto bridge = guestmods::BuildBridge::installed(std::string(),false);
-        python = bridge.python;
+        python = bridge.tool_python();
         tool = (std::filesystem::path(bridge.builder).parent_path().parent_path() / "story_mods" / "stage_builder.py").string();
     } catch (const std::exception& e) {
         return {BuildResult{only, "", std::string("the stage builder is unavailable: ") + e.what()}};
@@ -599,7 +599,7 @@ Value templates(const std::string& game_dir, std::string& why) {
     std::vector<std::string> command;
     try {
         const auto bridge = guestmods::BuildBridge::installed(std::string(),false);
-        command = bridge.python;
+        command = bridge.tool_python();
         command.push_back((std::filesystem::path(bridge.builder).parent_path().parent_path() / "story_mods" / "stage_builder.py").string());
     } catch (const std::exception& e) {
         return why = std::string("the stage builder is unavailable: ") + e.what(), Value();
@@ -624,7 +624,7 @@ Value kit_materials(const std::string& game_dir, const std::string& stage, unsig
     std::vector<std::string> command;
     try {
         const auto bridge = guestmods::BuildBridge::installed(std::string(),false);
-        command = bridge.python;
+        command = bridge.tool_python();
         command.push_back((std::filesystem::path(bridge.builder).parent_path().parent_path() / "story_mods" / "stage_builder.py").string());
     } catch (const std::exception& e) {
         return why = std::string("the stage builder is unavailable: ") + e.what(), Value();
@@ -646,7 +646,7 @@ Value export_glb(const std::string& game_dir, const std::string& out, const std:
     std::vector<std::string> command;
     try {
         const auto bridge = guestmods::BuildBridge::installed(std::string(),false);
-        command = bridge.python;
+        command = bridge.tool_python();
         command.push_back((std::filesystem::path(bridge.builder).parent_path().parent_path() / "story_mods" / "export_glb.py").string());
     } catch (const std::exception& e) {
         return why = std::string("the exporter is unavailable: ") + e.what(), Value();

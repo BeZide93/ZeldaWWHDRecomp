@@ -12,6 +12,9 @@ player worked around it by adding "..\\story_mods" to the ._pth by hand. The ._p
 
 Checks, with no game files:
 - every tools/story_mods script the game starts (runtime/src/mods/*.cpp) is a file the release ships (TOOL_FILES);
+- the game starts each of them through the bootstrap that puts the tool's folder on sys.path (BuildBridge::
+  tool_python, runtime/src/mods/guest_build.h), and each starts that way under the release Python with the tool's own
+  sys.path line taken out (the bootstrap alone is enough);
 - every shipped tool (TOOL_FILES and INSTALLER_FILES), copied into a folder laid out as the release is, starts from
   another working directory under an interpreter that reads a copy of the official ._pth (macOS, Linux; "-I -S"
   where that cannot be built), and every module it and the modules it loads import later, inside functions, resolves.
@@ -97,6 +100,13 @@ def started_by_the_game():
     return names
 
 
+def bootstrap():
+    """BuildBridge::tool_bootstrap: the Python code the game runs a tool with (-c CODE TOOL ARGS...)"""
+    with open(os.path.join(ROOT, "runtime", "src", "mods", "guest_build.h"), encoding="utf-8") as f:
+        match = re.search(r'inline constexpr const char\* tool_bootstrap=\s*((?:"(?:[^"\\]|\\.)*"\s*)+);', f.read())
+    return "".join(json.loads(part) for part in re.findall(r'"(?:[^"\\]|\\.)*"', match.group(1)))
+
+
 def release_python(package_dir):
     """[interpreter] of a release-like tools/python: a link to this Python next to a copy of the official ._pth, with
     the zip line pointing at this Python's standard library. None where the platform can't (Windows: python.exe
@@ -128,6 +138,40 @@ class ShippedTools(unittest.TestCase):
         self.assertIn("tools/story_mods/kit_model.py", started)
         missing = sorted(started - set(package.TOOL_FILES))
         self.assertEqual(missing, [], "the game starts these tools, but the release doesn't ship them")
+
+    def test_the_game_starts_story_tools_through_the_bootstrap(self):
+        folder = os.path.join(ROOT, "runtime", "src", "mods")
+        direct = []
+        for name in sorted(os.listdir(folder)):
+            if name.endswith(".cpp"):
+                with open(os.path.join(folder, name), encoding="utf-8", errors="replace") as f:
+                    text = f.read()
+                if '"story_mods"' in text and re.search(r"bridge\.python\b", text):
+                    direct.append(name)
+        self.assertEqual(direct, [], "these start a story_mods tool with bridge.python, not bridge.tool_python()")
+        with tempfile.TemporaryDirectory() as temporary:
+            temporary = os.path.realpath(temporary)
+            tree = os.path.join(temporary, "release")
+            for rel in package.TOOL_FILES:
+                target = os.path.join(tree, rel)
+                os.makedirs(os.path.dirname(target), exist_ok=True)
+                with open(os.path.join(ROOT, rel), encoding="utf-8") as f:
+                    text = f.read()
+                if rel in started_by_the_game():  # without its own line, the bootstrap must find the siblings
+                    text = text.replace("sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))", "pass")
+                with open(target, "w", encoding="utf-8") as f:
+                    f.write(text)
+            python = release_python(tree) or [sys.executable, "-I", "-S"]
+            elsewhere = os.path.join(temporary, "elsewhere")
+            os.makedirs(elsewhere)
+            env = {k: v for k, v in os.environ.items() if k not in ("PYTHONPATH", "PYTHONHOME", "PYTHONSTARTUP")}
+            env["PYTHONDONTWRITEBYTECODE"] = "1"
+            for rel in sorted(started_by_the_game()):
+                with self.subTest(tool=rel):
+                    result = subprocess.run(python + ["-c", bootstrap(), os.path.join(tree, rel), "--help"], cwd=elsewhere,
+                                            env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=120)
+                    self.assertNotIn("ModuleNotFoundError", result.stderr)
+                    self.assertEqual(result.returncode, 0, result.stderr[-400:])
 
     def test_shipped_tools_start_under_the_release_python(self):
         shipped = [rel for rel in package.TOOL_FILES + package.INSTALLER_FILES if rel.endswith(".py")]
