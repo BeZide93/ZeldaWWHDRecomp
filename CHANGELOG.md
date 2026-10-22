@@ -15,8 +15,8 @@ what is on `devel` and not released yet (also in the
   game loads that object.
 - **Frame interpolation no longer changes the game** (40, 60, 120 and 240 fps). Extra frames drawn between the game's
   steps used up random numbers and decided what was visible with the blended camera, so enemies, effects and sounds
-  could play out slightly differently than at 30 fps. The game now plays exactly as at 30 fps; only the picture is
-  smoother.
+  could play out slightly differently than at 30 fps. The game now plays exactly as at 30 fps (at 40 fps also while
+  Z-targeting); only the picture is smoother.
 - **40 fps without judder** (#254): every frame now shows the game at its exact point in time (¾ of a step apart),
   instead of half, half, one and one step in turn. Camera turns are even.
 - **Even more moves smoothly** with frame interpolation: camera shake, the sky's clouds, eye movements, lava, scene
