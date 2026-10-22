@@ -9,9 +9,13 @@
 #include "platform/host.h"
 #include "stutter_trace.h"
 #include "worker_metrics.h"
+#include "../../pipeline_groups.h"
+#include <deque>
 #include <algorithm>
 #include <atomic>
 #include <cstdio>
+#include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <mutex>
 #include <shared_mutex>
@@ -33,7 +37,7 @@ void destroy(VkDevice device, WarmPipeline& p) {
   for (auto set : p.sets) if (set) vkDestroyDescriptorSetLayout(device, set, nullptr);
   p = {};
 }
-struct Ready { WarmPipeline handles; std::shared_ptr<PipelineRecipe> recipe; };
+struct Ready { WarmPipeline handles; std::shared_ptr<PipelineRecipe> recipe; uint64_t sequence = 0; };
 struct Worker {
   VkDevice device = VK_NULL_HANDLE;
   PipelineRecipeFingerprint fingerprint{};
@@ -56,9 +60,19 @@ struct Worker {
   std::unordered_set<std::string> consumed;
   size_t recipeBytes = 0;
   RecipeShaderPool shaderPool;
+  // Grouped recipes (the setup's model sweep): compiled when one of their object archives is loaded in play.
+  std::unordered_map<uint32_t, std::vector<std::string>> byGroup;
+  std::unordered_set<uint32_t> resident;      // groups resident in the game (last published set)
+  std::unordered_set<uint32_t> prefetched;    // groups queued since they became resident
+  std::deque<std::string> prefetch;           // keys of newly resident groups, compiled before startup work
+  std::unordered_set<std::string> compiling;  // keys a prefetch compiler is building now
+  uint64_t residentGeneration = 0, readySequence = 0;
+  size_t prefetchedReady = 0;
+  bool drainExit = false;                     // finish/offline warming: leave once the queues are empty
+  std::condition_variable workWake;
   ~Worker() {
     { std::lock_guard lock(mutex); stopped = true; saveStopped = true; }
-    saveWake.notify_all();
+    saveWake.notify_all(); workWake.notify_all();
     if (thread.joinable()) thread.join();
     if (saver.joinable()) saver.join();
     for (auto& [key, entry] : ready) destroy(device, entry.handles);
@@ -74,29 +88,70 @@ constexpr size_t maxUnusedWarmPipelines = 256;
 #else
 constexpr size_t maxUnusedWarmPipelines = 1024;
 #endif
+// Archive prefetch compilers: a few on desktops (an archive brings up to dozens of pipelines a few frames before its
+// first draw), one on phones (memory, few big cores).
+size_t prefetch_threads() {
+  if (const char* e = std::getenv("WWHD_VK_PREFETCH_THREADS"); e && *e) return std::clamp<size_t>(std::strtoul(e, nullptr, 10), 1, 8);
+#ifdef __ANDROID__
+  return 1;
+#else
+  const unsigned cores = std::max(1u, std::thread::hardware_concurrency());
+  return std::clamp<size_t>(cores > 4 ? cores / 4 : 1, 1, 3);
+#endif
+}
+// Prefetch waits while the render thread's own (demand) compiler is busy: a pipeline needed now comes first.
+// WWHD_VK_PREFETCH_YIELD=0 (measurements) lets it run on.
+bool prefetch_yields() {
+  static const bool value = [] { const char* e = std::getenv("WWHD_VK_PREFETCH_YIELD"); return !e || std::strcmp(e, "0"); }();
+  return value;
+}
+bool group_resident(const Worker& w, const PipelineRecipe& recipe) {
+  for (auto group : recipe.groups) if (w.resident.contains(group)) return true;
+  return false;
+}
+// Full: the entry least likely to be drawn soon goes first, one whose archives are all unloaded, else the oldest.
 void retain_ready(Worker& w, const std::string& key, WarmPipeline handles,
                   const std::shared_ptr<PipelineRecipe>& recipe) {
   if(w.ready.size() >= maxUnusedWarmPipelines) {
-    auto victim=w.ready.begin(); destroy(w.device,victim->second.handles); w.ready.erase(victim);
+    auto victim=w.ready.end();
+    for (auto it=w.ready.begin();it!=w.ready.end();++it) {
+      const bool unloaded=!it->second.recipe->groups.empty() && !group_resident(w,*it->second.recipe);
+      if (victim==w.ready.end()) { victim=it; continue; }
+      const bool victimUnloaded=!victim->second.recipe->groups.empty() && !group_resident(w,*victim->second.recipe);
+      if ((unloaded && !victimUnloaded) || (unloaded==victimUnloaded && it->second.sequence<victim->second.sequence)) victim=it;
+    }
+    destroy(w.device,victim->second.handles); w.ready.erase(victim);
   }
-  w.ready.emplace(key,Ready{handles,recipe});
+  w.ready.emplace(key,Ready{handles,recipe,++w.readySequence});
 }
 
+// Bytes a recipe holds besides its shared, packed shaders (counted once each in the pool).
 size_t footprint(const PipelineRecipe& p) {
-  size_t size = 8192 + p.key.size();
-  for (int i = 0; i < 2; ++i)
-    size += p.words(i).size() * 4 + p.descriptors[i].size() * sizeof(VkDescriptorSetLayoutBinding);
+  size_t size = 2048 + p.key.size() + p.groups.size() * 4;
+  for (int i = 0; i < 2; ++i) size += p.descriptors[i].size() * sizeof(VkDescriptorSetLayoutBinding);
   return size;
+}
+void index_groups(Worker& w, const std::string& key, const PipelineRecipe& recipe) {
+  for (auto group : recipe.groups) {
+    auto& keys = w.byGroup[group];
+    if (std::find(keys.begin(), keys.end(), key) == keys.end()) keys.push_back(key);
+  }
+  if (!recipe.groups.empty()) pipeline_groups::want();
 }
 bool insert_recipe(Worker& w, const std::shared_ptr<PipelineRecipe>& recipe) {
   auto key = identity(recipe->key);
   auto found = w.recipes.find(key);
+  // A pipeline recorded in play keeps the archive groups the sweep found for it (the new recipe is not shared yet).
+  if (found != w.recipes.end())
+    for (auto group : found->second->groups) recipe->add_group(group);
   const size_t old = found == w.recipes.end() ? 0 : footprint(*found->second);
   const size_t size = footprint(*recipe);
   if ((found == w.recipes.end() && w.recipes.size() >= kPipelineRecipeMaxCount) ||
-      size > kPipelineRecipeMaxBytes - (w.recipeBytes - old)) return false;
+      size > kPipelineRecipeMaxBytes - std::min(kPipelineRecipeMaxBytes, w.recipeBytes - old)) return false;
+  const size_t packed = w.shaderPool.packedBytes;
   w.shaderPool.freeze(*recipe);
-  w.recipeBytes += size - old;
+  w.recipeBytes += size - old + (w.shaderPool.packedBytes - packed);
+  index_groups(w, key, *recipe);
   w.recipes.insert_or_assign(std::move(key), recipe);
   return true;
 }
@@ -115,7 +170,7 @@ void persist_snapshot(Worker& w) {
     for (auto& [key, recipe] : w.recipes) snapshot.push_back(recipe);
   }
   try {
-    auto bytes = encode_pipeline_recipes(w.fingerprint, snapshot);
+    auto bytes = encode_local_pipeline_recipes(w.fingerprint, snapshot);
     atomic_recipe_write(w.path, bytes, host::replace_file);
     {
       std::lock_guard lock(w.mutex);
@@ -146,7 +201,8 @@ void save_loop(Worker& w) {
     lock.lock();
   }
 }
-VkResult compile(VkDevice device, VkPipelineCache cache, PipelineRecipe& recipe, WarmPipeline& out) {
+VkResult compile(VkDevice device, VkPipelineCache cache, PipelineRecipe& recipe, WarmPipeline& out,
+                 const char* traceKind = "startup_pipeline") {
   VkShaderModule modules[2]{};
   auto cleanup = [&] {
     for (auto module : modules) if (module) vkDestroyShaderModule(device, module, nullptr);
@@ -158,8 +214,9 @@ VkResult compile(VkDevice device, VkPipelineCache cache, PipelineRecipe& recipe,
     descriptor.pBindings = recipe.descriptors[stage].data();
     result = vkCreateDescriptorSetLayout(device, &descriptor, nullptr, &out.sets[stage]);
     if (result != VK_SUCCESS) break;
+    const auto words = recipe.words(stage);
     VkShaderModuleCreateInfo module{VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
-    module.codeSize = recipe.words(stage).size() * 4; module.pCode = recipe.words(stage).data();
+    module.codeSize = words.size() * 4; module.pCode = words.data();
     result = vkCreateShaderModule(device, &module, nullptr, &modules[stage]);
   }
   if (result == VK_SUCCESS) {
@@ -183,7 +240,7 @@ VkResult compile(VkDevice device, VkPipelineCache cache, PipelineRecipe& recipe,
     const auto cpuStart = stutter::trace().enabled() ? stutter::thread_cpu_now() : 0;
     const auto started = stutter::trace().enabled() ? stutter::now() : 0;
     result = vkCreateGraphicsPipelines(device, cache, 1, &info, nullptr, &out.pipeline);
-    if (started) stutter::trace().add("startup_pipeline", 0, std::hash<std::string>{}(identity(recipe.key)),
+    if (started) stutter::trace().add(traceKind, 0, std::hash<std::string>{}(identity(recipe.key)),
         started, stutter::now(), int(result), stutter::cpu_elapsed(cpuStart));
   }
   cleanup();
@@ -268,11 +325,18 @@ void run(Worker& w, std::vector<uint8_t> seed) {
       }
     }
     if (loaded.empty()) { w.result = {0, failed}; return; }
+    std::deque<std::shared_ptr<PipelineRecipe>> startup;
+    size_t grouped = 0;
     {
       std::lock_guard lock(w.mutex);
       std::erase_if(loaded, [&](const auto& recipe) {
         return w.consumed.contains(identity(recipe->key)) || !insert_recipe(w, recipe);
       });
+      // Grouped recipes wait for their archives; the rest (seen in play, the head start) are warmed now.
+      for (auto& recipe : loaded) {
+        if (recipe->groups.empty()) startup.push_back(recipe);
+        else ++grouped;
+      }
     }
     VkPipelineCacheCreateInfo ci{VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO};
     ci.initialDataSize = seed.size(); ci.pInitialData = seed.data();
@@ -283,38 +347,93 @@ void run(Worker& w, std::vector<uint8_t> seed) {
     }
     { std::unique_lock lock(w.cacheMutex); w.cache = cache; }
     std::vector<uint8_t>().swap(seed); // Vulkan copied initial cache data during creation.
-    std::fprintf(stderr, "[vulkan warmup] %zu exact pipeline recipes queued\n", loaded.size());
-    for (auto& recipe : loaded) {
-      // Demand has its own single compiler; stop issuing speculative work
-      // while it is busy. A driver call already in flight cannot be cancelled.
-      while (pipeline_demand_active() || vk::shader_compiler_active()) {
-        { std::lock_guard lock(w.mutex); if (w.stopped) break; }
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
-      }
-      auto key = identity(recipe->key);
-      {
-        std::lock_guard lock(w.mutex);
-        if (w.stopped) break;
-        if (w.consumed.contains(key)) { ++cancelled; continue; }
-      }
-      WarmPipeline result;
-      {
-        std::shared_lock cacheLock(w.cacheMutex);
-        if (compile(w.device, cache, *recipe, result) != VK_SUCCESS) { ++failed; continue; }
-        w.cacheChanged = true;
-      }
-      bool publish;
-      {
-        std::lock_guard lock(w.mutex);
-        publish = !w.stopped && !w.consumed.contains(key);
-        if (publish) {
-          try { retain_ready(w,key,result,recipe); }
-          catch (...) { destroy(w.device,result); throw; }
+    std::fprintf(stderr, "[vulkan warmup] %zu exact pipeline recipes queued, %zu wait for their object archives\n",
+                 startup.size(), grouped);
+    // Several compilers for archive prefetch (an archive's models are drawn a few frames after it loads); the
+    // driver pipeline cache is internally synchronized. Startup work stays one at a time and yields to demand.
+    std::atomic<size_t> prefetched{0}, done{0}, failures{0}, cancels{0};
+    auto loop = [&] {
+      host::set_thread_name("Vulkan warmup");
+      for (;;) {
+        std::shared_ptr<PipelineRecipe> recipe;
+        bool ahead = false;
+        {
+          std::unique_lock lock(w.mutex);
+          for (;;) {
+            if (w.stopped) break;
+            // Newly loaded archives (in the order the game's resource table lists them): their recipes go before
+            // any startup work.
+            if (!w.byGroup.empty() && pipeline_groups::generation() != w.residentGeneration) {
+              w.residentGeneration = pipeline_groups::generation();
+              const auto now = pipeline_groups::resident();
+              w.resident = std::unordered_set<uint32_t>(now.begin(), now.end());
+              std::erase_if(w.prefetched, [&](uint32_t group) { return !w.resident.contains(group); });
+              for (auto group : now) {
+                auto found = w.byGroup.find(group);
+                if (found == w.byGroup.end() || !w.prefetched.insert(group).second) continue;
+                for (auto& key : found->second) w.prefetch.push_back(key);
+              }
+              w.workWake.notify_all();
+            }
+            while (!w.prefetch.empty() && !recipe) {
+              auto key = std::move(w.prefetch.front()); w.prefetch.pop_front();
+              auto found = w.recipes.find(key);
+              if (found == w.recipes.end() || w.consumed.contains(key) || w.ready.contains(key) ||
+                  w.compiling.contains(key)) continue;
+              recipe = found->second; ahead = true;
+            }
+            if (recipe) break;
+            if (!startup.empty()) { recipe = std::move(startup.front()); startup.pop_front(); break; }
+            if (w.drainExit || w.byGroup.empty()) break;
+            w.workWake.wait_for(lock, std::chrono::milliseconds(50));
+          }
+          if (recipe) w.compiling.insert(identity(recipe->key));
         }
+        if (!recipe) break;
+        auto key = identity(recipe->key);
+        auto finished = [&] { std::lock_guard lock(w.mutex); w.compiling.erase(key); };
+        // Demand has its own single compiler; startup work waits while it is busy. A driver call already in
+        // flight cannot be cancelled.
+        while ((!ahead || prefetch_yields()) && (pipeline_demand_active() || vk::shader_compiler_active())) {
+          { std::lock_guard lock(w.mutex); if (w.stopped) break; }
+          std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        {
+          std::lock_guard lock(w.mutex);
+          if (w.stopped) { w.compiling.erase(key); break; }
+          if (w.consumed.contains(key)) { w.compiling.erase(key); ++cancels; continue; }
+        }
+        WarmPipeline result;
+        VkResult compiled;
+        {
+          std::shared_lock cacheLock(w.cacheMutex);
+          compiled = compile(w.device, cache, *recipe, result, ahead ? "prefetch_pipeline" : "startup_pipeline");
+          if (compiled == VK_SUCCESS) w.cacheChanged = true;
+        }
+        if (compiled != VK_SUCCESS) { finished(); ++failures; continue; }
+        bool publish;
+        {
+          std::lock_guard lock(w.mutex);
+          w.compiling.erase(key);
+          publish = !w.stopped && !w.consumed.contains(key);
+          if (publish) {
+            try { retain_ready(w,key,result,recipe); }
+            catch (...) { destroy(w.device,result); throw; }
+          }
+        }
+        if (publish) { ++done; prefetched += ahead; }
+        else { destroy(w.device, result); ++cancels; }
       }
-      if (publish) ++completed;
-      else { destroy(w.device, result); ++cancelled; }
-    }
+    };
+    const size_t helpers = grouped ? prefetch_threads() - 1 : 0;
+    std::vector<std::thread> pool;
+    for (size_t i = 0; i < helpers; ++i) pool.emplace_back([&] { try { loop(); } catch (...) {} });
+    loop();
+    { std::lock_guard lock(w.mutex); w.drainExit = true; }  // helpers leave too once the queues are empty
+    w.workWake.notify_all();
+    for (auto& thread : pool) thread.join();
+    completed += done; failed += failures; cancelled += cancels;
+    if (grouped) std::fprintf(stderr, "[vulkan warmup] %zu compiled ahead for loaded object archives\n", prefetched.load());
     std::fprintf(stderr, "[vulkan warmup] %zu ready, %zu failed, %zu cancelled\n", completed, failed, cancelled);
   } catch (const std::exception& error) {
     ++failed;
@@ -375,6 +494,27 @@ void remember_pipeline_recipe(std::shared_ptr<PipelineRecipe> recipe) {
   std::lock_guard lock(w.mutex);
   if (insert_recipe(w, recipe)) changed(w);
 }
+void note_pipeline_group(const std::vector<uint8_t>& key, uint32_t group) {
+  auto& w = worker();
+  if (!w.device || !group) return;
+  std::lock_guard lock(w.mutex);
+  auto id = identity(key);
+  auto found = w.recipes.find(id);
+  if (found == w.recipes.end()) return;
+  const auto& old = *found->second;
+  if (!old.state || old.groups.size() >= kPipelineRecipeMaxGroups ||
+      std::find(old.groups.begin(), old.groups.end(), group) != old.groups.end()) return;
+  // Published recipes are immutable (the saver may be encoding this one): replace it with a copy.
+  auto copy = std::make_shared<PipelineRecipe>();
+  copy->key = old.key; copy->spirv = old.spirv; copy->descriptors = old.descriptors;
+  copy->state = std::make_unique<GraphicsPipelineState>(*old.state);
+  copy->dynamicUniforms = old.dynamicUniforms; copy->sharedSpirv = old.sharedSpirv; copy->groups = old.groups;
+  copy->add_group(group);
+  w.recipeBytes += 4;
+  index_groups(w, id, *copy);
+  found->second = std::move(copy);
+  changed(w);
+}
 void checkpoint_pipeline_recipes() {
   auto& w=worker();
   if(!w.device) return;
@@ -389,6 +529,7 @@ void save_pipeline_recipes() {
   {
     std::lock_guard lock(w.mutex); w.stopped = true;
   }
+  w.workWake.notify_all();
   if (w.thread.joinable()) w.thread.join();
   {
     std::lock_guard lock(w.mutex); w.saveStopped = true;
@@ -415,9 +556,14 @@ bool merge_pipeline_worker_cache(VkPipelineCache target, bool wait) {
   std::fprintf(stderr, "[vulkan warmup] worker pipeline cache merged for persistence\n");
   return true;
 }
+static void leave_prefetch(Worker& w) {
+  { std::lock_guard lock(w.mutex); w.drainExit = true; }
+  w.workWake.notify_all();
+}
 PipelineWarmupResult warm_resolved_pipeline_recipes(std::vector<std::shared_ptr<PipelineRecipe>> recipes,
     const std::function<void(size_t)>& progress) {
   auto& w = worker();
+  leave_prefetch(w);
   if (w.thread.joinable()) w.thread.join();
   if (!w.device || recipes.size() > kPipelineRecipeMaxCount) return {0, recipes.size()};
   std::atomic<size_t> next{0}, ready{0}, failed{0}, finished{0};
@@ -477,6 +623,7 @@ PipelineWarmupResult warm_resolved_pipeline_recipes(std::vector<std::shared_ptr<
 }
 PipelineWarmupResult finish_pipeline_warmup() {
   auto& w = worker();
+  leave_prefetch(w);
   if (w.thread.joinable()) w.thread.join();
   return w.result;
 }

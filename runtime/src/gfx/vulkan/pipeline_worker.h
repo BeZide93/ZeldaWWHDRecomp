@@ -19,6 +19,8 @@ bool take_warm_pipeline(const std::vector<uint8_t>& key,
     const std::array<std::vector<VkDescriptorSetLayoutBinding>, 2>& descriptors,
     bool dynamicUniforms, const GraphicsPipelineState& currentState, WarmPipeline& out);
 void remember_pipeline_recipe(std::shared_ptr<PipelineRecipe> recipe);
+// The setup's model sweep drew a model of archive group `group` with this (portable) key: file the recipe under it too.
+void note_pipeline_group(const std::vector<uint8_t>& key, uint32_t group);
 // Explicit checkpoint/shutdown only: joins the worker and writes local recipes.
 void save_pipeline_recipes();
 // Save current dirty revision without stopping compiler or periodic persistence.

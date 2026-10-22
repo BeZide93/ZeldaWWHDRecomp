@@ -29,6 +29,7 @@
 #include "shader_binary.h"
 #include "stutter_trace.h"
 #include "../../dsweep.h"
+#include "../../pipeline_groups.h"
 #include "pipeline_state.h"
 #include "pipeline_worker.h"
 #include "pipeline_demand.h"
@@ -889,6 +890,17 @@ Pipeline &pipeline(const uint32_t *r, vk::Shader *vs, vk::Shader *ps,
                    const std::array<Surface *, 8> &colors, Surface *depth) {
   if(preparation_stats_enabled())++R.cpuPreparation.pipelineLookups;
   const PipelineKey key = pipeline_key(r, vs, ps, fs, topology, colors, depth);
+  // the setup's model sweep: every pipeline a swept archive's models use is filed under that archive (once each)
+  if (const uint32_t group = pipeline_groups::sweeping()) {
+    static std::unordered_set<uint64_t> noted;
+    const uint64_t id = PipelineKeyHash{}(key) * 1099511628211ull ^ group;
+    if (noted.insert(id).second) {
+      auto portable = key;
+      portable.vs = vs->pipelineId; portable.ps = ps->pipelineId;
+      const auto* bytes = reinterpret_cast<const uint8_t*>(&portable);
+      note_pipeline_group(std::vector<uint8_t>(bytes, bytes + sizeof portable), group);
+    }
+  }
   std::array<VkFormat, 8> formats{};
   uint32_t ncolor = 0;
   for (int i = 0; i < 8; i++) {
@@ -1347,6 +1359,7 @@ Pipeline &pipeline(const uint32_t *r, vk::Shader *vs, vk::Shader *ps,
     recipe->descriptors = std::move(descriptorBindings);
     recipe->dynamicUniforms = p.dynamicUniforms;
     recipe->state = std::make_unique<GraphicsPipelineState>(std::move(pipelineState));
+    recipe->add_group(pipeline_groups::sweeping());
     pending->recipe = std::move(recipe);
     // The owner waits for its ticket before destroying modules or itself.
     // Capturing a shared owner here would form an owner/ticket/job cycle.
@@ -1409,6 +1422,7 @@ Pipeline &pipeline(const uint32_t *r, vk::Shader *vs, vk::Shader *ps,
     recipe->descriptors = std::move(descriptorBindings);
     recipe->dynamicUniforms = p.dynamicUniforms;
     recipe->state = std::make_unique<GraphicsPipelineState>(std::move(pipelineState));
+    recipe->add_group(pipeline_groups::sweeping());
     remember_pipeline_recipe(std::move(recipe));
   }
   R.pipelineCacheDirty = true;
