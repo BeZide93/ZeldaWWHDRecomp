@@ -1293,6 +1293,8 @@ static void activate_submission(size_t index) {
   R.garbageCacheRegions=std::move(slot.garbageCacheRegions);
   R.recording=false;R.rendering=false;R.passTracked=false;
 }
+// depth peeks (depth_peek.h): the submission that carries the latest peek copy; retired on demand
+static uint64_t peekSubmission = 0, lastSubmissionSerial = 0;
 static void drain_submissions() {
   if(active_deferred_commands)active_deferred_commands->finish_exact();
   for(auto& slot:R.submissions)resolve_retained_submission(slot);
@@ -1368,6 +1370,7 @@ static void submit(VkSemaphore wait = VK_NULL_HANDLE,
   const auto seal=[&slot,owner]() noexcept {
     slot.serial=++nextSubmissionSerial;
     slot.recordedFrame=R.frame;
+    lastSubmissionSerial=slot.serial;
     slot.uploadBlocks=std::move(R.uploadBlocks);
     slot.completions=std::move(R.completions);
     slot.garbageBuffers=std::move(R.garbageBuffers);
@@ -1447,6 +1450,22 @@ static void submit(VkSemaphore wait = VK_NULL_HANDLE,
   }
 }
 unsigned submission_pool_slots() { return submissionPoolSlots; }
+void peek_submitted() { peekSubmission = lastSubmissionSerial; }
+void peek_retire() {
+  if (!peekSubmission) return;
+  // submissions sealed but still held by the ordered command stream are submitted first (as in
+  // drain_submissions), then retired oldest first up to the peek's (its fence covers the earlier ones)
+  for (auto& slot : R.submissions)
+    if (slot.serial <= peekSubmission) resolve_retained_submission(slot);
+  for (;;) {
+    Renderer::Submission* oldest = nullptr;
+    for (auto& slot : R.submissions)
+      if (slot.pending && slot.serial <= peekSubmission && (!oldest || slot.serial < oldest->serial)) oldest = &slot;
+    if (!oldest) break;
+    retire_submission(*oldest);
+  }
+  peekSubmission = 0;
+}
 void flush_async() {
   // Deferred objects may reference earlier queued work even if this slot has
   // no draw commands. Submit an empty command buffer to retire them in order.

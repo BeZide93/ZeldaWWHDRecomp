@@ -61,32 +61,64 @@ extern "C" void hook_0252E388(Cpu* c) {
 namespace gfx::depth_peek {
 namespace {
 AnswerGate g_gate;
+std::mutex g_publishMutex;
+std::unordered_map<uint32_t, uint64_t> g_completed;  // per destination: the newest ticket written
+struct Held { uint64_t ticket; uint32_t dst, depth; };
+std::vector<Held> g_held;  // mode 3: answers kept back until the game's swap after the next one
+void write_answer(uint64_t ticket, uint32_t dst, uint32_t depth) {  // under g_publishMutex
+    // Submission drains can retire newer fences before older ones. Never overwrite a newer answer.
+    if (!dst || g_completed[dst] >= ticket) return;
+    g_completed[dst] = ticket;
+    st32(dst, depth);
+    static const bool log = getenv("WWHD_PEEKZ_LOG") != nullptr;
+    if (log) LOG("[peekz] %08X: %06X", dst, depth);
 }
-bool synchronous() {
-    static const bool on = [] { const char* e = getenv("WWHD_PEEKZ_SYNC"); return !e || atoi(e) != 0; }();
-    return on;
 }
+int mode() {
+    static const int m = [] {
+        const char* e = getenv("WWHD_PEEKZ_SYNC");
+        const int v = e && *e ? atoi(e) : 1;
+        if (v != 1) LOG("[peekz] WWHD_PEEKZ_SYNC=%d: %s", v, v == 0 ? "answers whenever the GPU frame completes (not deterministic)"
+                        : v == 2 ? "test: synchronous copy at each peek" : v == 3 ? "test: answers two steps after the request"
+                        : "unknown, using 1");
+        return v >= 0 && v <= 3 ? v : 1;
+    }();
+    return m;
+}
+bool synchronous() { return mode() != 0; }
 void issued() { g_gate.issue(); }
 void answered() { g_gate.answer(); }
+bool outstanding() { return g_gate.open(); }
+bool wanted() { return g_gate.wanted(); }
+void set_render_wake(void (*wake)()) { std::lock_guard lock(g_gate.mutex); g_gate.wakeRender = wake; }
 void wait_answered() {
     if (!synchronous()) return;
+    if (mode() == 3) {
+        // the answers of the previous frame's requests are written now: the game reads them at its next
+        // step, two steps after it asked
+        static uint64_t previous = 0;
+        const uint64_t target = previous;
+        previous = g_gate.issued_count();
+        if (!g_gate.wait_until(target, std::chrono::seconds(5)))
+            LOG("[peekz] depth peeks not answered after 5 s; going on without them");
+        std::lock_guard lock(g_publishMutex);
+        auto keep = g_held.begin();
+        for (auto& h : g_held)
+            if (h.ticket <= target) write_answer(h.ticket, h.dst, h.depth);
+            else *keep++ = h;
+        g_held.erase(keep, g_held.end());
+        return;
+    }
     // the render thread answers in command order; a generous limit guards against a lost request
     if (!g_gate.wait(std::chrono::seconds(5)))
         LOG("[peekz] depth peeks not answered after 5 s; going on without them");
 }
 uint64_t next_ticket() { static std::atomic<uint64_t> serial{0}; return ++serial; }
 void publish(uint64_t ticket, const std::vector<uint32_t>& destinations, const std::vector<uint32_t>& depths) {
-    // Submission drains can retire newer fences before older ones. Never overwrite a newer answer.
-    static std::mutex mutex;
-    static std::unordered_map<uint32_t, uint64_t> completed;
-    std::lock_guard lock(mutex);
-    static const bool log = getenv("WWHD_PEEKZ_LOG") != nullptr;
+    std::lock_guard lock(g_publishMutex);
     for (size_t i = 0; i < destinations.size(); i++) {
-        uint32_t dst = destinations[i];
-        if (!dst || completed[dst] >= ticket) continue;
-        completed[dst] = ticket;
-        st32(dst, depths[i]);
-        if (log) LOG("[peekz] %08X: %06X", dst, depths[i]);
+        if (mode() == 3) g_held.push_back({ticket, destinations[i], depths[i]});
+        else write_answer(ticket, destinations[i], depths[i]);
     }
 }
 }

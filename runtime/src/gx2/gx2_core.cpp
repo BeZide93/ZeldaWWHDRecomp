@@ -324,6 +324,9 @@ static int64_t steady_ns() {
 }
 static void render_thread_main() {
     host::set_thread_name("GX2 render");
+    // the game thread waits at its swap for depth-peek answers: wake this thread's command wait so it
+    // retires the copies (gfx/depth_peek.h)
+    gfx::depth_peek::set_render_wake([] { { std::lock_guard<std::mutex> lk(g_q_mutex); } g_q_cv.notify_all(); });
     if (!r5_slow_render::apply("GX2 render")) host::boost_thread_priority();
     perf_hint::add_current_thread();
     thread_sampler::add_current_thread("render");
@@ -354,7 +357,18 @@ static void render_thread_main() {
                     }
                     lk.lock();
                 }
-                g_q_cv.wait(lk, [] { return !g_q_pending.empty(); });
+                // the game waits at its swap for depth-peek answers: retire their copy now (depth_peek.h)
+                while (g_q_pending.empty() && gfx::depth_peek::wanted()) {
+                    lk.unlock();
+                    {
+                        std::lock_guard<std::recursive_mutex> ex(g_exec_mutex);
+                        render::with_autorelease_pool([] { render::peek_retire(); });
+                    }
+                    lk.lock();
+                    if (gfx::depth_peek::wanted()) g_q_cv.wait_for(lk, std::chrono::microseconds(200));
+                }
+                g_q_cv.wait(lk, [] { return !g_q_pending.empty() || gfx::depth_peek::wanted(); });
+                if (g_q_pending.empty()) { lk.unlock(); continue; }  // woken for depth-peek answers: retire them
                 if (idle) rprof::add_idle(rprof::now_ns() - idle);
             }
             g_q_waiting = false;
@@ -697,7 +711,7 @@ static void execute_op(Op op, const uint32* p, uint32 n) {
     case OP_SET_CONTEXT: set_context(p[0]); break;
     case OP_INVALIDATE: render::invalidate(p[0], p[1], p[2]); break;
     case OP_EXPAND_COLOR: case OP_EXPAND_DEPTH: break;  // MSAA/HiZ decompression: nothing to do on the host
-    case OP_PEEK_Z: render::peek_z(p, n); gfx::depth_peek::answered(); break;
+    case OP_PEEK_Z: render::peek_z(p, n); break;  // answered (gfx::depth_peek) when its copy completes
     case OP_FLUSH: render::guest_flush(); break;  // Vulkan: asynchronous submission
     case OP_DRAW_DONE:
         // The Vulkan renderer writes GPU results back to guest memory only for linear surfaces (guest data is copied

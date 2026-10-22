@@ -2,6 +2,7 @@
 #include <cassert>
 #include <chrono>
 #include <limits>
+#include <atomic>
 #include <thread>
 
 int main() {
@@ -47,4 +48,25 @@ int main() {
     gate.issue();
     gate.answer();
     assert(gate.wait(0ms));
+
+    // the render thread retires copies only while the game thread waits (wanted), and is woken for it
+    gfx::depth_peek::AnswerGate waited;
+    static std::atomic<int> wakes{0};
+    waited.wakeRender = [] { wakes++; };
+    waited.issue();
+    assert(waited.open() && !waited.wanted());  // not waiting yet: the render thread stays idle
+    std::thread renderer([&] {
+        while (!waited.wanted()) std::this_thread::yield();  // the game waits now
+        waited.answer();
+    });
+    assert(waited.wait(5s) && wakes == 1 && !waited.wanted());
+    renderer.join();
+    // two steps (test mode 3): wait only for the earlier requests
+    waited.issue();
+    waited.issue();
+    assert(waited.issued_count() == 3);
+    assert(waited.wait_until(1, 0ms));       // the first request was handled long ago: no wait
+    assert(!waited.wait_until(2, 10ms));     // the second is not: the limit runs out (no resync)
+    waited.answer();
+    assert(waited.wait_until(2, 0ms) && waited.open());
 }
