@@ -762,8 +762,30 @@ extern "C" void f_025D4654(Cpu* c);
 // packets that a draw list still holds (as true60.cpp does for its half-pass previews).
 namespace interp {
 struct ActorKeep { uint32_t actor; std::vector<uint32_t> words; };
-constexpr uint32_t kProcessBase = 0xB8;  // sizeof(base_process_class) in WWHD (f_pc_base.h)
+// the process manager's part of an actor (f_pc_base.h, f_op_actor.h): base_process_class (+0 .. +0xB8:
+// state, layer, line, delete and priority tags), leafdraw_class (.. +0xC4: draw method and priority),
+// fopAc_ac_c's actor_type, actor_tag, draw_tag (+0xDC: the draw list's link), sub_method, heap (.. +0xF8)
+constexpr uint32_t kProcessTags = 0xF8;
 std::vector<ActorKeep> g_actor_kept;
+// The models such a draw calcs (J3DModel::calc 027F4D5C: the joint world matrices, model +0x2C ->
+// block +0x10, block +0x2C count) live outside the actor, and its next execute may read them: the
+// harbour boat (ikada) places its crane rope from joint 1's matrix (setRopePos). A boat the step's
+// logic pass culled but the 120 fps record pass drew had its matrices calced a step early and its
+// rope moved off the 30 fps one. Their matrices are saved before the calc and put back with the
+// actor. debug: WWHD_INTERP_KEEP_MODELS=0 leaves them calced
+uint32_t g_keep_drawing = 0;  // the kept actor whose draw is running
+struct ModelKeep { uint32_t mtx; std::vector<uint32_t> words; };
+std::vector<ModelKeep> g_model_kept;
+void model_calc_before(uint32_t model) {
+    static const bool off = getenv("WWHD_INTERP_KEEP_MODELS") && !atoi(getenv("WWHD_INTERP_KEEP_MODELS"));
+    if (!g_keep_drawing || off) return;
+    const uint32_t jnt = ld32(model + 0x2C), mtx = jnt ? ld32(jnt + 0x10) : 0, n = jnt ? ld16(jnt + 0x2C) : 0;
+    if (mtx < 0x10000000 || mtx >= 0x50000000 || n == 0 || n > 1024 || g_model_kept.size() >= 512) return;
+    for (const auto& k : g_model_kept)
+        if (k.mtx == mtx) return;
+    g_model_kept.push_back({mtx, std::vector<uint32_t>(12 * n)});
+    memcpy(g_model_kept.back().words.data(), ppc_ptr(mtx), 48 * n);
+}
 void actor_keep(uint32_t actor) {
     for (const auto& k : g_actor_kept)
         if (k.actor == actor) return;
@@ -793,17 +815,21 @@ void actors_put_back() {
         std::vector<uint32_t> keep;
         for (uint32_t i = 0x94 / 4; i < n; i++)
             if (cur[i] != it->words[i] && entered(i)) { keep.push_back(i); keep.push_back(i - (0x94 - 0x10) / 4); }
-        // (base_process_class, +0 .. +0xB8: the process manager's state and its queue tags. Logic after
-        // the draw in the same pass changes them: a scene change queues the room's actors for deletion
-        // (state, layer, line, delete and priority tags). Put back, the actor left the delete queue's
-        // view of it (delete tag cleared, still linked in the queue) and the next pass's deletion
-        // crashed on a null layer (fpcLy_DeletedMesg, 40/120 fps, a scene change at sea). No draw
-        // writes them: left alone. debug: WWHD_INTERP_KEEP_PROCESS_TAGS=0 puts them back too, as before)
+        // (the process manager's part, +0 .. kProcessTags: its state and queue tags. Logic after the draw
+        // in the same pass changes them: a scene change queues the room's actors for deletion (state,
+        // layer, line, delete, priority and draw tags). Put back, the actor left the delete queue's view
+        // of it (delete tag cleared, still linked in the queue) and the next pass's deletion crashed on
+        // a null layer (fpcLy_DeletedMesg, 40/120 fps, a scene change at sea); its draw tag went back
+        // into use. No draw writes them: left alone. debug: WWHD_INTERP_KEEP_PROCESS_TAGS=0 puts them
+        // back too, as before)
         static const bool tags_too = getenv("WWHD_INTERP_KEEP_PROCESS_TAGS") && !atoi(getenv("WWHD_INTERP_KEEP_PROCESS_TAGS"));
-        for (uint32_t i = tags_too ? 0 : kProcessBase / 4; i < n; i++)
+        for (uint32_t i = tags_too ? 0 : kProcessTags / 4; i < n; i++)
             if (cur[i] != it->words[i] && std::find(keep.begin(), keep.end(), i) == keep.end()) cur[i] = it->words[i];
     }
     g_actor_kept.clear();
+    for (auto it = g_model_kept.rbegin(); it != g_model_kept.rend(); ++it)
+        memcpy(ppc_ptr(it->mtx), it->words.data(), 4 * it->words.size());
+    g_model_kept.clear();
 }
 }  // namespace interp
 // Edge of the screen on blended logic passes: an actor the exact camera culls (so the 30 fps frame does
@@ -1873,7 +1899,7 @@ extern "C" void hook_0203593C(Cpu* c) {
     }
     if (!g_exact_writes.empty()) put_back_exact();
     if (!g_tev_kept.empty()) tevstr_put_back();
-    if (!g_actor_kept.empty()) actors_put_back();
+    if (!g_actor_kept.empty() || !g_model_kept.empty()) actors_put_back();
     clipper_put_back();
     // (the step's camera drawn blended last: exact again before the next step's logic)
     if (g_cam_exact_pending && (!cam_exact_back_on() || !enabled() || !g_hold_next)) {
@@ -2317,8 +2343,12 @@ extern "C" void hook_025D4654(Cpu* c) {
     const bool keep_condition = interp::enabled() && interp::g_hold && interp::exact_cull_on() && !true60::enabled();
     const uint32_t condition = keep_condition ? ld32(actor + 0x2E4) : 0;
     const Cpu saved = *c;
-    if (keep_condition && (condition & 0x04)) interp::actor_keep(actor);  // (not drawn by the step's logic pass)
+    const bool kept = keep_condition && (condition & 0x04);
+    if (kept) interp::actor_keep(actor);  // (not drawn by the step's logic pass)
+    const uint32_t keep_drawing = interp::g_keep_drawing;
+    if (kept) interp::g_keep_drawing = actor;  // (its models' matrices too: model_calc_before)
     if (!dsweep::hide_actor_draw(actor)) f_025D4654_orig(c);
+    interp::g_keep_drawing = keep_drawing;
     if (keep_condition) st32(actor + 0x2E4, condition);
     interp::edge_draw(saved, c, actor);
     dsweep::after_actor_draw(c, actor);  // debug D-sweep (WWHD_DSWEEP), off by default
