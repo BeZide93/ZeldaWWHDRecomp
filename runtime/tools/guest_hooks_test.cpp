@@ -414,6 +414,11 @@ namespace item_icons {
 void set_items(const std::vector<Item>&,const std::filesystem::path&) {}
 int frame(uint16_t) {return -1;}
 }
+namespace game_layouts {
+bool texture(const std::string&,Image&,std::string& error) {error="no game layouts in this test";return false;}
+bool texture_size(const std::string&,uint32_t&,uint32_t&) {return false;}
+bool pane(const std::string&,Pane&) {return false;}
+}
 namespace story_mail { void set_item_get_next(void (*)(Cpu*)) {} }
 namespace story_notebook {
 int32_t reach(const std::string&,const std::string&,uint32_t) {return kResultInvalid;}
