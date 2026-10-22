@@ -412,7 +412,7 @@ target_include_directories(mod_package_test PRIVATE runtime/src runtime/include)
 target_compile_options(mod_package_test PRIVATE -UNDEBUG)
 target_link_libraries(mod_package_test PRIVATE ZLIB::ZLIB Threads::Threads ${CMAKE_DL_LIBS})
 # World editor command layer (runtime/src/editor): commands, warp list, test-mode record reset, saving.
-add_executable(editor_test runtime/tools/editor_test.cpp runtime/src/editor/commands.cpp runtime/src/editor/commands_build.cpp runtime/src/editor/commands_game_objects.cpp runtime/src/editor/commands_game_pieces.cpp runtime/src/editor/commands_stages.cpp runtime/src/editor/stage_files.cpp
+add_executable(editor_test runtime/tools/editor_test.cpp runtime/src/editor/commands.cpp runtime/src/editor/commands_build.cpp runtime/src/editor/model_import.cpp runtime/src/editor/commands_game_objects.cpp runtime/src/editor/commands_game_pieces.cpp runtime/src/editor/commands_stages.cpp runtime/src/editor/stage_files.cpp
                            runtime/src/editor/commands_quest.cpp runtime/src/editor/commands_story.cpp runtime/src/editor/quests.cpp runtime/src/editor/commands_scene.cpp runtime/src/editor/demo_names.cpp runtime/src/editor/commands_route.cpp runtime/src/editor/commands_paths.cpp runtime/src/editor/commands_water.cpp runtime/src/editor/water.cpp runtime/src/editor/scenes.cpp runtime/src/editor/demo_tracks.cpp runtime/src/mods/story_native_scene_coverage.cpp ${WWHD_NPC_CATALOGUE})
 target_include_directories(editor_test PRIVATE runtime/src)
 target_compile_options(editor_test PRIVATE -UNDEBUG)
@@ -423,10 +423,17 @@ add_executable(editor_water_test runtime/tools/editor_water_test.cpp runtime/src
 target_include_directories(editor_water_test PRIVATE runtime/src)
 target_compile_options(editor_water_test PRIVATE -UNDEBUG)
 add_test(NAME editor_water COMMAND editor_water_test)
+# The model import's fixes (runtime/src/editor/model_import.cpp, issue #280): small GLBs made in the test (several mesh
+# objects, strips and fans, loose edges, vertex colours, blended materials, JPEG and oversized textures) come out as the
+# game's validator takes them, with a note for each change; a file that already fits is kept byte for byte.
+add_executable(editor_model_import_test runtime/tools/editor_model_import_test.cpp runtime/src/editor/model_import.cpp runtime/src/editor/water.cpp)
+target_include_directories(editor_model_import_test PRIVATE runtime/src)
+target_compile_options(editor_model_import_test PRIVATE -UNDEBUG)
+add_test(NAME editor_model_import COMMAND editor_model_import_test)
 # World editor MCP interface (runtime/src/editor/mcp.h): HTTP parsing, JSON-RPC, tools, token, Host / Origin,
 # size limit, confirm and path rules, and the loopback listener
 add_executable(editor_mcp_test runtime/tools/editor_mcp_test.cpp runtime/src/editor/mcp.cpp runtime/src/editor/mcp_server.cpp
-               runtime/src/editor/commands.cpp runtime/src/editor/commands_build.cpp runtime/src/editor/commands_game_objects.cpp runtime/src/editor/commands_game_pieces.cpp runtime/src/editor/commands_stages.cpp runtime/src/editor/stage_files.cpp
+               runtime/src/editor/commands.cpp runtime/src/editor/commands_build.cpp runtime/src/editor/model_import.cpp runtime/src/editor/commands_game_objects.cpp runtime/src/editor/commands_game_pieces.cpp runtime/src/editor/commands_stages.cpp runtime/src/editor/stage_files.cpp
                runtime/src/editor/commands_quest.cpp runtime/src/editor/commands_story.cpp runtime/src/editor/quests.cpp runtime/src/editor/commands_scene.cpp runtime/src/editor/demo_names.cpp runtime/src/editor/commands_route.cpp runtime/src/editor/commands_paths.cpp runtime/src/editor/commands_water.cpp runtime/src/editor/water.cpp runtime/src/editor/scenes.cpp runtime/src/editor/demo_tracks.cpp runtime/src/mods/story_native_scene_coverage.cpp ${WWHD_NPC_CATALOGUE})
 target_include_directories(editor_mcp_test PRIVATE runtime/src)
 target_compile_options(editor_mcp_test PRIVATE -UNDEBUG)
@@ -436,14 +443,14 @@ endif()
 target_link_libraries(editor_mcp_test PRIVATE Threads::Threads)
 add_test(NAME editor_mcp COMMAND editor_mcp_test)
 # The quest editor (runtime/src/editor/quests.cpp, commands_quest.cpp): graph, steps, start-at-step, flags, search, copy and paste.
-add_executable(editor_quest_test runtime/tools/editor_quest_test.cpp runtime/src/editor/commands.cpp runtime/src/editor/commands_build.cpp runtime/src/editor/commands_game_objects.cpp runtime/src/editor/commands_game_pieces.cpp runtime/src/editor/commands_stages.cpp
+add_executable(editor_quest_test runtime/tools/editor_quest_test.cpp runtime/src/editor/commands.cpp runtime/src/editor/commands_build.cpp runtime/src/editor/model_import.cpp runtime/src/editor/commands_game_objects.cpp runtime/src/editor/commands_game_pieces.cpp runtime/src/editor/commands_stages.cpp
                                  runtime/src/editor/stage_files.cpp runtime/src/editor/commands_quest.cpp runtime/src/editor/commands_story.cpp runtime/src/editor/quests.cpp runtime/src/editor/commands_scene.cpp runtime/src/editor/demo_names.cpp runtime/src/editor/commands_route.cpp runtime/src/editor/commands_paths.cpp runtime/src/editor/commands_water.cpp runtime/src/editor/water.cpp runtime/src/editor/scenes.cpp runtime/src/editor/demo_tracks.cpp runtime/src/mods/story_native_scene_coverage.cpp ${WWHD_NPC_CATALOGUE})
 target_include_directories(editor_quest_test PRIVATE runtime/src)
 target_compile_options(editor_quest_test PRIVATE -UNDEBUG)
 add_test(NAME editor_quests COMMAND editor_quest_test)
 # Letters on their own, treasure charts and items (runtime/src/editor/commands_story.cpp): add, set, remove and
 # list with undo, the validator's refusals, removing what is still used, icons, search and the quest graph.
-add_executable(editor_story_test runtime/tools/editor_story_test.cpp runtime/src/editor/commands.cpp runtime/src/editor/commands_build.cpp runtime/src/editor/commands_game_objects.cpp runtime/src/editor/commands_game_pieces.cpp runtime/src/editor/commands_stages.cpp
+add_executable(editor_story_test runtime/tools/editor_story_test.cpp runtime/src/editor/commands.cpp runtime/src/editor/commands_build.cpp runtime/src/editor/model_import.cpp runtime/src/editor/commands_game_objects.cpp runtime/src/editor/commands_game_pieces.cpp runtime/src/editor/commands_stages.cpp
                                  runtime/src/editor/stage_files.cpp runtime/src/editor/commands_quest.cpp runtime/src/editor/commands_story.cpp runtime/src/editor/quests.cpp
                                  runtime/src/editor/commands_scene.cpp runtime/src/editor/demo_names.cpp runtime/src/editor/commands_route.cpp runtime/src/editor/commands_paths.cpp runtime/src/editor/commands_water.cpp runtime/src/editor/water.cpp runtime/src/editor/scenes.cpp runtime/src/editor/demo_tracks.cpp runtime/src/mods/story_native_scene_coverage.cpp ${WWHD_NPC_CATALOGUE})
 target_include_directories(editor_story_test PRIVATE runtime/src)
@@ -451,7 +458,7 @@ target_compile_options(editor_story_test PRIVATE -UNDEBUG)
 add_test(NAME editor_story COMMAND editor_story_test)
 # A new, empty mod from the editor (new_mod): ids, duplicates, registration, opening, saving and exporting,
 # and nothing outside the new package folder changes.
-add_executable(editor_new_mod_test runtime/tools/editor_new_mod_test.cpp runtime/src/editor/commands.cpp runtime/src/editor/commands_build.cpp runtime/src/editor/commands_game_objects.cpp runtime/src/editor/commands_game_pieces.cpp runtime/src/editor/commands_stages.cpp
+add_executable(editor_new_mod_test runtime/tools/editor_new_mod_test.cpp runtime/src/editor/commands.cpp runtime/src/editor/commands_build.cpp runtime/src/editor/model_import.cpp runtime/src/editor/commands_game_objects.cpp runtime/src/editor/commands_game_pieces.cpp runtime/src/editor/commands_stages.cpp
                                    runtime/src/editor/stage_files.cpp runtime/src/editor/commands_quest.cpp runtime/src/editor/commands_story.cpp runtime/src/editor/quests.cpp
                                    runtime/src/editor/commands_scene.cpp runtime/src/editor/demo_names.cpp runtime/src/editor/commands_route.cpp runtime/src/editor/commands_paths.cpp runtime/src/editor/commands_water.cpp runtime/src/editor/water.cpp runtime/src/editor/scenes.cpp runtime/src/editor/demo_tracks.cpp runtime/src/mods/story_native_scene_coverage.cpp ${WWHD_NPC_CATALOGUE})
 target_include_directories(editor_new_mod_test PRIVATE runtime/src)
@@ -459,7 +466,7 @@ target_compile_options(editor_new_mod_test PRIVATE -UNDEBUG)
 add_test(NAME editor_new_mod COMMAND editor_new_mod_test)
 # The game's own villagers in the editor: the NPC catalogue's mapping of a loaded resident, list_villagers,
 # pick_villager and add_villager_talk (a new quest, a new step, a step's talk; one undo step each).
-add_executable(editor_villager_test runtime/tools/editor_villager_test.cpp runtime/src/editor/commands.cpp runtime/src/editor/commands_build.cpp runtime/src/editor/commands_game_objects.cpp runtime/src/editor/commands_game_pieces.cpp runtime/src/editor/commands_stages.cpp
+add_executable(editor_villager_test runtime/tools/editor_villager_test.cpp runtime/src/editor/commands.cpp runtime/src/editor/commands_build.cpp runtime/src/editor/model_import.cpp runtime/src/editor/commands_game_objects.cpp runtime/src/editor/commands_game_pieces.cpp runtime/src/editor/commands_stages.cpp
                                     runtime/src/editor/stage_files.cpp runtime/src/editor/commands_quest.cpp runtime/src/editor/commands_story.cpp runtime/src/editor/quests.cpp
                                     runtime/src/editor/commands_scene.cpp runtime/src/editor/demo_names.cpp runtime/src/editor/commands_route.cpp runtime/src/editor/commands_paths.cpp runtime/src/editor/commands_water.cpp runtime/src/editor/water.cpp runtime/src/editor/scenes.cpp runtime/src/editor/demo_tracks.cpp runtime/src/mods/story_native_scene_coverage.cpp ${WWHD_NPC_CATALOGUE})
 target_include_directories(editor_villager_test PRIVATE runtime/src)
@@ -467,7 +474,7 @@ target_compile_options(editor_villager_test PRIVATE -UNDEBUG)
 add_test(NAME editor_villagers COMMAND editor_villager_test)
 # The story tables while the game runs (story_reload.h, Session::apply_story): saved step numbers after an
 # edit, item changes that wait for a restart, and that story changes, undo and redo hand the game that mod's manifest.
-add_executable(editor_live_story_test runtime/tools/editor_live_story_test.cpp runtime/src/editor/commands.cpp runtime/src/editor/commands_build.cpp runtime/src/editor/commands_game_objects.cpp runtime/src/editor/commands_game_pieces.cpp runtime/src/editor/commands_stages.cpp
+add_executable(editor_live_story_test runtime/tools/editor_live_story_test.cpp runtime/src/editor/commands.cpp runtime/src/editor/commands_build.cpp runtime/src/editor/model_import.cpp runtime/src/editor/commands_game_objects.cpp runtime/src/editor/commands_game_pieces.cpp runtime/src/editor/commands_stages.cpp
                                       runtime/src/editor/stage_files.cpp runtime/src/editor/commands_quest.cpp runtime/src/editor/commands_story.cpp runtime/src/editor/quests.cpp
                                       runtime/src/editor/commands_scene.cpp runtime/src/editor/demo_names.cpp runtime/src/editor/commands_route.cpp runtime/src/editor/commands_paths.cpp runtime/src/editor/commands_water.cpp runtime/src/editor/water.cpp runtime/src/editor/scenes.cpp runtime/src/editor/demo_tracks.cpp runtime/src/mods/story_native_scene_coverage.cpp ${WWHD_NPC_CATALOGUE})
 target_include_directories(editor_live_story_test PRIVATE runtime/src)
@@ -475,7 +482,7 @@ target_compile_options(editor_live_story_test PRIVATE -UNDEBUG)
 add_test(NAME editor_live_story COMMAND editor_live_story_test)
 # The scene editor (runtime/src/editor/scenes.cpp runtime/src/editor/demo_tracks.cpp, commands_scene.cpp): steps, camera keys, timeline and retiming, choices,
 # walking paths, triggers, the native version, previews, copy and paste, and a handle drag as one undo step.
-add_executable(editor_scene_test runtime/tools/editor_scene_test.cpp runtime/src/editor/commands.cpp runtime/src/editor/commands_build.cpp runtime/src/editor/commands_game_objects.cpp runtime/src/editor/commands_game_pieces.cpp runtime/src/editor/commands_stages.cpp
+add_executable(editor_scene_test runtime/tools/editor_scene_test.cpp runtime/src/editor/commands.cpp runtime/src/editor/commands_build.cpp runtime/src/editor/model_import.cpp runtime/src/editor/commands_game_objects.cpp runtime/src/editor/commands_game_pieces.cpp runtime/src/editor/commands_stages.cpp
                                  runtime/src/editor/stage_files.cpp runtime/src/editor/commands_quest.cpp runtime/src/editor/commands_story.cpp runtime/src/editor/quests.cpp
                                  runtime/src/editor/commands_scene.cpp runtime/src/editor/demo_names.cpp runtime/src/editor/commands_route.cpp runtime/src/editor/commands_paths.cpp runtime/src/editor/commands_water.cpp runtime/src/editor/water.cpp runtime/src/editor/scenes.cpp runtime/src/editor/demo_tracks.cpp runtime/src/mods/story_native_scene_coverage.cpp ${WWHD_NPC_CATALOGUE})
 target_include_directories(editor_scene_test PRIVATE runtime/src)

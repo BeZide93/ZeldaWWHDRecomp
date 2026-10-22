@@ -27,4 +27,15 @@ bool register_external(const std::string& identity,const std::string& path,unsig
 bool bounds_for(const std::string& archive,story_notebook::WorldPoint& minimum,story_notebook::WorldPoint& maximum);
 mod_actor::ModelRig rig_for(const std::string& archive);
 std::vector<std::string> clips_for(const std::string& archive);
+// Why a model of `mod` could not be prepared (prepare's last failure, or one note_failure recorded for a model built
+// elsewhere, a kit model): empty once it is prepared. The editor says this instead of "appears after a restart",
+// because a restart prepares it the same way and fails again (issue #280).
+std::string failure_for(const std::string& mod,const std::string& model);
+void note_failure(const std::string& mod,const std::string& model,const std::string& why);
+void clear_failure(const std::string& mod,const std::string& model);
+// prepare is running for this model now (the editor prepares on a thread of its own)
+bool preparing(const std::string& mod,const std::string& model);
+// A converter's reason as one plain line: terminal colour sequences (Python 3.13+ colours its tracebacks) and
+// control characters removed, at most 200 characters.
+std::string plain_reason(std::string text);
 }

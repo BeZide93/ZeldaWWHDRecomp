@@ -14,6 +14,8 @@
 #include "../mods/static_model_validation.h"
 #include "../mods/story_manifest.h"
 #include "commands.h"
+#include "model_import.h"
+#include <cstring>
 #include "ray_ground.h"
 #include "quests.h"
 
@@ -316,8 +318,16 @@ bool check_model_file(const std::string& path, Value& info, std::string& why) {
     std::ifstream f(file, std::ios::binary);
     std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
     if (bytes.size() != size) return why = "cannot read " + path, false;
+    return check_model_bytes(bytes, info, why);
+}
+bool check_model_bytes(const std::vector<uint8_t>& bytes, Value& info, std::string& why) {
+    if (bytes.size() > static_models::kMaxSourceBytes) {
+        char mb[32];
+        std::snprintf(mb, sizeof mb, "%.1f", double(bytes.size()) / (1024 * 1024));
+        return why = std::string("Size: the file is ") + mb + " MB; a model can be up to 8 MB.", false;
+    }
     info = Value();
-    info["size"] = double(size);
+    info["size"] = double(bytes.size());
     static_models::ModelInfo s;
     std::string problem;
     if (static_models::validate_glb(bytes, s, problem)) {
@@ -330,6 +340,8 @@ bool check_model_file(const std::string& path, Value& info, std::string& why) {
         info["texture_bytes"] = double(s.texture_bytes);
         info["bones"] = 0;
         info["clips"] = array();
+        info["minimum"] = point_value({s.minimum[0], s.minimum[1], s.minimum[2]});
+        info["maximum"] = point_value({s.maximum[0], s.maximum[1], s.maximum[2]});
         return true;
     }
     if (problem.find("skins, animations") == std::string::npos) return why = model_message(problem), false;
@@ -345,6 +357,72 @@ bool check_model_file(const std::string& path, Value& info, std::string& why) {
     info["bones"] = double(k.joints);
     info["clips"] = array();
     for (const auto& c : k.clips) info["clips"].array.push_back(Value(c.name));
+    info["minimum"] = point_value({k.minimum[0], k.minimum[1], k.minimum[2]});
+    info["maximum"] = point_value({k.maximum[0], k.maximum[1], k.maximum[2]});
+    return true;
+}
+
+float origin_gap(const WorldPoint& lo, const WorldPoint& hi) {
+    const double dx = std::max({double(lo.x), 0.0, -double(hi.x)}), dz = std::max({double(lo.z), 0.0, -double(hi.z)});
+    return float(std::sqrt(dx * dx + dz * dz));
+}
+bool off_origin(const WorldPoint& lo, const WorldPoint& hi) {
+    const double width = std::max(double(hi.x) - lo.x, double(hi.z) - lo.z);
+    const double gap = origin_gap(lo, hi);
+    return gap > 1000 && gap > width / 4;
+}
+void placed_bounds(const WorldPoint& lo, const WorldPoint& hi, const Value& actor, WorldPoint& low, WorldPoint& high) {
+    WorldPoint at{}, turn{}, scale{1, 1, 1};
+    read_point(actor.get("position"), at);
+    read_point(actor.get("rotation"), turn);
+    read_point(actor.get("scale"), scale);
+    const double k = 3.14159265358979323846 / 180;
+    const double cx = std::cos(turn.x * k), sx = std::sin(turn.x * k), cy = std::cos(turn.y * k), sy = std::sin(turn.y * k), cz = std::cos(turn.z * k), sz = std::sin(turn.z * k);
+    // RY * RX * RZ (mod_actor's matrix, the game's mDoMtx_ZXYrotS)
+    const double m[9] = {cy * cz + sy * sx * sz, -cy * sz + sy * sx * cz, sy * cx, cx * sz, cx * cz, -sx, -sy * cz + cy * sx * sz, sy * sz + cy * sx * cz, cy * cx};
+    low = {INFINITY, INFINITY, INFINITY};
+    high = {-INFINITY, -INFINITY, -INFINITY};
+    for (int corner = 0; corner < 8; ++corner) {
+        const double v[3] = {double(corner & 1 ? hi.x : lo.x) * scale.x, double(corner & 2 ? hi.y : lo.y) * scale.y, double(corner & 4 ? hi.z : lo.z) * scale.z};
+        const float w[3] = {float(m[0] * v[0] + m[1] * v[1] + m[2] * v[2] + at.x), float(m[3] * v[0] + m[4] * v[1] + m[5] * v[2] + at.y),
+                            float(m[6] * v[0] + m[7] * v[1] + m[8] * v[2] + at.z)};
+        low = {std::min(low.x, w[0]), std::min(low.y, w[1]), std::min(low.z, w[2])};
+        high = {std::max(high.x, w[0]), std::max(high.y, w[1]), std::max(high.z, w[2])};
+    }
+}
+WorldPoint room_origin(const std::string& stage, int room) { return stage == "sea" ? sea_room_centre(room) : WorldPoint{0, 0, 0}; }
+
+bool import_model_file(const std::string& path, std::vector<uint8_t>& bytes, Value& info, std::string& why) {
+    std::error_code ec;
+    const fs::path file = utf8_path(path);
+    if (!fs::is_regular_file(file, ec)) return why = "no file " + path, false;
+    std::string ext = file.extension().string();
+    for (char& c : ext) c = char(std::tolower((unsigned char)c));
+    if (ext != ".glb") return why = "a model is a .glb file (glTF 2.0, binary)", false;
+    // larger than a model may be: its textures may be scaled down on import
+    const auto size = fs::file_size(file, ec);
+    if (ec || size > kMaxImportBytes) {
+        char mb[32];
+        std::snprintf(mb, sizeof mb, "%.1f", double(size) / (1024 * 1024));
+        return why = std::string("Size: the file is ") + mb + " MB; a model to import can be up to 64 MB (the model in the package up to 8 MB).", false;
+    }
+    std::ifstream f(file, std::ios::binary);
+    std::vector<uint8_t> raw((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+    if (raw.size() != size) return why = "cannot read " + path, false;
+    // not a GLB at all: the check's own message
+    if (raw.size() < 12 || std::memcmp(raw.data(), "glTF", 4)) return check_model_bytes(raw, info, why);
+    model_import::Result fixed;
+    std::string problem;
+    if (!model_import::fix(raw, fixed, problem)) return why = "The model can't be imported: " + problem + ".", false;
+    if (!check_model_bytes(fixed.glb, info, why)) {
+        if (fixed.changed) why += " (after the import's own fixes)";
+        return false;
+    }
+    bytes = std::move(fixed.glb);
+    if (fixed.changed) {
+        info["import_fixes"] = array();
+        for (const auto& n : fixed.notes) info["import_fixes"].array.push_back(Value(n));
+    }
     return true;
 }
 
@@ -578,6 +656,28 @@ bool Session::where(const Value& p, Place& place, std::string& why) {
     return true;
 }
 
+namespace {
+// The bounds of one of the package's models (check_model_file's), false for a kit model or an unusable file.
+bool model_box(const std::string& dir, const Value& manifest, const std::string& model, WorldPoint& lo, WorldPoint& hi) {
+    const Value* m = by_id(manifest.get("models"), model);
+    if (!m || dir.empty() || m->get("kind").string() == "kit") return false;
+    Value info;
+    std::string w;
+    return check_model_file((fs::path(utf8_path(dir)) / utf8_path(m->get("source").string())).string(), info, w) &&
+           read_point(info.get("minimum"), lo) && read_point(info.get("maximum"), hi);
+}
+std::string metres_text(double units) {
+    char text[32];
+    std::snprintf(text, sizeof text, "%.0f m", units / 100);
+    return text;
+}
+std::string place_text(const WorldPoint& p) {
+    char text[64];
+    std::snprintf(text, sizeof text, "(%.0f, %.0f, %.0f)", double(p.x), double(p.y), double(p.z));
+    return text;
+}
+}  // namespace
+
 // ---------------------------------------------------------------- session: the building commands
 Value Session::dispatch_build(const std::string& command, const Value& p, std::string& why, bool& ok, bool& handled) {
     Value r;
@@ -726,6 +826,32 @@ Value Session::dispatch_build(const std::string& command, const Value& p, std::s
         if ((game || piece) && !id_ok(id)) return why = "an actor id is 1 to 32 lower-case letters, digits, '-', '_' or '.'", r;
         if (piece ? !new_game_piece(type, id, place, a, why) : game ? !new_game_object(type, id, place, p.get("options"), a, why) : !new_actor(type, id, place, text(p, "model"), pkg->manifest, p.get("options"), a, why)) return r;
         if (by_id(pkg->manifest.get("actors"), id)) return why = "the mod has an actor \"" + id + "\" already", r;
+        // A model made away from its origin (on an island export, which keeps the room's coordinates) is drawn that far
+        // from where it is placed. Added at Link or the camera, it goes to the room's origin, unturned, so it stands
+        // where it was modelled; a given position is kept, and the note says where it is drawn (issue #280).
+        std::string model_note;
+        if (WorldPoint lo, hi; a.get("kind").string() == "mod" && model_box(pkg->dir, pkg->manifest, text(p, "model"), lo, hi) && off_origin(lo, hi)) {
+            const std::string name = text(p, "model");
+            const std::string gap = metres_text(origin_gap(lo, hi));
+            const std::string room = place.stage == "sea" ? "sea room " + std::to_string(place.room) : place.stage + " room " + std::to_string(place.room);
+            if (p.get("at").string("link") != "position") {
+                const WorldPoint origin = room_origin(place.stage, place.room);
+                a["position"] = rounded(origin);
+                a.object.erase("rotation");
+                info.object.erase("snapped");  // the origin is where the model was made, not the ground below Link
+                info.object.erase("snap_note");
+                WorldPoint low, high;
+                placed_bounds(lo, hi, a, low, high);
+                model_note = name + " was modelled away from its origin (" + gap + " from it, as on an island export, which keeps the room's coordinates). It is placed at the origin of " +
+                             room + " " + place_text(origin) + ", unturned, so it stands where you modelled it: around " + place_text({(low.x + high.x) / 2, (low.y + high.y) / 2, (low.z + high.z) / 2}) +
+                             ". Its handle is that origin; move or turn it as a whole.";
+            } else {
+                WorldPoint low, high;
+                placed_bounds(lo, hi, a, low, high);
+                model_note = name + " was modelled away from its origin (" + gap + " from it): it is drawn around " + place_text({(low.x + high.x) / 2, (low.y + high.y) / 2, (low.z + high.z) / 2}) +
+                             ", not at the position given. Modelled on an island export, it stands where you modelled it at the origin of the room " + place_text(room_origin(place.stage, place.room)) + ", unturned.";
+            }
+        }
         ok = change(*pkg, "Add " + id, [&](Value& m, std::string& w) {
             // an actor that needs one of the mod's room paths (a wall cannon's firing area): the one
             // options.path names, or a new square area of 1600 units in front of it
@@ -770,6 +896,7 @@ Value Session::dispatch_build(const std::string& command, const Value& p, std::s
         r["id"] = id;
         r["actor"] = a;
         for (const auto& [k, v] : info.object) r[k] = v;
+        if (!model_note.empty()) r["note"] = model_note + (r.get("note").string().empty() ? std::string() : " " + r.get("note").string());
         if (piece && host_) {
             // the piece's set is built from the player's room archive if this mod has no copy yet
             const std::string ref = story_game_pieces::reference(type), state = host_->piece_state(pkg->mod, ref);
@@ -929,7 +1056,8 @@ Value Session::dispatch_build(const std::string& command, const Value& p, std::s
         return r;
     }
     if (command == "check_model") {
-        if (!check_model_file(text(p, "file"), r, why)) return r;
+        std::vector<uint8_t> bytes;  // what import_model would put into the package ("import_fixes": what it changes)
+        if (!import_model_file(text(p, "file"), bytes, r, why)) return r;
         ok = true;
         return r;
     }
@@ -954,7 +1082,8 @@ Value Session::dispatch_build(const std::string& command, const Value& p, std::s
         Value info;
         const bool kit = p.get("kit").type != Value::Null;
         if (!kit && (p.get("materials").type != Value::Null || p.get("material").type != Value::Null)) return why = "materials and material need kit (a room of the game)", r;
-        if (kit ? !check_kit_model_file(text(p, "file"), p, info, why) : !check_model_file(text(p, "file"), info, why)) return r;
+        std::vector<uint8_t> fixed;  // a static or skinned model as the package keeps it (model_import.h)
+        if (kit ? !check_kit_model_file(text(p, "file"), p, info, why) : !import_model_file(text(p, "file"), fixed, info, why)) return r;
         const fs::path from = utf8_path(text(p, "file"));
         const std::string id = p.get("id").type == Value::String ? p.get("id").text : slug(from.stem().string());
         if (!id_ok(id)) return why = "a model id is 1 to 32 lower-case letters, digits, '-', '_' or '.'", r;
@@ -963,14 +1092,22 @@ Value Session::dispatch_build(const std::string& command, const Value& p, std::s
         const fs::path to = utf8_path(pkg->dir) / utf8_path(source);
         std::error_code ec;
         bool created = false;
+        auto write = [&](const fs::path& where) {  // the fixed model (kit: the file as it is)
+            if (kit) return fs::copy_file(from, where, fs::copy_options::overwrite_existing, ec);
+            std::ofstream o(where, std::ios::binary | std::ios::trunc);
+            o.write(reinterpret_cast<const char*>(fixed.data()), std::streamsize(fixed.size()));
+            if (!o) ec = std::make_error_code(std::errc::io_error);
+            return bool(o);
+        };
         if (fs::exists(to, ec)) {
             std::ifstream a(from, std::ios::binary), b(to, std::ios::binary);
-            const std::string x((std::istreambuf_iterator<char>(a)), {}), y((std::istreambuf_iterator<char>(b)), {});
+            const std::string x = kit ? std::string((std::istreambuf_iterator<char>(a)), {}) : std::string(fixed.begin(), fixed.end());
+            const std::string y((std::istreambuf_iterator<char>(b)), {});
             if (x != y && !p.get("confirm").boolean) return why = "the package has a different " + source + ": \"confirm\": true replaces it", r;
-            if (x != y) fs::copy_file(from, to, fs::copy_options::overwrite_existing, ec);
+            if (x != y) write(to);
         } else {
             fs::create_directories(to.parent_path(), ec);
-            fs::copy_file(from, to, ec);
+            write(to);
             created = !ec;
         }
         if (ec) return why = "cannot copy the model into the package: " + ec.message(), r;
@@ -994,11 +1131,16 @@ Value Session::dispatch_build(const std::string& command, const Value& p, std::s
         }
         r["model"] = entry;
         r["info"] = info;
+        // what the import changed to make the file fit (model_import.h): said first, the file in the package is the fixed one
+        std::string fixes;
+        for (const auto& n : info.get("import_fixes").array) fixes += (fixes.empty() ? "" : " ") + n.string();
+        if (!fixes.empty()) r["fixes"] = info.get("import_fixes");
         if (host_) {
             std::string note, w;
             if (host_->prepare_model(pkg->mod, pkg->dir, entry, note, w)) r["note"] = note;
             else r["note"] = "the model is in the package; it is prepared when the game starts (" + w + ")";
         }
+        if (!fixes.empty()) r["note"] = "Imported with changes: " + fixes + (r.get("note").string().empty() ? std::string() : " " + r.get("note").string());
         return r;
     }
     if (command == "set_model_kit" || command == "reload_model") {
@@ -1007,7 +1149,28 @@ Value Session::dispatch_build(const std::string& command, const Value& p, std::s
         const std::string id = text(p, "model");
         const Value* md = by_id(pkg->manifest.get("models"), id);
         if (!md) return why = "no model \"" + id + "\"", r;
-        if (md->get("kind").string() != "kit") return why = "only a kit model is built again while the game runs (another model takes a changed file at the next start)", r;
+        if (md->get("kind").string() != "kit") {
+            if (command == "set_model_kit") return why = "only a kit model has a kit room", r;
+            // a changed file in the package (exported again from Blender over it): the import's fixes applied to it in
+            // place; the game takes it at the next start (a static or animated model is prepared at start-up)
+            const fs::path file = fs::path(utf8_path(pkg->dir)) / utf8_path(md->get("source").string());
+            std::vector<uint8_t> bytes;
+            Value info;
+            if (!import_model_file(file.string(), bytes, info, why)) return r;
+            std::string fixes;
+            for (const auto& n : info.get("import_fixes").array) fixes += (fixes.empty() ? "" : " ") + n.string();
+            if (!fixes.empty()) {
+                std::ofstream o(file, std::ios::binary | std::ios::trunc);
+                o.write(reinterpret_cast<const char*>(bytes.data()), std::streamsize(bytes.size()));
+                if (!o) return why = "cannot write " + file.string(), r;
+                r["fixes"] = info.get("import_fixes");
+            }
+            r["model"] = *md;
+            r["info"] = info;
+            r["note"] = (fixes.empty() ? std::string() : "Fixed in the package: " + fixes + " ") + "The game takes the changed model at the next start.";
+            ok = true;
+            return r;
+        }
         Value entry = *md;
         if (command == "set_model_kit") {
             if (p.get("kit").type != Value::Null) entry["kit"] = p.get("kit");
@@ -1047,6 +1210,19 @@ Value Session::dispatch_build(const std::string& command, const Value& p, std::s
             r["problems"].array.push_back(v);
         }
         r["valid"] = r["problems"].array.empty();
+        // models this computer could not prepare (the converter's reason): their actors are not in the game. A warning,
+        // since another computer may prepare them; never "after a restart", a restart fails the same way (issue #280)
+        if (host_)
+            for (const auto& m : pkg->manifest.get("models").array) {
+                const std::string failed = host_->model_failure(pkg->mod, m.get("id").string());
+                if (failed.empty()) continue;
+                Value v;
+                v["message"] = "model " + m.get("id").string() + " could not be prepared for the game: " + failed + ". Its actors are not in the game; a restart won't change that until the cause is fixed";
+                v["kind"] = "model";
+                v["id"] = m.get("id").string();
+                v["severity"] = "warning";
+                r["problems"].array.push_back(v);
+            }
         // the quest editor's own checks: warnings, they never block saving or exporting (quests.h)
         for (const auto& pr : quest_problems(pkg->mod, pkg->manifest)) {
             Value v;
@@ -1087,6 +1263,7 @@ Value Session::dispatch_build(const std::string& command, const Value& p, std::s
         if (!host_) return why = "the game is not running", r;
         // a world object (a building, a pond, a river): its whole extent in the picture, from its middle
         float distance = 700;
+        bool framed = false;
         std::vector<story_notebook::ManifestActor> actors;
         std::string w;
         if (story_notebook::parse_actors(pkg->manifest, actors, w))
@@ -1098,7 +1275,16 @@ Value Session::dispatch_build(const std::string& command, const Value& p, std::s
                     if (!read_point(q.get("minimum"), lo) || !read_point(q.get("maximum"), hi)) break;
                     at = {(lo.x + hi.x) / 2, (lo.y + hi.y) / 2, (lo.z + hi.z) / 2};
                     distance = std::clamp(std::max({hi.x - lo.x, hi.y - lo.y, hi.z - lo.z}) * 0.9f, 700.0f, 90000.0f);  // up to a square-wide one
+                    framed = true;
                 }
+        // an actor drawing one of the mod's models: the model where it is drawn, which for a model made away from its
+        // origin is not the actor's place (issue #280)
+        if (WorldPoint lo, hi; !place && !framed && a && a->get("kind").string() == "mod" && model_box(pkg->dir, pkg->manifest, a->get("model").string(), lo, hi)) {
+            WorldPoint low, high;
+            placed_bounds(lo, hi, *a, low, high);
+            at = {(low.x + high.x) / 2, (low.y + high.y) / 2, (low.z + high.z) / 2};
+            distance = std::clamp(std::max({high.x - low.x, high.y - low.y, high.z - low.z}) * 0.9f, 700.0f, 90000.0f);
+        }
         if (WorldPoint eye; read_point(p.get("eye"), eye)) {  // from a given place (below an island, say)
             if (!host_->look(eye, at, why)) return r;
             r["requested"] = true;

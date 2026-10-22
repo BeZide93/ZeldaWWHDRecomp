@@ -556,6 +556,7 @@ void load_world(const std::string& mod,const mods::json::Value& manifest,const s
             } catch(const std::exception& e) {
                 LOG("[world] %s: model %s is not ready and its actors are left out: %s",mod.c_str(),model.id.c_str(),e.what());
                 {std::lock_guard guard(g_world_model_notes_mutex);g_world_model_notes.push_back({mod,"Model "+model.id+" is not ready: "+e.what()});}
+                actor_model_cache::note_failure(mod,model.id,e.what());
                 failed_models.push_back(model.id);
             }
             continue;
@@ -575,6 +576,7 @@ void load_world(const std::string& mod,const mods::json::Value& manifest,const s
         } catch(const std::exception& e) {
             LOG("[world] %s: model %s is not ready and its actors are left out: %s",mod.c_str(),model.id.c_str(),e.what());
             {std::lock_guard guard(g_world_model_notes_mutex);g_world_model_notes.push_back({mod,"Model "+model.id+" is not ready: "+e.what()});}
+            actor_model_cache::note_failure(mod,model.id,e.what());
             failed_models.push_back(model.id);
         }
     }

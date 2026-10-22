@@ -203,6 +203,13 @@ public:
     virtual bool prepare_model(const std::string& mod, const std::string& dir, const Value& model, std::string& note, std::string& why) {
         return why = "the game is not running", false;
     }
+    // Why a model of `mod` could not be prepared for the game on this computer (the converter's reason); empty when it
+    // is prepared, still being prepared or never was asked for. A restart prepares it the same way, so it isn't
+    // "after a restart" (issue #280).
+    virtual std::string model_failure(const std::string& mod, const std::string& model) {
+        (void)mod, (void)model;
+        return {};
+    }
     // Snapshot query: collision geometry and placement/budget findings for one
     // parsed object, including motion, grapple points and island presentation. The host
     // synchronizes its geometry, wave envelope and protected world snapshot.
@@ -519,10 +526,28 @@ std::string free_id(const Value& list, const std::string& base);
 // A copy of the actor `a` under id `id`, with its own flags (each flag id gets the new id).
 Value duplicate_actor(const Value& a, const std::string& id);
 // A .glb file checked as the game would take it: {"kind", "size", "vertices", "triangles", "texture",
-// "bones", "clips"} or false with a message that says which limit (size, triangles, texture, bones,
+// "bones", "clips", "minimum", "maximum" (its bounds, game units)} or false with a message that says which limit (size, triangles, texture, bones,
 // clips, material) it breaks.
 bool check_model_file(const std::string& path, Value& info, std::string& why);
+bool check_model_bytes(const std::vector<uint8_t>& bytes, Value& info, std::string& why);
+// A .glb to import: made to fit the game's rules where it can be (model_import.h), then checked as check_model_file
+// does. `bytes` is the file the package keeps; info["import_fixes"] lists what was changed (absent: nothing).
+inline constexpr size_t kMaxImportBytes = 64 * 1024 * 1024;
+bool import_model_file(const std::string& path, std::vector<uint8_t>& bytes, Value& info, std::string& why);
 bool check_kit_model_file(const std::string& path, const Value& declaration, Value& info, std::string& why);
+// A model's place relative to its own origin (issue #280). Bounds are in game units, the GLB's metres x 100, as
+// check_model_file's "minimum" and "maximum" give them.
+// How far the geometry lies from the origin across the ground (x, z): 0 when the origin is under or inside it.
+float origin_gap(const WorldPoint& minimum, const WorldPoint& maximum);
+// Modelled away from its origin, as a model made on an island export is (the export keeps the room's coordinates):
+// the gap is over 10 m and over a quarter of the model's width.
+bool off_origin(const WorldPoint& minimum, const WorldPoint& maximum);
+// The world box of the model drawn by an actor with this "position", "rotation" (degrees) and "scale"; the game
+// turns a model as mDoMtx_ZXYrotS does (Y, then X, then Z).
+void placed_bounds(const WorldPoint& minimum, const WorldPoint& maximum, const Value& actor, WorldPoint& low, WorldPoint& high);
+// The place an off-origin model goes when it is added at Link or the camera: the origin of the room's coordinates,
+// as the island export has it (a sea square's centre at sea level; a stage's own origin).
+WorldPoint room_origin(const std::string& stage, int room);
 // Writes the package (manifest plus the package's own files, never game files) into `dest`, a new or
 // empty folder. `written`: the files.
 bool export_package(const std::string& dir, const Value& manifest, const std::string& dest, std::vector<std::string>& written, std::string& why);

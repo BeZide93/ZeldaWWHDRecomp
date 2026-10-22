@@ -791,7 +791,11 @@ public:
                 // a world object where it can't stand: not in the game until it is moved (said as such, not as a restart)
                 std::string list, room, held;
                 for (const auto& p : pending) {
-                    std::string& to = p.find("(Reload room)") != std::string::npos ? room : p.find(": can't stand here") != std::string::npos ? held : list;
+                    // a model that could not be prepared: not in the game until its cause is fixed (a restart fails the same way)
+                    const bool not_in_game = p.find(": can't stand here") != std::string::npos || p.find(" could not be prepared: ") != std::string::npos;
+                    // a model still being prepared: it appears by itself when ready (no restart)
+                    const bool soon = p.find("(Reload room)") != std::string::npos || p.find(" is being prepared: ") != std::string::npos;
+                    std::string& to = soon ? room : not_in_game ? held : list;
                     to += (to.empty() ? "" : "; ") + p;
                 }
                 std::string status = held.empty() ? "" : "Not in the game: " + held;
@@ -1386,12 +1390,14 @@ public:
                 try {
                     set = guestmods::editor_build_kit_model(mod, dir, mods::packages::package_data_directory(mod), model);
                 } catch (const std::exception& e) {
-                    return set_status("Model " + model.get("id").string() + ": " + e.what());
+                    actor_model_cache::note_failure(mod, model.get("id").string(), e.what());
+                    return set_status("Model " + model.get("id").string() + " could not be built: " + e.what());
                 }
                 post([mod, model, set](Cpu*) {
                     std::string w;
                     if (!story_kit_models::register_for_mod(mod, model.get("id").string(), *set, true, w))
                         return set_status("Model " + model.get("id").string() + ": " + w + " (it is prepared when the game starts)");
+                    actor_model_cache::clear_failure(mod, model.get("id").string());
                     set_status("Model " + model.get("id").string() + " is ready: built from your game files (" +
                                std::to_string(set->archive_bytes / 1024) + " KiB); actors can use it now");
                     reapply_mod(mod, model.get("id").string());
@@ -1402,7 +1408,11 @@ public:
         }
         std::thread([mod, dir, model] {
             std::string archive, w;
-            if (!guestmods::editor_prepare_model(mod, dir, mods::packages::package_data_directory(mod), model, archive, w)) return set_status("Model " + model.get("id").string() + ": " + w);
+            if (!guestmods::editor_prepare_model(mod, dir, mods::packages::package_data_directory(mod), model, archive, w)) {
+                // remembered (actor_model_cache::failure_for): its actors say why, not "after a restart"
+                actor_model_cache::note_failure(mod, model.get("id").string(), w);
+                return set_status("Model " + model.get("id").string() + " could not be prepared, its actors are not in the game: " + w);
+            }
             post([mod, model, archive](Cpu*) {
                 std::string w2;
                 if (model.get("collision").boolean && !mod_actor::register_collision(mod, model.get("id").string(), actor_model_cache::collision_for(archive)))
@@ -1416,6 +1426,7 @@ public:
         note = "The model is being prepared for the game; actors using it appear when it is ready.";
         return true;
     }
+    std::string model_failure(const std::string& mod, const std::string& model) override { return actor_model_cache::failure_for(mod, model); }
     bool prepare_piece(const std::string& mod, const std::string& id, std::string& note, std::string& why) override {
         if (!story_game_pieces::catalogue().find(id)) return why = "no such building", false;
         {

@@ -219,6 +219,7 @@ bool bounds_for(const std::string&,story_notebook::WorldPoint&,story_notebook::W
 std::string prepare(const std::string&,const story_notebook::ManifestModel&,const std::string&,const std::string&,const std::vector<std::string>&,const std::string&,const std::string&,bool,bool,const std::string&){return {}; }
 bool water_for(const std::string&){return false;}
 std::string material_for(const std::string&){return {};}
+void note_failure(const std::string&,const std::string&,const std::string&){}
 }
 #if defined(GUEST_HOOKS_TEST_NO_HOOKS) || defined(GUEST_HOOKS_TEST_EDITOR)
 namespace editor { bool launch_mode(){return true;} }   // --editor (NO_HOOKS: game code built without --mod-hooks)
