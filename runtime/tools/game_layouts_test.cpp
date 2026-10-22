@@ -129,7 +129,30 @@ static void layout_panes_and_material() {
     assert(img.rgba[3] == 255 && img.srgb);
 }
 
+static void enlarging() {
+    // a constant colour stays constant, the size grows; a transparent texel's colour does not bleed
+    game_layouts::Image flat{4, 3, Bytes(4 * 3 * 4, 0), true};
+    for (size_t i = 0; i < flat.rgba.size(); i += 4) flat.rgba[i] = 200, flat.rgba[i + 1] = 100, flat.rgba[i + 2] = 50, flat.rgba[i + 3] = 255;
+    const game_layouts::Image big = game_layouts::upscale(flat, 3);
+    assert(big.width == 12 && big.height == 9 && big.srgb);
+    for (size_t i = 0; i < big.rgba.size(); i += 4)
+        assert(big.rgba[i] == 200 && big.rgba[i + 1] == 100 && big.rgba[i + 2] == 50 && big.rgba[i + 3] == 255);
+    game_layouts::Image half = flat;
+    for (size_t i = 0; i < half.rgba.size(); i += 4)
+        if ((i / 4) % 4 >= 2) half.rgba[i] = 0, half.rgba[i + 1] = 255, half.rgba[i + 2] = 0, half.rgba[i + 3] = 0;
+    const game_layouts::Image edge = game_layouts::upscale(half, 2);
+    for (size_t i = 0; i < edge.rgba.size(); i += 4)
+        if (edge.rgba[i + 3] > 8) assert(edge.rgba[i + 1] < 130);  // no green from the invisible half
+    assert(game_layouts::upscale(flat, 1).width == 4 && game_layouts::upscale(flat, 5).width == 4);
+    std::string l, it, m;
+    uint32_t f = 0;
+    assert(game_layouts::split_spec("BtnMapBalloon_00/r2c_b^t#P_DummyMapBig_00@3", l, it, m, f) && f == 3 && m == "P_DummyMapBig_00");
+    assert(game_layouts::split_spec("Map_00/MapShip_00^t", l, it, m, f) && f == 1);
+    assert(!game_layouts::split_spec("Map_00/MapShip_00^t@9", l, it, m, f));
+}
+
 int main() {
+    enlarging();
     exact_rgba8();
     bc_flat_blocks();
     bc4_modes();

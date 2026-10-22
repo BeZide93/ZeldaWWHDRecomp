@@ -259,6 +259,74 @@ void apply_material(Image& image, const Material& m) {
     image.srgb = true;
 }
 
+Image upscale(const Image& in, uint32_t factor) {
+    if (factor < 2 || factor > 4 || !in.width || !in.height) return in;
+    const uint32_t w = in.width * factor, h = in.height * factor;
+    if (w > 2048 || h > 2048) return in;
+    auto lanczos = [](double x) {
+        x = std::fabs(x);
+        if (x < 1e-9) return 1.0;
+        if (x >= 3) return 0.0;
+        const double px = 3.14159265358979323846 * x;
+        return 3 * std::sin(px) * std::sin(px / 3) / (px * px);
+    };
+    // premultiplied, linear floats; edges clamped
+    std::vector<float> src(size_t(in.width) * in.height * 4);
+    for (size_t i = 0; i < src.size(); i += 4) {
+        const float a = in.rgba[i + 3] / 255.0f;
+        for (int c = 0; c < 3; c++) src[i + c] = in.rgba[i + c] / 255.0f * a;
+        src[i + 3] = a;
+    }
+    auto pass = [&](const std::vector<float>& from, uint32_t fw, uint32_t fh, bool horizontal) {
+        const uint32_t tw = horizontal ? fw * factor : fw, th = horizontal ? fh : fh * factor;
+        const uint32_t n = horizontal ? fw : fh;
+        std::vector<float> to(size_t(tw) * th * 4, 0.0f);
+        const uint32_t outer = horizontal ? th : tw, inner = horizontal ? tw : th;
+        for (uint32_t o = 0; o < outer; o++)
+            for (uint32_t i = 0; i < inner; i++) {
+                const double centre = (i + 0.5) / factor - 0.5;
+                const int first = int(std::floor(centre)) - 2;
+                double acc[4] = {0, 0, 0, 0}, sum = 0;
+                for (int k = first; k < first + 6; k++) {
+                    const double wgt = lanczos(centre - k);
+                    const uint32_t kk = uint32_t(std::clamp(k, 0, int(n) - 1));
+                    const size_t at = horizontal ? (size_t(o) * fw + kk) * 4 : (size_t(kk) * fw + o) * 4;
+                    for (int c = 0; c < 4; c++) acc[c] += wgt * from[at + c];
+                    sum += wgt;
+                }
+                const size_t out = horizontal ? (size_t(o) * tw + i) * 4 : (size_t(i) * tw + o) * 4;
+                for (int c = 0; c < 4; c++) to[out + c] = float(acc[c] / sum);
+            }
+        return to;
+    };
+    const std::vector<float> wide = pass(src, in.width, in.height, true);
+    const std::vector<float> full = pass(wide, w, in.height, false);
+    Image out;
+    out.width = w, out.height = h, out.srgb = in.srgb;
+    out.rgba.resize(size_t(w) * h * 4);
+    for (size_t i = 0; i < out.rgba.size(); i += 4) {
+        const float a = std::clamp(full[i + 3], 0.0f, 1.0f);
+        for (int c = 0; c < 3; c++) {
+            const float v = a > 1e-4f ? full[i + c] / a : 0.0f;
+            out.rgba[i + c] = uint8_t(std::lround(std::clamp(v, 0.0f, 1.0f) * 255.0f));
+        }
+        out.rgba[i + 3] = uint8_t(std::lround(a * 255.0f));
+    }
+    return out;
+}
+
+bool split_spec(const std::string& spec, std::string& layout, std::string& item, std::string& material, uint32_t& factor) {
+    factor = 1;
+    std::string rest = spec;
+    if (rest.size() > 2 && rest[rest.size() - 2] == '@') {
+        const char f = rest.back();
+        if (f < '2' || f > '4') return false;
+        factor = uint32_t(f - '0');
+        rest.resize(rest.size() - 2);
+    }
+    return split_spec(rest, layout, item, material);
+}
+
 bool split_spec(const std::string& spec, std::string& layout, std::string& item, std::string& material) {
     layout.clear(), item.clear(), material.clear();
     if (spec.size() > 128) return false;
@@ -336,7 +404,8 @@ void note_open(const std::string& guest_path, const std::string& host_path) {
 
 bool texture(const std::string& spec, Image& out, std::string& error) {
     std::string layout, item, material;
-    if (!split_spec(spec, layout, item, material)) {
+    uint32_t factor = 1;
+    if (!split_spec(spec, layout, item, material, factor)) {
         error = "invalid layout texture name";
         return false;
     }
@@ -358,6 +427,7 @@ bool texture(const std::string& spec, Image& out, std::string& error) {
             }
             apply_material(out, m->second);
         }
+        out = upscale(out, factor);
     } catch (const std::exception& e) {
         error = e.what();
         return false;

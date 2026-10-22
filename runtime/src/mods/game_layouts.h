@@ -48,10 +48,17 @@ void apply_material(Image& image, const Material& material);
 // (path separators, "..", over 64 bytes, characters other than A-Z a-z 0-9 _ ^ + - .).
 bool split_spec(const std::string& spec, std::string& layout, std::string& item, std::string& material);
 
+// Lanczos-3 enlargement by 2-4 (premultiplied alpha, clamped edges), for drawing small game art large
+// without the blur of bilinear scaling; the image as it is for another factor or above 2048 x 2048.
+Image upscale(const Image& image, uint32_t factor);
+// As split_spec, also taking a trailing "@2".."@4" (an enlargement factor; 1 without it).
+bool split_spec(const std::string& spec, std::string& layout, std::string& item, std::string& material, uint32_t& factor);
+
 // ---- the port ----
 // The game opened a file (fs.cpp): remember the host path of its 2D language pack.
 void note_open(const std::string& guest_path, const std::string& host_path);
-// "<Layout>/<texture>[#<material>]" as RGBA (at most 2048 x 2048). False with a short reason.
+// "<Layout>/<texture>[#<material>][@<2-4>]" as RGBA (at most 2048 x 2048; "@N" enlarges it N times with
+// upscale()). False with a short reason.
 bool texture(const std::string& spec, Image& out, std::string& error);
 // "<Layout>/<texture>": whether the texture exists and its size, without decoding it.
 bool texture_size(const std::string& spec, uint32_t& width, uint32_t& height);

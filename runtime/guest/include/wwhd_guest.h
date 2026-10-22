@@ -241,7 +241,8 @@ u32 wwhd_hud_clip(u32 list,const wwhd_hud_element* element);
 /* PNG path relative to this package's assets/ or textures/, or this mod's Data folder.
  * WWHD_HUD_GAME: a texture of the game's own layout art, read from the player's installed 2D pack of
  * the running language: "<Layout>/<texture>" (e.g. "Map_00/MapShip_00^t"), optionally "#<material>" to
- * colour it with that material's black/white colours as the game does. Older hosts return zero.
+ * colour it with that material's black/white colours as the game does, and "@2".."@4" at the end to get it
+ * enlarged that many times (Lanczos-3, for small art drawn large). Older hosts return zero.
  * Returns an owned handle, zero on failure. Reuse handles between logic steps. */
 u32 wwhd_hud_texture(u32 source,const char* path);
 u32 wwhd_hud_release(u32 image);
