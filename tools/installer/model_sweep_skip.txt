@@ -2,6 +2,7 @@
 # room (doors, shutters and others that need their room's data), and archives the title cannot load. Anything else
 # that stops the game is found and skipped by the sweep itself (shader-prebuild/model-sweep/<renderer>/skip.txt).
 # visit-<stage>: stages whose visit (entered from the title, no save loaded) stops the game.
+Ba1
 BFlower
 BigElf
 Bj8
@@ -11,6 +12,7 @@ Bm1
 Bm2
 Bm3
 Bm4
+Bm5
 Bst
 CmTrap
 door10
@@ -20,6 +22,7 @@ doorSH
 Ecube
 Fmastr1
 Gflag
+Gnd
 Hdai3
 Hi
 Humi5z
@@ -55,4 +58,5 @@ visit-Mjtower
 visit-sea_E
 Yfrlt00
 Zenshut
+zouK3
 zouK4
