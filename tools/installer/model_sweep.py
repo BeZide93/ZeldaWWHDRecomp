@@ -109,7 +109,7 @@ def culprit(progress_lines, skip):
     already."""
     start = len(progress_lines) - 1 - progress_lines[::-1].index('start') if 'start' in progress_lines else 0
     for line in reversed(progress_lines[start:]):
-        if line.startswith(('model ', 'load ', 'actor ', 'env ')):
+        if line.startswith(('model ', 'load ', 'actor ', 'env ', 'visit ')):
             name = line.split(' ', 1)[1]
             return None if name in skip else name
     return None
@@ -178,6 +178,14 @@ def run(executable, game, cache_root, renderer, identity, cache_env, line=lambda
         (state / 'identity.json').write_text(json.dumps(identity, sort_keys=True), encoding='utf-8')
     archives = state / 'archives.txt'
     archives.write_text(''.join(n + '\n' for n in object_archives(game)), encoding='utf-8')
+    # measurements only (WWHD_SETUP_MODEL_SWEEP_VISITS=1): enter every stage at its first room and draw it under its own
+    # environment (dsweep.cpp, stage visits)
+    visits = None
+    if os.environ.get('WWHD_SETUP_MODEL_SWEEP_VISITS') == '1':
+        visits = state / 'visits.txt'
+        rooms = {s: sorted(int(a[4:]) for a in names if a.startswith('Room')) for s, names in stage_archives(game).items()}
+        visits.write_text(''.join('%s %d\n' % (s, r[0]) for s, r in rooms.items() if r and s not in ('sea_T', 'Name')),
+                          encoding='utf-8')
     stages = state / 'stages.txt'
     stages.write_text(''.join('%s %s\n' % (stage, ' '.join(names)) for stage, names in stage_archives(game).items()),
                       encoding='utf-8')
@@ -199,6 +207,8 @@ def run(executable, game, cache_root, renderer, identity, cache_env, line=lambda
                 folder = tempfile.TemporaryDirectory(prefix='wwhd-model-sweep-')
             scratch = Path(stack.enter_context(folder))
             env = environment(os.environ, game, cache_env, renderer, state, archives, scratch, stages)
+            if visits:
+                env['WWHD_DSWEEP_VISIT'] = str(visits)
             (scratch / 'save').mkdir()
             output_path = scratch / 'output.log'
             output = stack.enter_context(output_path.open('wb'))
@@ -246,6 +256,8 @@ def run(executable, game, cache_root, renderer, identity, cache_env, line=lambda
         done_lines = _lines(progress_file)
         if 'sweep-done' in done_lines:
             return 'done'
+        if done_lines and done_lines[-1] == 'restart':  # an orderly restart the sweep asked for (not a stop)
+            continue
         skip = set(_lines(state / 'skip.txt'))
         name = culprit(done_lines, skip)
         log('Model preparation attempt %d stopped (%s); %s' % (

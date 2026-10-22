@@ -3,10 +3,13 @@
 // model of every object archive once with the game's own model and material code, so the renderer creates (and
 // records, with the archive) the pipelines those models need. See dsweep.cpp.
 #include <cstdint>
+#include <string>
 struct Cpu;
 namespace dsweep {
 // The batch being drawn (1-based), 0 outside a sweep; written by the game thread, read by the renderer's key log.
 int tag();
+// debug (WWHD_VK_PIPELINE_WHO): the guest call chain and the archive resources / actors the drawing code points to
+std::string describe_draw_context();
 // WWHD_DSWEEP_EXIT: true once the sweep is done (the display then quits in order, so the caches are saved)
 bool exit_requested();
 // fopAc_Draw hook, after the actor's own draw: runs the sweep from the player's draw (camera and lists are set up).

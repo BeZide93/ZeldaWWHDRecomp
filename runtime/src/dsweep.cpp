@@ -55,6 +55,7 @@
 #include "interp.h"
 #include "runtime.h"
 #include "gfx/renderer.h"
+#include "gx2/gx2_cmd.h"
 #include "guest_addr.h"
 #include "mods/guest_heap_query.h"
 #include "pipeline_groups.h"
@@ -121,7 +122,7 @@ struct Entry {
 };
 
 enum class Phase { Start, Resident, NextArchive, Loading, StageLoading, Sweeping, Draining, Environment, Actors, Plants,
-                   FileSelect, Done };
+                   FileSelect, Visits, Done };
 constexpr int kHeaps = 6;   // solid heaps alive at once: a batch's models live until kHeaps batches later
 constexpr int kDrain = 6;   // frames between an archive's last draw and its release (frames in flight)
 constexpr int kLoadFrames = 900;
@@ -636,6 +637,7 @@ void begin(Cpu* c) {
             if (l.rfind("actor-done ", 0) == 0) g.done.insert(l.substr(11));
             if (l.rfind("env-done ", 0) == 0) g.done.insert(l.substr(9));
             if (l == "file-select") g_file_select_seen = true;
+            if (l.rfind("visit-done ", 0) == 0) g.done.insert(l.substr(11));
         }
     }
     if (const char* list = std::getenv("WWHD_DSWEEP_ARCHIVES"))
@@ -787,6 +789,93 @@ void environment_step(Cpu* c) {
 // (no file is selected, nothing is saved).
 constexpr unsigned kFileSelectSteps = 240, kFileSelectTimeout = 2400;
 uint64_t g_file_select_from = 0, g_file_select_in = 0;
+// Stage visits (debug, WWHD_DSWEEP_VISIT=<file>, "<stage> <room>" per line; last): each stage entered with the
+// game's own stage change (the next stage request, as a door or the portable save states do) and drawn under its
+// own environment (lighting, fog, sky, its actors) for kVisitSteps, filed under "<stage>_Stage". The file select
+// (reached from the title only) then follows in a new attempt ("restart" in progress.txt).
+constexpr unsigned kVisitSteps = 150, kVisitTimeout = 3000;
+struct Visit { std::string stage; int room = 0; };
+std::vector<Visit> g_visits;
+size_t g_visit = 0;
+uint64_t g_visit_asked = 0, g_visit_in = 0;
+std::atomic<bool> g_visiting{false};
+Cpu* g_visit_cpu = nullptr;
+void begin_file_select();
+bool file_select_pending();
+void begin_visits() {
+    static const char* list = std::getenv("WWHD_DSWEEP_VISIT");
+    if (!list || !*list) return begin_file_select();
+    g_visits.clear();
+    for (auto& line : lines(list)) {
+        char stage[16] = {};
+        int room = 0;
+        if (std::sscanf(line.c_str(), "%15s %d", stage, &room) >= 1 && !g.done.count(std::string("visit-") + stage) &&
+            !g.skip.count(std::string("visit-") + stage))
+            g_visits.push_back({stage, room});
+    }
+    if (g_visits.empty()) return begin_file_select();
+    phase_time("visits");
+    g.phase = Phase::Visits;
+    g_visiting = true;
+    g_visit = 0;
+    g_visit_asked = g_visit_in = 0;
+}
+void visit_step(const std::string& current) {
+    const uint64_t now = interp::executed_steps();
+    if (g_visit >= g_visits.size()) {
+        g_visiting = false;
+        // the file select is reached from the title only: the next attempt starts there (an orderly restart)
+        if (file_select_pending()) {
+            flush_done(true);
+            progress("restart");
+            LOG("[dsweep] visits done: restarting for the file select");
+            g_abort = true;
+            g.phase = Phase::Done;
+            return;
+        }
+        return finish();
+    }
+    const Visit& v = g_visits[g_visit];
+    const uint32_t next = GD(0x1046F0B0) + 0x5140;  // dStage_nextStage_c: name[8], point, room, layer, enabled, wipe
+    if (!g_visit_asked) {
+        if (ld8(next + 12)) return;  // a stage change is in progress
+        progress("visit " + v.stage);
+        for (int i = 0; i < 8; ++i) st8(next + i, i < int(v.stage.size()) ? uint8_t(v.stage[i]) : 0);
+        st16(next + 8, 0);
+        st8(next + 10, uint8_t(v.room));
+        st8(next + 11, 0xFF);
+        st8(next + 13, 0);
+        if (current == "sea_T") {
+            // the title is not a play scene (its own next-stage check returns to the title): change to the play
+            // scene, which starts at the next stage, as the file select does (fopScnM_ChangeReq(scene, PLAY_SCENE))
+            st8(next + 12, 0);
+            const uint32_t scene = call(g_visit_cpu, GC(0x025DC80C), {ld32(GD(0x1047E6C4))});  // fopScnM_SearchByID
+            if (!mem2(scene) || !call(g_visit_cpu, GC(0x025DC86C), {scene, 7, 0, 5, 1})) {
+                LOG("[dsweep] visit %s: no scene change from the title", v.stage.c_str());
+                return;
+            }
+        } else {
+            st8(next + 12, 1);
+        }
+        g_visit_asked = now;
+        g_visit_in = 0;
+        const std::string group = v.stage + "_Stage";
+        pipeline_groups::set_sweeping(pipeline_groups::group_of(group.data(), group.size()));
+        g_tag = ++g.batch;
+        LOG("[dsweep] batch %d step %llu ns %lld: visit %s room %d", g.batch, (unsigned long long)now, (long long)now_ns(),
+            v.stage.c_str(), v.room);
+        return;
+    }
+    if (current == v.stage && !g_visit_in) g_visit_in = now;
+    const bool shown = g_visit_in && now - g_visit_in >= kVisitSteps;
+    if (!shown && now - g_visit_asked < kVisitTimeout) return;
+    if (!shown) LOG("[dsweep] visit %s: not reached (now in %s)", v.stage.c_str(), current.c_str());
+    progress(std::string(shown ? "visit-done visit-" : "visit-failed visit-") + v.stage);
+    g.done.insert("visit-" + v.stage);
+    ++g_visit;
+    g_visit_asked = 0;
+}
+bool file_select_pending() { return std::getenv("WWHD_DSWEEP_FILE_SELECT") && !g_file_select_seen; }
 void begin_file_select() {
     static const bool on = std::getenv("WWHD_DSWEEP_FILE_SELECT") != nullptr;
     if (!on || g_file_select_seen) return finish();
@@ -819,7 +908,7 @@ void begin_plants() {
 }
 void plants_step(Cpu* c) {
     const uint32_t packet = ld32(GD(0x1046F0B0) + 0x5AB8);
-    if (!mem2(packet, 0x1A5CC + 64 * 4)) return begin_file_select();
+    if (!mem2(packet, 0x1A5CC + 64 * 4)) return begin_visits();
     if (g_plant_frames++ == 0) {
         unsigned blades = 0, cut = 0;
         for (uint32_t room = 0; room < 64; ++room)
@@ -835,11 +924,11 @@ void plants_step(Cpu* c) {
     for (uint32_t room = 0; room < 64; ++room)
         if (ld32(packet + 0x1A5CC + room * 4)) call(c, GC(0x0254AC50), {packet + 0x1A5CC + room * 4});  // deleteData
     g_tag = 0;
-    begin_file_select();
+    begin_visits();
 }
 void begin_actors(Cpu* c) {
     static const bool on = std::getenv("WWHD_DSWEEP_ACTORS") != nullptr;
-    if (!on) return begin_file_select();
+    if (!on) return begin_visits();
     std::map<std::string, std::pair<uint16_t, int8_t>> table;  // the stage actor name table: name -> profile, argument
     const uint32_t names = GD(0x101EBFDC);
     for (uint32_t i = 0; i < 809; ++i) {
@@ -1097,6 +1186,100 @@ void after_execute(Cpu*) {
     g.frozen.clear();
 }
 
+// debug (WWHD_VK_PIPELINE_WHO=<file>, off by default): what draws a pipeline the renderer creates. The guest thread's
+// return chain (function addresses; names: build/names.tsv or the decomp) and the objects its registers and the
+// top of its stack point to: resources of the loaded object archives and stage resources ("<archive>:<entry>",
+// also through a J3DModel's model data at +4) and drawn actors ("actor <profile> <name>"). Reads only, except the
+// archives' entry names (resourceHashString) and stage resource lookups, which call the game's pure lookups.
+namespace {
+std::map<uint32_t, std::string> g_who_actors;  // actor -> "actor <profile> <name>" (drawn since the last frame)
+std::map<uint32_t, std::string> who_resources(Cpu* c) {
+    static uint64_t built = ~0ull;
+    static std::map<uint32_t, std::string> out;
+    const uint64_t now = interp::executed_steps();
+    if (built == now) return out;
+    built = now;
+    out.clear();
+    constexpr uint32_t kRowCount = 629;
+    const uint32_t rows = GD(0x1009BB1C);
+    for (uint32_t info : archive_infos()) {
+        const std::string name = cstring(info + 0x1C);
+        const uint32_t res = ld32(info + 0x60);
+        const int32_t count = int32_t(ld32(info + 0x84));
+        const uint32_t hash = call(c, GC(0x0273B264), {info + 0x1C, uint32_t(name.size())});  // resourceHashString
+        uint32_t entries = 0, entryCount = 0;
+        for (uint32_t r = 0; r < kRowCount; ++r)
+            if (ld32(rows + r * 12) == hash) entries = ld32(rows + r * 12 + 4), entryCount = ld32(rows + r * 12 + 8);
+        for (uint32_t e = 0; e < uint32_t(std::max(count, 0)) && e < 4096; ++e) {
+            const uint32_t data = ld32(res + e * 4);
+            if (!mem2(data)) continue;
+            const std::string entry = e < entryCount && mem2(entries, entryCount * 8) ? cstring(ld32(entries + e * 8), 128)
+                                                                                       : "#" + std::to_string(e);
+            out.emplace(data, name + ":" + entry);
+        }
+    }
+    if (!g.scratch) {
+        g.scratch = mem::host_alloc(0x1000, 32);
+        std::memset(mem::ptr(g.scratch), 0, 0x1000);
+    }
+    for (uint32_t info : path_infos()) {
+        const std::string stage = cstring(ld32(info + 0x10)), arc = cstring(ld32(info + 0x5C));
+        const uint32_t archive = ld32(info + 0xA8);
+        const uint32_t header = mem2(archive, 0x18) ? ld32(archive + 0x14) : 0;
+        if (stage.empty() || arc.empty() || !mem2(header, 0x68)) continue;
+        const uint32_t count = std::min<uint32_t>(ld16(header + 0x50), 256), models = rel(header + 0x20);
+        for (uint32_t i = 0; i < count && mem2(models + i * 16, 0x28); ++i) {
+            const std::string model = cstring(rel(rel(models + i * 16 + 0x24) + 4), 128);
+            if (model.empty()) continue;
+            if (const uint32_t data = stage_res(c, stage, arc, model + ".bmd"); mem2(data))
+                out.emplace(data, stage + "_" + arc + ":" + model + ".bmd");
+        }
+    }
+    return out;
+}
+}  // namespace
+std::string describe_draw_context() {
+    Cpu* c = threads::current();
+    if (!c) return "chain - objs - (not a guest thread)";
+    std::string text = "chain";
+    char b[48];
+    uint32_t sp = c->r[1];
+    for (int i = 0; i < 20 && sp >= 0x10000000u && sp < 0xF0000000u; ++i) {
+        const uint32_t prev = ld32(sp);
+        if (!prev || prev <= sp || prev - sp > 0x100000u) break;
+        std::snprintf(b, sizeof b, " %08X", ld32(prev + 4));
+        text += b;
+        sp = prev;
+    }
+    const auto resources = who_resources(c);
+    std::set<std::string> seen;
+    std::string objs;
+    auto look = [&](uint32_t w) {
+        if (!mem2(w)) return;
+        std::string what;
+        if (auto a = g_who_actors.find(w); a != g_who_actors.end()) what = a->second;
+        else if (auto r = resources.find(w); r != resources.end()) what = r->second;
+        else if (mem2(w, 8)) {
+            if (auto m = resources.find(ld32(w + 4)); m != resources.end()) what = "model of " + m->second;
+        }
+        if (!what.empty() && seen.insert(what).second && seen.size() <= 8) objs += " [" + what + "]";
+    };
+    for (int i = 3; i < 32; ++i) look(c->r[i]);
+    for (uint32_t a = c->r[1]; a < c->r[1] + 0x3000 && mem2(a, 4); a += 4) look(ld32(a));
+    return text + " | objs" + (objs.empty() ? std::string(" -") : objs);
+}
+void note_drawn_actor(uint32_t actor) {
+    static const bool on = std::getenv("WWHD_VK_PIPELINE_WHO") != nullptr;
+    if (on && !gx2::g_draw_context_provider) gx2::g_draw_context_provider = &describe_draw_context;
+    if (!on || !mem2(actor, 0x10) || g_who_actors.count(actor)) return;
+    const uint16_t profile = ld16(actor + 0xE);
+    std::string name = "?";
+    const uint32_t names = GD(0x101EBFDC);
+    for (uint32_t i = 0; i < 809; ++i)
+        if (ld16(names + i * 12 + 8) == profile) { name = name8(names + i * 12); break; }
+    g_who_actors.emplace(actor, "actor " + std::to_string(profile) + " " + name);
+}
+
 int tag() { return g_tag.load(std::memory_order_relaxed); }
 uint32_t pad_buttons(uint64_t frame) {
     // a title sweep: the boot's notice screen waits for A; pulse it until the title stage is up. Later the idle title
@@ -1105,6 +1288,7 @@ uint32_t pad_buttons(uint64_t frame) {
     if (!config().title || g_finished || frame % 60 >= 6) return 0;
     // the file select at the end: A on the title until it is up, then nothing
     if (g_file_select.load(std::memory_order_relaxed)) return g_in_file_select.load(std::memory_order_relaxed) ? 0 : 0x8000u;
+    if (g_visiting.load(std::memory_order_relaxed)) return 0;
     if (!g_title_seen.load(std::memory_order_relaxed)) return frame >= 120 ? 0x8000u : 0u;
     const int64_t last = g_last_draw_ns.load(std::memory_order_relaxed);
     return last && now_ns() - last > 2'000'000'000 ? 0x8000u : 0u;
@@ -1326,6 +1510,7 @@ void room_test(Cpu* c, uint32_t actor) {
 
 void after_actor_draw(Cpu* c, uint32_t actor) {
     if (!mem2(actor, 0x330)) return;
+    note_drawn_actor(actor);
     room_test(c, actor);
     publish_resident();
     const Config& cfg = config();
@@ -1353,6 +1538,7 @@ void after_actor_draw(Cpu* c, uint32_t actor) {
         LOG("[dsweep] stage \"%s\" at step %llu", current.c_str(), (unsigned long long)now);
     }
     if (g.phase == Phase::FileSelect) return file_select_step(current);
+    if (g.phase == Phase::Visits) return g_visit_cpu = c, visit_step(current);
     if (g.phase == Phase::Actors && cfg.title && !current.empty() && current != "sea_T" && !g_abort) {
         LOG("[dsweep] actor %s changed the stage to %s: ending this attempt", g.spawn.id().c_str(), current.c_str());
         g_abort = true;  // the supervisor skips it (the last "actor" line) and resumes

@@ -22,6 +22,8 @@
 #include <mutex>
 #include <thread>
 #include <unordered_map>
+#include <string>
+#include <vector>
 #include <vector>
 
 #include "gx2.h"
@@ -453,7 +455,32 @@ static void render_sync(int site = kSyncShutdown) {
     g_q_done_cv.wait(lk, [&] { return g_fence_done >= id; });
 }
 
+std::string (*g_draw_context_provider)() = nullptr;
+static std::mutex g_draw_context_mutex;
+static std::vector<std::string> g_draw_context_texts{"-"};
+static std::unordered_map<std::string, uint32_t> g_draw_context_ids;
+static std::atomic<uint32_t> g_draw_context{0};
+std::string current_draw_context() {
+    std::lock_guard<std::mutex> lk(g_draw_context_mutex);
+    const uint32_t id = g_draw_context.load(std::memory_order_relaxed);
+    return id < g_draw_context_texts.size() ? g_draw_context_texts[id] : "-";
+}
 void emit(Op op, const uint32* payload, uint32 n) {
+    static thread_local bool describing = false;
+    if (g_draw_context_provider && !describing && (op == OP_DRAW || op == OP_DRAW_INDEXED || op == OP_CALL) &&
+        !(recording() && recording()->start)) {
+        describing = true;
+        const std::string text = g_draw_context_provider();
+        uint32 id;
+        {
+            std::lock_guard<std::mutex> lk(g_draw_context_mutex);
+            auto [it, fresh] = g_draw_context_ids.try_emplace(text, uint32_t(g_draw_context_texts.size()));
+            if (fresh) g_draw_context_texts.push_back(text);
+            id = it->second;
+        }
+        emit(OP_DEBUG_CONTEXT, &id, 1);
+        describing = false;
+    }
     if (Recording* rec = recording(); rec && rec->start) {
         uint32 bytes = 4 * (n + 1);
         if (rec->pos + bytes > rec->end) {
@@ -627,6 +654,7 @@ static void execute_op(Op op, const uint32* p, uint32 n);
 static void execute_one(Op op, const uint32* p, uint32 n) {
     rprof::Op kind;
     switch (op) {
+    case OP_DEBUG_CONTEXT: g_draw_context.store(n ? p[0] : 0, std::memory_order_relaxed); return;
     case OP_CALL: execute_op(op, p, n); return;
     case OP_SET_REGS: case OP_SET_PROJ_REGS: kind = rprof::kOpRegs; break;
     case OP_DRAW: case OP_DRAW_INDEXED: kind = rprof::kOpDraw; rprof::classify_draw(); break;

@@ -12,6 +12,7 @@
 #pragma once
 #include <cstdint>
 #include <initializer_list>
+#include <string>
 
 namespace gx2 {
 
@@ -44,9 +45,15 @@ enum Op : uint32_t {
     // cloud research prototype (cloud_proto.cpp): brackets drawVrkumo's draws; payload: snapshot seq
     OP_CLOUDS_BEGIN,
     OP_CLOUDS_END,
+    // debug (WWHD_VK_PIPELINE_WHO): the drawing code's context id for the next draws (host-only, never recorded)
+    OP_DEBUG_CONTEXT,
     OP_COUNT
 };
 
+// debug draw provenance (WWHD_VK_PIPELINE_WHO): a provider (set by dsweep.cpp) describes the guest code issuing a
+// draw or display-list call; the render thread knows the description of the draw it executes
+extern std::string (*g_draw_context_provider)();
+std::string current_draw_context();
 // emit a command (records into the active display list, or executes now)
 void emit(Op op, const uint32_t* payload, uint32_t n);
 inline void emit(Op op, std::initializer_list<uint32_t> payload) { emit(op, payload.begin(), (uint32_t)payload.size()); }
