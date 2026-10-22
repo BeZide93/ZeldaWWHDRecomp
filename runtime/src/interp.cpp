@@ -1814,6 +1814,11 @@ std::string pass_cpu_report() {
 }  // namespace interp
 
 static void fader_between_passes();  // debug (WWHD_INTERP_FADER_TRACE), below
+namespace interp {
+// The game's other sead tasks (ResLoadTask: archive and stage loads) calc in the same frame as the
+// per-frame function, before it: this frame is a hold pass (frame interpolation, not true 60)
+bool frame_is_hold() { return interp_on() && !true60::enabled() && g_hold_next; }
+}  // namespace interp
 extern "C" void hook_0203593C(Cpu* c) {
     using namespace interp;
     // Opt-in countdown trace: scalar timing measurements only, no save or asset data.

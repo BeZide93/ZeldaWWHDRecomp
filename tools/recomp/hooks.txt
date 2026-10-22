@@ -11,6 +11,7 @@
 025D4654  # fopAc_Draw: one-shot no-draw requests of the step's logic hold for its in-between frames
 02715310  # HD UI screens' update after the process executes (end of fpcM_Management): logic, once per step
 025C5A8C  # shared minigame timer: HD puts its update in the draw slot; logic once per 30 Hz step
+0260C74C  # ResLoadTask::calc (sead task, calc on every frame): archive loads advance once per 30 Hz step
 @026277A8 # Boat-race timer formatting: presentation-only fractional milliseconds
 @026E9C24 # Shared HUD timer formatting: presentation-only fractional milliseconds
 024FFC40  # camera_draw: blended camera on logic passes

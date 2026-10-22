@@ -5,6 +5,7 @@
 
 namespace interp {
 uint64_t logic_steps();      // saved/restored 30 Hz scenario clock
+bool frame_is_hold();        // this frame's per-frame function runs a hold pass (no logic): for tasks that calc before it
 void record_executed_step(); // game thread; includes built-in turbo passes
 uint64_t executed_steps();    // actual actor logic passes, including true60 half steps
 int mode();                 // 0 off (30 fps), 1 frame interpolation (at fps()), 2 true 60
