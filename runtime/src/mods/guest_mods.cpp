@@ -1331,7 +1331,8 @@ void init() {
             for(size_t a=0;a<list.size();){size_t b=list.find(',',a);if(b==std::string::npos)b=list.size();
                 if(b>a)icons.push_back({key++,list.substr(a,b-a)});a=b+1;}
         }
-        item_icons::set_items(icons,g_icon_cache);
+        // the world editor: spare frames for items added while the game runs (item_icons.h, live icons)
+        item_icons::set_items(icons,g_icon_cache,editor::launch_mode()?item_icons::kSpareFrames:0);
         story_items::set_frame_source(item_icons::frame);
     }
     // Every service below claims game functions in the hook-flag table (g_mod_hook_flags), which only game
@@ -1566,6 +1567,7 @@ void init() {
     // Mod items (story_items.h): the game's item tables answer for the port's item numbers, only when a
     // loaded mod declares items.
     story_items::set_game_calls(call_original,[](Cpu* c,uint32_t fn,std::initializer_list<uint32_t> args){return guest_call(c,fn,args);});
+    if(editor::launch_mode())item_icons::set_game_calls([](Cpu* c,uint32_t fn,std::initializer_list<uint32_t> args){return guest_call(c,fn,args);},story_lyt_screen::safe_string("BtnItemIcon_00"));
     story_items::set_presenter(story_notebook::show_info);
     if(story_items::imported())story_mail::set_item_get_next(story_items::hooks::exec_item_get);
     // a mod treasure chart's chest (story_treasure_chest.h): its stand-in's execItemGet, before the mod items'
@@ -1809,7 +1811,7 @@ void logic_service(Cpu* c) {
             }
         }
     }
-    story_item_models::tick(c);story_item_get_icon::logic(hud::store().step());mod_actor::heap_sample(c);actor_sweep(c);story_scenes::tick(c,false,2);story_actors::service(c);
+    story_item_models::tick(c);story_item_get_icon::logic(hud::store().step());item_icons::service(c);mod_actor::heap_sample(c);actor_sweep(c);story_scenes::tick(c,false,2);story_actors::service(c);
     mod_stages::logic(c);
     story_native_wait_runtime::logic(c);
     story_scenes::demo_tick(c);

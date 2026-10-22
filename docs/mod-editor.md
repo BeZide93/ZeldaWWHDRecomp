@@ -475,8 +475,8 @@ form below adds a new one. Every change is one command, so Undo and Redo work fo
 Under each entry, **Used by** lists everything that names it. A chart or item that is still used can't be
 removed: change or remove those first (**Remove…** says so). **JSON** shows the whole entry to edit by hand
 (a field you take out is removed). Letters and charts change in the game at once, as quests do; of an item,
-its name, description, how many and use do, while a new item, its icon, held model and **hold_up** wait
-for a restart (see [Story changes while the game runs](#story-changes-while-the-game-runs)).
+its name, description, how many, use and icon do, and a new item works at once (up to eight per start),
+while a removed item, its held model and **hold_up** wait for a restart (see [Story changes while the game runs](#story-changes-while-the-game-runs)).
 
 ## Story changes while the game runs
 
@@ -491,8 +491,11 @@ the game again. Save the package to keep your changes: the next start reads the 
 
 These wait for a restart (save, then start the game again); the status bar names them after the change:
 
-- a new item and a removed item, and an item's icon, held model and **hold_up** (the game builds them
-  into its menus when it starts); its name, description, how many and use change at once;
+- a removed item, and an item's held model and **hold_up**; its name, description, how many, use and icon
+  change at once. A new item works at once too (its icon in the Delivery Bag, on the buttons and over Link's
+  head when he gets it): the editor starts the game with eight spare icon places, so up to eight items can be
+  added per start; the ninth waits for a restart. The Story tab says **Takes effect after a restart** next to
+  an item whose change waits;
 - a removed chart: the chart list keeps it until a restart. A new or changed chart shows in the chart
   list at once; its treasure's salvage point is set up when Link enters the sea room, so it follows
   there after **Reload room** or the next visit;

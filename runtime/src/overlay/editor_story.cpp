@@ -333,7 +333,8 @@ void item_fields(const Value& m, const Value& e) {
         ImGui::TextWrapped("%s: %s. Save, then start the game again.", kAfterRestart, why.c_str());
         ImGui::PopStyleColor();
     }
-    muted("Its name, description, how many and use change in the game at once; its held model and hold_up after a restart.");
+    muted("Its name, description, how many, use and icon change in the game at once, and a new item works at once while the "
+          "spare icon places last (eight per start); its held model and hold_up, and a removed item, after a restart.");
 }
 
 void selected_entry(const Value& m, const std::string& kind, const Value& e) {

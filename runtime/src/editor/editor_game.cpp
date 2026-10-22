@@ -42,6 +42,8 @@
 #include "../mods/story_npc_catalogue.h"
 #include "../mods/story_demo.h"
 #include "../mods/story_items.h"
+#include "../mods/story_bag.h"
+#include "../mods/item_icons.h"
 #include "../mods/story_mail.h"
 #include "../mods/story_mail_book.h"
 #include "../mods/story_manifest.h"
@@ -625,8 +627,17 @@ std::string joined(const std::vector<std::string>& list) {
     for (const auto& x : list) s += (s.empty() ? "" : ", ") + x;
     return s;
 }
+// What the running game can take of a mod's items live (story_reload::LiveIcons): the item icons' spare
+// frames of the editor launch mode (item_icons.h)
+story_reload::LiveIcons live_icons(const std::string& mod) {
+    story_reload::LiveIcons l;
+    if (!story_items::installed_hooks() || !item_icons::live_icons()) return l;
+    l.placed = [mod](const std::string& id) { return item_icons::has_frame(story_items::item_key(mod, id)); };
+    l.spare = item_icons::free_spares();
+    return l;
+}
 // The items of story_later, each "<id> (<why>)"
-std::vector<std::string> items_later(const Value& started, const Value& manifest) {
+std::vector<std::string> items_later(const std::string& mod, const Value& started, const Value& manifest) {
     std::vector<std::string> out;
     if (!story_items::installed_hooks()) {
         // no item hooks this session: every item that changed waits
@@ -637,15 +648,15 @@ std::vector<std::string> items_later(const Value& started, const Value& manifest
         }
         return out;
     }
-    return story_reload::restart_items(started, manifest);
+    return story_reload::restart_items(started, manifest, live_icons(mod));
 }
 // What of a story change waits for a restart (the note of apply_story)
-std::vector<std::string> story_later(const Value& started, const Value& manifest) {
+std::vector<std::string> story_later(const std::string& mod, const Value& started, const Value& manifest) {
     std::vector<std::string> later;
     const bool items_changed = !(started.get("items") == manifest.get("items"));
     if (items_changed && !story_items::installed_hooks()) later.push_back("the items (the game had no mod items at start-up)");
     else
-        for (const auto& i : items_later(started, manifest)) later.push_back("item " + i);
+        for (const auto& i : items_later(mod, started, manifest)) later.push_back("item " + i);
     for (const auto& id : story_reload::gone(
              [&] {
                  std::vector<std::string> ids;
@@ -704,9 +715,22 @@ void story_tick() {
             std::vector<story_notebook::ManifestItem> list;
             std::string w;
             if (story_notebook::parse_items(ch.manifest, list, w)) {
-                const auto live = story_reload::live_items(ch.started, ch.manifest);
-                for (const auto& item : list)
-                    if (std::find(live.begin(), live.end(), item.id) != live.end() && story_items::define(mod, ch.dir, item, w)) items++;
+                const auto live = story_reload::live_items(ch.started, ch.manifest, live_icons(mod));
+                for (const auto& item : list) {
+                    if (std::find(live.begin(), live.end(), item.id) == live.end()) continue;
+                    const std::optional<story_items::Item> before = story_items::find(mod, item.id);
+                    if (!story_items::define(mod, ch.dir, item, w)) {
+                        set_status("Item " + item.id + " is not changed in the game: " + w);
+                        continue;
+                    }
+                    items++;
+                    // a new item or a new icon (#270): its icon frame (a spare one for a new item) is drawn again
+                    const std::optional<story_items::Item> now = story_items::find(mod, item.id);
+                    if (now && item_icons::live_icons() && (!before || before->icon_hash != now->icon_hash || !item_icons::has_frame(now->key))) {
+                        if (item_icons::live_icon(now->key, now->icon_path) < 0) LOG("[editor] item %s: no icon frame left this session", item.id.c_str());
+                        story_bag::forget_icon(now->key);
+                    }
+                }
             }
         }
         // the loaded Quest Log keeps its step numbers: say where one now names another step
@@ -816,7 +840,7 @@ public:
             std::lock_guard<std::mutex> lk(g_story_mu);
             g_story_pending[mod] = {name, dir, started, manifest};
         }
-        const auto later = story_later(started, manifest);
+        const auto later = story_later(mod, started, manifest);
         note = "Quests, quest talks, letters and charts change in the game at the next calm moment (after a talk, a letter or a scene).";
         if (!later.empty()) note += " After a restart (save, then start the game again): " + joined(later) + ".";
         return true;
@@ -2154,7 +2178,7 @@ std::vector<std::string> items_after_restart(const std::string& mod) {
     try_with_session([&](Session& session) {
         const Value* started = session.started(mod);
         const Value* now = session.manifest(mod);
-        last[mod] = started && now ? items_later(*started, *now) : std::vector<std::string>{};
+        last[mod] = started && now ? items_later(mod, *started, *now) : std::vector<std::string>{};
     });
     return last[mod];
 }

@@ -413,7 +413,9 @@ void set_game_calls(void (*)(Cpu*,uint32_t),uint32_t (*)(Cpu*,uint32_t,std::init
 namespace hooks { void exec_item_get(Cpu*) {} }
 }
 namespace item_icons {
-void set_items(const std::vector<Item>&,const std::filesystem::path&) {}
+void set_items(const std::vector<Item>&,const std::filesystem::path&,unsigned) {}
+void set_game_calls(uint32_t (*)(Cpu*,uint32_t,std::initializer_list<uint32_t>),uint32_t) {}
+void service(Cpu*) {}
 int frame(uint16_t) {return -1;}
 Bytes picture(const std::string&) {return {};}
 }
@@ -444,6 +446,7 @@ void set_game_calls(void (*)(Cpu*,uint32_t),uint32_t (*)(Cpu*,uint32_t,std::init
 void install(const std::function<void(uint32_t,void (*)(Cpu*))>&) {}
 }
 namespace story_lyt_screen {
+uint32_t safe_string(const char*) {return 0;}
 void set_game_calls(void (*)(Cpu*,uint32_t),uint32_t (*)(Cpu*,uint32_t,std::initializer_list<uint32_t>)) {}
 void install(const std::function<std::string(uint32_t)>&,const std::function<void(uint32_t,void (*)(Cpu*))>&) {}
 void state_loaded() {}
