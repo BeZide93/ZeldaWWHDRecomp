@@ -21,6 +21,10 @@ what is on `devel` and not released yet (also in the
   instead of half, half, one and one step in turn. Camera turns are even.
 - **Even more moves smoothly** with frame interpolation: camera shake, the sky's clouds, eye movements, lava, scene
   wipes, chains, the Swift Sail and boost blur, debris, Valoo, light beams and searchlights.
+- **Fixed: fade-ins and fade-outs flickered** with frame interpolation (#273). Fades between scenes are smooth again
+  at 40, 60 and 120 fps.
+- **More moves smoothly** with frame interpolation: boss hit flashes, sand floors, cloth and flags, water masks, shadows
+  and mod HUDs. Objects at the screen edge no longer pop in or out between the game's steps.
 - **New setting: Shader compile** (Settings → Graphics). **Off** (the default) draws everything exactly and waits for
   shaders that aren't ready yet, as before. **Fast** keeps playing while new shaders compile and may leave out a few
   objects for a frame or two, for fewer stutters on first visits.
