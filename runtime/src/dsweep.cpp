@@ -54,6 +54,7 @@
 #include <vector>
 #include "interp.h"
 #include "runtime.h"
+#include "gfx/renderer.h"
 #include "guest_addr.h"
 #include "mods/guest_heap_query.h"
 #include "pipeline_groups.h"
@@ -119,7 +120,8 @@ struct Entry {
     std::string id() const { return stage.empty() ? arc : stage + "_" + arc; }
 };
 
-enum class Phase { Start, Resident, NextArchive, Loading, StageLoading, Sweeping, Draining, Actors, Done };
+enum class Phase { Start, Resident, NextArchive, Loading, StageLoading, Sweeping, Draining, Environment, Actors, Plants,
+                   FileSelect, Done };
 constexpr int kHeaps = 6;   // solid heaps alive at once: a batch's models live until kHeaps batches later
 constexpr int kDrain = 6;   // frames between an archive's last draw and its release (frames in flight)
 constexpr int kLoadFrames = 900;
@@ -164,6 +166,8 @@ struct State {
     std::set<std::string> archives_before;
 } g;
 std::atomic<bool> g_abort{false};  // an actor changed the stage: orderly exit, the supervisor skips it
+std::atomic<bool> g_file_select{false}, g_in_file_select{false};  // the last part: the title's file select
+bool g_file_select_seen = false;  // ... done in an earlier attempt
 
 std::string State::Spawn::id() const {
     char b[64];
@@ -209,7 +213,46 @@ void report_archives(const std::string& detail) {
     std::printf("WWHD-PROGRESS %zu %zu %s\n", std::min(g.done.size(), g.listed), g.listed, detail.c_str());
     std::fflush(stdout);
 }
+#ifdef WWHD_HAS_VULKAN
+}  // namespace
+}  // namespace dsweep
+namespace gfxvk { int64_t pipeline_recipes_durable_ns(); }
+namespace dsweep {
+namespace {
+#endif
+// Work is marked done ("...-done" lines) only once the pipelines it recorded are on disk: Vulkan saves its recipes
+// in snapshots (pipeline_recipes_durable_ns); Metal appends each one at once. A sweep that stops the game redoes
+// what was not saved yet instead of losing it.
+std::vector<std::pair<int64_t, std::string>> g_pending_done;
+void write_progress(const std::string& line);
+void flush_done(bool all) {
+#ifdef WWHD_HAS_VULKAN
+    const int64_t durable = render::vulkan() ? gfxvk::pipeline_recipes_durable_ns() : INT64_MAX;
+#else
+    const int64_t durable = INT64_MAX;
+#endif
+    size_t n = 0;
+    // (half a second of margin: the render thread records a frame's pipelines a little after the game drew it)
+    while (n < g_pending_done.size() && (all || (durable != INT64_MAX ? g_pending_done[n].first + 500'000'000 < durable : true)))
+        write_progress(g_pending_done[n++].second);
+    g_pending_done.erase(g_pending_done.begin(), g_pending_done.begin() + long(n));
+}
 void progress(const std::string& line) {
+    if (g.state_dir.empty()) return;
+    if (line.find("-done ") != std::string::npos && line.find("-done ") < 12) {
+        g_pending_done.emplace_back(now_ns(), line);
+        return flush_done(false);
+    }
+    write_progress(line);
+}
+// "phase <name> <seconds since this attempt started>" in progress.txt and the log, for setup's timing
+void phase_time(const char* name) {
+    char line[96];
+    std::snprintf(line, sizeof line, "phase %s %.1f", name, double(now_ns() - g.started_ns) / 1e9);
+    LOG("[dsweep] %s", line);
+    write_progress(line);
+}
+void write_progress(const std::string& line) {
     if (g.state_dir.empty()) return;
     if (FILE* f = std::fopen((g.state_dir + "/progress.txt").c_str(), "a")) {
         std::fprintf(f, "%s\n", line.c_str());
@@ -589,6 +632,8 @@ void begin(Cpu* c) {
             if (l.rfind("archive-done ", 0) == 0) g.done.insert(l.substr(13));
             if (l == "resident-done") resident_done = true;
             if (l.rfind("actor-done ", 0) == 0) g.done.insert(l.substr(11));
+            if (l.rfind("env-done ", 0) == 0) g.done.insert(l.substr(9));
+            if (l == "file-select") g_file_select_seen = true;
         }
     }
     if (const char* list = std::getenv("WWHD_DSWEEP_ARCHIVES"))
@@ -629,12 +674,15 @@ void begin(Cpu* c) {
     LOG("[dsweep] start: %zu resident archives (%zu models%s), %zu archives queued, %zu names skipped", g.resident.size(),
         g.models.size(), resident_done ? ", done before" : "", g.queue.size(), g.skip.size());
     g.phase = Phase::Resident;
+    phase_time("objects");
 }
 
 void finish() {
     g.phase = Phase::Done;
     g_tag = 0;
     pipeline_groups::set_sweeping(0);
+    flush_done(true);  // an orderly exit saves the rest
+    phase_time("end");
     progress("sweep-done");
     g_finished = true;
     LOG("[dsweep] done: %u models swept, %u create failures, %u archives loaded, %u load failures, %u actors shown "
@@ -657,9 +705,139 @@ uint32_t actor_of(Cpu* c, uint32_t id) {
     st32(g.scratch + 0x9F0, id);
     return call(c, GC(0x025D5218), {GC(0x025E1234), g.scratch + 0x9F0});  // fopAcIt_Judge(fpcSch_JudgeByID, &id)
 }
+// The environment sweep (WWHD_DSWEEP_ENV=1, after the archives): the title's sea, sky, clouds, fog and screen
+// passes at other times of day and in a storm, set with the game's own environment setters (the save's time of
+// day, dKy_change_colpat, dKyw_rain_set, the thunder mode as daVrbox's storm sets them), each held for a while,
+// then the title's own state is restored. Its pipelines are not filed under any archive: they compile at start.
+struct EnvState {
+    const char* name;
+    float degrees;  // time of day (0..360 for 24 hours)
+    int colpat, rain, thunder;
+};
+constexpr EnvState kEnvStates[] = {
+    {"dawn", 90, 0, 0, 0},     {"noon", 180, 0, 0, 0},       {"dusk", 255, 0, 0, 0},
+    {"night", 0, 0, 0, 0},     {"storm-day", 180, 1, 250, 1}, {"storm-night", 0, 1, 250, 1},
+};
+constexpr unsigned kEnvFrames = 150;  // steps per state: the palette blends and the rain builds up over time
+struct EnvSaved {
+    bool saved = false;
+    uint32_t time = 0, rainOrig = 0, thunder = 0;
+    uint8_t colpat = 0;
+    size_t next = 0;
+    unsigned frames = 0;
+} g_env;
+void begin_actors(Cpu* c);
+void env_apply(Cpu* c, const EnvState& e) {
+    const uint32_t info = ld32(GD(0x101F84DC));
+    if (mem2(info, 0x48)) st32(info + 0x44, f32_as_u32(e.degrees));
+    call(c, GC(0x0255FD48), {uint32_t(e.colpat)});  // dKy_change_colpat
+    call(c, GC(0x0257E7C0), {uint32_t(e.rain)});    // dKyw_rain_set
+    const uint32_t env = call(c, GC(0x02555D0C));   // dKy_getEnvlight
+    if (mem2(env, 0xAC0)) st32(env + 0xAB4, uint32_t(e.thunder));  // mThunderEff.mMode
+}
+void begin_environment(Cpu* c) {
+    static const bool on = std::getenv("WWHD_DSWEEP_ENV") != nullptr;
+    if (!on) return begin_actors(c);
+    const uint32_t info = ld32(GD(0x101F84DC)), env = call(c, GC(0x02555D0C));
+    if (!mem2(info, 0x48) || !mem2(env, 0xAC0)) return begin_actors(c);
+    g_env.saved = true;
+    g_env.time = ld32(info + 0x44);
+    g_env.rainOrig = ld32(env + 0xA44);  // mRainCountOrig (next to mRainCount +0xA40)
+    g_env.thunder = ld32(env + 0xAB4);
+    g_env.next = 0;
+    g_env.frames = kEnvFrames;
+    phase_time("environment");
+    g_tag = 0;
+    pipeline_groups::set_sweeping(0);
+    g.phase = Phase::Environment;
+}
+void environment_step(Cpu* c) {
+    if (++g_env.frames < kEnvFrames) return;
+    g_env.frames = 0;
+    // the previous state is done
+    if (g_env.next > 0) {
+        const std::string done = std::string("env-") + kEnvStates[g_env.next - 1].name;
+        progress("env-done " + done);
+        g.done.insert(done);
+    }
+    while (g_env.next < std::size(kEnvStates)) {
+        const EnvState& e = kEnvStates[g_env.next++];
+        const std::string id = std::string("env-") + e.name;
+        if (g.done.count(id) || g.skip.count(id)) continue;
+        progress("env " + id);
+        g_tag = ++g.batch;
+        LOG("[dsweep] batch %d step %llu ns %lld: %s", g.batch, (unsigned long long)interp::executed_steps(),
+            (long long)now_ns(), id.c_str());
+        env_apply(c, e);
+        return;
+    }
+    // the title's own environment again
+    const uint32_t info = ld32(GD(0x101F84DC)), env = call(c, GC(0x02555D0C));
+    if (mem2(info, 0x48)) st32(info + 0x44, g_env.time);
+    call(c, GC(0x0255FD48), {0u});
+    call(c, GC(0x0257E7C0), {g_env.rainOrig});
+    if (mem2(env, 0xAC0)) st32(env + 0xAB4, g_env.thunder);
+    g_tag = 0;
+    begin_actors(c);
+}
+// The file select (WWHD_DSWEEP_FILE_SELECT=1, last): A on the title opens it (the "Name" stage: its 2D screens,
+// backdrop and the transitions on the way); after kFileSelectSteps there the sweep ends. Nothing is chosen there
+// (no file is selected, nothing is saved).
+constexpr unsigned kFileSelectSteps = 240, kFileSelectTimeout = 2400;
+uint64_t g_file_select_from = 0, g_file_select_in = 0;
+void begin_file_select() {
+    static const bool on = std::getenv("WWHD_DSWEEP_FILE_SELECT") != nullptr;
+    if (!on || g_file_select_seen) return finish();
+    progress("file-select");
+    phase_time("file-select");
+    g.phase = Phase::FileSelect;
+    g_file_select_from = interp::executed_steps();
+    g_file_select = true;
+}
+void file_select_step(const std::string& stage) {
+    const uint64_t now = interp::executed_steps();
+    g_in_file_select = stage == "Name";
+    if (g_in_file_select && !g_file_select_in) g_file_select_in = now;
+    if ((g_file_select_in && now - g_file_select_in >= kFileSelectSteps) || now - g_file_select_from > kFileSelectTimeout) {
+        g_file_select = false;
+        finish();
+    }
+}
+// Plants (after the actors, which made the grass, flowers and trees the rooms place at the look-at point): the
+// grass packet (dComIfGp +0x5AB8, its rooms' data lists at +0x1A5CC, 64 rooms, data: +0x2 animation index, +0x40
+// next) draws grass with a wind animation and without one (a cut, dGrass_data_c::WorkAt: index -1) with other
+// shapes; every other blade loses its animation for a while, then they are removed with their rooms' lists
+// (dGrass_room_c::deleteData).
+constexpr unsigned kPlantFrames = 30;
+unsigned g_plant_frames = 0;
+void begin_plants() {
+    phase_time("plants");
+    g.phase = Phase::Plants;
+    g_plant_frames = 0;
+}
+void plants_step(Cpu* c) {
+    const uint32_t packet = ld32(GD(0x1046F0B0) + 0x5AB8);
+    if (!mem2(packet, 0x1A5CC + 64 * 4)) return begin_file_select();
+    if (g_plant_frames++ == 0) {
+        unsigned blades = 0, cut = 0;
+        for (uint32_t room = 0; room < 64; ++room)
+            for (uint32_t data = ld32(packet + 0x1A5CC + room * 4), n = 0; mem2(data, 0x44) && n < 1500; data = ld32(data + 0x40), ++n)
+                if (++blades % 2 == 0 && int8_t(ld8(data + 2)) < 8) st8(data + 2, 0xFF), ++cut;
+        progress("plants");
+        g_tag = ++g.batch;
+        LOG("[dsweep] batch %d step %llu ns %lld: plants (%u grass, %u without animation)", g.batch,
+            (unsigned long long)interp::executed_steps(), (long long)now_ns(), blades, cut);
+        return;
+    }
+    if (g_plant_frames < kPlantFrames) return;
+    for (uint32_t room = 0; room < 64; ++room)
+        if (ld32(packet + 0x1A5CC + room * 4)) call(c, GC(0x0254AC50), {packet + 0x1A5CC + room * 4});  // deleteData
+    g_tag = 0;
+    begin_file_select();
+}
 void begin_actors(Cpu* c) {
     static const bool on = std::getenv("WWHD_DSWEEP_ACTORS") != nullptr;
-    if (!on) return finish();
+    if (!on) return begin_file_select();
     std::map<std::string, std::pair<uint16_t, int8_t>> table;  // the stage actor name table: name -> profile, argument
     const uint32_t names = GD(0x101EBFDC);
     for (uint32_t i = 0; i < 809; ++i) {
@@ -685,6 +863,7 @@ void begin_actors(Cpu* c) {
     g.listed += all.size();
     for (const auto& sp : all)
         if (g.done.count(sp.id()) || g.skip.count(sp.name) || g.skip.count(sp.id())) g.done.insert(sp.id());
+    phase_time("actors");
     LOG("[dsweep] actors: %zu names, %zu to create (%zu placements)", table.size(), g.spawns.size(), g.placed.size());
     progress("actors");
     g.phase = Phase::Actors;
@@ -704,7 +883,7 @@ void actor_step(Cpu* c) {
         if (g.spawns.empty()) {
             g_tag = 0;
             pipeline_groups::set_sweeping(0);
-            return finish();
+            return begin_plants();
         }
         g.spawn = g.spawns.back();
         g.spawns.pop_back();
@@ -759,6 +938,7 @@ void actor_step(Cpu* c) {
 }
 
 void step(Cpu* c, uint32_t host) {
+    flush_done(false);
     const uint32_t name = g.scratch + 0x780, phase = g.scratch + 0x7F0;
     switch (g.phase) {
     case Phase::Start:
@@ -779,8 +959,12 @@ void step(Cpu* c, uint32_t host) {
             g.done.insert(g.queue.back().arc);  // swept with the resident archives (or not loadable by name)
             g.queue.pop_back();
         }
-        if (g.queue.empty()) return begin_actors(c);
+        if (g.queue.empty()) return begin_environment(c);
         g.entry = g.queue.back();
+        if (!g.entry.stage.empty()) {
+            static bool once = false;  // the phase's start, for setup's timing (setup.log)
+            if (!once) once = true, phase_time("rooms");
+        }
         g.archive = g.entry.id();
         g.queue.pop_back();
         std::memset(mem::ptr(name), 0, 0x78);  // the name and the load phase
@@ -879,8 +1063,12 @@ void step(Cpu* c, uint32_t host) {
         }
         g.phase = Phase::NextArchive;
         return;
+    case Phase::Environment:
+        return environment_step(c);
     case Phase::Actors:
         return actor_step(c);
+    case Phase::Plants:
+        return plants_step(c);
     case Phase::Done:
         return;
     }
@@ -913,6 +1101,8 @@ uint32_t pad_buttons(uint64_t frame) {
     // plays its story intro (no actor draws, so the sweep pauses): A there returns to the title. Never while the title
     // itself is up (A there opens the file select).
     if (!config().title || g_finished || frame % 60 >= 6) return 0;
+    // the file select at the end: A on the title until it is up, then nothing
+    if (g_file_select.load(std::memory_order_relaxed)) return g_in_file_select.load(std::memory_order_relaxed) ? 0 : 0x8000u;
     if (!g_title_seen.load(std::memory_order_relaxed)) return frame >= 120 ? 0x8000u : 0u;
     const int64_t last = g_last_draw_ns.load(std::memory_order_relaxed);
     return last && now_ns() - last > 2'000'000'000 ? 0x8000u : 0u;
@@ -1002,8 +1192,18 @@ void publish_resident() {
         if (!name.empty()) groups.push_back(pipeline_groups::group_of(name.data(), name.size()));
     }
     // and the stage resources (rooms, the stage archive, LODs) as <stage>_<archive>
+    static const bool trace = std::getenv("WWHD_DSWEEP_PUBLISH_LOG") != nullptr;  // debug: the stage resources published
+    std::string ids;
     for (uint32_t info : path_infos())
-        if (const std::string id = path_id(info); !id.empty()) groups.push_back(pipeline_groups::group_of(id.data(), id.size()));
+        if (const std::string id = path_id(info); !id.empty()) {
+            groups.push_back(pipeline_groups::group_of(id.data(), id.size()));
+            if (trace) ids += " " + id;
+        }
+    if (trace) {
+        static std::string previous;
+        if (ids != previous) LOG("[dsweep] stage resources published at step %llu:%s", (unsigned long long)now, ids.c_str());
+        previous = ids;
+    }
     pipeline_groups::publish(std::move(groups));
 }
 
@@ -1150,6 +1350,7 @@ void after_actor_draw(Cpu* c, uint32_t actor) {
         if (current == "sea_T") g_title_seen = true;
         LOG("[dsweep] stage \"%s\" at step %llu", current.c_str(), (unsigned long long)now);
     }
+    if (g.phase == Phase::FileSelect) return file_select_step(current);
     if (g.phase == Phase::Actors && cfg.title && !current.empty() && current != "sea_T" && !g_abort) {
         LOG("[dsweep] actor %s changed the stage to %s: ending this attempt", g.spawn.id().c_str(), current.c_str());
         g_abort = true;  // the supervisor skips it (the last "actor" line) and resumes

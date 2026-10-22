@@ -373,10 +373,13 @@ question of the text setup, or `--model-sweep`); setup remembers the choice, so 
 carries out Rebuild shader cache) runs it again. It runs for each prepared renderer (on macOS Metal and
 Vulkan at the same time, on one bar): the game starts hidden and muted from its title screen (no save is
 needed or touched), loads every object archive and every stage's rooms named in your game files and
-draws each of their models once, then shows every actor the rooms place for a few frames (made by the
-game, drawn, never running its logic, then removed), so the pipelines they need are recorded for this
-build and this computer (about 6 minutes on a recent Mac). Metal builds the recorded pipelines in the background at start; Vulkan builds an archive's
-pipelines when the game loads it (a room's when the room loads). Nothing from the game is shipped: the archive list is read from your
+draws each of their models once, shows the title's sea and sky at other times of day and in a storm,
+shows every actor the rooms place for a few frames (made by the game, drawn, never running its logic,
+then removed) and the grass they plant with and without its wind animation, and finally opens the file
+select, so the pipelines they need are recorded for this build and this computer (about 10 minutes on a
+recent Mac; the game runs without a frame limit meanwhile). Metal builds the recorded pipelines in the background at start; Vulkan builds an archive's
+pipelines when the game loads it (a room's when the room loads; the latest load first); pipelines of
+the title's own scene are built at start. Nothing from the game is shipped: the archive list is read from your
 own files and only names are stored. Cancelling keeps everything prepared so far; the next setup
 continues where it stopped. A model or actor that makes the game stop is skipped the next time
 (`shader-prebuild/model-sweep/<renderer>/skip.txt`, names only; `tools/installer/model_sweep_skip.txt` lists

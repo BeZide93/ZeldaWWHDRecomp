@@ -158,10 +158,15 @@ bool insert_recipe(Worker& w, const std::shared_ptr<PipelineRecipe>& recipe) {
 void changed(Worker& w) {
   w.revision.changed(); w.saveWake.notify_one();
 }
+std::atomic<int64_t> g_durableNs{0};  // steady-clock start of the last snapshot written (pipeline_recipes_durable_ns)
+int64_t steady_ns() {
+  return std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
+}
 void persist_snapshot(Worker& w) {
   std::lock_guard writer(w.persistenceMutex);
   std::vector<std::shared_ptr<PipelineRecipe>> snapshot;
   uint64_t revision;
+  const int64_t started = steady_ns();
   {
     std::lock_guard lock(w.mutex);
     if (!w.revision.dirty()) return;
@@ -176,6 +181,7 @@ void persist_snapshot(Worker& w) {
       std::lock_guard lock(w.mutex);
       w.revision.complete(revision);
     }
+    g_durableNs.store(started, std::memory_order_release);
     std::fprintf(stderr, "[vulkan warmup] saved %zu recipes (%zu bytes)\n", snapshot.size(), bytes.size());
   } catch (const std::exception& error) {
     std::fprintf(stderr, "[vulkan warmup] save failed: %s\n", error.what());
@@ -190,7 +196,10 @@ void save_loop(Worker& w) {
     if (w.saveStopped) break;
     // Only one bounded snapshot at a time; failures also back off for two
     // minutes, and an explicit checkpoint always saves the latest revision.
-    auto due = w.lastSave + std::chrono::seconds(120);
+    // (the setup's model sweep: every few seconds, so a sweep that stops the game loses little; dsweep.cpp marks
+    // its work done only once it is saved, pipeline_recipes_durable_ns)
+    static const int every = std::getenv("WWHD_DSWEEP") ? 5 : 120;
+    auto due = w.lastSave + std::chrono::seconds(every);
     if (w.saveWake.wait_until(lock, due, [&] { return w.saveStopped; })) break;
     lock.unlock();
     try { persist_snapshot(w); }
@@ -361,18 +370,21 @@ void run(Worker& w, std::vector<uint8_t> seed) {
           std::unique_lock lock(w.mutex);
           for (;;) {
             if (w.stopped) break;
-            // Newly loaded archives (in the order the game's resource table lists them): their recipes go before
-            // any startup work.
+            // Newly loaded archives: their recipes go before any startup work, and before the rest of earlier
+            // archives' (the newest load is the one about to be drawn: a room the player enters must not wait
+            // behind archives loaded long before).
             if (!w.byGroup.empty() && pipeline_groups::generation() != w.residentGeneration) {
               w.residentGeneration = pipeline_groups::generation();
               const auto now = pipeline_groups::resident();
               w.resident = std::unordered_set<uint32_t>(now.begin(), now.end());
               std::erase_if(w.prefetched, [&](uint32_t group) { return !w.resident.contains(group); });
+              std::vector<std::string> fresh;
               for (auto group : now) {
                 auto found = w.byGroup.find(group);
                 if (found == w.byGroup.end() || !w.prefetched.insert(group).second) continue;
-                for (auto& key : found->second) w.prefetch.push_back(key);
+                fresh.insert(fresh.end(), found->second.begin(), found->second.end());
               }
+              w.prefetch.insert(w.prefetch.begin(), fresh.begin(), fresh.end());
               w.workWake.notify_all();
             }
             while (!w.prefetch.empty() && !recipe) {
@@ -494,6 +506,13 @@ void remember_pipeline_recipe(std::shared_ptr<PipelineRecipe> recipe) {
   std::lock_guard lock(w.mutex);
   if (insert_recipe(w, recipe)) changed(w);
 }
+int64_t pipeline_recipes_durable_ns() {
+  auto& w = worker();
+  if (!w.device) return INT64_MAX;
+  std::lock_guard lock(w.mutex);
+  if (!w.revision.dirty()) return steady_ns();
+  return g_durableNs.load(std::memory_order_acquire);
+}
 void note_pipeline_group(const std::vector<uint8_t>& key, uint32_t group) {
   auto& w = worker();
   if (!w.device || !group) return;
@@ -502,7 +521,9 @@ void note_pipeline_group(const std::vector<uint8_t>& key, uint32_t group) {
   auto found = w.recipes.find(id);
   if (found == w.recipes.end()) return;
   const auto& old = *found->second;
-  if (!old.state || old.groups.size() >= kPipelineRecipeMaxGroups ||
+  // A pipeline first made outside the sweep's batches (the title's own scene: sea, sky, 2D) stays ungrouped, so it
+  // is compiled at start, not only once one of the archives drawn next to it loads.
+  if (!old.state || old.groups.empty() || old.groups.size() >= kPipelineRecipeMaxGroups ||
       std::find(old.groups.begin(), old.groups.end(), group) != old.groups.end()) return;
   // Published recipes are immutable (the saver may be encoding this one): replace it with a copy.
   auto copy = std::make_shared<PipelineRecipe>();

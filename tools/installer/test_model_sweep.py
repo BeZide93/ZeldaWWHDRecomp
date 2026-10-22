@@ -117,6 +117,8 @@ class ModelSweepTests(unittest.TestCase):
         self.assertEqual(self.run_sweep(game), 'done')
         listed = Path(game.calls[0][1]['WWHD_DSWEEP_STAGES']).read_text().splitlines()
         self.assertEqual(listed, ['A_mori Stage Room0', 'Name Stage', 'sea Stage Room1 Room10 LOD03 LODALL'])
+        for key in ('WWHD_DSWEEP_ENV', 'WWHD_DSWEEP_ACTORS', 'WWHD_DSWEEP_FILE_SELECT'):
+            self.assertEqual(game.calls[0][1][key], '1')
 
     def test_sweep_runs_hidden_and_muted_with_its_own_settings(self):
         game = FakeGame(self, ['ok'])
@@ -125,7 +127,7 @@ class ModelSweepTests(unittest.TestCase):
         self.assertEqual(command[1:3], ['--game', str(self.game)])
         for key, value in (('WWHD_NO_AUDIO', '1'), ('WWHD_HIDDEN_WINDOWS', '1'), ('WWHD_NO_HOST_INPUT', '1'),
                            ('WWHD_DSWEEP', 'title,1,2'), ('WWHD_DSWEEP_EXIT', '1'), ('WWHD_RENDERER_RUNTIME', 'vulkan'),
-                           ('WWHD_SHADER_CACHE', 'live/shaders.bin')):
+                           ('WWHD_SHADER_CACHE', 'live/shaders.bin'), ('WWHD_UNCAPPED', '1')):
             self.assertEqual(env[key], value)
         self.assertEqual(env['WWHD_HEADSTART'], '0')
         self.assertIn('door10', env['WWHD_DSWEEP_SKIP'].split(','))  # names that stop the game outside their room

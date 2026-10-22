@@ -26,7 +26,8 @@ STAGE_ARCHIVE = re.compile(r'^(.+)_(Stage|Room\d+|LOD\d+|LODALL)$')
 MAX_ATTEMPTS = 40          # attempts in a row that finish no archive or actor (each skips what it stopped at)
 MAX_ATTEMPTS_TOTAL = 1000  # attempts in all (actors that stop the game: a few seconds each)
 DEFAULT_SKIP = Path(__file__).with_name('model_sweep_skip.txt')
-STALL_SECONDS = 240        # no new line in progress.txt for this long: the attempt counts as a crash
+STALL_SECONDS = 60         # no new line in progress.txt for this long: the attempt counts as a crash (a model, room or
+                           # actor takes well under a second; a stuck game writes nothing more)
 
 
 def _pack_entries(path):
@@ -106,7 +107,7 @@ def culprit(progress_lines, skip):
     already."""
     start = len(progress_lines) - 1 - progress_lines[::-1].index('start') if 'start' in progress_lines else 0
     for line in reversed(progress_lines[start:]):
-        if line.startswith(('model ', 'load ', 'actor ')):
+        if line.startswith(('model ', 'load ', 'actor ', 'env ')):
             name = line.split(' ', 1)[1]
             return None if name in skip else name
     return None
@@ -139,13 +140,17 @@ def environment(base, game, cache_env, renderer, state, archives, scratch, stage
                WWHD_SETTINGS=str(scratch / 'settings.ini'), WWHD_DISPLAY_SETTINGS=str(scratch / 'display.plist'),
                WWHD_CONTROLS=str(scratch / 'controls.json'), WWHD_STATE_DIR=str(scratch / 'states'),
                WWHD_DSWEEP='title,1,2', WWHD_DSWEEP_ARCHIVES=str(archives), WWHD_DSWEEP_STATE=str(state),
-               WWHD_DSWEEP_EXIT='1')
+               WWHD_DSWEEP_EXIT='1',
+               # no frame limit: the game runs as fast as it can draw (faster than real time; nobody watches)
+               WWHD_UNCAPPED='1')
     default_skip = [n for n in _lines(DEFAULT_SKIP) if not n.startswith('#')]
     if default_skip:
         env['WWHD_DSWEEP_SKIP'] = ','.join(default_skip)
     if stages:
         env['WWHD_DSWEEP_STAGES'] = str(stages)
-        env['WWHD_DSWEEP_ACTORS'] = '1'  # then every actor (placements from the rooms), see dsweep.cpp
+        # then the title's scene at other times of day and in a storm, every actor the rooms place, and the file
+        # select (dsweep.cpp)
+        env.update(WWHD_DSWEEP_ENV='1', WWHD_DSWEEP_ACTORS='1', WWHD_DSWEEP_FILE_SELECT='1')
     env['WWHD_HEADSTART'] = '0'  # the sweep records pipelines; it warms nothing (and holds no generation)
     return env
 

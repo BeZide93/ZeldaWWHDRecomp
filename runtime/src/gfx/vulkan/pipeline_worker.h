@@ -21,6 +21,9 @@ bool take_warm_pipeline(const std::vector<uint8_t>& key,
 void remember_pipeline_recipe(std::shared_ptr<PipelineRecipe> recipe);
 // The setup's model sweep drew a model of archive group `group` with this (portable) key: file the recipe under it too.
 void note_pipeline_group(const std::vector<uint8_t>& key, uint32_t group);
+// Steady-clock time (ns) up to which every recipe recorded is on disk: the start of the last snapshot written, now
+// when nothing is unsaved, INT64_MAX without a worker (the setup's model sweep marks work done only once saved).
+int64_t pipeline_recipes_durable_ns();
 // Explicit checkpoint/shutdown only: joins the worker and writes local recipes.
 void save_pipeline_recipes();
 // Save current dirty revision without stopping compiler or periodic persistence.
