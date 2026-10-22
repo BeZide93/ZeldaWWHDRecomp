@@ -49,7 +49,11 @@ what is on `devel` and not released yet (also in the
 - **World editor: own 3D models** (#280, for mod makers): own models now work in the Windows release (their converter
   could not start there before). A model built on an exported island stands exactly where it was modelled, the editor
   says why a model can't be shown instead of asking for a restart, and the import fixes common Blender exports by itself
-  (several objects, quads, vertex colours, blended materials, large textures) with a note for each fix.
+  (several objects, quads, vertex colours, blended materials, large textures) with a note for each fix. A model with
+  its own `_col` collision meshes now gets that collision when added as **Your model**, so Link walks on it and its
+  walls stop him, and the import warns when a mesh's normals point inward (the model then looks dark where it is lit).
+  The editor docs explain how to use the game's own materials and textures for a model. All of the game's model tools
+  also start correctly under the Windows release's Python (no more "No module named …").
 - **New setting: Shader compile** (Settings → Graphics). **Off** (the default) draws everything exactly and waits for
   shaders that aren't ready yet, as before. **Fast** keeps playing while new shaders compile and may leave out a few
   objects for a frame or two, for fewer stutters on first visits.
