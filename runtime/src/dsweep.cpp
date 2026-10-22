@@ -48,6 +48,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
+#include <map>
 #include <set>
 #include <string>
 #include <vector>
@@ -118,7 +119,7 @@ struct Entry {
     std::string id() const { return stage.empty() ? arc : stage + "_" + arc; }
 };
 
-enum class Phase { Start, Resident, NextArchive, Loading, StageLoading, Sweeping, Draining, Done };
+enum class Phase { Start, Resident, NextArchive, Loading, StageLoading, Sweeping, Draining, Actors, Done };
 constexpr int kHeaps = 6;   // solid heaps alive at once: a batch's models live until kHeaps batches later
 constexpr int kDrain = 6;   // frames between an archive's last draw and its release (frames in flight)
 constexpr int kLoadFrames = 900;
@@ -142,7 +143,33 @@ struct State {
     size_t listed = 0;               // archives in WWHD_DSWEEP_ARCHIVES and WWHD_DSWEEP_STAGES (progress total)
     int64_t started_ns = 0;
     std::string state_dir;
+    // actors (WWHD_DSWEEP_ACTORS=1)
+    struct Spawn {
+        std::string name;
+        uint16_t proc = 0;
+        int8_t arg = 0;
+        uint32_t params = 0xFFFFFFFF;
+        int16_t ax = 0, az = 0;
+        std::string id() const;
+    };
+    std::vector<Spawn> spawns;       // still to create (popped from the back)
+    std::set<std::string> placed;    // placements read from the rooms (name params angles), deduplicated
+    Spawn spawn;                     // the actor being shown
+    uint32_t actor_id = 0xFFFFFFFF, actor = 0;
+    unsigned actor_frames = 0, actor_draws = 0, actors = 0, actor_failed = 0;
+    std::vector<uint32_t> orphans;   // actors still being created when given up: deleted once they exist
+    std::set<uint32_t> host_actors;  // the title's own actors (drawn before the actor sweep; never deleted)
+    std::map<uint32_t, uint32_t> ours;  // process id -> actor: the shown actor and what it made (drawn, not the title's)
+    std::vector<std::pair<uint32_t, uint32_t>> frozen;  // actor, status bits added for one execute pass
+    std::set<std::string> archives_before;
 } g;
+std::atomic<bool> g_abort{false};  // an actor changed the stage: orderly exit, the supervisor skips it
+
+std::string State::Spawn::id() const {
+    char b[64];
+    std::snprintf(b, sizeof b, "%s:%08X:%d:%d", name.c_str(), params, ax, az);
+    return b;
+}
 
 bool mem2(uint32_t a, uint32_t size = 4) { return a >= mem::kMem2Start && a <= mem::kMem2End - size; }
 uint32_t call(Cpu* c, uint32_t fn, std::initializer_list<uint32_t> args = {}) {
@@ -310,6 +337,58 @@ void add_stage_models(Cpu* c, uint32_t info, const Entry& e) {
         ++found;
     }
     LOG("[dsweep] stage archive %s: %u models", id.c_str(), found);
+}
+
+// Actor placements of a stage resource (room.dzr of a room, stage.dzs of the stage archive), for the actor sweep:
+// the chunk table (count, then {tag, entries, offset}) and its actor chunks (ACTR/TRES/TGOB and their layer
+// variants ACTn/TREn: 0x20 bytes; SCOB/TGSC/DOOR/TGDR and SCOn: 0x24) {name[8], parameters, position, angle x,y,z}.
+// Kept as "name parameters angle-x angle-z" in the sweep's state folder (actors.txt), up to kVariants per name.
+constexpr size_t kVariants = 4;
+std::string name8(uint32_t at) {
+    std::string out;
+    for (uint32_t i = 0; i < 8 && mem2(at + i, 1); ++i) {
+        const uint8_t ch = ld8(at + i);
+        if (!ch) break;
+        if (ch < 0x21 || ch > 0x7E) return {};
+        out.push_back(char(ch));
+    }
+    return out;
+}
+void harvest(Cpu* c, const Entry& e) {
+    static const bool on = std::getenv("WWHD_DSWEEP_ACTORS") != nullptr;
+    if (!on) return;
+    const uint32_t data = stage_res(c, e.stage, e.arc, e.arc == "Stage" ? "stage.dzs" : "room.dzr");
+    if (!mem2(data, 4)) return;
+    const uint32_t chunks = std::min<uint32_t>(ld32(data), 64);
+    std::map<std::string, size_t> perName;
+    for (const auto& p : g.placed) ++perName[p.substr(0, p.find(' '))];
+    std::string added;
+    for (uint32_t i = 0; i < chunks && mem2(data + 4 + i * 12, 12); ++i) {
+        const uint32_t at = data + 4 + i * 12;
+        char tag[5] = {char(ld8(at)), char(ld8(at + 1)), char(ld8(at + 2)), char(ld8(at + 3)), 0};
+        const std::string t = tag;
+        uint32_t size = 0;
+        if (t == "ACTR" || t == "TRES" || t == "TGOB" || (t.size() == 4 && (t.rfind("ACT", 0) == 0 || t.rfind("TRE", 0) == 0)))
+            size = 0x20;
+        else if (t == "SCOB" || t == "TGSC" || t == "DOOR" || t == "TGDR" || (t.size() == 4 && t.rfind("SCO", 0) == 0))
+            size = 0x24;
+        if (!size) continue;
+        const uint32_t count = std::min<uint32_t>(ld32(at + 4), 1024), base = data + ld32(at + 8);
+        for (uint32_t k = 0; k < count && mem2(base + k * size, size); ++k) {
+            const uint32_t a = base + k * size;
+            const std::string name = name8(a);
+            if (name.empty() || perName[name] >= kVariants) continue;
+            char line[96];
+            std::snprintf(line, sizeof line, "%s %08X %d %d", name.c_str(), ld32(a + 8), int16_t(ld16(a + 0x18)),
+                          int16_t(ld16(a + 0x1C)));
+            if (g.placed.insert(line).second) ++perName[name], added += std::string(line) + "\n";
+        }
+    }
+    if (!added.empty() && !g.state_dir.empty())
+        if (FILE* f = std::fopen((g.state_dir + "/actors.txt").c_str(), "a")) {
+            std::fputs(added.c_str(), f);
+            std::fclose(f);
+        }
 }
 
 uint32_t find_info(const std::string& name) {
@@ -505,9 +584,11 @@ void begin(Cpu* c) {
     bool resident_done = false;
     if (!g.state_dir.empty()) {
         for (auto& s : lines(g.state_dir + "/skip.txt")) g.skip.insert(s);
+        for (auto& p : lines(g.state_dir + "/actors.txt")) g.placed.insert(p);
         for (auto& l : lines(g.state_dir + "/progress.txt")) {
             if (l.rfind("archive-done ", 0) == 0) g.done.insert(l.substr(13));
             if (l == "resident-done") resident_done = true;
+            if (l.rfind("actor-done ", 0) == 0) g.done.insert(l.substr(11));
         }
     }
     if (const char* list = std::getenv("WWHD_DSWEEP_ARCHIVES"))
@@ -556,8 +637,125 @@ void finish() {
     pipeline_groups::set_sweeping(0);
     progress("sweep-done");
     g_finished = true;
-    LOG("[dsweep] done: %u models swept, %u create failures, %u archives loaded, %u load failures, %.1f s", g.swept,
-        g.failed, g.archives, g.load_failed, double(now_ns() - g.started_ns) / 1e9);
+    LOG("[dsweep] done: %u models swept, %u create failures, %u archives loaded, %u load failures, %u actors shown "
+        "(%u not created), %.1f s", g.swept, g.failed, g.archives, g.load_failed, g.actors, g.actor_failed,
+        double(now_ns() - g.started_ns) / 1e9);
+}
+
+// The actor sweep (WWHD_DSWEEP_ACTORS=1, after the archives): every actor the rooms place (up to kVariants
+// placements per name: parameters and angles), with its profile from the stage actor name table
+// (dStage_searchName's table), is created with the game's own fopAcM_create at the look-at point, draws for a few
+// frames without running its logic (before_execute), then is deleted with what it made. Progress "actor <name:params:angles>" before it is created, "actor-done ..." after; an actor
+// that changes the stage ends the attempt in order (its pipelines are kept) and is skipped the next time.
+constexpr unsigned kCreateFrames = 240, kShowFrames = 24, kShowDraws = 3;
+std::set<std::string> archive_names() {
+    std::set<std::string> out;
+    for (uint32_t info : archive_infos()) out.insert(cstring(info + 0x1C));
+    return out;
+}
+uint32_t actor_of(Cpu* c, uint32_t id) {
+    st32(g.scratch + 0x9F0, id);
+    return call(c, GC(0x025D5218), {GC(0x025E1234), g.scratch + 0x9F0});  // fopAcIt_Judge(fpcSch_JudgeByID, &id)
+}
+void begin_actors(Cpu* c) {
+    static const bool on = std::getenv("WWHD_DSWEEP_ACTORS") != nullptr;
+    if (!on) return finish();
+    std::map<std::string, std::pair<uint16_t, int8_t>> table;  // the stage actor name table: name -> profile, argument
+    const uint32_t names = GD(0x101EBFDC);
+    for (uint32_t i = 0; i < 809; ++i) {
+        const std::string name = name8(names + i * 12);
+        if (!name.empty()) table.emplace(name, std::make_pair(ld16(names + i * 12 + 8), int8_t(ld8(names + i * 12 + 0xA))));
+    }
+    std::set<std::string> withPlacement;
+    std::vector<State::Spawn> all;
+    for (const auto& p : g.placed) {
+        char name[16] = {};
+        unsigned params = 0;
+        int ax = 0, az = 0;
+        if (std::sscanf(p.c_str(), "%15s %x %d %d", name, &params, &ax, &az) != 4 || !table.count(name)) continue;
+        State::Spawn sp;
+        sp.name = name, sp.params = params, sp.ax = int16_t(ax), sp.az = int16_t(az);
+        sp.proc = table[name].first, sp.arg = table[name].second;
+        all.push_back(sp);
+        withPlacement.insert(name);
+    }
+    // only placed actors: with made-up parameters most actors stop the game in their create (their asserts)
+    for (auto it = all.rbegin(); it != all.rend(); ++it)
+        if (!g.done.count(it->id()) && !g.skip.count(it->name) && !g.skip.count(it->id())) g.spawns.push_back(*it);
+    g.listed += all.size();
+    for (const auto& sp : all)
+        if (g.done.count(sp.id()) || g.skip.count(sp.name) || g.skip.count(sp.id())) g.done.insert(sp.id());
+    LOG("[dsweep] actors: %zu names, %zu to create (%zu placements)", table.size(), g.spawns.size(), g.placed.size());
+    progress("actors");
+    g.phase = Phase::Actors;
+    g.actor_id = 0xFFFFFFFF;
+}
+void actor_step(Cpu* c) {
+    // orphans: actors given up while being created, deleted once they exist
+    for (size_t i = 0; i < g.orphans.size();) {
+        if (const uint32_t a = actor_of(c, g.orphans[i])) {
+            call(c, GC(0x025DF944), {a});  // fpcM_Delete
+            g.orphans.erase(g.orphans.begin() + long(i));
+        } else if (!call(c, GC(0x025DD868), {g.orphans[i]})) {  // fpcM_IsCreating: gone
+            g.orphans.erase(g.orphans.begin() + long(i));
+        } else ++i;
+    }
+    if (g.actor_id == 0xFFFFFFFF) {
+        if (g.spawns.empty()) {
+            g_tag = 0;
+            pipeline_groups::set_sweeping(0);
+            return finish();
+        }
+        g.spawn = g.spawns.back();
+        g.spawns.pop_back();
+        progress("actor " + g.spawn.id());
+        g.archives_before = archive_names();
+        // at the camera's look-at point; angle (x, 0, z) carries parameters for some actors
+        const uint32_t camera = call(c, GC(0x024F8044));
+        const uint32_t pos = g.scratch + 0x9C0, angle = g.scratch + 0x9D0;
+        for (int i = 0; i < 3; ++i) st32(pos + i * 4, mem2(camera, 0x20) ? ld32(camera + 0x10 + i * 4) : 0);
+        st16(angle, uint16_t(g.spawn.ax));
+        st16(angle + 2, 0);
+        st16(angle + 4, uint16_t(g.spawn.az));
+        g.actor_id = call(c, GC(0x025D5834), {uint32_t(int32_t(int16_t(g.spawn.proc))), g.spawn.params, pos, 0, angle, 0,
+                                              uint32_t(int32_t(g.spawn.arg)), 0});  // fopAcM_create
+        g.actor = 0;
+        g.actor_frames = g.actor_draws = 0;
+        g_tag = ++g.batch;
+        pipeline_groups::set_sweeping(0);
+        LOG("[dsweep] batch %d step %llu ns %lld: actor %s", g.batch, (unsigned long long)interp::executed_steps(),
+            (long long)now_ns(), g.spawn.id().c_str());
+        if (g.actor_id == 0xFFFFFFFF) g.actor_frames = kCreateFrames;  // not requested: done below
+        return;
+    }
+    ++g.actor_frames;
+    if (!g.actor && g.actor_id != 0xFFFFFFFF) {
+        g.actor = actor_of(c, g.actor_id);
+        if (g.actor) {
+            ++g.actors;
+            // its pipelines go with the first object archive it loaded (compiled when that archive loads in play)
+            for (const auto& name : archive_names())
+                if (!g.archives_before.count(name)) {
+                    pipeline_groups::set_sweeping(pipeline_groups::group_of(name.data(), name.size()));
+                    break;
+                }
+            g.actor_frames = 0;
+        }
+    }
+    const bool creating = !g.actor && g.actor_id != 0xFFFFFFFF && call(c, GC(0x025DD868), {g.actor_id});
+    const bool shown = g.actor && (g.actor_draws >= kShowDraws || g.actor_frames >= kShowFrames);
+    if (!shown && (creating || g.actor) && g.actor_frames < kCreateFrames) return;
+    // the actor and the actors it made (those still alive)
+    for (const auto& [id, a] : g.ours)
+        if (actor_of(c, id) == a) call(c, GC(0x025DF944), {a});  // fpcM_Delete
+    g.ours.clear();
+    if (creating) g.orphans.push_back(g.actor_id);
+    if (!g.actor) ++g.actor_failed;
+    progress("actor-done " + g.spawn.id());
+    g.done.insert(g.spawn.id());
+    report_archives(g.spawn.name);
+    g.actor_id = 0xFFFFFFFF;
+    g.actor = 0;
 }
 
 void step(Cpu* c, uint32_t host) {
@@ -581,7 +779,7 @@ void step(Cpu* c, uint32_t host) {
             g.done.insert(g.queue.back().arc);  // swept with the resident archives (or not loadable by name)
             g.queue.pop_back();
         }
-        if (g.queue.empty()) return finish();
+        if (g.queue.empty()) return begin_actors(c);
         g.entry = g.queue.back();
         g.archive = g.entry.id();
         g.queue.pop_back();
@@ -632,6 +830,7 @@ void step(Cpu* c, uint32_t host) {
         g_tag = 0;
         pipeline_groups::set_sweeping(0);
         add_stage_models(c, info, g.entry);
+        harvest(c, g.entry);
         g.phase = Phase::Sweeping;
         return;
     }
@@ -680,11 +879,33 @@ void step(Cpu* c, uint32_t host) {
         }
         g.phase = Phase::NextArchive;
         return;
+    case Phase::Actors:
+        return actor_step(c);
     case Phase::Done:
         return;
     }
 }
 }  // namespace
+
+// The actor sweep's actors draw, but never run their logic: around the game's execute pass (fpcEx_Handler) they
+// carry the status bits fopAc_Execute skips actors with (fopAc_ac_c::stopStatus, *101F3084); the draw pass runs
+// without them.
+void before_execute(Cpu* c) {
+    if (g.phase != Phase::Actors || g.ours.empty()) return;
+    const uint32_t stop = ld32(GD(0x101F3084));
+    if (!stop) return;
+    for (const auto& [id, a] : g.ours)
+        if (actor_of(c, id) == a) {
+            const uint32_t status = ld32(a + 0x2E0);
+            g.frozen.emplace_back(a, stop & ~status);
+            st32(a + 0x2E0, status | stop);
+        }
+}
+void after_execute(Cpu*) {
+    for (const auto& [a, bits] : g.frozen)
+        if (mem2(a, 0x2E4)) st32(a + 0x2E0, ld32(a + 0x2E0) & ~bits);
+    g.frozen.clear();
+}
 
 int tag() { return g_tag.load(std::memory_order_relaxed); }
 uint32_t pad_buttons(uint64_t frame) {
@@ -697,7 +918,7 @@ uint32_t pad_buttons(uint64_t frame) {
     return last && now_ns() - last > 2'000'000'000 ? 0x8000u : 0u;
 }
 std::atomic<bool> g_finished{false};
-bool exit_requested() { return g_finished && std::getenv("WWHD_DSWEEP_EXIT"); }
+bool exit_requested() { return (g_finished || g_abort) && std::getenv("WWHD_DSWEEP_EXIT"); }
 
 bool hide_actor_draw(uint32_t actor) {
     // debug (attribution runs): WWHD_DSWEEP_PROFILES=1 logs each actor profile the first time it draws in a stage
@@ -910,6 +1131,9 @@ void after_actor_draw(Cpu* c, uint32_t actor) {
     time_of_day(actor);
     const uint64_t now = interp::executed_steps();
     if (!cfg.on || now < cfg.start) return;
+    if (g.actor && actor == g.actor) ++g.actor_draws;
+    if (cfg.title && g.phase != Phase::Actors) g.host_actors.insert(actor);
+    else if (g.phase == Phase::Actors && !g.host_actors.count(actor)) g.ours.emplace(ld32(actor + 4), actor);
     // once per logic step, from the first actor drawn (the camera and the frame's draw lists are set up then)
     static uint64_t last = ~0ull;
     if (now == last) return;
@@ -925,6 +1149,10 @@ void after_actor_draw(Cpu* c, uint32_t actor) {
         stage = current, since = now;
         if (current == "sea_T") g_title_seen = true;
         LOG("[dsweep] stage \"%s\" at step %llu", current.c_str(), (unsigned long long)now);
+    }
+    if (g.phase == Phase::Actors && cfg.title && !current.empty() && current != "sea_T" && !g_abort) {
+        LOG("[dsweep] actor %s changed the stage to %s: ending this attempt", g.spawn.id().c_str(), current.c_str());
+        g_abort = true;  // the supervisor skips it (the last "actor" line) and resumes
     }
     if (current.empty() || current == "Name" || now - since < kSettle) return;
     if (cfg.title && current != "sea_T") return;  // a title sweep never sweeps elsewhere

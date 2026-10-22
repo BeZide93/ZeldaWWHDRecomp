@@ -128,6 +128,7 @@ class ModelSweepTests(unittest.TestCase):
                            ('WWHD_SHADER_CACHE', 'live/shaders.bin')):
             self.assertEqual(env[key], value)
         self.assertEqual(env['WWHD_HEADSTART'], '0')
+        self.assertIn('door10', env['WWHD_DSWEEP_SKIP'].split(','))  # names that stop the game outside their room
         self.assertNotEqual(Path(env['WWHD_SETTINGS']).parent, self.cache)
         self.assertIn('WWHD-PROGRESS 4 4 Link', self.lines)
         self.assertEqual(model_sweep.status(self.cache, 'vulkan', {'game': 'g', 'preparation': 'p'}), 'done')
@@ -142,6 +143,13 @@ class ModelSweepTests(unittest.TestCase):
         progress = (state / 'progress.txt').read_text().splitlines()
         self.assertEqual(progress.count('archive-done Always'), 1)  # not swept twice
         self.assertEqual(len(game.calls), 2)
+
+    def test_the_culprit_is_the_last_model_archive_or_actor_started(self):
+        lines = ['start', 'load Bk', 'model Bk:a.bdl', 'archive-done Bk', 'actors', 'actor Tbox:0:0:0',
+                 'actor-done Tbox:0:0:0', 'actor Saku:1:0:0']
+        self.assertEqual(model_sweep.culprit(lines, set()), 'Saku:1:0:0')
+        self.assertIsNone(model_sweep.culprit(lines, {'Saku:1:0:0'}))
+        self.assertEqual(model_sweep.culprit(lines[:3], set()), 'Bk:a.bdl')
 
     def test_a_repeating_crash_gives_up(self):
         game = FakeGame(self, [('crash', 'Kn')] * 3)

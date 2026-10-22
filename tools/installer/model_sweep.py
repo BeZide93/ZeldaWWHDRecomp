@@ -23,7 +23,9 @@ SCHEMA = 1
 # Rooms, stages and the sea's island LODs are stage resources (<stage>_<archive>.szs), loaded by the stage loader.
 NOT_OBJECTS = re.compile(r'(_Stage|_Room\d+|_LOD\d+|_LODALL)$')
 STAGE_ARCHIVE = re.compile(r'^(.+)_(Stage|Room\d+|LOD\d+|LODALL)$')
-MAX_ATTEMPTS = 40          # each attempt skips the model or archive it crashed at
+MAX_ATTEMPTS = 40          # attempts in a row that finish no archive or actor (each skips what it stopped at)
+MAX_ATTEMPTS_TOTAL = 1000  # attempts in all (actors that stop the game: a few seconds each)
+DEFAULT_SKIP = Path(__file__).with_name('model_sweep_skip.txt')
 STALL_SECONDS = 240        # no new line in progress.txt for this long: the attempt counts as a crash
 
 
@@ -100,10 +102,11 @@ def _lines(path):
 
 
 def culprit(progress_lines, skip):
-    """The model or archive the last attempt stopped at (the last one it started), unless it is skipped already."""
+    """The model, archive or actor the last attempt stopped at (the last one it started), unless it is skipped
+    already."""
     start = len(progress_lines) - 1 - progress_lines[::-1].index('start') if 'start' in progress_lines else 0
     for line in reversed(progress_lines[start:]):
-        if line.startswith(('model ', 'load ')):
+        if line.startswith(('model ', 'load ', 'actor ')):
             name = line.split(' ', 1)[1]
             return None if name in skip else name
     return None
@@ -137,8 +140,12 @@ def environment(base, game, cache_env, renderer, state, archives, scratch, stage
                WWHD_CONTROLS=str(scratch / 'controls.json'), WWHD_STATE_DIR=str(scratch / 'states'),
                WWHD_DSWEEP='title,1,2', WWHD_DSWEEP_ARCHIVES=str(archives), WWHD_DSWEEP_STATE=str(state),
                WWHD_DSWEEP_EXIT='1')
+    default_skip = [n for n in _lines(DEFAULT_SKIP) if not n.startswith('#')]
+    if default_skip:
+        env['WWHD_DSWEEP_SKIP'] = ','.join(default_skip)
     if stages:
         env['WWHD_DSWEEP_STAGES'] = str(stages)
+        env['WWHD_DSWEEP_ACTORS'] = '1'  # then every actor (placements from the rooms), see dsweep.cpp
     env['WWHD_HEADSTART'] = '0'  # the sweep records pipelines; it warms nothing (and holds no generation)
     return env
 
@@ -167,7 +174,12 @@ def run(executable, game, cache_root, renderer, identity, cache_env, line=lambda
     stages.write_text(''.join('%s %s\n' % (stage, ' '.join(names)) for stage, names in stage_archives(game).items()),
                       encoding='utf-8')
     progress_file = state / 'progress.txt'
-    for attempt in range(1, attempts + 1):
+    def finished():
+        return sum(1 for l in _lines(progress_file) if l.startswith(('archive-done ', 'actor-done ')))
+    without_progress, before = 0, finished()
+    for attempt in range(1, MAX_ATTEMPTS_TOTAL + 1):
+        if without_progress >= attempts:
+            break
         if 'sweep-done' in _lines(progress_file):
             return 'done'
         if cancel():
@@ -233,8 +245,15 @@ def run(executable, game, cache_root, renderer, identity, cache_env, line=lambda
             'skipping %s' % name if name else 'nothing new to skip'))
         if not name:
             return 'failed'
+        if 'actor ' + name in done_lines:  # an actor: the second placement of a name that stops the game skips them all
+            base = name.split(':', 1)[0]
+            if any(s.split(':', 1)[0] == base for s in skip if s.count(':') == 3):
+                name = base
         with (state / 'skip.txt').open('a', encoding='utf-8') as stream:
             stream.write(name + '\n')
+        now = finished()
+        without_progress = 0 if now > before else without_progress + 1
+        before = now
     return 'failed'
 
 

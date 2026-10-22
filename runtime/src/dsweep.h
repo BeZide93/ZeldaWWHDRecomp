@@ -17,4 +17,7 @@ bool hide_actor_draw(uint32_t actor);
 // VPAD buttons a title sweep (WWHD_DSWEEP=title, setup's "Preparing shaders: models") holds at this script frame: A on
 // the boot's notice screen and in the title's idle story intro (back to the title), 0 otherwise
 uint32_t pad_buttons(uint64_t frame);
+// fpcEx_Handler hook, around the game's execute pass: the actor sweep's actors draw but never run their logic
+void before_execute(Cpu* c);
+void after_execute(Cpu* c);
 }  // namespace dsweep
