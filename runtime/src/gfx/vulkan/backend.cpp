@@ -27,6 +27,7 @@
 #include "platform/quest_theater.h"
 #endif
 #include "backend.h"
+#include "../../dsweep.h"
 #include "pass.h"
 #include "rendering_path.h"
 #include "stereo.h"
@@ -5200,7 +5201,7 @@ void run_main_loop() {
     }
     if (elapsed >= 0.5 && !input::text_prompt_active()) {
       uint64_t frames = gx2::flips_presented();
-      if (exitFrame && frame_count() >= exitFrame) {
+      if ((exitFrame && frame_count() >= exitFrame) || dsweep::exit_requested()) {
         SDL_Event quit{};quit.type=SDL_EVENT_QUIT;SDL_PushEvent(&quit);
       }
       char title[160];

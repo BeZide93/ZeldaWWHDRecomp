@@ -59,6 +59,7 @@
 #include "../overlay/overlay.h"
 #include "../overlay/guest_hud.h"
 #include "../screenshot.h"
+#include "../dsweep.h"
 
 // The game's own icon in the Dock: meta/iconTex.tga of the game folder (uncompressed 32-bit TGA,
 // 128x128 in Wind Waker HD), as the SDL host does for its windows. Nothing happens without it.
@@ -704,6 +705,14 @@ void run_appkit_loop() {
                 [NSApp terminate:nil];
             }];
     }
+    // D-sweep (WWHD_DSWEEP_EXIT): quits (orderly, caches saved) once the sweep is done
+    if (getenv("WWHD_DSWEEP_EXIT"))
+        [NSTimer scheduledTimerWithTimeInterval:0.25 repeats:YES block:^(NSTimer* t) {
+            if (!dsweep::exit_requested()) return;
+            [t invalidate];
+            LOG("[display] D-sweep done: quitting");
+            [NSApp terminate:nil];
+        }];
     // test runs: WWHD_TEST_RENDERER_SWITCH=frame:metal|vulkan does what Graphics > Renderer > Restart Now does
     if (const char* e = getenv("WWHD_TEST_RENDERER_SWITCH")) {
         uint64_t at = strtoull(e, nullptr, 10);

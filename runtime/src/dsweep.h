@@ -6,6 +6,8 @@ struct Cpu;
 namespace dsweep {
 // The batch being drawn (1-based), 0 outside a sweep; written by the game thread, read by the renderer's key log.
 int tag();
+// WWHD_DSWEEP_EXIT: true once the sweep is done (the display then quits in order, so the caches are saved)
+bool exit_requested();
 // fopAc_Draw hook, after the actor's own draw: runs the sweep from the player's draw (camera and lists are set up).
 void after_actor_draw(Cpu* c, uint32_t actor);
 // WWHD_DSWEEP_ONLY=<step>: from that logic step on no actor draws itself (the sweep's models are the only models in
