@@ -517,8 +517,35 @@ std::vector<uint8_t> g_exact_cam_img, g_cam_blended_img;
 // j3dSys words camera_draw writes (view matrix +0x38..+0x67, projection words +0x14C +0x160 +0x174 +0x178)
 constexpr uint32_t kJ3dCamWords[] = {0x38, 0x3C, 0x40, 0x44, 0x48, 0x4C, 0x50, 0x54, 0x58, 0x5C, 0x60, 0x64, 0x14C, 0x160, 0x174, 0x178};
 uint32_t g_exact_j3d_words[16];
-bool g_cam_exact_pending = false;  // a 40 fps blended record pass drew the camera blended: exact again before the next logic
 uint32_t g_exact_cam_addr = 0;
+// The step's camera is drawn exactly by its record pass, the step's last pass, at 30/60/120 fps. Two
+// cases leave the camera's last draw before the next step's logic blended: a 40 fps blended record
+// pass (no exact pass in its step), and a step whose later passes do not draw the camera at all (the
+// fade-out of a scene change: the logic pass drew it blended, the record pass draws no scene). What a
+// blended camera_draw wrote (the camera process: view and projection matrices; j3dSys's view; the
+// play window's scissor) then stayed in place for the next step's logic: the camera's execute reads
+// the scissor (the lock-on camera's sight angle, 40 fps Z-target) and the process kept the blended
+// matrices (the camera's process hash at the scene change, 60 fps). The words a blended draw changed
+// go back to the exact pre-run's before the next step's logic, unless a later pass of the step drew
+// the camera exactly. debug: WWHD_INTERP_CAM_EXACT_BACK=0 does it only after a 40 fps blended record
+// pass (as before)
+bool g_cam_exact_pending = false;  // the camera's last draw was blended: exact again before the next logic
+uint64_t g_exact_img_step = ~0ull;  // the logic step whose pre-run g_exact_cam_img holds
+static bool cam_exact_back_on() {
+    static const bool off = getenv("WWHD_INTERP_CAM_EXACT_BACK") && !atoi(getenv("WWHD_INTERP_CAM_EXACT_BACK"));
+    return !off;
+}
+// The play window (dComIfGp's dDlst_window_c 10474B7C, 0x2C bytes: view port, scissor +0x18..+0x27,
+// camera id): camera_draw sets its scissor from the letterbox height (dCamera_c mTrimHeight), and the
+// camera's next execute reads it; it goes back with the camera (above).
+// debug: WWHD_INTERP_WINDOW_EXACT=0 leaves the blended scissor in place
+static uint32_t window_ea() { return GD(0x10474B7C); }
+constexpr int kWindowWords = 0x2C / 4;
+uint32_t g_exact_window[kWindowWords], g_blended_window[kWindowWords];
+static bool window_exact_on() {
+    static const bool off = getenv("WWHD_INTERP_WINDOW_EXACT") && !atoi(getenv("WWHD_INTERP_WINDOW_EXACT"));
+    return !off;
+}
 namespace interp {
 bool exact_cull_on() {
     static const bool off = getenv("WWHD_INTERP_EXACT_CULL") && !atoi(getenv("WWHD_INTERP_EXACT_CULL"));
@@ -539,6 +566,8 @@ void exact_prerun(Cpu* c) {
         if (size < 0x100 || size > 0x8000) size = 0;
         g_exact_cam_img.assign((uint8_t*)ppc_ptr(g_exact_cam_addr), (uint8_t*)ppc_ptr(g_exact_cam_addr) + size);
         for (int i = 0; i < 16; i++) g_exact_j3d_words[i] = ld32(GD(0x104B45C0) + kJ3dCamWords[i]);
+        for (int i = 0; i < kWindowWords; i++) g_exact_window[i] = ld32(window_ea() + 4 * i);
+        g_exact_img_step = g_logic_steps;
     }
     g_cam_prerun = false;
     g_cam_blended = false;
@@ -824,29 +853,6 @@ static void camera_draw(Cpu* c) {
     camera_draw_body(c);
     interp::g_drawing_cam = saved;
 }
-// The play window (dComIfGp's dDlst_window_c 10474B7C, 0x2C bytes: view port, scissor +0x18..+0x27,
-// camera id): camera_draw sets its scissor from the letterbox height (dCamera_c mTrimHeight), and the
-// camera's next execute reads it (the lock-on camera's sight angle from the scissor's size). A
-// blended camera_draw sets it from the blended height. At 30/60/120 fps the step's last pass draws
-// the camera exactly; a 40 fps blended record pass has no exact pass after it, so the words its
-// camera_draw changed go back to the exact pre-run's (exact_after_pass) before the next step's logic:
-// a Z-target's bars easing in left the scissor 2 lines off and the 40 fps camera eye left the 30 fps
-// one. debug: WWHD_INTERP_WINDOW_EXACT=0 leaves the blended scissor in place as before
-namespace interp {
-static uint32_t window_ea() { return GD(0x10474B7C); }
-constexpr int kWindowWords = 0x2C / 4;
-static bool window_exact_on() {
-    static const bool off = getenv("WWHD_INTERP_WINDOW_EXACT") && !atoi(getenv("WWHD_INTERP_WINDOW_EXACT"));
-    return !off;
-}
-// after a blended record pass's camera_draw: the words it changed back to `exact` (the pre-run's) after the pass
-static void window_put_back(const uint32_t* exact) {
-    for (int i = 0; i < kWindowWords; i++) {
-        const uint32_t ea = window_ea() + 4 * i;
-        if (ld32(ea) != exact[i]) exact_after_pass(ea, exact[i], 4);
-    }
-}
-}  // namespace interp
 static void camera_draw_body(Cpu* c) {
     using namespace interp;
     uint32_t cam = c->r[3];
@@ -904,12 +910,7 @@ static void camera_draw_body(Cpu* c) {
         // (also on a snap: the sound listener keeps following only the record pass's camera)
         g_cam_blended = p->valid;
         cam_trace(cam, "blended");
-        uint32_t window_exact[kWindowWords];
-        const bool window_kept = window_exact_on() && record_blended() && g_prerun_pass == g_passes;
-        if (window_kept)
-            for (int i = 0; i < kWindowWords; i++) window_exact[i] = ld32(window_ea() + 4 * i);
         f_024FFC40_orig(c);
-        if (window_kept) window_put_back(window_exact);
         capture_projection(*p);
         g_cam_blended = false;
         g_view_pass = g_passes;
@@ -921,15 +922,18 @@ static void camera_draw_body(Cpu* c) {
             p->shake = read_shake(cam);
             p->trim = (float)ldf32(cam + kCamBody + kTrimHeight);
             p->valid = true;
-            // (the step has no exact pass: what this camera_draw wrote is put back to the exact pre-run's
-            // before the next step's logic, as the 30 fps frame leaves it)
-            if (g_prerun_pass == g_passes && g_exact_cam_addr == cam && !g_exact_cam_img.empty()) {
-                g_cam_exact_pending = true;
-                g_cam_blended_img.assign((uint8_t*)ppc_ptr(cam), (uint8_t*)ppc_ptr(cam) + g_exact_cam_img.size());
-            }
+        }
+        // (what this camera_draw wrote goes back to the step's exact pre-run's before the next step's
+        // logic unless a later pass draws the camera exactly: g_cam_exact_pending)
+        const bool back = cam_exact_back_on() ? g_exact_img_step == g_logic_steps : record_blended() && g_prerun_pass == g_passes;
+        if (back && g_exact_cam_addr == cam && !g_exact_cam_img.empty()) {
+            g_cam_exact_pending = true;
+            g_cam_blended_img.assign((uint8_t*)ppc_ptr(cam), (uint8_t*)ppc_ptr(cam) + g_exact_cam_img.size());
+            for (int i = 0; i < kWindowWords; i++) g_blended_window[i] = ld32(window_ea() + 4 * i);
         }
         return;
     }
+    if (cam == g_exact_cam_addr) g_cam_exact_pending = false;  // (drawn exactly: nothing to put back)
     p->s = read_cam(cam);  // exact step: remember it for the next step's blended frames
     p->shake = read_shake(cam);
     p->trim = (float)ldf32(cam + kCamBody + kTrimHeight);
@@ -1863,16 +1867,24 @@ extern "C" void hook_0203593C(Cpu* c) {
     if (!g_tev_kept.empty()) tevstr_put_back();
     if (!g_actor_kept.empty()) actors_put_back();
     clipper_put_back();
-    if (g_cam_exact_pending) {  // (the exact camera of a 40 fps blended record pass)
+    // (the step's camera drawn blended last: exact again before the next step's logic)
+    if (g_cam_exact_pending && (!cam_exact_back_on() || !enabled() || !g_hold_next)) {
         g_cam_exact_pending = false;
-        // (only the words the blended camera_draw changed, where nothing else changed them since)
-        if (g_exact_cam_addr && g_cam_blended_img.size() == g_exact_cam_img.size()) {
+        // (only the words the blended camera_draw changed, where nothing else changed them since; the
+        // same camera process: a scene change may have deleted it meanwhile)
+        const bool same = g_exact_cam_addr && g_cam_blended_img.size() == g_exact_cam_img.size() &&
+                          memcmp(ppc_ptr(g_exact_cam_addr + 4), g_exact_cam_img.data() + 4, 4) == 0 &&     // process id
+                          memcmp(ppc_ptr(g_exact_cam_addr + 0x10), g_exact_cam_img.data() + 0x10, 4) == 0;  // profile
+        if (same) {
             uint8_t* m = (uint8_t*)ppc_ptr(g_exact_cam_addr);
             for (size_t i = 0; i + 4 <= g_exact_cam_img.size(); i += 4)
                 if (memcmp(m + i, g_cam_blended_img.data() + i, 4) == 0 && memcmp(m + i, g_exact_cam_img.data() + i, 4) != 0)
                     memcpy(m + i, g_exact_cam_img.data() + i, 4);
         }
         for (int i = 0; i < 16; i++) st32(GD(0x104B45C0) + kJ3dCamWords[i], g_exact_j3d_words[i]);
+        if (window_exact_on())
+            for (int i = 0; i < kWindowWords; i++)
+                if (ld32(window_ea() + 4 * i) == g_blended_window[i]) st32(window_ea() + 4 * i, g_exact_window[i]);
     }
     if (!g_models_before.empty()) g_models_before.clear();
     fader_between_passes();
