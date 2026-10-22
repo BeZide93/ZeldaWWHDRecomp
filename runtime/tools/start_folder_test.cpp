@@ -41,6 +41,7 @@ int main() {
     // --data-dir wins
     assert(start_folder::find(data / "bin", (root / "elsewhere").string(), "") == root / "elsewhere");
 
+#ifndef _WIN32  // the app bundle exists on macOS only; its script quotes POSIX paths
     // the macOS app: Contents/MacOS/launch names the data folder (setup.py mac_app's script)
     const fs::path macos = root / "Wind Waker HD.app" / "Contents" / "MacOS";
     fs::create_directories(macos);
@@ -57,6 +58,7 @@ int main() {
         f << "#!/bin/sh\ncd \"/tmp/a \\\"quoted\\\" folder\" || exit 1\n";
     }
     assert(start_folder::app_launcher_folder(macos) == fs::path("/tmp/a \"quoted\" folder"));
+#endif
 
     // already in the data folder (the launcher's start): nothing changes
     assert(!start_folder::needs_change(data, data));
