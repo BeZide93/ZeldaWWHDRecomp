@@ -272,6 +272,62 @@ it breaks:
 prepares it for the game while you work; when the status bar says it is ready, actors can use it without
 a restart.
 
+### What the import fixes for you
+
+A model straight from Blender often breaks one of the limits above in a way the editor can repair. The
+check lists what the import will change, and the import changes it in the copy it puts into the package
+(your own file stays as it is) and says so in the status bar:
+
+- **Several mesh objects** (Blender's `name.001` copies, a model made of parts): merged into one model,
+  each object's own position, rotation and scale applied. A mesh object named `<name>_col`, or one whose
+  materials are all `col_*` surfaces, stays collision.
+- **Faces that aren't plain triangles**: triangle strips and fans become triangles. Loose edges and loose
+  vertices (lines and points) are left out; the game draws faces only.
+- **Vertex colours, a second UV map, tangents**: left out. The model draws with its positions, normals and
+  first UV map. A mesh without normals gets flat ones.
+- **Blended transparency** (`alphaMode` `BLEND`): drawn as a cut-out (`MASK`, alpha below 0.5 see-through)
+  when the texture has transparent parts, else opaque.
+- **Textures**: a JPEG, a 16-bit or palette PNG is converted to a plain PNG; a texture over 512 pixels, or
+  of a size the game can't take (width a multiple of 64, height of 8), is scaled to the nearest size it
+  takes; when all textures of the model together are over 1 MiB, the largest are halved until they fit.
+  A file of up to 64 MB can be imported this way; the model in the package is at most 8 MB.
+- Normal, occlusion, emissive and metal/roughness textures and optional glTF extensions (specular, IOR)
+  are left out.
+
+What it can't repair is said as it is: a visible face without a material or without a base colour texture,
+shape keys, a required extension (Draco compression, WebP or KTX2 textures), more than 16 materials or
+more than 4096 vertices and 8192 triangles. A file that already fits is kept byte for byte.
+
+These Blender export settings (File → Export → glTF 2.0) give a file that needs no fixing: Format **glTF
+Binary (.glb)**; Include: **Selected Objects** (or Visible Objects) so nothing else goes along; Transform:
+**+Y Up**; Data → Mesh: **Apply Modifiers**, **UVs** and **Normals** on, **Tangents** off, vertex colours off
+(Blender 4.2 and later: Use Vertex Color **None**), **Loose Edges** and **Loose Points**
+off; Material: **Export**, Images **Automatic** or **PNG**; Shape Keys, Skinning and Animation off (on for an
+animated model); Compression off.
+
+### Models made on an island export
+
+A model you build in Blender next to one of the game's islands (from `export_glb`, see [Export the game's
+islands](world-objects.md#export-the-games-islands-for-reference)) keeps the export's coordinates: its
+geometry lies far from its own origin, where the island's square has its centre. Added with **Your model**
+at Link or the camera, such a model is placed at the origin of the room Link is in (a sea square's centre at
+sea level, a stage's own origin), unturned, so it stands exactly where you modelled it; the status bar says
+so and where its middle is. Its handle is that origin: move or turn it as a whole. Placed at a position you
+give, it keeps the position and the note says where it is drawn. **Focus** on it frames the model, not its
+origin. [Build next to a game island](world-objects.md#build-next-to-a-game-island) has the whole round trip.
+
+### When a model doesn't show
+
+The status bar, and **Check** (as a warning), say why:
+
+- *could not be prepared: …*: the model couldn't be converted on this computer, with the converter's
+  reason. A restart prepares it the same way and fails again, so fix the cause (the reason names it) and
+  import the file again.
+- *is being prepared*: it appears by itself when it is ready.
+- *can't stand here*: a world object in the way of something of the island; [Limits and
+  placement](world-objects.md#limits-and-placement) lists what counts.
+- *was modelled away from its origin*: it is drawn where the note says, not at its handle (above).
+
 ## Water: ponds, rivers and waterfalls
 
 **Add → Water → Pond, River or Waterfall** (or the toolbar's **Water**) opens the Water window and starts
@@ -783,7 +839,7 @@ separated by `;`, or `@file` with one such line per row. Results go to the log.
 | `get_actor`, `get_scene` | `id`, `mod`? | one entry as the manifest declares it |
 | `list_actor_types` | | what `add_actor` places, and what appears without a restart |
 | `list_game_objects` | `category`?, `query`? | the game's own objects `add_actor` places as `game:<id>`, with variants, limits and whether your game files have them, and island buildings it places as `piece:<id>` (`state`: preparing, ready or the reason it failed) |
-| `add_actor` | `type`, `id`?, `at`? (`link`, `camera`, `position`), `position`?, `stage`?, `room`?, `angle`?, `snap`?, `model`?, `options`?, `mod`? | place a new actor (on the ground unless `snap` is false); `type` `game:<id>` places a game object (`options.variant`), `piece:<id>` an island building (made from your game files first: `state`, `note`) |
+| `add_actor` | `type`, `id`?, `at`? (`link`, `camera`, `position`), `position`?, `stage`?, `room`?, `angle`?, `snap`?, `model`?, `options`?, `mod`? | place a new actor (on the ground unless `snap` is false); `type` `game:<id>` places a game object (`options.variant`), `piece:<id>` an island building (made from your game files first: `state`, `note`); a model made away from its origin goes to the room's origin ([Models made on an island export](#models-made-on-an-island-export)) |
 | `remove_actor` | `id`, `confirm`, `mod`? | remove an actor (needs `"confirm": true`) |
 | `duplicate_actor` | `id`, `new_id`?, `offset`?, `mod`? | a copy next to it, with flags of its own |
 | `place_actor` | `id`, `at` (`link`, `camera`, `ground`, `position`), `position`?, `snap`?, `mod`? | move an actor to Link, the camera, the ground below it or a position |
@@ -815,10 +871,10 @@ separated by `;`, or `@file` with one such line per row. Results go to the log.
 | `pick` | `origin`, `direction`, `range`? | the first ground a ray meets |
 | `ground` | `position` | the ground height below a point |
 | `focus` | `id` or `position`, `distance`?, `yaw`?, `eye`?, `mod`? | fly the camera to an actor (a world object: its whole extent in view) or a place; `distance` back, looking along `yaw` degrees, or from `eye` (any height, below an island say) |
-| `check_model` | `file` | check a `.glb` file |
-| `import_model` | `file`, `id`?, `confirm`?, `kit`?, `materials`?, `material`?, `mod`? | copy a `.glb` into the mod and add the model; with `kit`, a model with game materials ([Game materials](world-objects.md#game-materials)) |
+| `check_model` | `file` | check a `.glb` file; `import_fixes` lists what the import would change ([What the import fixes](#what-the-import-fixes-for-you)) |
+| `import_model` | `file`, `id`?, `confirm`?, `kit`?, `materials`?, `material`?, `mod`? | copy a `.glb` into the mod and add the model, fixed where it can be (`fixes`); with `kit`, a model with game materials ([Game materials](world-objects.md#game-materials)) |
 | `set_model_kit` | `model`, `kit`?, `materials`?, `material`?, `mod`? | change a kit model's kit room and material names; built again, live |
-| `reload_model` | `model`, `mod`? | build a kit model again from its changed file; its actors take it live |
+| `reload_model` | `model`, `mod`? | a model's changed file in the package: the import's fixes applied to it; a kit model is built again and its actors take it live, another model at the next start |
 | `place_world_object` | `id`, `model`, `collision`, `stage`, `room`, `position`, `behaviour`?, `buoyancy`?, `drift`?, `anchor`?, `grapple_points`?, `distant`?, `shoreline`?, `chart_marker`?, `arrival`?, `calm_water`?, `rotation`?, `scale`?, `mod`? | place a static, floating or drifting object of the mod with collision (one Undo step) |
 | `set_world_object` | `id`, `collision`?, `behaviour`?, `buoyancy`?, `drift`?, `anchor`?, `grapple_points`?, `distant`?, `shoreline`?, `chart_marker`?, `arrival`?, `calm_water`?, `mod`? | change a world object's collision, behaviour and motion together (`null` removes one) |
 | `preview_collision`, `placement_conflicts` | `id`, `mod`? | a world object's collision as a wireframe, and what its place conflicts with |
