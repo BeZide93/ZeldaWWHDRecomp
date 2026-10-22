@@ -133,6 +133,7 @@ constexpr size_t maxSourceBytes = diskcache::kMaxSourceBytes;
 constexpr size_t maxCacheEntries = diskcache::kMaxEntries;
 using DiskShader = diskcache::Entry;
 std::unordered_map<uint64_t, DiskShader> diskShaders;
+diskcache::WordPool diskWords;  // one copy of each distinct module among diskShaders
 std::string diskPath;
 bool diskInitialized = false, diskDirty = false;
 uint64_t diskChangedFrame = 0, diskAttemptFrame = 0, diskRevision = 0;
@@ -170,7 +171,7 @@ void initialize_disk_cache() {
         bool read=fread(bytes.data(),1,bytes.size(),file)==bytes.size() && fgetc(file)==EOF && !ferror(file);
         fclose(file);
         if(read) {
-            const auto decoded=diskcache::decode(bytes,cache_fingerprint(),diskShaders);
+            const auto decoded=diskcache::decode(bytes,cache_fingerprint(),diskShaders,&diskWords);
             if(decoded.ok) {
                 ++stats.diskLoads; diskBytes=decoded.bytes;
                 // An older file (with GLSL text) is rewritten smaller at the next checkpoint.
@@ -948,9 +949,11 @@ void publish_shader_binary(Shader& shader, uint64_t frame) {
             std::make_shared<const std::vector<uint32_t>>(std::move(result.words));
         if (shader.spirvWords && shader.sourceId.length <= maxSourceBytes &&
             diskcache::spirv_valid(*shader.spirvWords) && diskShaders.size() < maxCacheEntries) {
-            const size_t oldBytes = cached == diskShaders.end() ? 0 :
-                diskcache::record_bytes(cached->second.words->size());
-            const size_t newBytes = diskcache::record_bytes(shader.spirvWords->size());
+            // Variants with the same final words share one copy (and one module in the file).
+            bool fresh;
+            shader.spirvWords = diskWords.intern(shader.spirvWords, fresh);
+            const size_t oldBytes = cached == diskShaders.end() ? 0 : diskcache::record_bytes(0, false);
+            const size_t newBytes = diskcache::record_bytes(shader.spirvWords->size(), fresh);
             if (newBytes <= maxCacheBytes - (diskBytes - oldBytes)) {
                 DiskShader entry;
                 entry.source = shader.sourceId; entry.words = shader.spirvWords; entry.vertex = shader.vertex;

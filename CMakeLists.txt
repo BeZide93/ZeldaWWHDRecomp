@@ -778,6 +778,7 @@ target_compile_options(android_user_directory_test PRIVATE -UNDEBUG)
 add_test(NAME android_user_directory COMMAND android_user_directory_test)
 add_executable(shader_source_test runtime/tools/shader_source_test.cpp)
 target_include_directories(shader_source_test PRIVATE runtime/src)
+target_link_libraries(shader_source_test PRIVATE ZLIB::ZLIB)
 target_compile_options(shader_source_test PRIVATE -UNDEBUG)
 add_test(NAME shader_source_cache COMMAND shader_source_test)
 
