@@ -254,7 +254,10 @@
 0255B9C8  # dKy_efplight_set
 0255BA9C  # dKy_efplight_cut
 025626A4  # dScnKy_env_light_c::settingTevStruct (debug trace, true60_test.cpp)
-025D6CE8  # fopAcM_cullingCheck (debug trace, true60_test.cpp)
+025D6CE8  # fopAcM_cullingCheck: exact camera on blended logic passes (interp.cpp); debug trace (true60_test.cpp)
+025D6B70  # fopAcM_checkCullingBox: exact camera on blended logic passes (interp.cpp)
+024FFC18  # dCamera_c::Draw: focus lines, not drawn in the exact camera pre-run (interp.cpp)
+02838148  # J3DUClipper::clip: on j3dSys's view, the exact camera on blended logic passes (interp.cpp)
 02786520  # agl shader program archive setup (debug WWHD_BOOTDBG, true60_test.cpp)
 027B8904  # agl ShaderProgramArchive init (debug WWHD_BOOTDBG, true60_test.cpp)
 027B82B8  # agl ShaderProgramArchive setup from sharc (debug WWHD_BOOTDBG, true60_test.cpp)
@@ -270,3 +273,4 @@
 025F1018 # mDoLib_projectViewport: project scoped interpolated marker points through the drawn camera
 
 023F22FC  # daPy_lk_c::setDemoData: event commands only on full steps (may replace model heaps)
+027C93A8  # shadow cascade setup (worker): the step's exact camera on passes before a logic pass (interp.cpp)

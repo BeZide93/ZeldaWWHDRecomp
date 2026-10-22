@@ -318,6 +318,10 @@ uint64_t g_passes = 0;      // every pass of the per-frame function
 bool g_hold = false;        // hold pass: draw only, no logic
 bool g_cam_blended = false; // camera_draw is drawing the blended camera
 uint32_t g_drawing_cam = 0; // the camera process camera_draw is drawing (zoom_ease)
+// exact culling on blended logic passes (exact_cull, below camera_draw)
+bool g_cam_prerun = false;          // camera_draw runs with the exact camera for the culling view
+uint64_t g_prerun_pass = ~0ull;     // the pass whose camera_draw had that run
+uint32_t g_exact_view[12];          // j3dSys's view matrix (104B45F8) of the exact camera, as drawn at 30 fps
 bool g_logic_pass = false;  // logic pass with interpolation on: camera drawn blended
 bool g_blend_draw = false;  // inside the loop body of a blended pass (logic pass or blended hold pass)
 bool g_hold_next = false;   // the next pass is a hold pass
@@ -490,6 +494,267 @@ extern "C" void hook_024FFC40(Cpu* c) {
     editor::camera_drawn(cam);
 }
 static void camera_draw_body(Cpu* c);
+// Exact culling. Which actors a pass draws decides game logic: a drawn actor's draw takes random
+// numbers (the candle and torch flicker of plightcol_plus, one per light per actor), and other draws
+// that take them later in the pass (the HUD meter) get other values when that count differs. At 30 fps
+// the step is drawn with the exact camera; the logic pass of frame interpolation draws with the
+// blended one, so while the camera turned, actors at the screen's edge were drawn or culled
+// differently and the game's random sequence left the 30 fps one within seconds (a 120 fps run of the
+// Windfall route at step 285). On blended logic passes camera_draw now runs once with the exact camera
+// first (its focus lines and the sound listener left out, the zoom ease not advanced twice) and keeps
+// j3dSys's view matrix; the culling checks of the pass (fopAcM_cullingCheck 025D6CE8,
+// fopAcM_checkCullingBox 025D6B70, J3DUClipper::clip 02838148 on j3dSys's view) see that matrix, so the pass draws the actors the 30 fps frame
+// draws, while everything is drawn with the blended camera. Actors drawn before the camera process
+// cull with the view the previous pass left: exact after a record pass; after a 40 fps blended record
+// pass its pre-run's. (Their second test, the shadow cascades: shadow_cascades_launch.) Passes without
+// logic cull with the camera they draw with; what their draws decide does not reach the game's logic
+// (fopAc_Draw keeps actor_condition).
+// debug: WWHD_INTERP_EXACT_CULL=0 culls with the blended camera as before
+std::vector<uint8_t> g_exact_cam_img, g_cam_blended_img;
+// j3dSys words camera_draw writes (view matrix +0x38..+0x67, projection words +0x14C +0x160 +0x174 +0x178)
+constexpr uint32_t kJ3dCamWords[] = {0x38, 0x3C, 0x40, 0x44, 0x48, 0x4C, 0x50, 0x54, 0x58, 0x5C, 0x60, 0x64, 0x14C, 0x160, 0x174, 0x178};
+uint32_t g_exact_j3d_words[16];
+bool g_cam_exact_pending = false;  // a 40 fps blended record pass drew the camera blended: exact again before the next logic
+uint32_t g_exact_cam_addr = 0;
+namespace interp {
+bool exact_cull_on() {
+    static const bool off = getenv("WWHD_INTERP_EXACT_CULL") && !atoi(getenv("WWHD_INTERP_EXACT_CULL"));
+    return !off;
+}
+void exact_prerun(Cpu* c) {
+    if (!exact_cull_on() || !interp_on() || true60::enabled() || g_prerun_pass == g_passes) return;
+    const Cpu saved = *c;
+    g_cam_prerun = true;
+    g_cam_blended = true;  // (the sound engine keeps the record pass's camera)
+    f_024FFC40_orig(c);
+    memcpy(g_exact_view, ppc_ptr(GD(0x104B45F8)), sizeof g_exact_view);
+    {   // (the exact camera's process for the shadow cascades of a 40 fps blended record pass)
+        g_exact_cam_addr = saved.r[3];
+        // (the process's size from its profile, +0x10 -> +0x10, as WWHD_PROC_DIGEST takes it)
+        const uint32_t prof = ld32(g_exact_cam_addr + 0x10);
+        uint32_t size = prof >= 0x10000000 && prof < 0x50000000 ? ld32(prof + 0x10) : 0;
+        if (size < 0x100 || size > 0x8000) size = 0;
+        g_exact_cam_img.assign((uint8_t*)ppc_ptr(g_exact_cam_addr), (uint8_t*)ppc_ptr(g_exact_cam_addr) + size);
+        for (int i = 0; i < 16; i++) g_exact_j3d_words[i] = ld32(GD(0x104B45C0) + kJ3dCamWords[i]);
+    }
+    g_cam_prerun = false;
+    g_cam_blended = false;
+    g_prerun_pass = g_passes;
+    *c = saved;
+}
+// the culling view of this pass: the exact camera's on a blended logic pass
+struct ExactCullView {
+    uint32_t saved[12];
+    bool on = false;
+    ExactCullView() {
+        // debug: WWHD_INTERP_CULL_TRACE=n logs the first n culling checks of logic passes
+        static int trace = getenv("WWHD_INTERP_CULL_TRACE") ? atoi(getenv("WWHD_INTERP_CULL_TRACE")) : 0;
+        if (trace > 0 && !g_hold && enabled()) {
+            trace--;
+            LOG("[interp] cull step %llu pass %llu: logic pass %d, exact view %s", (unsigned long long)g_logic_steps, (unsigned long long)g_passes,
+                g_logic_pass, g_prerun_pass == g_passes ? "of this pass" : g_prerun_pass + 1 == g_passes ? "of the pass before" : "in memory");
+        }
+        // (actors drawn before the camera process cull with the view the previous pass left: exact
+        // after a record pass, as at 30 fps; after a 40 fps blended record pass, its exact view)
+        if (!g_logic_pass || g_hold || (g_prerun_pass != g_passes && g_prerun_pass + 1 != g_passes)) return;
+        memcpy(saved, ppc_ptr(GD(0x104B45F8)), sizeof saved);
+        memcpy(ppc_ptr(GD(0x104B45F8)), g_exact_view, sizeof g_exact_view);
+        on = true;
+    }
+    ~ExactCullView() { if (on) memcpy(ppc_ptr(GD(0x104B45F8)), saved, sizeof saved); }
+};
+}  // namespace interp
+// Light state of drawn things (dKy_tevstr_c, 0x1C8 bytes: actors +0x110, other processes and models
+// their own). settingTevStruct (025626A4, from the draws) eases it towards the lights around it and
+// counts its own timers on every call: with frame interpolation 2x/4x/8x per logic step. Its light
+// handling then ran ahead (a light reaching an object a step early), and with it the candle flicker's
+// random numbers, which are game logic (the sea route: from step 309). On passes without logic each
+// tevstr is saved before its first settingTevStruct of the pass and put back at the start of the next
+// pass (after it has been painted), so it advances once per step, on the logic pass, as at 30 fps.
+// debug: WWHD_INTERP_TEV_KEEP=0 lets the draws of passes without logic keep it
+namespace interp {
+struct TevKeep { uint32_t addr; uint8_t bytes[0x1C8]; };
+std::vector<TevKeep> g_tev_kept;
+void tevstr_put_back() {
+    for (auto it = g_tev_kept.rbegin(); it != g_tev_kept.rend(); ++it) memcpy(ppc_ptr(it->addr), it->bytes, sizeof it->bytes);
+    g_tev_kept.clear();
+}
+}  // namespace interp
+void interp_tevstr_keep(uint32_t tevstr) {
+    using namespace interp;
+    static const bool off = getenv("WWHD_INTERP_TEV_KEEP") && !atoi(getenv("WWHD_INTERP_TEV_KEEP"));
+    if (off || !g_hold || !enabled() || true60::enabled() || tevstr < 0x10000000 || tevstr >= 0x50000000) return;
+    for (const auto& k : g_tev_kept)
+        if (k.addr == tevstr) return;
+    if (g_tev_kept.size() >= 4096) return;
+    g_tev_kept.emplace_back();
+    g_tev_kept.back().addr = tevstr;
+    memcpy(g_tev_kept.back().bytes, ppc_ptr(tevstr), sizeof g_tev_kept.back().bytes);
+}
+void interp_exact_cull(Cpu* c, void (*orig)(Cpu*)) {
+    // debug: WWHD_INTERP_CULL_ACTOR=hex logs that actor's culling checks on logic passes with hashes of the
+    // view matrix, the clipper (f_op_actor_mng) and the shadow cascades
+    static const uint32_t who = getenv("WWHD_INTERP_CULL_ACTOR") ? (uint32_t)strtoul(getenv("WWHD_INTERP_CULL_ACTOR"), nullptr, 16) : 0;
+    const uint32_t actor = c->r[3];
+    interp::ExactCullView v;
+    if (who && actor == who && !interp::g_hold) {
+        auto h = [](uint32_t a, uint32_t n) { uint64_t x = 1469598103934665603ull; for (uint32_t i = 0; i < n; i++) x = (x ^ ld8(a + i)) * 1099511628211ull; return (unsigned long long)x; };
+        uint32_t casc = 0, cn = 0;
+        const uint32_t root = ld32(GD(0x101F95D0));
+        if (root) { const uint32_t pp = ld32(root + 0x1024); const uint32_t sv = pp ? ld32(pp) : 0; if (sv) { cn = ld32(sv + 0x610 + 0x254); casc = ld32(sv + 0x610 + 0x2C0); } }
+        LOG("[interp] cull %08X step %llu: view %016llx swapped %d, clipper %016llx, cascades %u %016llx", actor, (unsigned long long)interp::g_logic_steps,
+            h(GD(0x104B45F8), 0x30), v.on, h(GD(0x1048CFF0), 0x80), cn, cn <= 8 && casc ? h(casc, cn * 0x5B4) : 0ull);
+    }
+    orig(c);
+}
+namespace interp {
+// The shadow cascades. Culling counts an actor as drawn when it is in the camera's view or in one of
+// the shadow cascades, which a worker job (setup 027C93A8, from per-frame child 10) computes from the
+// camera's view matrix and projection, reading them through pointers while the main thread already
+// draws the next pass. The logic pass after a record pass then culled with cascades from whatever
+// camera the next pass had written by then, and after a 40 fps blended record pass (no exact pass in
+// the step) from the blended camera. On passes followed by a logic pass (the record pass, a 40 fps
+// blended record pass) the job gets a copy of the step's exact view and projection taken when the
+// pass starts it (the exact camera pre-run's on a blended pass), so the next logic pass culls with
+// the cascades the 30 fps frame of the step had. Other passes keep the camera they draw with.
+std::atomic<uint32_t> g_shadow_view_src{0}, g_shadow_proj_src{0};
+std::atomic<bool> g_shadow_sub{false};
+constexpr uint32_t kShadowView = 0x30, kShadowProj = 0x80;
+void shadow_cascades_launch() {
+    g_shadow_sub = false;
+    if (!exact_cull_on() || !interp_on() || true60::enabled() || !(record_pass() || record_blended())) return;
+    const uint32_t v = g_shadow_view_src, pr = g_shadow_proj_src, slot = mem::fixed_slot(mem::kFixShadowCam);
+    if (!v || !pr) return;
+    if (record_pass()) {  // drawn exactly: the camera as it is now
+        memcpy(ppc_ptr(slot), ppc_ptr(v), kShadowView);
+        memcpy(ppc_ptr(slot + kShadowView), ppc_ptr(pr), kShadowProj);
+    } else {  // a blended pass: the exact camera of its pre-run
+        const uint32_t lo = g_exact_cam_addr, hi = lo + (uint32_t)g_exact_cam_img.size();
+        if (g_prerun_pass != g_passes || v < lo || v + kShadowView > hi || pr < lo || pr + kShadowProj > hi) {
+            static bool logged = false;
+            if (!logged) {
+                logged = true;
+                LOG("[interp] shadow cascades: camera %08X/%08X not in the camera process %08X..%08X: not taken from the exact camera", v, pr, lo, hi);
+            }
+            return;
+        }
+        memcpy(ppc_ptr(slot), g_exact_cam_img.data() + (v - lo), kShadowView);
+        memcpy(ppc_ptr(slot + kShadowView), g_exact_cam_img.data() + (pr - lo), kShadowProj);
+    }
+    g_shadow_sub = true;
+}
+}  // namespace interp
+// the cascade setup (worker thread): view r5, projection r6
+extern "C" void f_027C93A8_orig(Cpu* c);
+extern "C" void hook_027C93A8(Cpu* c) {
+    using namespace interp;
+    g_shadow_view_src = c->r[5];
+    g_shadow_proj_src = c->r[6];
+    if (g_shadow_sub) {
+        const uint32_t slot = mem::fixed_slot(mem::kFixShadowCam);
+        c->r[5] = slot;
+        c->r[6] = slot + kShadowView;
+    }
+    f_027C93A8_orig(c);
+}
+// dCamera_c::Draw (024FFC18, end of camera_draw): the focus lines, drawn once per pass (not in the
+// exact pre-run, which would draw them, and take their random numbers, a second time)
+extern "C" void f_024FFC18_orig(Cpu* c);
+extern "C" void hook_024FFC18(Cpu* c) {
+    if (interp::g_cam_prerun) { c->r[3] = 1; return; }
+    f_024FFC18_orig(c);
+}
+extern "C" void f_025D6CE8_orig(Cpu* c);
+extern "C" void f_025D4654(Cpu* c);
+// Actors the step's logic pass did not draw (culled with the exact camera, as the 30 fps frame culls
+// them) but a later pass draws (its blended camera shows them; or the edge draws below): their draw
+// leaves draw-side state in their memory (animation caches, line buffers, rope point counts) that the
+// 30 fps game, which did not draw them, does not have. Their memory is saved before such a draw and
+// put back at the start of the next pass (after the pass has been painted), except the links of their
+// packets that a draw list still holds (as true60.cpp does for its half-pass previews).
+namespace interp {
+struct ActorKeep { uint32_t actor; std::vector<uint32_t> words; };
+std::vector<ActorKeep> g_actor_kept;
+void actor_keep(uint32_t actor) {
+    for (const auto& k : g_actor_kept)
+        if (k.actor == actor) return;
+    const uint32_t prof = ld32(actor + 0x10);
+    uint32_t size = prof >= 0x10000000 && prof < 0x50000000 ? ld32(prof + 0x10) : 0;
+    if (size < 0x3AC || size > 0x20000 || g_actor_kept.size() >= 512) return;
+    g_actor_kept.push_back({actor, std::vector<uint32_t>(size / 4)});
+    memcpy(g_actor_kept.back().words.data(), ppc_ptr(actor), size & ~3u);
+}
+void actors_put_back() {
+    for (auto it = g_actor_kept.rbegin(); it != g_actor_kept.rend(); ++it) {
+        const uint32_t actor = it->actor, n = (uint32_t)it->words.size();
+        uint32_t* cur = (uint32_t*)ppc_ptr(actor);
+        auto entered = [&](uint32_t i) {  // J3DPacket in the actor: +0x94 its draw-list slot, +0x10 the next packet
+            if (i * 4 < 0x94) return false;
+            const uint32_t slot = __builtin_bswap32(cur[i]);
+            if (slot < 0x10000000 || slot >= 0x50000000 || (slot & 3)) return false;
+            const uint32_t pkt = actor + 4 * i - 0x94;
+            uint32_t q = ld32(slot);
+            for (int k = 0; q && k < 4096; k++) {
+                if (q == pkt) return true;
+                if (q < 0x10000000 || q >= 0x50000000 || (q & 3)) return false;
+                q = ld32(q + 0x10);
+            }
+            return false;
+        };
+        std::vector<uint32_t> keep;
+        for (uint32_t i = 0x94 / 4; i < n; i++)
+            if (cur[i] != it->words[i] && entered(i)) { keep.push_back(i); keep.push_back(i - (0x94 - 0x10) / 4); }
+        for (uint32_t i = 0; i < n; i++)
+            if (cur[i] != it->words[i] && std::find(keep.begin(), keep.end(), i) == keep.end()) cur[i] = it->words[i];
+    }
+    g_actor_kept.clear();
+}
+}  // namespace interp
+// Edge of the screen on blended logic passes: an actor the exact camera culls (so the 30 fps frame does
+// not draw it) but the blended camera of the frame shows would be missing from that one frame while
+// the camera turns. It is drawn a second time with the pass's own camera, as on a pass without logic
+// (g_hold for the call: its random numbers, light state, animations, per-draw state and culling
+// result do not reach the game's logic; see the hold-pass hooks). debug: WWHD_INTERP_EDGE_DRAW=0
+namespace interp {
+void edge_draw(const Cpu& call, Cpu* c, uint32_t actor) {
+    static const bool off = getenv("WWHD_INTERP_EDGE_DRAW") && !atoi(getenv("WWHD_INTERP_EDGE_DRAW"));
+    if (off || g_hold || !g_logic_pass || !exact_cull_on() || (g_prerun_pass != g_passes && g_prerun_pass + 1 != g_passes)) return;
+    if (!(ld32(actor + 0x2E4) & 0x04) || !(ld32(actor + 0x2E0) & 0x100)) return;  // drawn, or not by culling
+    const Cpu result = *c;
+    *c = call;
+    f_025D6CE8_orig(c);  // (the check with the pass's own camera)
+    const bool culled = c->r[3] != 0;
+    if (!culled) {
+        static int trace = getenv("WWHD_INTERP_CULL_TRACE") ? atoi(getenv("WWHD_INTERP_CULL_TRACE")) : 0;
+        if (trace > 0) {
+            trace--;
+            LOG("[interp] step %llu: actor %08X culled by the exact camera, drawn with the pass's", (unsigned long long)g_logic_steps, actor);
+        }
+        const uint32_t status = ld32(actor + 0x2E0), condition = ld32(actor + 0x2E4);
+        actor_keep(actor);  // (put back after the pass has been painted)
+        *c = call;
+        g_hold = true;
+        f_025D4654(c);  // (through the hooks: as on a pass without logic)
+        g_hold = false;
+        st32(actor + 0x2E0, status);
+        st32(actor + 0x2E4, condition);
+    }
+    *c = result;
+}
+}  // namespace interp
+// fopAcM_checkCullingBox (025D6B70): the other culling check on j3dSys's view
+extern "C" void f_025D6B70_orig(Cpu* c);
+extern "C" void hook_025D6B70(Cpu* c) { interp_exact_cull(c, f_025D6B70_orig); }
+// J3DUClipper::clip(clipper, view, pos, radius) (02838148) with j3dSys's view: draws that test their
+// own visibility (bombs, before they set up their light; the particle system's simple emitters; the
+// trees' clip state)
+extern "C" void f_02838148_orig(Cpu* c);
+extern "C" void hook_02838148(Cpu* c) {
+    static const uint32_t view = GD(0x104B45F8);
+    if (c->r[4] != view) { f_02838148_orig(c); return; }
+    interp::ExactCullView v;
+    f_02838148_orig(c);
+}
 static void camera_draw(Cpu* c) {
     const uint32_t saved = interp::g_drawing_cam;
     interp::g_drawing_cam = c->r[3];
@@ -502,6 +767,7 @@ static void camera_draw_body(Cpu* c) {
     mods::moon_jump_camera(cam);
     Prev* p = prev_for(cam);
     if (g_blend_draw && !true60::runs_60(cam)) {  // blended between the step drawn last (S) and the new one (S+1)
+        if (!g_hold && p->valid) exact_prerun(c);  // (logic pass: the exact camera's culling view first)
         CamState cur = read_cam(cam);
         float trim_drawn = NAN;  // the exact letterbox height, when it was drawn blended
         if (p->valid) {
@@ -559,8 +825,15 @@ static void camera_draw_body(Cpu* c) {
         if (trim_drawn == trim_drawn) stf32(cam + kCamBody + kTrimHeight, trim_drawn);  // (exact back)
         if (record_blended()) {  // 40 fps blended record pass: the step's camera for the next step's frames
             p->s = cur;
+            p->shake = read_shake(cam);
             p->trim = (float)ldf32(cam + kCamBody + kTrimHeight);
             p->valid = true;
+            // (the step has no exact pass: what this camera_draw wrote is put back to the exact pre-run's
+            // before the next step's logic, as the 30 fps frame leaves it)
+            if (g_prerun_pass == g_passes && g_exact_cam_addr == cam && !g_exact_cam_img.empty()) {
+                g_cam_exact_pending = true;
+                g_cam_blended_img.assign((uint8_t*)ppc_ptr(cam), (uint8_t*)ppc_ptr(cam) + g_exact_cam_img.size());
+            }
         }
         return;
     }
@@ -624,7 +897,9 @@ bool zoom_ease(Cpu* c, void (*orig)(Cpu*)) {
     const uint32_t v = c->r[3];
     float x = (float)ldf32(v), before = x;
     double ret = 0;
-    fade::floats_call(p->zoom, g_drawing_cam, g_logic_steps, !g_hold, pass_t(), 1u, &x, [&](float* y) {
+    // (the exact pre-run of a logic pass advanced it: the blended run after it only shows it)
+    const bool advance = !g_hold && (g_cam_prerun || g_prerun_pass != g_passes);
+    fade::floats_call(p->zoom, g_drawing_cam, g_logic_steps, advance, g_cam_prerun ? 1.0f : pass_t(), 1u, &x, [&](float* y) {
         stf32(v, y[0]);
         orig(c);
         y[0] = (float)ldf32(v);
@@ -1015,6 +1290,7 @@ extern "C" void hook_027F5018(Cpu* c) {
 // systems stay in step with the game logic at 30 steps per second.
 namespace interp {
 void fx_pass_start();          // interp_fx.cpp: puts back the values drawn blended
+void fx_anm_settle(Cpu* c);    // interp_fx.cpp: material animations exact again before a logic pass
 void fx_hold_blend(float t);   // interp_fx.cpp: blended hold pass: logic-time effect blends at t
 void fx_ss_reset();
 void nodraw_reset();          // fopAc_Draw hook: the step's one-shot no-draw requests
@@ -1470,10 +1746,24 @@ extern "C" void hook_0203593C(Cpu* c) {
         g_record_pending = false;
     }
     if (!g_exact_writes.empty()) put_back_exact();
+    if (!g_tev_kept.empty()) tevstr_put_back();
+    if (!g_actor_kept.empty()) actors_put_back();
+    if (g_cam_exact_pending) {  // (the exact camera of a 40 fps blended record pass)
+        g_cam_exact_pending = false;
+        // (only the words the blended camera_draw changed, where nothing else changed them since)
+        if (g_exact_cam_addr && g_cam_blended_img.size() == g_exact_cam_img.size()) {
+            uint8_t* m = (uint8_t*)ppc_ptr(g_exact_cam_addr);
+            for (size_t i = 0; i + 4 <= g_exact_cam_img.size(); i += 4)
+                if (memcmp(m + i, g_cam_blended_img.data() + i, 4) == 0 && memcmp(m + i, g_exact_cam_img.data() + i, 4) != 0)
+                    memcpy(m + i, g_exact_cam_img.data() + i, 4);
+        }
+        for (int i = 0; i < 16; i++) st32(GD(0x104B45C0) + kJ3dCamWords[i], g_exact_j3d_words[i]);
+    }
     if (!g_models_before.empty()) g_models_before.clear();
     fader_between_passes();
     perf::game_frame();
     fx_pass_start();
+    if (enabled() && !g_hold_next) fx_anm_settle(c);  // (a logic pass follows)
     ss::service(c);  // save states: exact values are back in guest memory, all other threads idle
     interp::NativeResumeBoundaryIssuer::after_service(c); // before any resumed native/game service
     mods::cheats_service();
@@ -1770,7 +2060,15 @@ extern "C" void hook_02738438(Cpu* c) {
     interp::light_trace_add(" hdl[%08X %08X %08X %08X]", ld32(o + 0x10), ld32(o + 0x14), ld32(o + 0x18), ld32(o + 0x1C));
     f_02738438_orig(c);
 }
-extern "C" void hook_0278FEBC(Cpu* c) { FaderWatch fw("child 10"); g_hold_child_cpu = c; if (!hold_skip_child(10)) f_0278FEBC_orig(c); }
+namespace interp { void shadow_cascades_launch(); }
+// child 10 starts the shadow cascade job (shadow_cascades_launch)
+extern "C" void hook_0278FEBC(Cpu* c) {
+    FaderWatch fw("child 10");
+    g_hold_child_cpu = c;
+    if (hold_skip_child(10)) return;
+    interp::shadow_cascades_launch();
+    f_0278FEBC_orig(c);
+}
 extern "C" void hook_027199C0(Cpu* c) { FaderWatch fw("child 11"); g_hold_child_cpu = c; if (!hold_skip_child(11)) f_027199C0_orig(c); }
 extern "C" void hook_02618940(Cpu* c) { FaderWatch fw("child 12"); g_hold_child_cpu = c; if (!hold_skip_child(12)) f_02618940_orig(c); }
 // Child 13 (02728A74) advances the HD display's fader (the stage fades) on every pass it runs, so
@@ -1847,6 +2145,7 @@ extern "C" void hook_02715310(Cpu* c) {
     else countdown::refresh(c);
 }
 
+namespace interp { bool exact_cull_on(); void edge_draw(const Cpu& call, Cpu* c, uint32_t actor); void actor_keep(uint32_t actor); }
 // fopAc_Draw(fopAc_ac_c*): one-shot "not drawn this frame" requests (fopAcStts_NODRAW_e) made by
 // the step's logic hold for all passes of the step (interp_nodraw.h; issue #126: in conversations
 // the talk camera hides Link on logic frames only, so he flickered at 60/120/240 fps and true 60).
@@ -1869,7 +2168,19 @@ extern "C" void hook_025D4654(Cpu* c) {
             }
         }
     }
+    // On passes without logic the draw's culling result does not reach the actor: actor_condition
+    // (+0x2E4: fopAcCnd_NODRAW, which executes read) keeps what the step's logic pass set. Those passes
+    // cull with the camera they draw with (blended), and the record pass with shadow cascades set up
+    // after the blended logic pass: at the next step's logic an actor could count as drawn or not
+    // drawn where at 30 fps it did not. debug: WWHD_INTERP_EXACT_CULL=0 (as before)
+    const uint32_t actor = c->r[3];
+    const bool keep_condition = interp::enabled() && interp::g_hold && interp::exact_cull_on() && !true60::enabled();
+    const uint32_t condition = keep_condition ? ld32(actor + 0x2E4) : 0;
+    const Cpu saved = *c;
+    if (keep_condition && (condition & 0x04)) interp::actor_keep(actor);  // (not drawn by the step's logic pass)
     f_025D4654_orig(c);
+    if (keep_condition) st32(actor + 0x2E4, condition);
+    interp::edge_draw(saved, c, actor);
 }
 
 namespace interp {
@@ -2099,3 +2410,4 @@ extern "C" void hook_025F0840(Cpu* c) {
             (unsigned long long)interp::g_passes, before, (int16_t)ld16(g + 0x18));
     }
 }
+

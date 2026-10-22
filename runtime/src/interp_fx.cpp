@@ -280,6 +280,7 @@ struct AnmRec {
     uint64_t pass = 0;
 };
 std::unordered_map<uint32_t, AnmRec> g_anm, g_anm_before;  // (before: blended record pass)
+std::vector<uint32_t> g_anm_blended;  // animators evaluated at a blended frame since the last logic pass
 struct { uint32_t blended = 0, wrapped = 0, jumped = 0; } g_astats;
 
 // frame at t between a (drawn at step S) and b (step S+1); returns b when it is not a small step
@@ -1273,7 +1274,40 @@ extern "C" void hook_027DF40C(Cpu* c) {
     stf32(ts, mid);
     f_027DF40C_orig(c);
     stf32(ts, cur);  // the evaluator's cache (+0x28) keeps mid, so the next exact frame re-evaluates
+    if (g_anm_blended.size() < 4096) g_anm_blended.push_back(anm);
 }
+// Before the next step's logic (interp.cpp, start of a logic pass): animators whose last evaluation
+// in the step was a blended one (no exact evaluation followed: their caller evaluates only when it
+// sees the frame change) are evaluated at the step's exact frame, so their values and their cache
+// (+0x28) are what the 30 fps frame of the step left (the step's actors keep it in their memory).
+// debug: WWHD_INTERP_ANM_SETTLE=0 leaves them as drawn
+namespace interp {
+void fx_anm_settle(Cpu* c) {
+    static const bool off = getenv("WWHD_INTERP_ANM_SETTLE") && !atoi(getenv("WWHD_INTERP_ANM_SETTLE"));
+    if (g_anm_blended.empty()) return;
+    std::vector<uint32_t> list;
+    list.swap(g_anm_blended);
+    if (off || true60::enabled()) return;
+    std::sort(list.begin(), list.end());
+    list.erase(std::unique(list.begin(), list.end()), list.end());
+    const Cpu saved = *c;
+    int settled = 0;
+    for (uint32_t anm : list) {
+        const uint32_t ts = ld32(anm);
+        if (ts < 0x10000000 || ts >= 0x50000000) continue;
+        if (ld32(anm + 0x28) == ld32(ts)) continue;  // (evaluated at the exact frame since)
+        c->r[3] = anm;
+        f_027DF40C_orig(c);
+        settled++;
+    }
+    *c = saved;
+    static int tr = trace_left(14);
+    if (tr && settled) {
+        tr--;
+        LOG("[interp-fx] %d material animations evaluated at the step's exact frame before its logic", settled);
+    }
+}
+}  // namespace interp
 
 // J3DFrameCtrl::update: animation frames advanced from Draw (e.g. daSalvage_c::_draw) are logic too
 // (the hook itself is in true60.cpp, which also scales the step for 60 Hz processes)
@@ -2307,6 +2341,7 @@ void fx_ss_reset() {
     g_ptcl_keep.clear();
     g_emtr.clear();
     g_anm.clear();
+    g_anm_blended.clear();
     g_temp.clear();
     g_temp_keep.clear();
     g_wave.pkt = 0;

@@ -424,16 +424,39 @@ void proc_digest(uint32_t proc) {
         return v;
     }();
     int16_t pname = (int16_t)ld16(proc + 8);
+    // WWHD_PROC_DIGEST_DUMP=NAME:path also writes the hashed bytes of the processes with that profile
+    // name as ADMP records (step, process, size, bytes; see WWHD_ACTOR_DUMP) to path
+    static int dump_name = -2;
+    static FILE* dump_file = nullptr;
+    if (dump_name == -2) {
+        dump_name = -1;
+        if (const char* e = getenv("WWHD_PROC_DIGEST_DUMP")) {
+            char* end;
+            dump_name = (int)strtol(e, &end, 16);
+            dump_file = *end == ':' ? fopen(end + 1, "wb") : nullptr;
+        }
+    }
+    if (dump_file && pname == dump_name) {
+        uint32_t full = 1; float one = 1.0f;
+        fwrite("ADMP", 1, 4, dump_file); fwrite(&step, 8, 1, dump_file); fwrite(&full, 4, 1, dump_file); fwrite(&one, 4, 1, dump_file);
+        fwrite(&proc, 4, 1, dump_file); fwrite(&size, 4, 1, dump_file); fwrite(mem::ptr(proc), 1, size, dump_file);
+    }
     uint64_t h = 0xcbf29ce484222325ull;
     const uint8_t* p = mem::ptr(proc);
     // mDoExt_3DlineMat0_c / 3DlineMat1_c inside the process (found by their vtable at +0x130): the byte
     // at +0x142 / +0x182 is a draw-side double-buffer index, flipped by each draw (how many draws a logic
     // step gets depends on real-time pacing): left out
     std::vector<uint32_t> auto_skip;
+    static const bool anm_cache = getenv("WWHD_PROC_DIGEST_ANM_CACHE") && atoi(getenv("WWHD_PROC_DIGEST_ANM_CACHE"));
     for (uint32_t o = 0x130; o + 4 <= size; o += 4) {
         uint32_t w = ld32(proc + o);
         if (w == GD(0x10058DC0u)) auto_skip.push_back(o - 0x130 + 0x142);
         else if (w == GD(0x10058DF0u)) auto_skip.push_back(o - 0x130 + 0x182);
+        // WWHD_PROC_DIGEST_ANM_CACHE=1: a material animator's evaluation cache (the frame it last
+        // evaluated, +0x28; its time block's frame mapping function, loop 027DA9E8 / clamp 027DAAA0,
+        // sits 0x14 before it): what drawing evaluated, not game state
+        else if (anm_cache && (w == GC(0x027DA9E8u) || w == GC(0x027DAAA0u)) && o + 0x18 <= size)
+            for (uint32_t k = 0; k < 4; k++) auto_skip.push_back(o + 0x14 + k);
     }
     for (uint32_t i = 0; i < size; i++) {
         bool skip = false;
@@ -571,11 +594,14 @@ uint64_t origin_step() { return g_origin_step; }
 
 // debug: WWHD_TEVLOG=path: dScnKy_env_light_c::settingTevStruct (025626A4) calls: step, full, type (r4), tevStr (r6)
 extern "C" void f_025626A4_orig(Cpu* c);
+void interp_tevstr_keep(uint32_t tevstr);
 extern "C" void hook_025626A4(Cpu* c) {
     static FILE* f = getenv("WWHD_TEVLOG") ? fopen(getenv("WWHD_TEVLOG"), "w") : nullptr;
     if (f) fprintf(f, "%llu %d %d %08X %08X %08X\n", (unsigned long long)interp::logic_steps(), interp::hold_pass() ? 0 : 1, (int)c->r[4], c->r[5], c->r[6], c->lr);
+    interp_tevstr_keep(c->r[6]);  // (interp.cpp: passes without logic leave it as the step's logic left it)
     f_025626A4_orig(c);
 }
+void interp_exact_cull(Cpu* c, void (*orig)(Cpu*));  // interp.cpp
 // debug: WWHD_CULLLOG=path: fopAcM_cullingCheck (025D6CE8): step, full, actor, result
 extern "C" void f_025D6CE8_orig(Cpu* c);
 namespace true60_test { uint64_t origin_step(); }
@@ -603,7 +629,8 @@ extern "C" void hook_025D6CE8(Cpu* c) {
     static FILE* f = getenv("WWHD_CULLLOG") ? fopen(getenv("WWHD_CULLLOG"), "w") : nullptr;
     uint32_t a = c->r[3];
     std::string ctx;
-    if (f) {
+    static const bool with_ctx = !getenv("WWHD_CULLLOG_BRIEF");  // (WWHD_CULLLOG_BRIEF=1: results only)
+    if (f && with_ctx) {
         char t[16];
         for (uint32_t o = 0; o < 0x30; o += 4) { snprintf(t, sizeof t, " %08X", ld32(GD(0x104B45F8) + o)); ctx += t; }
         ctx += " | cull";
@@ -615,7 +642,7 @@ extern "C" void hook_025D6CE8(Cpu* c) {
         ctx += " | box";
         for (uint32_t o = 0x34C; o < 0x370; o += 4) { snprintf(t, sizeof t, " %08X", ld32(a + o)); ctx += t; }
     }
-    f_025D6CE8_orig(c);
+    interp_exact_cull(c, f_025D6CE8_orig);  // (interp.cpp: the exact camera on blended logic passes)
     if (f) fprintf(f, "%llu %d %08X %d%s\n", (unsigned long long)interp::logic_steps(), interp::hold_pass() ? 0 : 1, a, (int)c->r[3], ctx.c_str());
 }
 // debug: WWHD_BOOTDBG=1 logs agl shader program archive setup (02786520 / 027B8904): boot crash hunt

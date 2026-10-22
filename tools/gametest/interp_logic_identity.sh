@@ -47,7 +47,7 @@ run() {  # run EXE NAME FPS [VAR=value ...]
         WWHD_TEST_FIXED_SEED=1 WWHD_PRESS=$boot WWHD_STATE_LOAD_AT=$load:1 WWHD_TEST_ORIGIN=1 WWHD_TEST_ORIGIN_LOAD=30 WWHD_TEST_END=$end \
         WWHD_TEST_STICK=$stick WWHD_TEST_RSTICK=$rstick WWHD_TEST_PRESS=$press \
         WWHD_LINK_TRACE=trace.txt WWHD_CAM_TRACE=cam.txt WWHD_SAVEINFO_DUMP=si.bin WWHD_SE_TRACE=se.txt WWHD_RNG_TRACE=rng.txt \
-        WWHD_PROC_DIGEST=digest.txt WWHD_PROC_DIGEST_SKIP=$skip \
+        WWHD_PROC_DIGEST=digest.txt WWHD_PROC_DIGEST_SKIP=$skip WWHD_PROC_DIGEST_ANM_CACHE=$anm \
         $mode "$@" $x --game $game --save save > log 2>&1 ) &
     local pid=$!
     trap "kill -9 $pid 2>/dev/null" EXIT INT TERM HUP
@@ -69,18 +69,26 @@ run() {  # run EXE NAME FPS [VAR=value ...]
 # process hashes: run-to-run noise (as run_scenario.sh) and, with DRAW_SKIP=1 (the default), state that
 # drawing writes into the processes: the actor's tevStr (+0x110, 0x1C8 bytes: lights, colours and their
 # per-draw easing, written by settingTevStruct in the actor's draw), the skull flag's render packet
-# (00AE +0x450: GPU uniforms and transforms, double-buffered per draw). The 60/120 fps runs draw more often
-# (and with the blended camera); the logic does not read these. DRAW_SKIP=0 hashes them too.
+# (00AE +0x3AC, 0x1344 bytes up to its cloth arrays: draw-list links, GPU uniforms and transforms,
+# double-buffered per draw, its position matrix from the camera). The 60/120 fps runs draw more often
+# (and with the blended camera). Link's eye and mouth texture controllers (+0x66C, +0x6C4, +0x71C: the frames his
+# draw sets from m3530/m3532 on every draw); the King of Red Lions' HD sea-shadow animation (00A5 +0x5BC,
+# played by its shadow draw), its wake's particle track callback (00A5 +0xD0DC: positions its particle
+# draw stores); its sail's render packet (00AB +0x3BC, 0x2100 bytes); the water pillars' tevStr
+# (01C1 +0x204); and every material animator's evaluation cache (the frame drawing last
+# evaluated, WWHD_PROC_DIGEST_ANM_CACHE). The logic does not read these. DRAW_SKIP=0 hashes them too.
 skip0=A8:64F0:98,6B:3D0:30,A8:6D9C:6,A8:713C:6,A8:71DC:6,1DC:508:8,A8:48C:168
 skip=$skip0
-[ "${DRAW_SKIP:-1}" = 1 ] && skip=$skip0,AE:450:D9C,*:110:1C8
+[ "${DRAW_SKIP:-1}" = 1 ] && skip=$skip0,AE:3AC:1344,A8:66C:4:58:3,A5:5BC:3C,A5:D0DC:50,AB:3BC:2100,1C1:204:1C8,*:110:1C8
+anm=0
+[ "${DRAW_SKIP:-1}" = 1 ] && anm=1
 bad=0
 for f in ${=FPS:-30 60 120}; do run $exe new$f $f "$@" || bad=1; done
 # (the base build may not know the * skip: both 30 fps runs of that comparison hash everything)
 if [ -n "${BASE:-}" ]; then
   full=$skip0
-  skip=$full run ${BASE:A} base30 30 "$@" || bad=1
-  skip=$full run $exe new30full 30 "$@" || bad=1
+  skip=$full anm=0 run ${BASE:A} base30 30 "$@" || bad=1
+  skip=$full anm=0 run $exe new30full 30 "$@" || bad=1
 fi
 for f in ${=FPS:-30 60 120}; do
   [ $f = 30 ] && continue
