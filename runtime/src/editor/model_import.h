@@ -22,6 +22,7 @@ namespace editor::model_import {
 struct Result {
     std::vector<uint8_t> glb;        // the file as the package keeps it
     std::vector<std::string> notes;  // what was changed, one sentence each
+    std::vector<std::string> warnings;  // what looks wrong but is kept as it is (normals pointing into the model)
     bool changed = false;            // false: `glb` is the input
 };
 // False (with `why`) for a file that isn't a GLB 2.0 the importer can read; `out` then holds the input unchanged.

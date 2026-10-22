@@ -210,6 +210,12 @@ public:
         (void)mod, (void)model;
         return {};
     }
+    // Whether the collision of a model of `mod` is being prepared (prepare_model with "collision"): a world object on it
+    // is placed and the game checks its place when the collision is ready, as for an island building being made.
+    virtual bool collision_preparing(const std::string& mod, const std::string& model) {
+        (void)mod, (void)model;
+        return false;
+    }
     // Snapshot query: collision geometry and placement/budget findings for one
     // parsed object, including motion, grapple points and island presentation. The host
     // synchronizes its geometry, wave envelope and protected world snapshot.

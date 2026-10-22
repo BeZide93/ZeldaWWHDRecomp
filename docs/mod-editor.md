@@ -152,7 +152,10 @@ more of the same; **Stop placing** in the toolbar or Esc ends it.
   Mothula (on the ground or winged), Morth, Magtail, Poe, Armos, Armos Knight, Kargaroc, Wizzrobe, Warship, Gyorgs (one to five), Floormaster, Big Octo (a target only). The Inspector's **Variant** changes a placed one, and **Sets switch when defeated**
   picks one of the mod's switches to set once every enemy naming it is defeated.
 - **Your models:** one of the mod's models (static or skinned), your own enemy (a skinned model with
-  flinch, stun, death and idle clips), a prop Link can carry.
+  flinch, stun, death and idle clips), a prop Link can carry. A static model with collision of its own (a
+  `<name>_col` mesh, see [World objects](world-objects.md#author-collision-in-the-glb)) is added as a
+  static world object standing on that collision, so Link walks on it; without one it gets a small solid
+  cylinder at its origin.
 - **Game objects:** the game's own palm trees, trees, tables and more, and island buildings (see below).
 
 Each new actor gets the flags it needs, named after it (for example `sign-read`, `pot-broken`,
@@ -285,6 +288,10 @@ check lists what the import will change, and the import changes it in the copy i
   vertices (lines and points) are left out; the game draws faces only.
 - **Vertex colours, a second UV map, tangents**: left out. The model draws with its positions, normals and
   first UV map. A mesh without normals gets flat ones.
+- **Normals pointing into the model** (against the way its faces are wound, as after flipping faces in
+  Blender): kept, since they may be meant so, but said, because the model is then lit from the wrong side
+  and looks dark where the light falls. In Blender: Edit Mode, select all, Mesh → Normals → Recalculate
+  Outside, and export again.
 - **Blended transparency** (`alphaMode` `BLEND`): drawn as a cut-out (`MASK`, alpha below 0.5 see-through)
   when the texture has transparent parts, else opaque.
 - **Textures**: a JPEG, a 16-bit or palette PNG is converted to a plain PNG; a texture over 512 pixels, or
@@ -315,6 +322,39 @@ sea level, a stage's own origin), unturned, so it stands exactly where you model
 so and where its middle is. Its handle is that origin: move or turn it as a whole. Placed at a position you
 give, it keeps the position and the note says where it is drawn. **Focus** on it frames the model, not its
 origin. [Build next to a game island](world-objects.md#build-next-to-a-game-island) has the whole round trip.
+
+**Collision.** Give the model a second mesh object named `<name>_col` (for example `windfall_ext_col`), a
+simpler copy of what Link should walk on and bump into, with materials named `col_grass`, `col_stone`,
+`col_wood` and so on ([the list](world-objects.md#author-collision-in-the-glb)). **Your model** then adds it
+as a static world object standing on that collision: Link walks on it, its walls stop him, the ship runs
+into it. Without a `_col` mesh it gets only a small solid cylinder at its origin. A world object keeps clear
+of the island's own things (villagers and their routes, start points, doors); if your part covers one, it
+says *can't stand here* with what is in the way, and the game leaves it out until it is moved or the model
+leaves that spot free.
+
+### Using the game's own materials
+
+A model can draw its surfaces with the game's own materials, Windfall's grass, Dragon Roost's rock, instead
+of pictures of its own. It then looks exactly like the island next to it: the game's full-size textures,
+its light through the day and its vertex-colour shading. A copy of the game's texture in your own material
+doesn't: your own materials are lit as objects are (a barrel, a sign), at the texture's full brightness, so
+they look brighter and flatter than the island's ground beside them.
+
+1. Find the names. `export_glb {"stage": "sea", "room": 11}` writes the room (here Windfall) as a GLB whose
+   materials carry the game's names; `list_kit_materials {"stage": "sea", "room": 11}` lists them with their
+   textures. Import the export into Blender as a reference.
+2. In your model, name each surface's material exactly as the game's (append the material from the
+   reference, or type its name; Blender's `.001` suffix is ignored) and **delete its Image Texture node**: a
+   game material never carries a picture, since a package never contains the game's pictures. To keep your
+   own names, map them on import instead: `"materials": {"my_grass": "<the game material>"}`.
+3. Materials with pictures of your own (a new sign) keep their Image Texture; one model can mix both.
+4. Optionally add a colour attribute (vertex colours, exported as `COLOR_0`) to shade it as the game's
+   ground is (darker at the foot of cliffs); white draws at full brightness.
+5. Import it with the room it takes the materials from: `import_model {"file": "...", "kit": {"stage":
+   "sea", "room": 11}}`. It is built from your game files, and Link can stand on its `_col` mesh as above.
+
+The details, limits and the costs are in [Game materials](world-objects.md#game-materials) and [Game materials on
+your own sea models](world-objects.md#game-materials-on-your-own-sea-models).
 
 ### When a model doesn't show
 

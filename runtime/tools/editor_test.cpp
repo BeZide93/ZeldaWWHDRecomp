@@ -165,6 +165,8 @@ struct FakeHost : editor::Host {
         const auto it = model_failures.find(mod + ":" + model);
         return it == model_failures.end() ? std::string() : it->second;
     }
+    std::set<std::string> collision_pending;  // "mod:model" whose collision is being prepared
+    bool collision_preparing(const std::string& mod, const std::string& model) override { return collision_pending.contains(mod + ":" + model); }
     bool prepare_model(const std::string& mod, const std::string&, const Value& model, std::string& note, std::string&) override {
         prepared = mod + ":" + model.get("id").string();
         prepared_collision = model.get("collision").boolean;
@@ -1939,6 +1941,73 @@ void own_models(const fs::path& examples) {
     CHECK(ok(w.run("import_model", p)));
     r = w.run("add_actor", json(R"({"type": "model", "model": "post", "id": "post"})"));
     CHECK(ok(r) && r.get("result").get("actor").get("position").get("x").number == 1 && r.get("result").get("note").string().find("origin") == std::string::npos);
+    // no collision of its own: the small cylinder as before, no world object
+    CHECK(r.get("result").get("actor").get("behaviour").type == Value::Null && r.get("result").get("actor").get("collision").get("radius").number == 30);
+    // normals against their faces' winding are kept but said (the model is lit from the wrong side); agreeing ones aren't
+    {
+        auto normals = [&](float sign) {
+            auto bin = static_model_fixture::cube_binary();
+            for (size_t n = 0; n < 8; ++n)
+                for (size_t c = 0; c < 3; ++c) {
+                    const float value = sign * ((n & (1u << c)) ? 0.577f : -0.577f);
+                    std::memcpy(bin.data() + 96 + n * 12 + c * 4, &value, 4);
+                }
+            return bin;
+        };
+        Value q;
+        // the fixture cube's faces wind inward (seen from inside), so its normals agree with them pointing to the centre
+        write(dir / "outward.glb", static_model_fixture::glb(static_model_fixture::cube_document(), normals(-1)));
+        q["file"] = (dir / "outward.glb").string();
+        r = w.run("check_model", q);
+        CHECK(ok(r) && r.get("result").get("import_warnings").type == Value::Null);
+        write(dir / "inward.glb", static_model_fixture::glb(static_model_fixture::cube_document(), normals(1)));
+        q["file"] = (dir / "inward.glb").string();
+        r = w.run("check_model", q);
+        CHECK(ok(r) && r.get("result").get("import_warnings").array.size() == 1 &&
+              r.get("result").get("import_warnings").array[0].string().find("100% of its normals point into the model") != std::string::npos);
+        r = w.run("import_model", q);
+        CHECK(ok(r) && r.get("result").get("note").string().find("Recalculate Outside") != std::string::npos);
+    }
+    // a model with collision of its own (a "<name>_col" mesh with a col_* material), as an island-export extension
+    // has: a static world object on its own collision, which is prepared at once (issue #280)
+    {
+        auto doc = static_model_fixture::cube_document();
+        doc["materials"].array.push_back(json(R"({"name": "col_grass"})"));
+        doc["meshes"].array.push_back(doc["meshes"].array[0]);
+        doc["meshes"].array[1]["primitives"].array[0]["material"] = double(doc["materials"].array.size() - 1);
+        doc["meshes"].array[1]["primitives"].array[0]["attributes"].object.erase("TEXCOORD_0");
+        doc["nodes"] = json(R"([{"name": "ground", "mesh": 0}, {"name": "ground_col", "mesh": 1}])");
+        doc["scenes"].array[0]["nodes"] = json("[0, 1]");
+        write(dir / "ground.glb", static_model_fixture::glb(doc, static_model_fixture::cube_binary()));
+        p["file"] = (dir / "ground.glb").string();
+        r = w.run("import_model", p);
+        CHECK(ok(r));
+        host.prepared.clear();
+        host.prepared_collision = false;
+        r = w.run("add_actor", json(R"({"type": "model", "model": "ground", "id": "ground"})"));
+        const Value& g = r.get("result").get("actor");
+        CHECK(ok(r) && g.get("behaviour").string() == "static" && g.get("collision").get("mesh").string() == "ground" && g.get("collision").get("radius").type == Value::Null);
+        CHECK(host.prepared == "sdk-v3-windfall:ground" && host.prepared_collision);
+        CHECK(r.get("result").get("note").string().find("stands on its own collision") != std::string::npos);
+        std::vector<story_notebook::ManifestActor> actors;
+        std::string why;
+        CHECK(story_notebook::parse_actors(*w.manifest("sdk-v3-windfall"), actors, why));
+        CHECK(std::any_of(actors.begin(), actors.end(), [](const auto& a) { return a.id == "ground" && a.world_object() && a.collision_mesh == "ground"; }));
+        // the import prepared it with its collision already
+        p["file"] = (dir / "ground.glb").string();
+        p["id"] = "ground-2";
+        host.prepared_collision = false;
+        CHECK(ok(w.run("import_model", p)) && host.prepared == "sdk-v3-windfall:ground-2" && host.prepared_collision);
+        p.object.erase("id");
+        // its collision still being prepared (no query can be made yet): placed all the same, the game checks its place
+        // when the collision is ready; a collision that can't be had is still the refusal
+        host.query_fails = true;
+        CHECK(!ok(w.run("add_actor", json(R"({"type": "model", "model": "ground-2", "id": "ground-b"})"))));
+        host.collision_pending.insert("sdk-v3-windfall:ground-2");
+        CHECK(ok(w.run("add_actor", json(R"({"type": "model", "model": "ground-2", "id": "ground-b"})"))));
+        host.collision_pending.clear();
+        host.query_fails = false;
+    }
     // a model this computer could not prepare: a warning in the problems, with the reason, never "after a restart"
     host.model_failures["sdk-v3-windfall:extension"] = "Static model conversion failed (ModuleNotFoundError: No module named 'notebook_model')";
     r = w.run("check_package");

@@ -91,6 +91,9 @@ std::mutex g_status_mu;
 std::string g_status;
 // island buildings being prepared for a mod (prepare_piece): "preparing", "ready", "failed: ..."
 std::mutex g_piece_mutex;
+// models whose collision prepare_model is preparing ({mod, model}): Host::collision_preparing
+std::mutex g_collision_mutex;
+std::set<std::pair<std::string, std::string>> g_collision_preparing;
 std::map<std::pair<std::string, std::string>, std::string> g_piece_states;
 // "a villager of the island (Grandma)": the character's name when the NPC catalogue knows the code
 void name_layout_conflicts(const story_notebook::ManifestActor& actor, Value& result) {
@@ -1406,14 +1409,30 @@ public:
             note = "The model is being built from your game files; actors using it appear when it is ready.";
             return true;
         }
-        std::thread([mod, dir, model] {
+        const bool collision = model.get("collision").boolean;
+        const std::pair<std::string, std::string> key{mod, model.get("id").string()};
+        if (collision) {
+            std::lock_guard guard(g_collision_mutex);
+            g_collision_preparing.insert(key);
+        }
+        std::thread([mod, dir, model, collision, key] {
+            struct Done {  // no longer "being prepared" once this ends (registered on the game thread, or failed)
+                bool on;
+                std::pair<std::string, std::string> key;
+                ~Done() {
+                    if (!on) return;
+                    std::lock_guard guard(g_collision_mutex);
+                    g_collision_preparing.erase(key);
+                }
+            };
+            auto done = std::make_shared<Done>(collision, key);
             std::string archive, w;
             if (!guestmods::editor_prepare_model(mod, dir, mods::packages::package_data_directory(mod), model, archive, w)) {
                 // remembered (actor_model_cache::failure_for): its actors say why, not "after a restart"
                 actor_model_cache::note_failure(mod, model.get("id").string(), w);
                 return set_status("Model " + model.get("id").string() + " could not be prepared, its actors are not in the game: " + w);
             }
-            post([mod, model, archive](Cpu*) {
+            post([mod, model, archive, done](Cpu*) {
                 std::string w2;
                 if (model.get("collision").boolean && !mod_actor::register_collision(mod, model.get("id").string(), actor_model_cache::collision_for(archive)))
                     return set_status("Model " + model.get("id").string() + ": prepared collision could not be registered");
@@ -1427,6 +1446,10 @@ public:
         return true;
     }
     std::string model_failure(const std::string& mod, const std::string& model) override { return actor_model_cache::failure_for(mod, model); }
+    bool collision_preparing(const std::string& mod, const std::string& model) override {
+        std::lock_guard guard(g_collision_mutex);
+        return g_collision_preparing.contains({mod, model});
+    }
     bool prepare_piece(const std::string& mod, const std::string& id, std::string& note, std::string& why) override {
         if (!story_game_pieces::catalogue().find(id)) return why = "no such building", false;
         {

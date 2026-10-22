@@ -678,7 +678,9 @@ back at the same place and the same scale:
 5. Go to the island (Link in its sea square) and add it: **Add actor → Your model**, or `add_actor
    {"type": "model", "model": "windfallextension"}`. A model made away from its origin is placed at the
    room's origin, the square's centre at sea level, unturned, so it stands where you modelled it; the status
-   bar says so. For ground Link walks on, place it as a world object with its collision instead:
+   bar says so. A model with a `_col` mesh (step 2) is added as a static world object on that collision, so
+   Link walks on it and its walls stop him; its collision is prepared at once and the object appears when it
+   is ready. The same with a command, at a position you choose:
 
    ```text
    place_world_object {"id": "windfall-ext", "model": "windfallextension", "collision": {"mesh": "windfallextension"},
@@ -693,9 +695,18 @@ back at the same place and the same scale:
    import's fixes are applied to it again; a kit model is built again at once, another model is taken at
    the next start.
 
-A model's own actor (**Your model**) has a small solid cylinder at its origin, not its `_col` mesh; a world
-object uses its collision and, as a kit model or with a distant model, is seen from across its square
-([Island presentation](#island-presentation)).
+**Your model** without a `_col` mesh gets a small solid cylinder at its origin, as a prop; with one (or as a kit
+model) it is a world object that uses its collision and, as a kit model or with a distant model, is seen from
+across its square ([Island presentation](#island-presentation)). An actor added before this, with the cylinder,
+keeps it: remove it and add the model again, or give it its collision with `set_world_object {"id":
+"windfallextension", "behaviour": "static", "collision": {"mesh": "windfallextension"}}`.
+
+**Why your part looks brighter than the island.** A model with textures of its own is lit as the game lights an
+object (a barrel, a sign): with the object light of the place it stands, at the full brightness of its texture.
+The island's own ground is lit with the room's background light and darkened by its vertex colours (Windfall's
+grass by about a third). Your textures, even a copy of the island's, are therefore drawn brighter and flatter
+than the ground next to them, whatever their size. Use the island's own materials (below) and it is drawn as
+the island is.
 
 ### Game materials on your own sea models
 

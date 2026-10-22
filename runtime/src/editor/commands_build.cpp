@@ -419,6 +419,10 @@ bool import_model_file(const std::string& path, std::vector<uint8_t>& bytes, Val
         return false;
     }
     bytes = std::move(fixed.glb);
+    if (!fixed.warnings.empty()) {
+        info["import_warnings"] = array();
+        for (const auto& n : fixed.warnings) info["import_warnings"].array.push_back(Value(n));
+    }
     if (fixed.changed) {
         info["import_fixes"] = array();
         for (const auto& n : fixed.notes) info["import_fixes"].array.push_back(Value(n));
@@ -666,6 +670,31 @@ bool model_box(const std::string& dir, const Value& manifest, const std::string&
     return check_model_file((fs::path(utf8_path(dir)) / utf8_path(m->get("source").string())).string(), info, w) &&
            read_point(info.get("minimum"), lo) && read_point(info.get("maximum"), hi);
 }
+// Whether a model's GLB has collision of its own: a mesh, or the node drawing it, named "<name>_col" (static_models::
+// validate_glb: those meshes are collision, not drawn; docs/world-objects.md "Author collision in the GLB").
+bool model_has_collision_mesh(const std::string& dir, const Value& manifest, const std::string& model) {
+    const Value* m = by_id(manifest.get("models"), model);
+    if (!m || dir.empty()) return false;
+    std::ifstream f(fs::path(utf8_path(dir)) / utf8_path(m->get("source").string()), std::ios::binary);
+    const std::vector<uint8_t> b((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+    if (b.size() < 28 || std::memcmp(b.data(), "glTF", 4) || static_models::le32(b.data() + 16) != 0x4E4F534A) return false;
+    const size_t length = static_models::le32(b.data() + 12);
+    if (length > b.size() - 20) return false;
+    Value doc;
+    try {
+        doc = mods::json::parse(std::string(reinterpret_cast<const char*>(b.data() + 20), length));
+    } catch (...) {
+        return false;
+    }
+    const auto named = [](const Value& v) { return v.get("name").type == Value::String && v.get("name").text.ends_with("_col"); };
+    const auto& meshes = doc.get("meshes").array;
+    for (const auto& node : doc.get("nodes").array) {
+        const auto& mesh = node.get("mesh");
+        if (mesh.type != Value::Number || mesh.number < 0 || size_t(mesh.number) >= meshes.size()) continue;
+        if (named(node) || named(meshes[size_t(mesh.number)])) return true;
+    }
+    return false;
+}
 std::string metres_text(double units) {
     char text[32];
     std::snprintf(text, sizeof text, "%.0f m", units / 100);
@@ -826,6 +855,35 @@ Value Session::dispatch_build(const std::string& command, const Value& p, std::s
         if ((game || piece) && !id_ok(id)) return why = "an actor id is 1 to 32 lower-case letters, digits, '-', '_' or '.'", r;
         if (piece ? !new_game_piece(type, id, place, a, why) : game ? !new_game_object(type, id, place, p.get("options"), a, why) : !new_actor(type, id, place, text(p, "model"), pkg->manifest, p.get("options"), a, why)) return r;
         if (by_id(pkg->manifest.get("actors"), id)) return why = "the mod has an actor \"" + id + "\" already", r;
+        // "Your model" with collision of its own (its "<name>_col" meshes), or a kit model: a static world object
+        // standing on its own collision, so Link walks on it and is stopped by its walls, as on the game's islands.
+        // Without that it got a small cylinder at its origin, and a model built on an island export (Link walking on a
+        // new hill beside Windfall) had no collision where it is drawn (issue #280).
+        bool world_object = false;
+        if (type == "model") {
+            const Value* m = by_id(pkg->manifest.get("models"), text(p, "model"));
+            const std::string kind = m ? m->get("kind").string("static") : std::string();
+            world_object = kind == "kit" || (kind == "static" && model_has_collision_mesh(pkg->dir, pkg->manifest, text(p, "model")));
+            if (world_object) {
+                a["behaviour"] = "static";
+                Value collision;
+                collision["mesh"] = text(p, "model");
+                a["collision"] = collision;
+            }
+        }
+        // its collision is prepared before the change (the model was imported without it, or the game started
+        // without an actor on it); the placement is checked when it is ready, and the object appears then
+        std::string collision_note;
+        if (world_object) {
+            const Value* m = by_id(pkg->manifest.get("models"), text(p, "model"));
+            if (host_ && m && m->get("kind").string("static") == "static") {
+                Value request = *m;
+                request["collision"] = true;  // a preparation option, never a manifest field
+                std::string prepared, w;
+                collision_note = host_->prepare_model(pkg->mod, pkg->dir, request, prepared, w) ? " Its collision is being prepared; it appears when it is ready."
+                                                                                                : " Its collision is prepared when the game starts (" + w + ").";
+            }
+        }
         // A model made away from its origin (on an island export, which keeps the room's coordinates) is drawn that far
         // from where it is placed. Added at Link or the camera, it goes to the room's origin, unturned, so it stands
         // where it was modelled; a given position is kept, and the note says where it is drawn (issue #280).
@@ -896,6 +954,9 @@ Value Session::dispatch_build(const std::string& command, const Value& p, std::s
         r["id"] = id;
         r["actor"] = a;
         for (const auto& [k, v] : info.object) r[k] = v;
+        if (world_object)
+            r["note"] = text(p, "model") + " stands on its own collision (its _col meshes): Link can walk on it." + collision_note +
+                        (r.get("note").string().empty() ? std::string() : " " + r.get("note").string());
         if (!model_note.empty()) r["note"] = model_note + (r.get("note").string().empty() ? std::string() : " " + r.get("note").string());
         if (piece && host_) {
             // the piece's set is built from the player's room archive if this mod has no copy yet
@@ -1137,10 +1198,17 @@ Value Session::dispatch_build(const std::string& command, const Value& p, std::s
         if (!fixes.empty()) r["fixes"] = info.get("import_fixes");
         if (host_) {
             std::string note, w;
-            if (host_->prepare_model(pkg->mod, pkg->dir, entry, note, w)) r["note"] = note;
+            // a model with collision of its own is prepared with it, so "Your model" can stand on it (issue #280)
+            Value request = entry;
+            if (!kit && info.get("kind").string() == "static" && model_has_collision_mesh(pkg->dir, pkg->manifest, id)) request["collision"] = true;
+            if (host_->prepare_model(pkg->mod, pkg->dir, request, note, w)) r["note"] = note;
             else r["note"] = "the model is in the package; it is prepared when the game starts (" + w + ")";
         }
         if (!fixes.empty()) r["note"] = "Imported with changes: " + fixes + (r.get("note").string().empty() ? std::string() : " " + r.get("note").string());
+        if (info.get("import_warnings").type == Value::Array) {
+            r["warnings"] = info.get("import_warnings");
+            for (const auto& n : info.get("import_warnings").array) r["note"] = r.get("note").string() + (r.get("note").string().empty() ? "" : " ") + n.string();
+        }
         return r;
     }
     if (command == "set_model_kit" || command == "reload_model") {

@@ -655,6 +655,12 @@ bool world_placements(Host* host, const std::string& mod, const Value& before, c
                 why.clear();
                 continue;
             }
+            // a model whose collision is still being prepared ("Your model" with its own _col meshes, issue #280): the
+            // game checks its place when the collision is ready (mod_actor::declare), as above
+            if (!actor.collision_mesh.empty() && host->collision_preparing(mod, actor.collision_mesh)) {
+                why.clear();
+                continue;
+            }
             why = "world object " + actor.id + ": " + (why.empty() ? "placement coverage or collision is unavailable" : why);
             return false;
         }

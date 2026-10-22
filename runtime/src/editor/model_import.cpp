@@ -452,6 +452,29 @@ bool fix_inner(std::span<const uint8_t> input, Result& out) {
                 }
                 notes.push_back("Mesh " + inst.name + " had no normals: it is lit with its faces' own (flat shading).");
             }
+            // normals pointing into the model (against their faces' winding): kept, as they may be meant so, but said,
+            // since the model is then lit from the wrong side, dark where the light falls (issue #280)
+            else if (!is_collision && !part.normal.empty()) {
+                std::vector<std::array<double, 3>> face(part.position.size(), {0, 0, 0});
+                for (size_t i = 0; i + 2 < part.index.size(); i += 3) {
+                    const auto &a = part.position[part.index[i]], &b = part.position[part.index[i + 1]], &c = part.position[part.index[i + 2]];
+                    const std::array<double, 3> u{b[0] - a[0], b[1] - a[1], b[2] - a[2]}, v{c[0] - a[0], c[1] - a[1], c[2] - a[2]};
+                    const std::array<double, 3> n{u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]};
+                    for (int k = 0; k < 3; ++k)
+                        for (int r = 0; r < 3; ++r) face[part.index[i + k]][r] += n[r];
+                }
+                size_t used = 0, inward = 0;
+                for (size_t i = 0; i < face.size(); ++i) {
+                    const auto &f = face[i], &n = part.normal[i];
+                    if (f[0] == 0 && f[1] == 0 && f[2] == 0) continue;
+                    ++used;
+                    if (f[0] * n[0] + f[1] * n[1] + f[2] * n[2] < 0) ++inward;
+                }
+                if (used && inward * 4 > used)
+                    out.warnings.push_back("Mesh " + inst.name + ": " + std::to_string(inward * 100 / used) +
+                                           "% of its normals point into the model, against its faces, so it is lit from the wrong side (dark where the light falls). In Blender: "
+                                           "select the mesh, Edit Mode, Mesh > Normals > Recalculate Outside, and export again.");
+            }
             if (part.uv.empty() && !is_collision) part.uv.assign(part.position.size(), {0, 0});
             (is_collision ? collision : render).push_back(std::move(part));
         }
@@ -789,7 +812,15 @@ bool fix(std::span<const uint8_t> input, Result& out, std::string& why) {
     // a file the game takes as it is stays as it is
     static_models::ModelInfo info;
     std::string strict;
-    if (static_models::validate_glb(input, info, strict)) return true;
+    if (static_models::validate_glb(input, info, strict)) {
+        // kept byte for byte; what looks wrong in it is still said (its warnings, from reading it as the import does)
+        try {
+            Result read;
+            if (fix_inner(input, read)) out.warnings = std::move(read.warnings);
+        } catch (const std::exception&) {
+        }
+        return true;
+    }
     Result fixed;
     try {
         if (!fix_inner(input, fixed)) return true;  // skinned: its own rules
