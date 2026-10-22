@@ -7,6 +7,16 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **The Goron merchants for mods** (for mod makers): the three Goron traders can be placed on a mod island and talk
+  with your own text. Also new in the catalogue: torches, flames, fire jets and lava bubbles, Dragon Roost's bomb flower,
+  the dungeons' stone block, rocks, boulders and blocks that break (and stay broken until the room loads again), more of
+  Dragon Roost's and Fire Mountain's rocks, and Zunari's stall in three sizes.
+- **Mod islands are seen from farther away** (for mod makers): island grounds, kit models and distant views stay visible
+  across their square and into the next ones, with the game's haze. A stage entry can be a hole Link falls into, and a
+  scene's area trigger can play again once Link has left the area.
+- **Fixed on Android: false "too hot" warnings on some handhelds** (#254). Some devices report Android's highest heat
+  level while they are cool (e.g. the AYANEO Pocket EVO at a 30 °C battery). Setup, the heat guard and the performance
+  report now believe that only together with a real high temperature (battery 40 °C or more, or processor 90 °C or more).
 - **Smoother frame interpolation** (40, 60, 120 and 240 fps). More things now move smoothly between the game's
   steps: the letterbox bars in cutscenes, the sword trail, the hookshot chain, the boomerang trail, the cannon's aiming
   arc, hair, strings and ropes, the sun, moon, lens flare and sea spray, the ship's hull, grass, trees and flowers when
