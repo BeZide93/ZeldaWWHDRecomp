@@ -1961,7 +1961,10 @@ extern "C" void hook_0203593C(Cpu* c) {
 namespace interp {
 namespace {
 struct Drawn { uint64_t pass = ~0ull; float t = 1.0f; bool record = false, record_blended = false; } g_drawn;
-void note_drawn() { g_drawn = Drawn{g_passes, pass_t(), record_pass(), record_blended()}; }
+void note_drawn() {
+    g_drawn = Drawn{g_passes, pass_t(), record_pass(), record_blended()};
+    mods::hud_drawn(g_drawn.t, g_logic_steps, interp_on() && !true60::enabled());  // (the mod HUDs of this frame)
+}
 }  // namespace
 // blend fraction of the pass being drawn or painted (1: exact, or interpolation off)
 float display_t() {

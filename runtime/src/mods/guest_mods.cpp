@@ -1714,7 +1714,7 @@ bool native_camera_run_original_pending(const Cpu*c,const story_native_event_dep
 
 bool hooks_built() { return g_mod_hook_count != 0 && g_mod_hook_flags && g_mod_bodies; }
 
-void frame(uint64_t step) {g_logic_step.store(step,std::memory_order_relaxed);story_notebook::logic_step(step);}
+void frame(uint64_t step) {g_logic_step.store(step,std::memory_order_relaxed);hud::store().set_step(step);story_notebook::logic_step(step);}
 void draw_frame(Cpu* c,uint64_t step) {
     if(!c||!g_hud_callbacks.load(std::memory_order_acquire))return;
     for(auto& mod:g_loaded) {

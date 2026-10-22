@@ -851,8 +851,8 @@ bool record_screenshot(Screen& screen,Buffer& buffer,uint32_t& width,uint32_t& h
 void draw_mod_overlay(Surface& scan, VkExtent2D displayExtent) {
  // both step aside (fade out) while a game menu, an event or a message is up (mods/hud_gate.cpp)
  const float shown=mods::game_ui_hud_alpha();
- mods::ClimbHud climb=mods::climb_hud();climb.alpha*=shown;
- mods::MoveHud move=mods::move_hud();move.alpha*=shown;
+ mods::ClimbHud climb=mods::climb_hud_drawn();climb.alpha*=shown;
+ mods::MoveHud move=mods::move_hud_drawn();move.alpha*=shown;
  const bool wheel=mods::climb_enabled()&&climb.alpha>0.0f, bar=move.alpha>0.0f;
  if((!wheel&&!bar)||!scan.image||!scan.view||!(scan.usage&VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT))return;
  transition_image(&scan,VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
