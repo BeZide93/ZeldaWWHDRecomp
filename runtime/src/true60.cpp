@@ -385,6 +385,8 @@ void trace_camera(uint32_t proc, float dt) {
     uint32_t d = proc + kDCamera;
     fprintf(g_cam_trace, "    m100 %d m108 %d work", (int)ld32(d + 0x100), (int)ld32(d + 0x108));
     for (uint32_t o = 0x36C; o <= 0x388; o += 4) fprintf(g_cam_trace, " %08X", ld32(d + o));
+    fprintf(g_cam_trace, " type %u mode %u style %u V %d", ld32(d + 0x51C), ld32(d + 0x13C),
+            ld32(d + 0x514), (int16_t)ld16(d + 0x40));
     fprintf(g_cam_trace, "\n");
     static int n = 0;
     if (++n % 60 == 0) fflush(g_cam_trace);

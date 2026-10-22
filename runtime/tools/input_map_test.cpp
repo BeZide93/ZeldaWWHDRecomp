@@ -736,6 +736,31 @@ static void test_camera_invert() {
         CHECK(camera_invert::inverts(site.use) == (site.use == Use::kCamera));
     }
     CHECK(camera == 5 && baton == 1);
+    // The guest helper flips its delta for descending endpoints. Both input paths
+    // must have the same final direction, independent of the live style order.
+    const Mapping previous_mapping = current();
+    for (bool inv : {false, true, false, true}) {
+        m.invert_camera_y = inv;
+        set_current(m, false);
+        CHECK(invert_camera_y() == inv);  // Controls changes publish immediately
+        for (double direction : {-1.0, 1.0}) {
+            for (bool descending : {false, true}) {
+                const double first = descending ? 10.0 : -10.0;
+                const double second = -first;
+                const double mouse = direction * camera_invert::mouse_pitch_sign(inv);
+                const double stick = -camera_invert::stick_y(float(-direction), inv, Use::kCamera);
+                for (double input : {mouse, stick}) {
+                    double delta = camera_invert::manual_pitch_delta(input, first, second);
+                    if (descending) delta = -delta;  // guest limited_range_addition
+                    CHECK(delta == direction * (inv ? -1.0 : 1.0));
+                }
+            }
+        }
+    }
+    set_current(previous_mapping, false);
+    CHECK(!std::signbit(camera_invert::manual_pitch_delta(0.0, 10.0, -10.0)));
+    CHECK(std::signbit(camera_invert::manual_pitch_delta(-0.0, 10.0, -10.0)));
+    CHECK(camera_invert::manual_pitch_delta(1.0, 5.0, 5.0) == 1.0);
 }
 
 // issue #40: per-stick range, applied radially after the dead zone
