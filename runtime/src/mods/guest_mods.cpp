@@ -41,6 +41,7 @@
 #include "guest_files.h"
 #include "guest_settings.h"
 #include "guest_hud.h"
+#include "game_layouts.h"
 #include <fstream>
 #include <filesystem>
 #include "guest_audio.h"
@@ -648,6 +649,21 @@ std::string setting_key(const Loaded& mod,uint32_t address) {
     return {};
 }
 void query_dungeon_room(Cpu* c, uint32_t address);
+// "layout-pane:<Layout>/<pane>" (structured type 6): 64 bytes, see wwhd_game_pane in wwhd_guest.h
+void query_layout_pane(Cpu* c, const std::string& spec, uint32_t address) {
+    auto& mod = owner(c);
+    c->r[3] = 0;
+    if (!setting_buffer(mod, address, 64)) return;
+    game_layouts::Pane pane;
+    if (!game_layouts::pane(spec, pane)) return;
+    const uint32_t flags = (pane.visible ? 1u : 0u) | (pane.kind == "pic1" ? 2u : 0u);
+    st32(address, 1); st32(address + 4, flags);
+    stf32(address + 8, pane.x); stf32(address + 12, pane.y);
+    stf32(address + 16, pane.width); stf32(address + 20, pane.height);
+    stf32(address + 24, pane.rotation); st32(address + 28, pane.alpha);
+    for (uint32_t i = 0; i < 32; ++i) st8(address + 32 + i, i < pane.texture.size() && i < 31 ? uint8_t(pane.texture[i]) : 0);
+    c->r[3] = 64;
+}
 void svc_setting_get(Cpu* c) {
     auto& mod=owner(c);auto key=setting_key(mod,c->r[3]);
     uint32_t expected=c->r[4],destination=c->r[5],capacity=c->r[6];
@@ -655,6 +671,12 @@ void svc_setting_get(Cpu* c) {
         c->r[3] = 0;
         if (!destination && !capacity) { c->r[3] = 808; return; }
         if (capacity >= 808) query_dungeon_room(c, destination);
+        return;
+    }
+    if (key.rfind("layout-pane:", 0) == 0 && expected == 6) {  // a pane of the game's layout art (game_layouts.h)
+        c->r[3] = 0;
+        if (!destination && !capacity) { c->r[3] = 64; return; }
+        if (capacity >= 64) query_layout_pane(c, key.substr(12), destination);
         return;
     }
     auto value=settings::read(key);c->r[3]=0;
@@ -720,6 +742,13 @@ void svc_hud_register(Cpu* c) {
 }
 void svc_hud_texture(Cpu* c) {
     auto& mod=owner(c);uint32_t source=c->r[3];auto path=hud_path(mod,c->r[4]);c->r[3]=0;
+    if(source==2) {  // the game's own layout art (game_layouts.h), read from the installed 2D pack
+        game_layouts::Image image;std::string error;
+        if(!game_layouts::texture(path,image,error)){hud::store().note(mod.id,"HUD game texture load failed: "+error);return;}
+        c->r[3]=hud::store().create_image(mod.id,image.width,image.height,image.width*4,image.rgba.data(),image.rgba.size());
+        if(!c->r[3])hud::store().note(mod.id,"HUD game texture load failed: per-mod image quota exceeded");
+        return;
+    }
     if(source>1||path.empty()){hud::store().note(mod.id,"HUD PNG load failed: invalid source or path");return;}
     // Package textures are deliberately restricted to the two artwork folders.
     if(source==0&&!path.starts_with("assets/")&&!path.starts_with("textures/")){hud::store().note(mod.id,"HUD PNG load failed: package images must be in assets/ or textures/");return;}

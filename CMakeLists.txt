@@ -620,6 +620,14 @@ target_include_directories(item_icons_test PRIVATE runtime/include runtime/src r
 target_compile_options(item_icons_test PRIVATE -UNDEBUG)
 target_link_libraries(item_icons_test PRIVATE ZLIB::ZLIB)
 add_test(NAME item_icons COMMAND item_icons_test)
+# the game's layout art for guest mods (runtime/src/mods/game_layouts.cpp): textures and panes read back
+# from archives written by lyt_build
+add_executable(game_layouts_test runtime/tools/game_layouts_test.cpp runtime/src/mods/game_layouts.cpp runtime/src/mods/item_icons.cpp
+               runtime/src/mods/lyt_build.cpp runtime/src/mods/guest_png.cpp runtime/src/mods/mod_archive.cpp)
+target_include_directories(game_layouts_test PRIVATE runtime/include runtime/src runtime/src/mods)
+target_compile_options(game_layouts_test PRIVATE -UNDEBUG)
+target_link_libraries(game_layouts_test PRIVATE ZLIB::ZLIB)
+add_test(NAME game_layouts COMMAND game_layouts_test)
 # the text prompt's reader of the game's name font (runtime/src/overlay/game_font.cpp)
 add_executable(rtl_text_test runtime/tools/rtl_text_test.cpp runtime/src/rtl_text.cpp)
 target_include_directories(rtl_text_test PRIVATE runtime/src)
