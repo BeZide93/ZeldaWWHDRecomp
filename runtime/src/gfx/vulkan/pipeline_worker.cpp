@@ -435,7 +435,9 @@ void run(Worker& w, std::vector<uint8_t> seed) {
     std::deque<std::string> background;
     bool backgroundPlanned = false;
     constexpr size_t kStartHead = 384;
+    std::atomic<size_t> threadCount{0};
     auto loop = [&] {
+      const size_t index = threadCount++;  // 0: the first compiler, the only one the background uses until play
       host::set_thread_name("Vulkan warmup");
       host::lower_thread_priority();  // the game's own threads (and its demand compiles) always win
       for (;;) {
@@ -499,7 +501,9 @@ void run(Worker& w, std::vector<uint8_t> seed) {
                              background.size(), maxUnusedWarmPipelines);
               }
             }
-            while (!background.empty() && !recipe) {
+            // (until the game plays, one thread: the boot, the file select and the loads into the first stage keep
+            // their CPU; afterwards all of them)
+            while (!background.empty() && !recipe && (index == 0 || pipeline_groups::playing())) {
               auto key = std::move(background.front()); background.pop_front();
               auto found = w.recipes.find(key);
               if (found == w.recipes.end() || w.consumed.contains(key) || w.ready.contains(key) ||

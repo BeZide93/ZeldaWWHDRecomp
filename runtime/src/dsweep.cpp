@@ -1522,6 +1522,15 @@ void publish_resident() {
     const uint64_t now = interp::executed_steps();
     if (!pipeline_groups::wanted() || now == last) return;
     last = now;
+    // a play stage drawing for a few seconds (not the boot's, the title's or the file select's): the background
+    // compile may use all its threads now (pipeline_groups::playing)
+    if (!pipeline_groups::playing()) {
+        static std::string stage;
+        static uint64_t since = 0;
+        const std::string current = stage_name();
+        if (current != stage) stage = current, since = now;
+        if (!current.empty() && current != "Name" && current != "sea_T" && now - since >= 90) pipeline_groups::set_playing();
+    }
     std::vector<uint32_t> groups;
     const uint32_t control = ld32(GD(0x101F4F28));
     for (unsigned i = 0; i < 128 && mem2(control, 0x28 + 128 * 0x20); ++i) {
