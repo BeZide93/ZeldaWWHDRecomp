@@ -71,3 +71,9 @@ jobs:
         env:
           WWHD_UNC_CONSOLE_FIXTURE: ${{ github.workspace }}/build/windows/unc_console_fixture.exe
         run: python tools/installer/test_unc_setup.py
+
+      - name: Atomic code-mod status publication (release Python)
+        shell: pwsh
+        run: |
+          python tools/installer/test_setup.py AtomicReplace
+          python tools/installer/test_code_mods_io.py build/windows/code_mods_io_test.exe

@@ -353,6 +353,40 @@ class SetupPython(unittest.TestCase):
             self.assertEqual(result, dict(config, python=["new-python"]))
 
 
+class AtomicReplace(unittest.TestCase):
+    def test_transient_windows_readers(self):
+        from unittest.mock import patch
+        with patch.object(setup.code_mods.os, 'name', 'nt'), \
+             patch.object(setup.code_mods.os, 'replace', side_effect=[PermissionError(), PermissionError(), None]) as replace, \
+             patch.object(setup.code_mods.time, 'sleep') as sleep:
+            setup.atomic_replace('source', 'destination')
+        self.assertEqual(replace.call_count, 3)
+        self.assertEqual(sleep.call_count, 2)
+        replace.assert_called_with('source', 'destination')
+
+    def test_persistent_denial(self):
+        from unittest.mock import patch
+        error = PermissionError('locked')
+        with patch.object(setup.code_mods.os, 'name', 'nt'), \
+             patch.object(setup.code_mods.os, 'replace', side_effect=error) as replace, \
+             patch.object(setup.code_mods.time, 'monotonic', side_effect=[0, 0, 1, 2]), \
+             patch.object(setup.code_mods.time, 'sleep'):
+            with self.assertRaises(PermissionError) as caught:
+                setup.atomic_replace('source', 'destination')
+        self.assertIs(caught.exception, error)
+        self.assertEqual(replace.call_count, 3)
+
+    def test_other_errors_and_platforms_do_not_retry(self):
+        from unittest.mock import patch
+        for platform, error in [('nt', FileNotFoundError()), ('posix', PermissionError())]:
+            with self.subTest(platform=platform, error=error), \
+                 patch.object(setup.code_mods.os, 'name', platform), \
+                 patch.object(setup.code_mods.os, 'replace', side_effect=error) as replace:
+                with self.assertRaises(type(error)):
+                    setup.atomic_replace('source', 'destination')
+                replace.assert_called_once()
+
+
 class Keys(unittest.TestCase):
     def test_raw_and_hex(self):
         raw = bytes(range(16))

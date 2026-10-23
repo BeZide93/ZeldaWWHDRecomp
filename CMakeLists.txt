@@ -3733,3 +3733,15 @@ foreach(fixture guest_hud_renderer_test input_sdl_test overlay_input_integration
     target_sources(${fixture} PRIVATE runtime/tools/file_select_quit_stub.cpp)
   endif()
 endforeach()
+
+# Exercise the exact game-side metadata reader against setup's real atomic writer.
+if(Python3_Interpreter_FOUND AND NOT ANDROID)
+  add_executable(code_mods_io_test runtime/tools/code_mods_io_test.cpp)
+  target_include_directories(code_mods_io_test PRIVATE runtime/src)
+  target_compile_options(code_mods_io_test PRIVATE -UNDEBUG)
+  add_test(NAME code_mods_atomic_io COMMAND ${Python3_EXECUTABLE}
+    ${CMAKE_SOURCE_DIR}/tools/installer/test_code_mods_io.py $<TARGET_FILE:code_mods_io_test>)
+  set_tests_properties(code_mods_atomic_io PROPERTIES TIMEOUT 60)
+  add_test(NAME setup_atomic_replace COMMAND ${Python3_EXECUTABLE}
+    ${CMAKE_SOURCE_DIR}/tools/installer/test_setup.py AtomicReplace)
+endif()
