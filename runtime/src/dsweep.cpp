@@ -912,6 +912,7 @@ std::vector<Visit> g_visits;
 size_t g_visit = 0;
 uint64_t g_visit_asked = 0, g_visit_in = 0;
 uint64_t g_visit_created = 0, g_visit_new = 0;  // the renderer's count of new pipelines, the step it last grew
+uint64_t g_visit_gap = 0;                         // the longest time it did not grow before it grew again
 std::atomic<bool> g_visiting{false};
 Cpu* g_visit_cpu = nullptr;
 void begin_file_select();
@@ -1026,21 +1027,25 @@ void visit_step(const std::string& current) {
         g_visit_in = now;
         g_visit_created = pipeline_groups::created();
         g_visit_new = now;
+        g_visit_gap = 0;
         // there: what the stage newly needs is filed under it (compiled when it loads); what it shares is not
         const std::string group = v.stage + "_Stage";
         pipeline_groups::set_sweeping(pipeline_groups::group_of(group.data(), group.size()), true);
     }
     if (g_visit_in) {
-        if (const uint64_t created = pipeline_groups::created(); created != g_visit_created)
+        if (const uint64_t created = pipeline_groups::created(); created != g_visit_created) {
+            g_visit_gap = std::max(g_visit_gap, now - g_visit_new);
             g_visit_created = created, g_visit_new = now;
+        }
     }
     const VisitIdle& idle = visit_idle();
     const bool settled = idle.idle && g_visit_in && now - g_visit_in >= idle.minimum && now - g_visit_new >= idle.idle;
     const bool shown = g_visit_in && (now - g_visit_in >= kVisitSteps || settled);
     if (!shown && now - g_visit_asked < kVisitTimeout) return;
     if (shown)  // (the last new pipeline: for choosing the idle time)
-        LOG("[dsweep] visit %s: there after %llu steps, last new pipeline at +%llu, left at +%llu", v.id().c_str(),
-            (unsigned long long)(g_visit_in - g_visit_asked), (unsigned long long)(g_visit_new - g_visit_in),
+        LOG("[dsweep] visit %s: there after %llu steps, last new pipeline at +%llu (longest pause before one %llu), "
+            "left at +%llu", v.id().c_str(), (unsigned long long)(g_visit_in - g_visit_asked),
+            (unsigned long long)(g_visit_new - g_visit_in), (unsigned long long)g_visit_gap,
             (unsigned long long)(now - g_visit_in));
     else LOG("[dsweep] visit %s: not reached (now in %s)", v.id().c_str(), current.c_str());
     progress(std::string(shown ? "visit-done visit-" : "visit-failed visit-") + v.id());
