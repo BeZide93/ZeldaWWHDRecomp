@@ -2,8 +2,8 @@
 # room (doors, shutters and others that need their room's data), and archives the title cannot load. Anything else
 # that stops the game is found and skipped by the sweep itself (shader-prebuild/model-sweep/<renderer>/skip.txt).
 # visit-<stage>: stages whose visit (entered from the title, no save loaded) stops the game.
-# <actor>:<parameters>:<angles>: placements that stopped every measured sweep (Bmcon1 when made; zouK1 leaves
-# something behind that stalls the next stage change), so no attempt is spent on finding them.
+# <actor>:<parameters>:<angles>: placements that stopped every measured sweep (Bmcon1 and Bmcon2 when made; zouK1 and
+# zouK leave something behind that stalls the next stage change), so no attempt is spent on finding them.
 AND_SW0
 AND_SW2
 Ba1
@@ -69,3 +69,5 @@ zouK3
 zouK4
 Bmcon1:00090000:0:0
 zouK1:00000001:0:0
+Bmcon2:000A0000:0:0
+zouK:00000000:0:0
