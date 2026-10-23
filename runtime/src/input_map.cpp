@@ -815,6 +815,8 @@ std::string to_json(const Mapping& m) {
     if (m.shoulder_names != Mapping::ShoulderNames::kAuto)
         prompts += std::string(",\n    \"shoulder_names\": \"") + kShoulderIds[(int)m.shoulder_names] + "\"";
     if (!m.prompt_colours) prompts += ",\n    \"button_colours\": false";
+    // issue #267: written only when on (files without it stay as they were)
+    if (m.background_controllers) prompts += ",\n    \"background_controllers\": true";
     char opt[320];
     snprintf(opt, sizeof opt,
              "  },\n  \"options\": {\n    \"format\": 2,\n    \"stick_deadzone\": %.3g,\n"
@@ -898,6 +900,7 @@ bool from_json(const std::string& text, Mapping& out, std::string* error) {
             m.right_range = std::clamp((float)r->n, kMinStickRange, kMaxStickRange);
         if (const Json* i = op->get("skip_controller_selection"); i && i->type == Json::Bool) m.skip_controller_selection = i->b;
         if (const Json* i = op->get("invert_camera_y"); i && i->type == Json::Bool) m.invert_camera_y = i->b;
+        if (const Json* i = op->get("background_controllers"); i && i->type == Json::Bool) m.background_controllers = i->b;
         // only "automatic" is stored: the two manual presets are the shape of the face bindings
         if (const Json* f = op->get("face_layout"); f && f->type == Json::Str) m.face_auto = f->s == "auto";
         // button prompts (#143); an unknown value keeps the default
@@ -1006,6 +1009,7 @@ static std::mutex g_mu;
 static Mapping g_map = Mapping::defaults();
 static std::atomic<uint32_t> g_gen{1};
 static std::atomic<bool> g_skip_controller_selection{true};
+static std::atomic<bool> g_background_controllers{false};
 static std::atomic<bool> g_invert_camera_y{false};
 
 // the dominant pad's labels as note_face_labels last reported them (its own lock: set_current
@@ -1089,6 +1093,7 @@ void set_current(const Mapping& requested, bool save) {
         g_invert_camera_y = m.invert_camera_y;
     }
     g_skip_controller_selection = m.skip_controller_selection;
+    g_background_controllers = m.background_controllers;
     g_gen++;
     if (save && !save_file(default_path(), m))
         fprintf(stderr, "[input] could not save controls to %s\n", default_path().c_str());
@@ -1096,6 +1101,7 @@ void set_current(const Mapping& requested, bool save) {
 
 uint32_t generation() { return g_gen.load(); }
 bool skip_controller_selection() { return g_skip_controller_selection.load(std::memory_order_relaxed); }
+bool background_controllers() { return g_background_controllers.load(std::memory_order_relaxed); }
 bool invert_camera_y() { return g_invert_camera_y.load(std::memory_order_relaxed); }
 
 }  // namespace input_map

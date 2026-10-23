@@ -1208,6 +1208,19 @@ int main() {
     CHECK(!skip_controller_selection());
     set_current(Mapping::defaults(), false);
     CHECK(skip_controller_selection());
+    // issue #267: controller input in the background, off by default, saved only when on
+    Mapping background = Mapping::defaults();
+    CHECK(!background.background_controllers && !background_controllers());
+    CHECK(to_json(background).find("background_controllers") == std::string::npos);
+    CHECK(from_json("{\"options\":{}}", parsed) && !parsed.background_controllers);
+    background.background_controllers = true;
+    CHECK(to_json(background).find("\"background_controllers\": true") != std::string::npos);
+    CHECK(from_json(to_json(background), parsed));
+    CHECK(parsed == background);
+    set_current(background, false);
+    CHECK(background_controllers());
+    set_current(Mapping::defaults(), false);
+    CHECK(!background_controllers());
     test_files();
     printf("input_map_test: %d passed, %d failed\n", g_pass, g_fail);
     return g_fail ? 1 : 0;
