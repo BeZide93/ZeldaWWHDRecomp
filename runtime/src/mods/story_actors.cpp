@@ -1265,6 +1265,7 @@ bool editor_update(const std::string& mod,const std::vector<ManifestActor>& decl
         Actor* a=step.actor;
         const bool was_removed=a->removed;
         a->removed=false;
+        if(was_removed&&a->mod_token)mod_actor::set_removed(a->mod_token,false);
         if(was_removed&&!step.update){
             // a removal undone: a deleted enemy's next copy needs a new ownership epoch
             if(a->enemy_token&&a->process==0xFFFFFFFFu)enemy_epoch(*a);
@@ -1280,7 +1281,7 @@ bool editor_update(const std::string& mod,const std::vector<ManifestActor>& decl
         }
         LOG("[actors] %s:%s %s by the editor",mod.c_str(),a->spec.id.c_str(),was_removed?"restored":"changed");
     }
-    for(Actor* a:remove){a->removed=true;a->respawn=false;if(a->game_batch&&a->game_planted)later.push_back(a->spec.id+": grass, flowers and small trees go when the room loads again (Reload room)");LOG("[actors] %s:%s removed by the editor",mod.c_str(),a->spec.id.c_str());}
+    for(Actor* a:remove){a->removed=true;a->respawn=false;if(a->mod_token)mod_actor::set_removed(a->mod_token,true);if(a->game_batch&&a->game_planted)later.push_back(a->spec.id+": grass, flowers and small trees go when the room loads again (Reload room)");LOG("[actors] %s:%s removed by the editor",mod.c_str(),a->spec.id.c_str());}
     if(!sync_visuals(mod,effective,true,why))return false;story_world_arrival::state_loaded();
     if(pending)*pending=std::move(later);
     return true;

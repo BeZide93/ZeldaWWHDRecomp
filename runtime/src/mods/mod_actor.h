@@ -22,6 +22,8 @@ bool world_object_query(const std::string& mod,const story_notebook::ManifestAct
                         std::shared_ptr<const story_world_collision::mesh::Mesh> geometry=nullptr);
 // The ground of the declared static world objects of `stage` (their own collision: island grounds, terraces, piers,
 // buildings; not bodies of water) under each of `above`: the highest at or below each point. False: none anywhere.
+// The editor removed (true) or restored (false) the actor of `token`: its own collision is no ground for object_grounds.
+void set_removed(uint32_t token,bool removed);
 bool object_grounds(const std::string& stage,const std::vector<story_notebook::WorldPoint>& above,std::vector<float>& heights,std::vector<bool>& found);
 // The height range of a room's own collision (its triangles' lowest and highest point, world space), from the
 // player's stage files: the game looks for a body of water only within it. False: unknown for that room.
