@@ -1681,11 +1681,12 @@ uint32_t pad_buttons(uint64_t frame) {
     if (g_file_select.load(std::memory_order_relaxed)) return g_in_file_select.load(std::memory_order_relaxed) ? 0 : 0x8000u;
     if (g_visiting.load(std::memory_order_relaxed)) return 0;
     if (!g_title_seen.load(std::memory_order_relaxed)) return frame >= 120 ? 0x8000u : 0u;
-    // (no actor draw for 90 logic steps, or 2 seconds: uncapped, a record-only sweep plays the whole intro in about
-    // two seconds, and A after it opened the file select, where the sweep stopped)
+    // (no actor draw for 90 logic steps. Not by time: uncapped, a record-only sweep plays the whole intro in about two
+    // seconds, and a frame waiting two seconds for its pipelines on a busy machine is no intro; either way A came
+    // on the title and opened the file select, where the attempt stalled)
     const int64_t last = g_last_draw_ns.load(std::memory_order_relaxed);
     const uint64_t lastStep = g_last_draw_step.load(std::memory_order_relaxed);
-    const bool idle = last && (now_ns() - last > 2'000'000'000 || interp::executed_steps() - lastStep > 90);
+    const bool idle = last && interp::executed_steps() - lastStep > 90;
     return idle ? 0x8000u : 0u;
 }
 std::atomic<bool> g_finished{false};
