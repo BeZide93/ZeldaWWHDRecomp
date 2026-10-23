@@ -1654,7 +1654,7 @@ the demo and ends it.
   - After its last key, a track holds its final value.
 - **Camera.** `eye` and `target` come together. `fovy` and `roll` are optional. Without a camera track, the camera keeps its gameplay view.
 - **Actors.** An actor names one of four things:
-  - a game actor by its stage name, with `"actor": "Dk"`, for example. When the room has none, the port creates one for the demo at the first key of its position track (or beside Link) and removes it afterwards; `"params"` (a number or `"0x..."`) are its creation parameters. `"spawn": false` requires the room's own actor instead; without it the step fails with a reason in the log and the scene ends cleanly.
+  - a game actor by its stage name, with `"actor": "Dk"`, for example. When the room has none, the port creates one for the demo at the first key of its position track (or beside Link), moves it along its tracks also where its own code doesn't know cutscenes (a pig, an enemy), and removes it afterwards; `"params"` (a number or `"0x..."`) are its creation parameters. `"spawn": false` requires the room's own actor instead; without it the step fails with a reason in the log and the scene ends cleanly.
   - When the room has one, the demo uses the room's own actor, and that actor's own code decides whether it shows: an actor that waits for an event of the game stays hidden (Outset's Helmaroc King waits for its story event). `"spawn": "always"` gives the demo its own one even then, created with `params` and removed afterwards; the room's stays as it is. The game's log names the room's actor when the demo uses it.
   - Link, with `"actor": "Link"`.
   - a model from the player's game, with `"model": {"archive", "file"}`.

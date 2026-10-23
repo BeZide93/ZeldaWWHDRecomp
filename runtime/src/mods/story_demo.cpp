@@ -188,6 +188,7 @@ void search_name(Cpu* c) {
     g_original(c, GC(0x025D9F38));
 }
 void apply_characters(Cpu* c);
+void apply_spawned(Cpu* c);
 // The demo message window's idle execute: the window is noted for a release with a message open.
 void demo_window_wait(Cpu* c) {
     if (recorded()) st32(g_arena + WindowAt, c->r[3]);
@@ -206,6 +207,7 @@ void manager_update(Cpu* c) {
         const Cpu saved = *c;
         parts_update(c);  // carried actors' slots first: mod-placed ones take them in apply_characters
         if (ld32(g_arena + CharacterCount)) apply_characters(c);
+        if (ld32(g_arena + SpawnCount)) apply_spawned(c);
         *c = saved;
     }
     c->r[3] = result;
@@ -747,7 +749,7 @@ void place_link(Cpu* c) {
     const uint32_t vtable = ld32(link + kActorVtable), place = vtable ? ld32(vtable + kSetPlayerPosAndAngle) : 0;
     if (!place) return;
     const float dx = u32_as_f32(ld32(link + 0x314)) - start->position.x, dy = u32_as_f32(ld32(link + 0x318)) - start->position.y, dz = u32_as_f32(ld32(link + 0x31C)) - start->position.z;
-    const uint32_t at = g_arena + Scratch + 0x70;
+    const uint32_t at = g_arena + Scratch + 0x50;
     st32(at, f32_as_u32(start->position.x)); st32(at + 4, f32_as_u32(start->position.y)); st32(at + 8, f32_as_u32(start->position.z));
     const int16_t heading = start->heading ? int16_t(int32_t(*start->heading * 32768.f / 180.f)) : int16_t(ld16(link + 0x32A));
     call(c, place, {link, at, uint32_t(int32_t(heading))});
@@ -805,6 +807,31 @@ void parts_update(Cpu* c) {
         }
         return 0;
     });
+}
+// Game actors the port created for the demo follow their tracks also where their own code doesn't read
+// a demo slot (a pig, an enemy, an object): their slot's values go to their position, angles and scale,
+// as for the mod-placed actors. Without that a created pig stood where its own code put it (at
+// Windfall, on a point of the room's pig path), not in the picture. Actors whose code reads its slot
+// set the same values themselves; the room's own actors are left to their code.
+void apply_spawned(Cpu* c) {
+    const uint32_t pool = ld32(kDemoPool);
+    if (!pool) return;
+    const uint32_t count = std::min<uint32_t>(ld32(g_arena + SpawnCount), 8);
+    for (uint32_t i = 0; i < count; ++i) {
+        const uint32_t out = g_arena + Scratch + 0x74;
+        st32(out, 0);
+        call(c, kSearchById, {ld32(g_arena + Spawned + i * 16), out});
+        const uint32_t actor = ld32(out), slot = actor ? ld8(actor + 0x2DC) : 0;
+        const uint32_t demo = slot && slot <= 32 ? call(c, kDemoActor, {pool, slot}) : 0;
+        if (!demo) continue;
+        const uint16_t flags = ld16(demo + 4);
+        if (flags & 2) for (uint32_t off : {0x314u, 0x300u}) for (unsigned k = 0; k < 12; k += 4) st32(actor + off + k, ld32(demo + 8 + k));
+        if (flags & 8) for (uint32_t off : {0x320u, 0x328u}) for (unsigned k = 0; k < 6; k += 2) st16(actor + off + k, ld16(demo + 0x20 + k));
+        if (flags & 4) for (unsigned k = 0; k < 12; k += 4) st32(actor + 0x330 + k, ld32(demo + 0x14 + k));
+        if (std::getenv("WWHD_DEMO_TRACE") && ld32(kDemoFrame) % 30 == 0)
+            LOG("[demo] %s (created for the demo) at %.0f,%.0f,%.0f (frame %u)", cstr(g_arena + Spawned + i * 16 + 4, 12).c_str(), u32_as_f32(ld32(actor + 0x314)),
+                u32_as_f32(ld32(actor + 0x318)), u32_as_f32(ld32(actor + 0x31C)), ld32(kDemoFrame));
+    }
 }
 // Skip: every participant takes the pose of its tracks' last keys (relative to the demo's origin).
 void end_poses(Cpu* c) {
