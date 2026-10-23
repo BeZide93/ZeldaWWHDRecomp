@@ -2026,6 +2026,17 @@ void tab_controls() {
         input_map::set_current(m);
     }
     help("At the title screen, automatically choose the configured Wii U controller.");
+#ifndef __ANDROID__
+    // issue #267 (not on Android: the app is in front or paused there). Saved with the controls; the host
+    // applies it at once (input_sdl.cpp, gfx/input.mm); beside Skip, or below it in a narrow window
+    flow::next(flow::check("Controller input when the game isn't focused"), 24);
+    if (check("Controller input when the game isn't focused", m.background_controllers, &v)) {
+        m.background_controllers = v;
+        input_map::set_current(m);
+    }
+    help("For a second screen, streaming or remote play. Keyboard and mouse still only work while the "
+         "game is focused.");
+#endif
     // face-button preset (issue #78): which host face buttons drive A/B/X/Y
     const input_map::FaceLayout fl = input_map::face_layout(m);
     ImGui::AlignTextToFramePadding();
@@ -2656,9 +2667,12 @@ void poll_controller_shortcuts(const float* values) {
     const auto m = input_map::current();
     const PadValues available = pad;
     const auto pressed = bindings.poll(m, available.data(), pad.data());
+    // issue #267: a background controller press never opens Settings (settings_shortcut.h)
+    const bool may_open = controller_may_open_settings(input::window_focused(), input::background_controllers());
     auto activate = [&](int a) {
         if (a == input_map::kSettings) {
             const auto& b = m.shortcuts[a];
+            if (!is_open() && !may_open) return;
             set_open(!is_open(), !b.hold && b.button == input_map::kPadHome ? OpenReason::Home : OpenReason::API);
         } else activate_shortcut(a);
     };
@@ -2670,7 +2684,8 @@ void poll_controller_shortcuts(const float* values) {
     const auto action = shortcut.poll(now_s(), !g_capturing_keys.load() && !selectModifier && pad[input_map::kPadOptions] > 0.5f,
                                      false, is_open()); // Home is an ordinary, remappable Settings binding.
 
-    if (action != SettingsShortcut::None) set_open(action == SettingsShortcut::Open, shortcut.reason());
+    if (action == SettingsShortcut::Close || (action == SettingsShortcut::Open && may_open))
+        set_open(action == SettingsShortcut::Open, shortcut.reason());
 }
 bool shortcut_took_input() { return g_shortcut_took.exchange(false); }
 
