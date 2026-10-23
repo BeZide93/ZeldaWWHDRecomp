@@ -416,6 +416,14 @@ void run(Worker& w, std::vector<uint8_t> seed) {
         else ++grouped;
       }
     }
+    // the setup's model sweep, record only (WWHD_DSWEEP_RECORD_ONLY=1): the recipes are kept (and saved with the new
+    // ones), but nothing is compiled ahead
+    static const bool recordOnly = [] { const char* e = std::getenv("WWHD_DSWEEP_RECORD_ONLY"); return e && *e == '1'; }();
+    if (recordOnly) {
+      std::fprintf(stderr, "[vulkan warmup] record only: %zu recipes kept, none compiled\n", loaded.size());
+      w.result = {0, failed};
+      return;
+    }
     VkPipelineCacheCreateInfo ci{VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO};
     ci.initialDataSize = seed.size(); ci.pInitialData = seed.data();
     if (vkCreatePipelineCache(w.device, &ci, nullptr, &cache) != VK_SUCCESS) {

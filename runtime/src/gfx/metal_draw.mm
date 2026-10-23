@@ -11,6 +11,7 @@ extern "C" uint64_t g_shader_state_gen;  // gx2_core.cpp: bumped by shader-relev
 #include "gfx/area_sample.h"
 #include "gfx/shader_linkage.h"
 #include "render_objects.h"
+#include "pipeline_groups.h"
 #include "gfx/shader_identity.h"
 #include "gfx/target_draw_history.h"
 #include "Cafe/HW/Latte/Core/LatteCachedFBO.h"
@@ -962,6 +963,7 @@ static id<MTLRenderPipelineState> get_pipeline(const uint32_t* regs, Shader* vs,
         g_pipelines[h] = pl;
         render_objects::set_pipelines(g_pipelines.size());
         cache_record_pipeline(regs, vs, ps, fsKey, tf);
+        pipeline_groups::note_created();
     }
     const int attempt = ++pl->attempts;
     const bool injectFailure = attempt <= g_test_fail_compiles;
