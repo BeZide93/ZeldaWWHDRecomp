@@ -117,6 +117,20 @@ public class SetupService extends Service {
             File selected = SetupStore.current(this);
             if (selected == null) throw new IOException("Choose a game dump before starting setup");
             if (running && !selected.equals(job)) throw new IOException("Another setup job is still running");
+            String action = intent == null ? null : intent.getAction();
+            // An automatic start (the setup screen's recovery check, an update) sent while a run was ending: the
+            // run has finished meanwhile (the setup screen saw "preparing models" as the models step's last
+            // attempt closed). A finished setup with nothing to rebuild starts nothing.
+            File selectedHost = new File(selected, "host.json");
+            if (action == null && !running && selectedHost.isFile() &&
+                    SetupStore.read(selectedHost).optString("state").equals("complete") && !AndroidGame.needsRebuild(this)) {
+                Log.i("wwhd-setup", "setup complete; nothing to start");
+                job = selected;
+                updateNotification();
+                stopForeground(STOP_FOREGROUND_DETACH);
+                stopSelf();
+                return START_NOT_STICKY;
+            }
             job = selected;
             if (hold == null || !hold.job.equals(job)) {
                 if (hold != null) { hold.close(); hold = null; }
@@ -135,7 +149,6 @@ public class SetupService extends Service {
                 heatJob = job;
                 if (policy.heatWaiting()) Log.i("wwhd-setup", "heat pause restored: waiting for the user");
             }
-            String action = intent == null ? null : intent.getAction();
             if (PAUSE.equals(action)) SetupStore.write(new File(job, "manual-pause.json"), new JSONObject().put("schema", 1));
             if (RESUME.equals(action)) {
                 SetupStore.remove(new File(job, "manual-pause.json"));
