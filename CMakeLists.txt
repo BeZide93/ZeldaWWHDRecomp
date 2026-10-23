@@ -61,8 +61,8 @@ set(GEN_DIR ${CMAKE_SOURCE_DIR}/build/gen CACHE PATH "recompiler output")
 # Decomp build (docs/decomp-build.md): the game functions of the decompilation (git submodule decomp) run
 # as compiled source in place of the recompiled code; libraries and everything not decompiled stay
 # recompiled. GEN_DIR must then come from recomp.py --decomp-hooks (cmake/Decomp.cmake checks it).
-# Local diagnostic (not for releases): count signalling-NaN float loads/stores of the game code that the
-# host conversion would quiet (runtime/src/snan_count.cpp); logs to captures/snan.log with WWHD_SNAN_COUNT=1.
+# Local diagnostic (not for releases): count signalling-NaN float loads/stores of the game code (moved
+# bit-exactly by ppc.h; runtime/src/snan_count.cpp); logs to captures/snan.log with WWHD_SNAN_COUNT=1.
 option(WWHD_SNAN_COUNT "count signalling-NaN float loads/stores (diagnostic; log with WWHD_SNAN_COUNT=1)" OFF)
 if(WWHD_SNAN_COUNT)
   add_compile_definitions(WWHD_SNAN_COUNT=1)
@@ -741,6 +741,17 @@ if(NOT WIN32)
   endif()
   target_link_libraries(spin_wait_test PRIVATE Threads::Threads)
   add_test(NAME spin_wait COMMAND spin_wait_test)
+endif()
+# lfs / stfs / psq float loads and stores move bits like the PowerPC (ppc.h ppc_lfs_value /
+# ppc_stfs_bits): built at -O0 and -O3 with the game code's FP flags (tools/recomp/test_ppc_f32_exact.py
+# also runs it over all 2^32 single words)
+if(NOT WIN32)
+  foreach(opt O0 O3)
+    add_executable(ppc_f32_exact_test_${opt} runtime/tools/ppc_f32_exact_test.c)
+    target_include_directories(ppc_f32_exact_test_${opt} PRIVATE runtime/include)
+    target_compile_options(ppc_f32_exact_test_${opt} PRIVATE -${opt} -ffp-contract=off -fno-strict-aliasing -fwrapv -w)
+    add_test(NAME ppc_f32_exact_${opt} COMMAND ppc_f32_exact_test_${opt})
+  endforeach()
 endif()
 add_executable(present_deadline_core_test runtime/tools/present_deadline_core_test.cpp)
 target_include_directories(present_deadline_core_test PRIVATE runtime/src)
