@@ -47,6 +47,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cctype>
+#include <cmath>
 #include <cstring>
 #include <fstream>
 #include <map>
@@ -119,8 +120,29 @@ struct Model {
 // An archive to sweep: an object archive (stage empty) or a stage resource (<stage>_<arc>: Stage, Room<n>, LOD..)
 struct Entry {
     std::string stage, arc;
+    size_t order = 0;  // its place in the archive and stage lists (several processes: the order of the whole work)
     std::string id() const { return stage.empty() ? arc : stage + "_" + arc; }
 };
+// WWHD_DSWEEP_PART=<i>/<n>: this process does part i (0..n-1) of the work, n processes at once (setup's models step on
+// desktops): every n-th archive or stage resource, every n-th actor, every n-th visit; the title's own models, the
+// environment and the particles only in part 0. Placements and places read from the rooms are kept with their
+// order (actors-indexed.txt, places-indexed.txt), all of them, so the supervisor merges the parts' lists into the
+// lists one process would have made (model_sweep.py), before the actors and the visits.
+struct Part { unsigned index = 0, count = 1; };
+const Part& part() {
+    static const Part value = [] {
+        Part p;
+        if (const char* e = std::getenv("WWHD_DSWEEP_PART"); e && *e) {
+            char* end = nullptr;
+            const unsigned i = unsigned(std::strtoul(e, &end, 10));
+            const unsigned n = end && *end == '/' ? unsigned(std::strtoul(end + 1, nullptr, 10)) : 0;
+            if (n > 1 && i < n) p.index = i, p.count = n;
+        }
+        return p;
+    }();
+    return value;
+}
+bool mine(size_t j) { return part().count <= 1 || j % part().count == part().index; }
 
 enum class Phase { Start, Resident, NextArchive, Loading, StageLoading, Sweeping, Draining, Environment, Particles, Actors,
                    Plants,
@@ -405,8 +427,10 @@ std::string name8(uint32_t at) {
 }
 std::set<std::string> g_places;  // "spawn <stage> <room> <point>", "layer <stage> <room|-1> <layer>" (places.txt)
 void harvest(Cpu* c, const Entry& e) {
-    static const bool on = std::getenv("WWHD_DSWEEP_ACTORS") || std::getenv("WWHD_DSWEEP_VISIT");
+    static const bool on = std::getenv("WWHD_DSWEEP_ACTORS") || std::getenv("WWHD_DSWEEP_VISIT") || part().count > 1;
     if (!on) return;
+    const bool indexed = part().count > 1;  // all placements, with the entry's order (merged by the supervisor)
+    const std::string prefix = indexed ? std::to_string(e.order) + " " : std::string();
     const uint32_t data = stage_res(c, e.stage, e.arc, e.arc == "Stage" ? "stage.dzs" : "room.dzr");
     if (!mem2(data, 4)) return;
     const uint32_t chunks = std::min<uint32_t>(ld32(data), 64);
@@ -431,7 +455,7 @@ void harvest(Cpu* c, const Entry& e) {
                 const int room = e.arc == "Stage" ? int(ld32(a + 8) & 0x3F) : std::atoi(e.arc.c_str() + 4);
                 char line[64];
                 std::snprintf(line, sizeof line, "spawn %s %d %d", e.stage.c_str(), room, int(ld16(a + 0x1C) & 0xFF));
-                if (g_places.insert(line).second) places += std::string(line) + "\n";
+                if (g_places.insert(line).second) places += prefix + line + "\n";
             }
             continue;
         }
@@ -441,27 +465,27 @@ void harvest(Cpu* c, const Entry& e) {
             const int room = e.arc == "Stage" ? -1 : std::atoi(e.arc.c_str() + 4);
             char line[64];
             std::snprintf(line, sizeof line, "layer %s %d %d", e.stage.c_str(), room, layer);
-            if (g_places.insert(line).second) places += std::string(line) + "\n";
+            if (g_places.insert(line).second) places += prefix + line + "\n";
         }
         if (!size) continue;
         const uint32_t count = std::min<uint32_t>(ld32(at + 4), 1024), base = data + ld32(at + 8);
         for (uint32_t k = 0; k < count && mem2(base + k * size, size); ++k) {
             const uint32_t a = base + k * size;
             const std::string name = name8(a);
-            if (name.empty() || perName[name] >= kVariants) continue;
+            if (name.empty() || (!indexed && perName[name] >= kVariants)) continue;
             char line[96];
             std::snprintf(line, sizeof line, "%s %08X %d %d", name.c_str(), ld32(a + 8), int16_t(ld16(a + 0x18)),
                           int16_t(ld16(a + 0x1C)));
-            if (g.placed.insert(line).second) ++perName[name], added += std::string(line) + "\n";
+            if (g.placed.insert(line).second) ++perName[name], added += prefix + line + "\n";
         }
     }
     if (!added.empty() && !g.state_dir.empty())
-        if (FILE* f = std::fopen((g.state_dir + "/actors.txt").c_str(), "a")) {
+        if (FILE* f = std::fopen((g.state_dir + (indexed ? "/actors-indexed.txt" : "/actors.txt")).c_str(), "a")) {
             std::fputs(added.c_str(), f);
             std::fclose(f);
         }
     if (!places.empty() && !g.state_dir.empty())
-        if (FILE* f = std::fopen((g.state_dir + "/places.txt").c_str(), "a")) {
+        if (FILE* f = std::fopen((g.state_dir + (indexed ? "/places-indexed.txt" : "/places.txt")).c_str(), "a")) {
             std::fputs(places.c_str(), f);
             std::fclose(f);
         }
@@ -672,10 +696,13 @@ void begin(Cpu* c) {
             if (l.rfind("visit-done ", 0) == 0) g.done.insert(l.substr(11));
         }
     }
+    if (part().index > 0) resident_done = true;  // the title's own models: part 0
+    size_t order = 0;
     if (const char* list = std::getenv("WWHD_DSWEEP_ARCHIVES"))
         for (auto& name : lines(list)) {
+            if (!mine(order++)) continue;
             ++g.listed;
-            if (!g.done.count(name) && !g.skip.count(name)) g.queue.push_back({{}, name});
+            if (!g.done.count(name) && !g.skip.count(name)) g.queue.push_back({{}, name, order - 1});
             else g.done.insert(name);  // a skipped archive counts as done for the progress
         }
     // WWHD_DSWEEP_STAGES=<file>: "<stage> <archive> <archive>..." per line (Stage, Room<n>, LOD<n>...): each stage
@@ -689,7 +716,8 @@ void begin(Cpu* c) {
                 at = end + 1;
             }
             for (size_t i = 1; i < words.size(); ++i) {
-                const Entry e{words[0], words[i]};
+                const Entry e{words[0], words[i], order};
+                if (!mine(order++)) continue;
                 ++g.listed;
                 // a whole stage only by "stage-<stage>": skip names are shared with object archives and actors
                 // (the actor "sea" on the list left out every sea room)
@@ -734,6 +762,36 @@ void finish() {
 // frames without running its logic (before_execute), then is deleted with what it made. Progress "actor <name:params:angles>" before it is created, "actor-done ..." after; an actor
 // that changes the stage ends the attempt in order (its pipelines are kept) and is skipped the next time.
 constexpr unsigned kCreateFrames = 240, kShowFrames = 24, kShowDraws = 3;
+// WWHD_DSWEEP_ACTOR_GROUP=<k>[,<radius>]: k actors at once, on a circle of that radius (default 150) around the look-at
+// point. Each is done as a single one would be (shown for kShowDraws draws or kShowFrames frames, or given up after
+// kCreateFrames); the group's pipelines are filed under every object archive its actors loaded. A group that stops the
+// game is split by the supervisor (actor-groups.txt: "<largest group> <actor>"), down to single actors, which are
+// skipped as before.
+struct ActorGroups { unsigned size = 1; float radius = 150.f; };
+const ActorGroups& actor_groups() {
+    static const ActorGroups value = [] {
+        ActorGroups v;
+        if (const char* e = std::getenv("WWHD_DSWEEP_ACTOR_GROUP"); e && *e) {
+            char* p = nullptr;
+            v.size = std::clamp(unsigned(std::strtoul(e, &p, 10)), 1u, 64u);
+            if (p && *p == ',') v.radius = std::strtof(p + 1, nullptr);
+        }
+        return v;
+    }();
+    return value;
+}
+struct Member {
+    State::Spawn spawn;
+    uint32_t id = 0xFFFFFFFF, actor = 0;
+    unsigned frames = 0, draws = 0;
+};
+std::vector<Member> g_group;                  // the group being shown
+std::map<std::string, unsigned> g_group_cap;  // actor id -> the largest group it is shown in (actor-groups.txt)
+std::vector<uint32_t> g_group_archives;       // the groups its pipelines are filed under
+unsigned group_cap(const State::Spawn& sp) {
+    auto it = g_group_cap.find(sp.id());
+    return it == g_group_cap.end() ? actor_groups().size : std::max(1u, it->second);
+}
 std::set<std::string> archive_names() {
     std::set<std::string> out;
     for (uint32_t info : archive_infos()) out.insert(cstring(info + 0x1C));
@@ -776,7 +834,7 @@ void env_apply(Cpu* c, const EnvState& e) {
 }
 void begin_environment(Cpu* c) {
     static const bool on = std::getenv("WWHD_DSWEEP_ENV") != nullptr;
-    if (!on) return begin_actors(c);
+    if (!on || part().index > 0) return begin_actors(c);
     const uint32_t info = ld32(GD(0x101F84DC)), env = call(c, GC(0x02555D0C));
     if (!mem2(info, 0x48) || !mem2(env, 0xAC0)) return begin_actors(c);
     g_env.saved = true;
@@ -829,6 +887,22 @@ uint64_t g_file_select_from = 0, g_file_select_in = 0;
 // own environment (lighting, fog, sky, its actors) for kVisitSteps, filed under "<stage>_Stage". The file select
 // (reached from the title only) then follows in a new attempt ("restart" in progress.txt).
 constexpr unsigned kVisitSteps = 150, kVisitTimeout = 3000;
+// WWHD_DSWEEP_VISIT_IDLE=<steps>[,<minimum>]: a visit ends once nothing new was recorded (no pipeline the renderer had
+// not made before) for <steps> logic steps, after at least <minimum> steps there (default 60); kVisitSteps at most
+struct VisitIdle { unsigned idle = 0, minimum = 60; };
+const VisitIdle& visit_idle() {
+    static const VisitIdle value = [] {
+        VisitIdle v;
+        if (const char* e = std::getenv("WWHD_DSWEEP_VISIT_IDLE"); e && *e) {
+            char* p = nullptr;
+            v.idle = unsigned(std::strtoul(e, &p, 10));
+            if (p && *p == ',') v.minimum = unsigned(std::strtoul(p + 1, nullptr, 10));
+            v.minimum = std::min(v.minimum, kVisitSteps);
+        }
+        return v;
+    }();
+    return value;
+}
 struct Visit {
     std::string stage;
     int room = 0, point = 0, layer = -1;
@@ -837,6 +911,7 @@ struct Visit {
 std::vector<Visit> g_visits;
 size_t g_visit = 0;
 uint64_t g_visit_asked = 0, g_visit_in = 0;
+uint64_t g_visit_created = 0, g_visit_new = 0;  // the renderer's count of new pipelines, the step it last grew
 std::atomic<bool> g_visiting{false};
 Cpu* g_visit_cpu = nullptr;
 void begin_file_select();
@@ -846,9 +921,8 @@ void begin_visits() {
     if (!list || !*list) return begin_file_select();
     g_visits.clear();
     auto add = [&](const Visit& v) {
-        if (v.stage == "sea_T" || v.stage == "Name" || g.done.count("visit-" + v.id()) || g.done.count("visit-" + v.stage) ||
-            g.skip.count("visit-" + v.stage) || g.skip.count(v.id()))  // (not a bare name: actors share them)
-            return;
+        if (v.stage == "sea_T" || v.stage == "Name" || g.skip.count("visit-" + v.stage) || g.skip.count(v.id()))
+            return;  // (not a bare name: actors share them)
         g_visits.push_back(v);
     };
     // the rooms with a player start (the rooms' places, places.txt) and the scene layers their placements use
@@ -888,6 +962,12 @@ void begin_visits() {
             }
         }
     }
+    // several processes: every n-th visit; then the visits done before are left out
+    std::vector<Visit> todo;
+    for (size_t j = 0; j < g_visits.size(); ++j)
+        if (mine(j) && !g.done.count("visit-" + g_visits[j].id()) && !g.done.count("visit-" + g_visits[j].stage))
+            todo.push_back(g_visits[j]);
+    g_visits.swap(todo);
     if (g_visits.empty()) return begin_file_select();
     phase_time("visits");
     g.phase = Phase::Visits;
@@ -944,13 +1024,25 @@ void visit_step(const std::string& current) {
     // there: the stage change done (the next-stage request taken) and the stage current
     if (current == v.stage && !g_visit_in && !ld8(next + 12) && now - g_visit_asked > 30) {
         g_visit_in = now;
+        g_visit_created = pipeline_groups::created();
+        g_visit_new = now;
         // there: what the stage newly needs is filed under it (compiled when it loads); what it shares is not
         const std::string group = v.stage + "_Stage";
         pipeline_groups::set_sweeping(pipeline_groups::group_of(group.data(), group.size()), true);
     }
-    const bool shown = g_visit_in && now - g_visit_in >= kVisitSteps;
+    if (g_visit_in) {
+        if (const uint64_t created = pipeline_groups::created(); created != g_visit_created)
+            g_visit_created = created, g_visit_new = now;
+    }
+    const VisitIdle& idle = visit_idle();
+    const bool settled = idle.idle && g_visit_in && now - g_visit_in >= idle.minimum && now - g_visit_new >= idle.idle;
+    const bool shown = g_visit_in && (now - g_visit_in >= kVisitSteps || settled);
     if (!shown && now - g_visit_asked < kVisitTimeout) return;
-    if (!shown) LOG("[dsweep] visit %s: not reached (now in %s)", v.id().c_str(), current.c_str());
+    if (shown)  // (the last new pipeline: for choosing the idle time)
+        LOG("[dsweep] visit %s: there after %llu steps, last new pipeline at +%llu, left at +%llu", v.id().c_str(),
+            (unsigned long long)(g_visit_in - g_visit_asked), (unsigned long long)(g_visit_new - g_visit_in),
+            (unsigned long long)(now - g_visit_in));
+    else LOG("[dsweep] visit %s: not reached (now in %s)", v.id().c_str(), current.c_str());
     progress(std::string(shown ? "visit-done visit-" : "visit-failed visit-") + v.id());
     g.done.insert("visit-" + v.id());
     ++g_visit;
@@ -1018,7 +1110,7 @@ constexpr uint32_t kParticleGroups[] = {0, 2, 4, 1, 3};  // (5 ship tail and 6 w
 struct ParticleState { size_t group = 0; uint32_t id = 0; unsigned frames = 0; bool alive = false; unsigned made = 0; } g_pa;
 void begin_particles(Cpu* c) {
     static const bool on = std::getenv("WWHD_DSWEEP_PARTICLES") != nullptr;
-    if (!on || g_particles_seen || !mem2(ld32(GD(0x1047B2D4)))) return begin_actors(c);
+    if (!on || g_particles_seen || part().index > 0 || !mem2(ld32(GD(0x1047B2D4)))) return begin_actors(c);
     phase_time("particles");
     g.phase = Phase::Particles;
     g_pa = {};
@@ -1085,18 +1177,33 @@ void begin_actors(Cpu* c) {
         all.push_back(sp);
         withPlacement.insert(name);
     }
+    if (part().count > 1) {  // every n-th actor
+        std::vector<State::Spawn> own;
+        for (size_t j = 0; j < all.size(); ++j)
+            if (mine(j)) own.push_back(all[j]);
+        all.swap(own);
+    }
     // only placed actors: with made-up parameters most actors stop the game in their create (their asserts)
     for (auto it = all.rbegin(); it != all.rend(); ++it)
         if (!g.done.count(it->id()) && !g.skip.count(it->name) && !g.skip.count(it->id())) g.spawns.push_back(*it);
     g.listed += all.size();
     for (const auto& sp : all)
         if (g.done.count(sp.id()) || g.skip.count(sp.name) || g.skip.count(sp.id())) g.done.insert(sp.id());
+    if (actor_groups().size > 1 && !g.state_dir.empty())
+        for (auto& line : lines(g.state_dir + "/actor-groups.txt")) {
+            const size_t space = line.find(' ');
+            if (space == std::string::npos) continue;
+            const unsigned cap = unsigned(std::strtoul(line.c_str(), nullptr, 10));
+            auto [it, added] = g_group_cap.emplace(line.substr(space + 1), cap);
+            if (!added) it->second = std::min(it->second, cap);
+        }
     phase_time("actors");
     LOG("[dsweep] actors: %zu names, %zu to create (%zu placements)", table.size(), g.spawns.size(), g.placed.size());
     progress("actors");
     g.phase = Phase::Actors;
     g.actor_id = 0xFFFFFFFF;
 }
+void actor_group_step(Cpu* c);
 void actor_step(Cpu* c) {
     // orphans: actors given up while being created, deleted once they exist
     for (size_t i = 0; i < g.orphans.size();) {
@@ -1107,6 +1214,7 @@ void actor_step(Cpu* c) {
             g.orphans.erase(g.orphans.begin() + long(i));
         } else ++i;
     }
+    if (actor_groups().size > 1) return actor_group_step(c);
     if (g.actor_id == 0xFFFFFFFF) {
         if (g.spawns.empty()) {
             g_tag = 0;
@@ -1163,6 +1271,80 @@ void actor_step(Cpu* c) {
     report_archives(g.spawn.name);
     g.actor_id = 0xFFFFFFFF;
     g.actor = 0;
+}
+
+// A group of actors (WWHD_DSWEEP_ACTOR_GROUP): the next actors of the list with the same largest group, created at
+// once around the look-at point, each shown as a single actor would be; deleted together with what they made.
+void actor_group_step(Cpu* c) {
+    if (g_group.empty()) {
+        if (g.spawns.empty()) {
+            g_tag = 0;
+            pipeline_groups::set_sweeping(0);
+            return begin_plants();
+        }
+        const unsigned cap = group_cap(g.spawns.back());
+        while (!g.spawns.empty() && g_group.size() < cap && group_cap(g.spawns.back()) == cap) {
+            g_group.push_back({g.spawns.back()});
+            g.spawns.pop_back();
+        }
+        progress("actor-group " + std::to_string(g_group.size()));
+        for (const auto& m : g_group) progress("actor " + m.spawn.id());
+        g.archives_before = archive_names();
+        g_group_archives.clear();
+        const uint32_t camera = call(c, GC(0x024F8044));
+        const uint32_t pos = g.scratch + 0x9C0, angle = g.scratch + 0x9D0;
+        const float radius = g_group.size() > 1 ? actor_groups().radius : 0.f;
+        std::string names;
+        for (size_t j = 0; j < g_group.size(); ++j) {
+            Member& m = g_group[j];
+            const float turn = 6.2831853f * float(j) / float(g_group.size());
+            const float offset[3] = {radius * std::cos(turn), 0.f, radius * std::sin(turn)};
+            for (int i = 0; i < 3; ++i)
+                st32(pos + i * 4, mem2(camera, 0x20) ? f32_as_u32(float(ldf32(camera + 0x10 + i * 4)) + offset[i]) : 0);
+            st16(angle, uint16_t(m.spawn.ax));
+            st16(angle + 2, 0);
+            st16(angle + 4, uint16_t(m.spawn.az));
+            m.id = call(c, GC(0x025D5834), {uint32_t(int32_t(int16_t(m.spawn.proc))), m.spawn.params, pos, 0, angle, 0,
+                                            uint32_t(int32_t(m.spawn.arg)), 0});  // fopAcM_create
+            if (m.id == 0xFFFFFFFF) m.frames = kCreateFrames;  // not requested: done below
+            names += " " + m.spawn.id();
+        }
+        g_tag = ++g.batch;
+        pipeline_groups::set_sweeping(0);
+        LOG("[dsweep] batch %d step %llu ns %lld: actors%s", g.batch, (unsigned long long)interp::executed_steps(),
+            (long long)now_ns(), names.c_str());
+        return;
+    }
+    bool all = true;
+    for (Member& m : g_group) {
+        ++m.frames;
+        if (!m.actor && m.id != 0xFFFFFFFF && (m.actor = actor_of(c, m.id))) ++g.actors, m.frames = 0;
+    }
+    // its pipelines go with the object archives its actors loaded (compiled when one of them loads in play)
+    std::vector<uint32_t> groups;
+    for (const auto& name : archive_names())
+        if (!g.archives_before.count(name) && groups.size() < 8) groups.push_back(pipeline_groups::group_of(name.data(), name.size()));
+    if (groups != g_group_archives) g_group_archives = groups, pipeline_groups::set_sweeping(groups);
+    std::vector<bool> creating(g_group.size());
+    for (size_t j = 0; j < g_group.size(); ++j) {
+        const Member& m = g_group[j];
+        creating[j] = !m.actor && m.id != 0xFFFFFFFF && call(c, GC(0x025DD868), {m.id});
+        const bool shown = m.actor && (m.draws >= kShowDraws || m.frames >= kShowFrames);
+        if (!shown && (creating[j] || m.actor) && m.frames < kCreateFrames) all = false;
+    }
+    if (!all) return;
+    for (const auto& [id, a] : g.ours)
+        if (actor_of(c, id) == a) call(c, GC(0x025DF944), {a});  // fpcM_Delete
+    g.ours.clear();
+    for (size_t j = 0; j < g_group.size(); ++j) {
+        const Member& m = g_group[j];
+        if (creating[j]) g.orphans.push_back(m.id);
+        if (!m.actor) ++g.actor_failed;
+        progress("actor-done " + m.spawn.id());
+        g.done.insert(m.spawn.id());
+        report_archives(m.spawn.name);
+    }
+    g_group.clear();
 }
 
 void step(Cpu* c, uint32_t host) {
@@ -1691,6 +1873,8 @@ void after_actor_draw(Cpu* c, uint32_t actor) {
     const uint64_t now = interp::executed_steps();
     if (!cfg.on || now < cfg.start) return;
     if (g.actor && actor == g.actor) ++g.actor_draws;
+    for (Member& m : g_group)
+        if (m.actor == actor) ++m.draws;
     if (cfg.title && g.phase != Phase::Actors) g.host_actors.insert(actor);
     else if (g.phase == Phase::Actors && !g.host_actors.count(actor)) g.ours.emplace(ld32(actor + 4), actor);
     // once per logic step, from the first actor drawn (the camera and the frame's draw lists are set up then)

@@ -542,11 +542,14 @@ def prepare(game, template, executable, cache_root, package, renderer='vulkan',
         def stopped():
             return stop.is_set() or cancel()
 
+        # several game processes per renderer on desktops (model_sweep.processes): the renderers share them
+        extra = {} if sweeper else {'processes': model_sweep.processes(len(names))}
+
         def work(name):
             try:
                 out[name] = run(executable, game, root, name, model_sweep.identity_of(wanted, name),
                                 cache_environment(generation, game, name), line=line_for(name), cancel=stopped,
-                                log=reporter.log)
+                                log=reporter.log, **extra)
             except InterruptedError:
                 out[name] = 'paused'
                 stop.set()

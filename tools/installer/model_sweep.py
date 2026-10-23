@@ -16,6 +16,7 @@ import re
 import shutil
 import struct
 import subprocess
+import sys
 import tempfile
 import time
 
@@ -31,6 +32,7 @@ DEFAULT_SKIP = Path(__file__).with_name('model_sweep_skip.txt')
 ISLAND_STAGES = ('sea',)
 MODELS_PER_BATCH = max(1, min(8, int(os.environ.get('WWHD_SETUP_MODEL_SWEEP_BATCH', '1') or 1)))
 STARTUP_SECONDS = 300     # until an attempt's first progress line (the game starting up)
+MAX_PROCESSES = 4          # game processes of the models step at once on a desktop (user decision 2026-10-23)
 STALL_SECONDS = 60         # no new line in progress.txt for this long: the attempt counts as a crash (a model, room or
                            # actor takes well under a second; a stuck game writes nothing more)
 
@@ -118,6 +120,20 @@ def culprit(progress_lines, skip):
     return None
 
 
+def stopped_group(progress_lines):
+    """The actors of the group (WWHD_DSWEEP_ACTOR_GROUP) the last attempt stopped in, if it stopped in one of more than
+    one actor; else None."""
+    start = len(progress_lines) - 1 - progress_lines[::-1].index('start') if 'start' in progress_lines else 0
+    lines = progress_lines[start:]
+    at = max((i for i, l in enumerate(lines) if l.startswith('actor-group ')), default=None)
+    if at is None:
+        return None
+    members = [l.split(' ', 1)[1] for l in lines[at + 1:] if l.startswith('actor ')]
+    done = {l.split(' ', 1)[1] for l in lines[at + 1:] if l.startswith('actor-done ')}
+    left = [m for m in members if m not in done]
+    return left if len(left) > 1 else None
+
+
 def state_dir(cache_root, renderer):
     return Path(cache_root) / 'model-sweep' / renderer
 
@@ -160,14 +176,25 @@ def environment(base, game, cache_env, renderer, state, archives, scratch, stage
         # the particle sweep (dsweep.cpp) only on request: measured on 19 places it recorded nothing they still build
         if os.environ.get('WWHD_SETUP_MODEL_SWEEP_PARTICLES') == '1':
             env['WWHD_DSWEEP_PARTICLES'] = '1'
+    # speed settings (each measured on its own; dsweep.cpp): stage visits end once nothing new appears for that many
+    # steps ("<steps>[,<minimum>]"); actors shown in groups of that many
+    for setting, game_var in (('WWHD_SETUP_MODEL_SWEEP_VISIT_IDLE', 'WWHD_DSWEEP_VISIT_IDLE'),
+                              ('WWHD_SETUP_MODEL_SWEEP_ACTOR_GROUP', 'WWHD_DSWEEP_ACTOR_GROUP'),
+                              ('WWHD_SETUP_MODEL_SWEEP_RECORD_ONLY', 'WWHD_DSWEEP_RECORD_ONLY')):
+        value = os.environ.get(setting, '')
+        if re.fullmatch(r'\d+(,\d+)?', value) and value != '0':
+            env[game_var] = value
+    # measurements only: the Vulkan renderer's key log (one line per pipeline it creates, with the sweep's batch)
+    if os.environ.get('WWHD_SETUP_MODEL_SWEEP_KEY_LOG'):
+        env['WWHD_VK_KEY_LOG'] = os.environ['WWHD_SETUP_MODEL_SWEEP_KEY_LOG']
     env['WWHD_HEADSTART'] = '0'  # the sweep records pipelines; it warms nothing (and holds no generation)
     return env
 
 
 def run(executable, game, cache_root, renderer, identity, cache_env, line=lambda text: None,
         cancel=lambda: False, log=lambda text: None, popen=subprocess.Popen, clock=time.monotonic,
-        sleep=time.sleep, attempts=MAX_ATTEMPTS, stall=STALL_SECONDS):
-    """Sweeps (or resumes) for one renderer. line(text) gets the game's output (its 'WWHD-PROGRESS done total
+        sleep=time.sleep, attempts=MAX_ATTEMPTS, stall=STALL_SECONDS, processes=1):
+    """Sweeps (or resumes) for one renderer, in that many game processes at once (processes()). line(text) gets the game's output (its 'WWHD-PROGRESS done total
     archive' lines carry the progress). Returns 'done' or 'failed'; raises InterruptedError when cancel()."""
     state = state_dir(cache_root, renderer)
     state.mkdir(parents=True, exist_ok=True)
@@ -179,6 +206,8 @@ def run(executable, game, cache_root, renderer, identity, cache_env, line=lambda
         # another build or game: its pipelines do not match; start over (crashing models stay skipped for the
         # same game files)
         (state / 'progress.txt').unlink(missing_ok=True)
+        (state / 'actor-groups.txt').unlink(missing_ok=True)
+        shutil.rmtree(state / 'parts', ignore_errors=True)
         if not isinstance(saved, dict) or saved.get('game') != identity.get('game'):
             (state / 'skip.txt').unlink(missing_ok=True)
         (state / 'identity.json').write_text(json.dumps(identity, sort_keys=True), encoding='utf-8')
@@ -196,6 +225,17 @@ def run(executable, game, cache_root, renderer, identity, cache_env, line=lambda
     stages = state / 'stages.txt'
     stages.write_text(''.join('%s %s\n' % (stage, ' '.join(names)) for stage, names in stage_archives(game).items()),
                       encoding='utf-8')
+    common = dict(line=line, cancel=cancel, log=log, popen=popen, clock=clock, sleep=sleep, attempts=attempts,
+                  stall=stall)
+    if processes > 1:
+        return _run_parts(executable, game, state, renderer, cache_env, archives, stages, visits, processes, **common)
+    return _attempts(executable, game, state, renderer, cache_env, archives, stages, visits, **common)
+
+
+def _attempts(executable, game, state, renderer, cache_env, archives, stages, visits, line, cancel, log, popen, clock,
+              sleep, attempts, stall, tweak=lambda env: None):
+    """The attempts of one game process (restarted after a stop, skipping what stopped it) until its progress says
+    'sweep-done' -> 'done' or 'failed'; tweak(env) adjusts each attempt's environment."""
     progress_file = state / 'progress.txt'
     def finished():
         return sum(1 for l in _lines(progress_file) if l.startswith(('archive-done ', 'actor-done ')))
@@ -214,7 +254,8 @@ def run(executable, game, cache_root, renderer, identity, cache_env, line=lambda
                 folder = tempfile.TemporaryDirectory(prefix='wwhd-model-sweep-')
             scratch = Path(stack.enter_context(folder))
             env = environment(os.environ, game, cache_env, renderer, state, archives, scratch, stages)
-            if visits:
+            tweak(env)
+            if visits and 'WWHD_DSWEEP_VISIT' not in env:
                 # each stage's first room; WWHD_SETUP_MODEL_SWEEP_VISITS=all: every room with a player start, once per
                 # scene layer (measured on 19 places: no gain over the first rooms, 22 more minutes)
                 env['WWHD_DSWEEP_VISIT'] = 'all' if os.environ.get('WWHD_SETUP_MODEL_SWEEP_VISITS') == 'all' else str(visits)
@@ -273,6 +314,18 @@ def run(executable, game, cache_root, renderer, identity, cache_env, line=lambda
             return 'done'
         if done_lines and done_lines[-1] == 'restart':  # an orderly restart the sweep asked for (not a stop)
             continue
+        group = stopped_group(done_lines)
+        if group:
+            # a group of actors stopped the game: its actors go again in groups half as large, down to single actors
+            # (which are skipped as before), so the same actors end up skipped as when shown one at a time
+            log('Model preparation attempt %d stopped (%s); splitting a group of %d actors' % (
+                attempt, 'stalled' if stalled else 'exit %s' % child.returncode, len(group)))
+            with (state / 'actor-groups.txt').open('a', encoding='utf-8') as stream:
+                stream.write(''.join('%d %s\n' % (len(group) // 2, name) for name in group))
+            now = finished()
+            without_progress = 0 if now > before else without_progress + 1
+            before = now
+            continue
         skip = set(_lines(state / 'skip.txt'))
         name = culprit(done_lines, skip)
         log('Model preparation attempt %d stopped (%s); %s' % (
@@ -290,6 +343,184 @@ def run(executable, game, cache_root, renderer, identity, cache_env, line=lambda
         without_progress = 0 if now > before else without_progress + 1
         before = now
     return 'failed'
+
+
+def processes(renderers=1):
+    """Game processes per renderer for the models step: desktops share up to MAX_PROCESSES between the renderers
+    (by cores and memory: a sweeping game uses about 2 cores and 2 GB); Android one.
+    WWHD_SETUP_MODEL_SWEEP_PROCESSES=n sets it per renderer, =auto chooses (one process unless set)."""
+    setting = os.environ.get('WWHD_SETUP_MODEL_SWEEP_PROCESSES', '')
+    if setting.isdigit() and int(setting) > 0:
+        return min(int(setting), MAX_PROCESSES)
+    if setting != 'auto':
+        return 1
+    if hasattr(sys, 'getandroidapilevel') or 'ANDROID_ROOT' in os.environ:
+        return 1
+    cores = os.cpu_count() or 1
+    try:
+        memory = os.sysconf('SC_PAGE_SIZE') * os.sysconf('SC_PHYS_PAGES')
+    except (AttributeError, ValueError, OSError):
+        memory = 0
+    if not memory and sys.platform == 'darwin':
+        try:
+            memory = int(subprocess.run(['sysctl', '-n', 'hw.memsize'], capture_output=True, text=True,
+                                        timeout=5).stdout.strip() or 0)
+        except (OSError, ValueError, subprocess.SubprocessError):
+            memory = 0
+    total = max(1, min(MAX_PROCESSES, cores // 4, int(memory // (4 << 30)) if memory else 1))
+    return max(1, total // max(1, renderers))
+
+
+# the files of the live caches each renderer's sweep adds to (copied for each process, then merged)
+CACHE_FILES = {'vulkan': ('WWHD_VK_PIPELINE_CACHE_DIR', 'WWHD_VK_SHADER_CACHE'), 'metal': ('WWHD_SHADER_CACHE',)}
+
+
+def _part_caches(cache_env, renderer, folder):
+    """Copies of the renderer's live caches in folder -> (the environment naming them, [(live file, copy)])."""
+    env, pairs = dict(cache_env), []
+    folder.mkdir(parents=True, exist_ok=True)
+    if renderer == 'vulkan':
+        live = Path(cache_env['WWHD_VK_PIPELINE_CACHE_DIR'])
+        for path in sorted(live.glob('*.recipes')):
+            pairs.append((path, folder / path.name))
+            driver = path.with_suffix('')  # the driver's pipeline cache: the part's own, never merged
+            if driver.is_file() and not (folder / driver.name).exists():
+                shutil.copyfile(driver, folder / driver.name)
+        spirv = Path(cache_env['WWHD_VK_SHADER_CACHE']) / 'spirv.bin'
+        (folder / 'vulkan-shaders').mkdir(exist_ok=True)
+        pairs.append((spirv, folder / 'vulkan-shaders' / 'spirv.bin'))
+        env.update(WWHD_VK_PIPELINE_CACHE_DIR=str(folder), WWHD_VK_SHADER_CACHE=str(folder / 'vulkan-shaders'),
+                   WWHD_SHADER_CACHE=str(folder / 'shaders.bin'))
+        if Path(cache_env['WWHD_SHADER_CACHE']).is_file():
+            pairs.append((Path(cache_env['WWHD_SHADER_CACHE']), folder / 'shaders.bin'))
+    else:
+        pairs.append((Path(cache_env['WWHD_SHADER_CACHE']), folder / 'shaders.bin'))
+        env['WWHD_SHADER_CACHE'] = str(folder / 'shaders.bin')
+    for live, copy in pairs:
+        if live.is_file() and not copy.exists():
+            shutil.copyfile(live, copy)
+    return env, pairs
+
+
+def _merge_caches(pairs_of_parts, log):
+    """Each live file := the merge of itself and its parts' copies (sweep_merge.py)."""
+    import sweep_merge
+    merges = {'.recipes': sweep_merge.merge_recipes, 'spirv.bin': sweep_merge.merge_spirv,
+              'shaders.bin': sweep_merge.merge_metal}
+    for live in {pair[0] for pairs in pairs_of_parts for pair in pairs}:
+        copies = [copy for pairs in pairs_of_parts for original, copy in pairs if original == live and copy.is_file()]
+        merge = next((m for suffix, m in merges.items() if live.name.endswith(suffix)), None)
+        if not merge or not copies:
+            continue
+        try:
+            base = live.read_bytes() if live.is_file() else None
+            if base is None:  # nothing before the sweep: the first copy is the base
+                base, copies = copies[0].read_bytes(), copies[1:]
+            sweep_merge._replace(live, merge(base, [c.read_bytes() for c in copies]))
+        except (OSError, ValueError) as error:
+            log('Model preparation: %s not merged (%s)' % (live.name, error))
+
+
+def _run_parts(executable, game, state, renderer, cache_env, archives, stages, visits, count, line, cancel, log,
+               popen, clock, sleep, attempts, stall):
+    """The sweep in count game processes at once (dsweep.cpp WWHD_DSWEEP_PART): each its own state and copies of the
+    caches. First the archives and stage resources (every count-th each); the placements and places the rooms list
+    are then merged into the lists one process would have made, and the actors and visits follow (every count-th
+    each). At the end the caches, skip lists and the progress are merged."""
+    import threading
+    import sweep_merge
+    root = state / 'parts'
+    parts = [root / str(i) for i in range(count)]
+    if not (root / 'count').is_file() or (root / 'count').read_text().strip() != str(count):
+        shutil.rmtree(root, ignore_errors=True)  # another split: start the parts over
+        root.mkdir(parents=True)
+        (root / 'count').write_text(str(count))
+    for part in parts:
+        part.mkdir(exist_ok=True)
+        for name in ('skip.txt', 'actor-groups.txt'):  # what the one-process sweep found already stays
+            if (state / name).is_file() and not (part / name).exists():
+                shutil.copyfile(state / name, part / name)
+    caches = [_part_caches(cache_env, renderer, part / 'cache') for part in parts]
+    totals = [None] * count
+    lock = threading.Lock()
+
+    def line_for(i):
+        def forward(text):
+            if not text.startswith('WWHD-PROGRESS '):
+                return line(text)
+            fields = text.split(' ', 3)
+            with lock:
+                try:
+                    totals[i] = (int(fields[1]), int(fields[2]))
+                except (IndexError, ValueError):
+                    return
+                if all(totals):
+                    line('WWHD-PROGRESS %d %d %s' % (sum(t[0] for t in totals), sum(t[1] for t in totals),
+                                                     fields[3] if len(fields) > 3 else ''))
+        return forward
+
+    def run_stage(second):
+        results = [None] * count
+
+        def tweak_for(i):
+            def tweak(env):
+                env['WWHD_DSWEEP_PART'] = '%d/%d' % (i, count)
+                if not second:  # archives and stage resources only
+                    env['WWHD_DSWEEP_VISIT'] = ''
+                    env.pop('WWHD_DSWEEP_ACTORS', None)
+                    env.pop('WWHD_DSWEEP_FILE_SELECT', None)
+                elif i:
+                    env.pop('WWHD_DSWEEP_FILE_SELECT', None)  # the title's file select: part 0
+            return tweak
+
+        def work(i):
+            try:
+                results[i] = _attempts(executable, game, parts[i], renderer, caches[i][0], archives, stages, visits,
+                                       line_for(i), cancel, log, popen, clock, sleep, attempts, stall, tweak=tweak_for(i))
+            except InterruptedError:
+                results[i] = 'paused'
+            except Exception as error:  # noqa: BLE001 - one part failing leaves the others' work usable
+                results[i] = 'failed'
+                log('Model preparation part %d failed: %s' % (i, error))
+        threads = [threading.Thread(target=work, args=(i,), daemon=True) for i in range(count)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+        if 'paused' in results:
+            raise InterruptedError('Model preparation paused')
+        return 'failed' if 'failed' in results else 'done'
+
+    result = 'done'
+    if not (root / 'second').is_file():
+        result = run_stage(False)
+        if result == 'done':
+            actors = sweep_merge.merge_placements([p / 'actors-indexed.txt' for p in parts])
+            places = sweep_merge.merge_places([p / 'places-indexed.txt' for p in parts])
+            for part in parts:
+                (part / 'actors.txt').write_text(''.join(l + '\n' for l in actors), encoding='utf-8')
+                (part / 'places.txt').write_text(''.join(l + '\n' for l in places), encoding='utf-8')
+                progress = [l for l in _lines(part / 'progress.txt') if l != 'sweep-done']
+                (part / 'progress.txt').write_text(''.join(l + '\n' for l in progress), encoding='utf-8')
+            (root / 'second').write_text('1')
+    if result == 'done':
+        result = run_stage(True)
+    _merge_caches([pairs for _, pairs in caches], log)
+    skip = []
+    for part in [state] + parts:
+        skip += [n for n in _lines(part / 'skip.txt') if n not in skip]
+    (state / 'skip.txt').write_text(''.join(n + '\n' for n in skip), encoding='utf-8')
+    with (state / 'progress.txt').open('a', encoding='utf-8') as stream:
+        for i, part in enumerate(parts):
+            stream.write(''.join('part%d %s\n' % (i, l) for l in _lines(part / 'progress.txt') if l.startswith('phase ')))
+        if result == 'done':
+            stream.write('sweep-done\n')
+    if result == 'done':
+        shutil.rmtree(root, ignore_errors=True)
+    else:  # the parts' caches are merged already: a later attempt starts them from the merged caches
+        for part in parts:
+            shutil.rmtree(part / 'cache', ignore_errors=True)
+    return result
 
 
 def identity_of(wanted, renderer):
