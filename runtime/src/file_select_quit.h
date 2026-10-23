@@ -41,13 +41,15 @@ struct Routing {
             pad.buttons &= ~input::kX;
         return pressed;
     }
-    Event route(input::PadState &pad, bool enabled, bool shown, bool confirming) {
+    Event route(input::PadState &pad, bool eligible, bool shown, bool confirming) {
         const uint32_t raw = pad.buttons | (pad.lx < -.5f ? input::kLeft : 0) | (pad.lx > .5f ? input::kRight : 0);
-        if (!enabled || !shown) {
+        if (!eligible || !shown) {
             previous = raw;
             x_held = (raw & input::kX) != 0;
             release = 0;
-            return {false, true, 0};
+            // A presentation stall hides the UI temporarily; only loss of the
+            // native context or the setting dismisses its pending confirmation.
+            return {false, !eligible, 0};
         }
         const bool open = filter(pad, true) && !confirming;
         uint32_t pressed = 0;

@@ -348,8 +348,11 @@ void observe(Cpu *cpu) {
         *cpu = saved;
     }
 }
+static bool context_valid() {
+    return input_map::file_select_quit() && !overlay::is_open() && tv_visible.load() && last_idle.load() > 0;
+}
 bool visible() {
-    if (!input_map::file_select_quit() || overlay::is_open() || !tv_visible.load())
+    if (!context_valid())
         return false;
     const double age = now() - last_idle.load();
     if (age < 0 || age > .25)
@@ -360,7 +363,7 @@ bool visible() {
 bool confirming() { return modal.load(); }
 void filter(input::PadState &pad) {
     std::lock_guard lock(input_mutex);
-    const auto event = routing.route(pad, input_map::file_select_quit(), visible(), modal.load());
+    const auto event = routing.route(pad, context_valid(), visible(), modal.load());
     if (event.dismiss) {
         ask = false;
         modal = false;
@@ -409,9 +412,11 @@ void backend_destroyed() {
 }
 void frame(float width, float height) {
     if (!visible()) {
-        ask = false;
-        modal = false;
-        presses = 0;
+        if (!context_valid()) {
+            ask = false;
+            modal = false;
+            presses = 0;
+        }
         return;
     }
     if (!texture) {

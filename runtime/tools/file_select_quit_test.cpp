@@ -57,14 +57,19 @@ static void dialog_routing() {
     routing.route(pad, true, true, false);
     assert(pad.buttons == 0);
     // A hidden or disabled UI cannot leave that release gate capturing input.
-    for (bool enabled : {false, true}) {
+    for (bool shown : {false, true}) {
         pad = original;
         pad.buttons |= input::kX;
         const auto before = pad;
-        event = routing.route(pad, enabled, false, true);
+        event = routing.route(pad, false, shown, true);
         assert(event.dismiss && !event.open && event.pressed == 0);
         assert(pad.buttons == before.buttons && pad.lx == before.lx && pad.touch == before.touch);
     }
+    // A stale presentation must pass inputs unchanged without dismissing an
+    // otherwise eligible confirmation (for example while saving a large PNG).
+    pad = original;
+    event = routing.route(pad, true, false, true);
+    assert(!event.dismiss && !event.open && event.pressed == 0 && pad.buttons == original.buttons);
     pad = original;
     event = routing.route(pad, false, true, true);
     assert(event.dismiss && pad.buttons == original.buttons);
