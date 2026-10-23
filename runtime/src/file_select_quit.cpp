@@ -48,7 +48,7 @@ std::mutex font_mutex;
 std::shared_ptr<const Font> font;
 std::shared_ptr<const Font> rendered_font;
 std::unique_ptr<ImTextureData> texture;
-std::array<std::unique_ptr<ImTextureData>, 8> art;
+std::array<std::unique_ptr<ImTextureData>, 9> art;
 std::set<ImTextureData *> srgb_art;
 std::atomic<bool> loading_font{false};
 game_layouts::TextStyle button_style{42, 48, 0, 2, true};
@@ -79,7 +79,8 @@ void apply_vertices(game_layouts::Image &image, const game_layouts::Pane &pane) 
             }
         }
 }
-std::unique_ptr<ImTextureData> native_image(const char *spec, const char *pane_name = nullptr) {
+std::unique_ptr<ImTextureData> native_image(const char *spec, const char *pane_name = nullptr,
+                                            const char *modulator = nullptr) {
     game_layouts::Image image;
     std::string error;
     if (!game_layouts::texture(spec, image, error)) {
@@ -89,6 +90,40 @@ std::unique_ptr<ImTextureData> native_image(const char *spec, const char *pane_n
     game_layouts::Pane pane;
     if (pane_name && game_layouts::pane(pane_name, pane))
         apply_vertices(image, pane);
+    // A selected native plate multiplies its cloth/mask by a second,
+    // coloured highlight texture. Bake those two samplers into one host image.
+    if (modulator) {
+        game_layouts::Image light;
+        if (!game_layouts::texture(modulator, light, error)) {
+            LOG("[file-select-quit] native highlight: %s", error.c_str());
+            return {};
+        }
+        auto linear = [](float v, bool srgb) {
+            return !srgb ? v : v <= .04045f ? v / 12.92f : std::pow((v + .055f) / 1.055f, 2.4f);
+        };
+        for (uint32_t y = 0; y < image.height; ++y)
+            for (uint32_t x = 0; x < image.width; ++x) {
+                const float u = (x + .5f) * light.width / image.width - .5f;
+                const float v = (y + .5f) * light.height / image.height - .5f;
+                const int ix = int(std::floor(u)), iy = int(std::floor(v));
+                const float fx = u - ix, fy = v - iy;
+                for (int channel = 0; channel < 4; ++channel) {
+                    float sample = 0;
+                    for (int tap = 0; tap < 4; ++tap) {
+                        const int lx = std::clamp(ix + (tap & 1), 0, int(light.width) - 1);
+                        const int ly = std::clamp(iy + (tap >> 1), 0, int(light.height) - 1);
+                        const float value = light.rgba[(ly * light.width + lx) * 4 + channel] / 255.f;
+                        sample += linear(value, channel < 3 && light.srgb) *
+                                  ((tap & 1) ? fx : 1 - fx) * ((tap >> 1) ? fy : 1 - fy);
+                    }
+                    auto& pixel = image.rgba[(y * image.width + x) * 4 + channel];
+                    float value = linear(pixel / 255.f, channel < 3 && image.srgb) * sample;
+                    if (channel < 3 && image.srgb)
+                        value = value <= .0031308f ? value * 12.92f : 1.055f * std::pow(value, 1 / 2.4f) - .055f;
+                    pixel = uint8_t(std::clamp(std::lround(value * 255), 0l, 255l));
+                }
+            }
+    }
     auto result = std::make_unique<ImTextureData>();
     result->Create(ImTextureFormat_RGBA32, image.width, image.height);
     result->UseColors = true;
@@ -112,6 +147,8 @@ void load_art() {
     art[5] = native_image("SequenceWindow_00/WaveWindowT_00^t#W_Base_00LT");
     art[6] = native_image("SequenceWindow_00/WaveWindowL_00^t#W_Base_00LT");
     art[7] = native_image("Cursor_00/Crsor_00^t#W_Cursor_00LT");
+    art[8] = native_image("BtnSequence_00/BtnSequencePattern_00^t#P_BtnSelect_00",
+                          "BtnSequence_00/P_BtnSelect_00", "BtnSequence_00/BtnSelect_00^q");
 }
 bool object(uint32_t p) { return p >= mem::kMem2Start && p < mem::kMem2End - 0x400; }
 bool state_is(Cpu *c, uint32_t machine, uint32_t expected) {
@@ -296,7 +333,9 @@ bool button(ImDrawList *d, Box b, const char *name, bool selected, float scale, 
         d->AddImage(art[1]->GetTexRef(), start, end);
     if (art[2])
         d->AddImage(art[2]->GetTexRef(), start, end, ImVec2(0, 0), ImVec2(1, 1),
-                    IM_COL32(255, 255, 255, selected ? 100 : 50));
+                    IM_COL32(255, 255, 255, 50));
+    if (selected && art[8])
+        d->AddImage(art[8]->GetTexRef(), start, end, ImVec2(0, 0), ImVec2(1, 1), IM_COL32(255, 255, 255, 100));
     ImVec2 corners[] = {p(b.x + 8, b.y + 12), p(b.x + b.w - 8, b.y + 8), p(b.x + b.w - 8, b.y + b.h - 12),
                         p(b.x + 8, b.y + b.h - 8)};
     if (selected) {
