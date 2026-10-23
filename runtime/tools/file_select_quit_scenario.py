@@ -4,7 +4,7 @@
 BINARY GAME SAVE WORK --case on|off|confirm|quit|mouse|cancel|copy|erase
 SAVE is an existing save directory; only cking.sav is copied. Captures are
 composed presents (including the host UI), rather than player screenshots.
-Uses macOS Metal's hidden presentation path. Other aspect ratios exercise
+Uses the macOS hidden presentation path (Metal or Vulkan). Other aspect ratios exercise
 letterboxing; mouse input clicks near the visible button edges.
 """
 import argparse
@@ -21,6 +21,7 @@ def main():
     for name in ("binary", "game", "save", "work"):
         parser.add_argument(name, type=lambda p: Path(p).resolve())
     parser.add_argument("--case", choices=("on", "off", "confirm", "quit", "mouse", "cancel", "copy", "erase"), default="on")
+    parser.add_argument("--renderer", choices=("metal", "vulkan"), default="metal")
     parser.add_argument("--size", choices=("1920x1080", "1280x720", "1280x960", "2560x1080", "1080x1920"), default="1920x1080")
     parser.add_argument("--prompts", choices=("original", "xbox", "playstation"), default="original")
     parser.add_argument("--layout", choices=("position", "labels"), default="position")
@@ -41,6 +42,8 @@ def main():
             raise RuntimeError("Two other game sessions are still running")
         time.sleep(.1)
     tag = args.case + "-" + args.size
+    if args.renderer != "metal":
+        tag += "-" + args.renderer
     if args.prompts != "original":
         tag += "-" + args.prompts
     if args.layout != "position":
@@ -89,7 +92,7 @@ def main():
     env = dict(os.environ, WWHD_USER_DIR=str(user), WWHD_CONTROLS=str(controls),
                WWHD_STATE_DIR=str(user / "states"), WWHD_DISPLAY_SETTINGS=str(user / "display.json"),
                WWHD_HIDDEN_WINDOWS="1", WWHD_NO_AUDIO="1", WWHD_NO_HOST_INPUT="1", WWHD_NO_GAMEPAD="1",
-               WWHD_RENDERER_RUNTIME="metal", WWHD_INTERP="0", WWHD_LANGUAGE="1",
+               WWHD_RENDERER_RUNTIME=args.renderer, WWHD_INTERP="0", WWHD_LANGUAGE="1",
                WWHD_ASPECT="16:9",
                WWHD_INTERP_PACED="0", WWHD_DISPLAY_HZ="0", WWHD_DRC_MODE="off",
                WWHD_SHADER_CACHE=str(args.work / "shader-cache.bin"),

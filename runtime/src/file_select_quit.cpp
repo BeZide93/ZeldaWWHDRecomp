@@ -2,6 +2,8 @@
 #include "button_glyph_art.h"
 #include "button_glyphs.h"
 #include "game_glyph.h"
+#include "game_languages.h"
+#include "overlay/game_font.h"
 #include "guest_addr.h"
 #include "imgui.h"
 #include "imgui_internal.h"
@@ -39,7 +41,7 @@ struct Font {
     static constexpr int cell = 128, width = 2048, height = 896;
     std::array<Letter, 108> letters{};
     std::vector<uint8_t> pixels;
-    int cell_height = 1;
+    int cell_height = 1, nominal_width = 1, nominal_height = 1;
     bool icons = false;
 };
 std::mutex font_mutex;
@@ -49,6 +51,7 @@ std::unique_ptr<ImTextureData> texture;
 std::array<std::unique_ptr<ImTextureData>, 8> art;
 std::set<ImTextureData *> srgb_art;
 std::atomic<bool> loading_font{false};
+game_layouts::TextStyle button_style{42, 48, 0, 2, true};
 // Bake the native picture's vertex gradient too: its cyan lower vertices
 // are what turn the authored green button plate darker toward the bottom.
 void apply_vertices(game_layouts::Image &image, const game_layouts::Pane &pane) {
@@ -98,6 +101,9 @@ std::unique_ptr<ImTextureData> native_image(const char *spec, const char *pane_n
 void load_art() {
     if (art[0])
         return;
+    game_layouts::Pane text;
+    if (game_layouts::pane("BtnSequence_00/T_Btn_00", text) && text.text.height > 0)
+        button_style = text.text;
     art[0] = native_image("BtnSequence_00/BtnSequenceShadow_00^t#P_BtnShadow_00", "BtnSequence_00/P_BtnShadow_00");
     art[1] = native_image("BtnSequence_00/BtnSequencePattern_00^t#P_Btn_00", "BtnSequence_00/P_Btn_00");
     art[2] = native_image("BtnSequence_00/BtnSequenceSpec_00^q", "BtnSequence_00/P_Btn_00");
@@ -144,7 +150,7 @@ void load_font(Cpu *cpu) {
     thread_local uint32_t scratch = mem::host_alloc(0x18, 16);
     auto next = std::make_shared<Font>();
     next->pixels.resize(Font::width * Font::height * 4);
-    for (unsigned ch = 33; ch < 127; ++ch) {
+    for (unsigned ch = 32; ch < 127; ++ch) {
         if (!std::strchr("Quit the game?YesNoABXY", ch))
             continue;
         std::memset(mem::ptr(scratch), 0, 0x18);
@@ -166,6 +172,11 @@ void load_font(Cpu *cpu) {
             for (int x = 0; x < glyph.bitmap.width; ++x) {
                 auto *p = next->pixels.data() + ((y0 + y) * Font::width + x0 + x) * 4;
                 std::memcpy(p, glyph.bitmap.rgba.data() + (y * glyph.bitmap.width + x) * 4, 4);
+                // The message font encodes its border at half coverage. The
+                // plain button lettering uses the upper half of that mask;
+                // tinting the entire mask also paints a heavy coloured border.
+                p[0] = p[1] = p[2] = 255;
+                p[3] = uint8_t(std::clamp((int(p[3]) - 128) * 255 / 127, 0, 255));
             }
     }
     // Native icon glyphs come from the loaded icon font, just as the game's
@@ -214,7 +225,9 @@ void load_font(Cpu *cpu) {
                 p[3] = rgba;
             }
     }
-    next->letters[0].advance = 16;
+    const auto metrics = game_font::message_metrics(game_lang::started());
+    next->nominal_width = metrics.width > 0 ? metrics.width : next->cell_height;
+    next->nominal_height = metrics.height > 0 ? metrics.height : next->cell_height;
     {
         std::lock_guard lock(font_mutex);
         font = std::move(next);
@@ -226,22 +239,40 @@ float text_width(const char *s, float size) {
     for (; *s; ++s)
         if (*s >= 32 && *s < 127)
             w += rendered_font->letters[*s - 32].advance;
-    return w * size / rendered_font->cell_height;
+    return w * size / rendered_font->nominal_width;
 }
-void label(ImDrawList *d, const char *s, ImVec2 center, float size, ImU32 color) {
-    float x = center.x - text_width(s, size) * .5f, scale = size / rendered_font->cell_height;
+void label(ImDrawList *d, const char *s, ImVec2 center, float size, ImU32 color, float aspect = 1) {
+    float x = center.x - text_width(s, size) * aspect * .5f;
+    const float scale = size / rendered_font->nominal_height;
+    const float sx = size * aspect / rendered_font->nominal_width;
     for (; *s; ++s) {
         if (*s < 32 || *s >= 127)
             continue;
         const unsigned i = *s - 32;
         const auto &g = rendered_font->letters[i];
-        ImVec2 a(x + g.left * scale, center.y - g.height * scale * .5f),
-            b(a.x + g.width * scale, a.y + g.height * scale);
+        ImVec2 a(x + g.left * sx, center.y - g.height * scale * .5f),
+            b(a.x + g.width * sx, a.y + g.height * scale);
         ImVec2 uv((i % 16) * float(Font::cell) / Font::width, (i / 16) * float(Font::cell) / Font::height);
         ImVec2 end(uv.x + g.width / float(Font::width), uv.y + g.height / float(Font::height));
         d->AddImage(texture->GetTexRef(), a, b, uv, end, color);
-        x += g.advance * scale;
+        x += g.advance * sx;
     }
+}
+// Layout colours are linear; the overlay's packed vertex colours are sRGB.
+ImU32 text_colour(game_layouts::Colour c) {
+    auto srgb = [](uint8_t v) {
+        const float f = v / 255.f;
+        return int(std::lround(255 * (f <= .0031308f ? f * 12.92f : 1.055f * std::pow(f, 1 / 2.4f) - .055f)));
+    };
+    return IM_COL32(srgb(c.r), srgb(c.g), srgb(c.b), c.a);
+}
+void button_label(ImDrawList* d, const char* name, ImVec2 center, float scale) {
+    const float size = button_style.height * scale;
+    const float aspect = button_style.width / button_style.height;
+    if (button_style.shadow)
+        label(d, name, ImVec2(center.x + button_style.shadow_x * scale, center.y + button_style.shadow_y * scale),
+              size, text_colour(button_style.shade), aspect);
+    label(d, name, center, size, text_colour(button_style.ink), aspect);
 }
 using Box = Rect;
 constexpr Box quit_box = kQuitBox;
@@ -250,6 +281,14 @@ bool button(ImDrawList *d, Box b, const char *name, bool selected, float scale, 
     ImGui::SetCursorScreenPos(p(b.x, b.y));
     const bool clicked = ImGui::InvisibleButton(name, ImVec2(b.w * scale, b.h * scale));
     selected |= ImGui::IsItemHovered();
+    // Native sequence buttons grow around their centre when selected. This
+    // changes only the picture; keep the established pointer target above.
+    if (selected) {
+        b.x -= b.w * .1f;
+        b.y -= b.h * .1f;
+        b.w *= 1.2f;
+        b.h *= 1.2f;
+    }
     const ImVec2 start = p(b.x, b.y), end = p(b.x + b.w, b.y + b.h);
     if (art[0])
         d->AddImage(art[0]->GetTexRef(), start, end);
@@ -271,7 +310,7 @@ bool button(ImDrawList *d, Box b, const char *name, bool selected, float scale, 
                             ImVec2(dx > 0 ? 1 : 0, dy > 0 ? 1 : 0));
         }
     }
-    label(d, name, p(b.x + b.w * .5f, b.y + b.h * .5f), b.h * .5f * scale, IM_COL32(0, 56, 0, 255));
+    button_label(d, name, p(b.x + b.w * .5f, b.y + b.h * .5f), scale * (selected ? 1.2f : 1.f));
     return clicked;
 }
 void prompt(ImDrawList *d, ImVec2 center, float radius) {
@@ -490,7 +529,7 @@ void frame(float width, float height) {
         image(5, 370, 435, 540, 40, false, true);
         image(6, 330, 275, 40, 160);
         image(6, 910, 275, 40, 160, true);
-        label(d, "Quit the game?", ImVec2(ox + 640 * scale, oy + 300 * scale), 38 * scale, IM_COL32(0, 56, 0, 255));
+        button_label(d, "Quit the game?", ImVec2(ox + 640 * scale, oy + 300 * scale), scale);
         const uint32_t pressed = presses.exchange(0);
         if (pressed & input::kLeft)
             yes = false;
