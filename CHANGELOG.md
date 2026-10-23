@@ -7,6 +7,10 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Fixed: characters didn't show up in a scene's Demo step** (#285, for mod makers). Link now starts at his first
+  position key instead of walking there from wherever he stood, and game characters created for a demo (a pig, for
+  example) follow their keys instead of their own routes. The editor warns in yellow when an actor's keys never come
+  into the demo camera's view, and a first position key is placed at Link instead of far out at sea.
 - **Fixed: Fast Forward's 3x and 4x ran only as fast as 2x** (#268). On a 60 Hz display the game waited for the screen
   after every step, which capped it at twice the normal speed. While Fast Forward is held, the game no longer waits
   for the screen, so 3x and 4x really run three and four times as fast, with or without frame interpolation and
