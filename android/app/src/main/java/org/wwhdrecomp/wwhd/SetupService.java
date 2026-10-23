@@ -342,7 +342,10 @@ public class SetupService extends Service {
      * setup screen (null: done), or pauses (heat, battery, Pause, the setup screen left: Pause).
      */
     private String runModels(File active) throws Exception {
-        for (String name : new String[] {ModelsStep.CANCEL, ModelsStep.RESULT, ModelsStep.SCREEN, ModelsStep.LAUNCHED})
+        // the request of an attempt that ended with the app (closed, stopped) goes first: with only its "launched"
+        // mark removed, the setup screen would start that old attempt once more (it refuses to run, after seconds)
+        for (String name : new String[] {ModelsStep.ATTEMPT, ModelsStep.CANCEL, ModelsStep.RESULT, ModelsStep.SCREEN,
+                ModelsStep.LAUNCHED})
             SetupStore.remove(new File(active, name));
         checkPause(active);
         AndroidGame.Selection selection = AndroidGame.selected(this);
