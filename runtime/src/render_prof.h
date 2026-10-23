@@ -51,6 +51,16 @@ void mark_slow(Phase p);
 inline void mark(Phase p) {
     if (g_draw_sampled) mark_slow(p);
 }
+// parts of a phase, timed on their own sample of draws (one in 64, never a draw whose phases are
+// timed, so the phase totals do not carry these timers' cost); reported on their own line, scaled
+// like the phases. sub_begin() returns 0 when the draw is not in that sample.
+enum SubPhase : int { kSubUniformSetup, kSubUniformPack, kSubUniformBlocks, kSubUniformSupportUpload, kSubPhases };
+extern bool g_sub_sampled;
+inline uint64_t sub_begin() { return g_sub_sampled ? now_ns() : 0; }
+void sub_end_slow(SubPhase p, uint64_t started);
+inline void sub_end(SubPhase p, uint64_t started) {
+    if (started) sub_end_slow(p, started);
+}
 
 // op timing around execute_one: begin() returns 0 when this call is not timed
 uint64_t op_begin(Op op);

@@ -2367,6 +2367,7 @@ StageResources bind_stage(const uint32_t *r, vk::Shader *sh,
                           bool sunShadow = false,
                           const ContinuedStage* reuse = nullptr, ContinuedStage* record = nullptr,
                           StageReplay* replayOut = nullptr) {
+  const uint64_t stageEntered = rprof::sub_begin();
   StageResources out;
   auto &m = sh->mapping;
   // stereo eye 0: what eye 1 needs to bind this stage again (replay_stage)
@@ -2489,6 +2490,8 @@ StageResources bind_stage(const uint32_t *r, vk::Shader *sh,
   static thread_local std::array<std::vector<uint8_t>, 2> supportScratch;
   auto& supportUniforms = supportScratch[sh->vertex ? 0 : 1];
   stereo::EyeRows supportRows;
+  rprof::sub_end(rprof::kSubUniformSetup, stageEntered);
+  const uint64_t packStarted = rprof::sub_begin();
   if (m.uniformVarsBufferBindingPoint >= 0) {
     const size_t capacity=preparation_stats_enabled()?supportUniforms.capacity():0;
     vk::pack_uniforms_into(r, *sh, supportUniforms, sx, sy, eyeOffset, stereo::frame.convergence,
@@ -2559,6 +2562,8 @@ StageResources bind_stage(const uint32_t *r, vk::Shader *sh,
     memcpy(supportUniforms.data() + remapped + 12, &noiseScale, sizeof noiseScale);
   }
 
+  rprof::sub_end(rprof::kSubUniformPack, packStarted);
+  const uint64_t blocksStarted = rprof::sub_begin();
   uint32_t block =
       sh->vertex ? mmSQ_VTX_UNIFORM_BLOCK_START : mmSQ_PS_UNIFORM_BLOCK_START;
   for (int i = 0; i < 16; i++)
@@ -2603,6 +2608,7 @@ StageResources bind_stage(const uint32_t *r, vk::Shader *sh,
               size, size_t(i), addr);
       if (addr) rprof::guest_read(rprof::kUpUbo, addr, size);
     }
+  rprof::sub_end(rprof::kSubUniformBlocks, blocksStarted);
   rprof::mark(rprof::kUniforms);
   uint32_t texbase = sh->vertex ? REGADDR::SQ_TEX_RESOURCE_WORD0_N_VS
                                 : REGADDR::SQ_TEX_RESOURCE_WORD0_N_PS;
@@ -2672,8 +2678,10 @@ StageResources bind_stage(const uint32_t *r, vk::Shader *sh,
   }
   rprof::mark(rprof::kTextures);
   if (m.uniformVarsBufferBindingPoint >= 0) {
+    const uint64_t uploadStarted = rprof::sub_begin();
     uniform(m.uniformVarsBufferBindingPoint, supportUniforms.data(),
             supportUniforms.size(), 16);
+    rprof::sub_end(rprof::kSubUniformSupportUpload, uploadStarted);
     eyeUniform(m.uniformVarsBufferBindingPoint, supportUniforms.data(), supportUniforms.size(), supportRows);
   }
   rprof::mark(rprof::kUniforms);

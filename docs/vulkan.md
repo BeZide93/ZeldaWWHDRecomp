@@ -998,6 +998,9 @@ contains:
 - ms per frame per op and, sampled on one draw in 64, per draw phase (shader lookup, index
   conversion, targets, pipeline, uniforms, textures, descriptors, pass, recording, vertex
   snapshots, draw/submit);
+- the uniforms phase in parts (stage setup, packing the support uniforms, guest uniform blocks,
+  the support-uniform upload), timed on another one draw in 64 so that the phase totals do not
+  carry these timers; one timer call's cost is taken off each part;
 - render-thread waits for the GPU and the swapchain; game-thread waits for the render thread
   (DrawDone, CopySurface, flips);
 - uploads per frame by kind (vertex, index, uniform blocks, packed uniforms, texture staging; logic
