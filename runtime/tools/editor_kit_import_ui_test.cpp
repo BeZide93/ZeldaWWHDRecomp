@@ -27,7 +27,7 @@ struct Call {
 std::vector<Call> calls;
 std::string clipboard;
 ki::State state;
-Value locations, link, checked;
+Value locations, link_place, checked;
 bool changed = false;
 
 void frame() {
@@ -36,7 +36,7 @@ void frame() {
     ImGui::SetNextWindowPos(ImVec2(0, 0));
     ImGui::SetNextWindowSize(io.DisplaySize);
     ImGui::Begin("Import", nullptr, ImGuiWindowFlags_NoDecoration);
-    changed |= ki::draw(state, locations, link, checked, [](const std::string& n, const Value& p, std::function<void(const Value&)> then) {
+    changed |= ki::draw(state, locations, link_place, checked, [](const std::string& n, const Value& p, std::function<void(const Value&)> then) {
         calls.push_back({n, p, std::move(then)});
     });
     ImGui::End();
@@ -93,7 +93,7 @@ int main() {
     const auto rooms = ki::rooms(locations);
     assert(rooms.size() == 3 && rooms[0].label == "Windfall Island (sea 11)" && rooms[2].label == "Dragon Roost Cavern (M_NewD2) room 3");
     assert(ki::room_label(rooms, "sea", 13) == "Dragon Roost Island (sea 13)" && ki::room_label(rooms, "Xboss0", 0) == "Xboss0 room 0");
-    link = json(R"({"valid": true, "stage": "sea", "room": 11})");
+    link_place = json(R"({"valid": true, "stage": "sea", "room": 11})");
 
     // off: nothing is asked, the import's commands are as before
     for (int i = 0; i < 2; i++) frame();
@@ -153,7 +153,7 @@ int main() {
     frame();
     assert(calls.back().name == "list_kit_materials" && calls.back().params.get("room").number == 13);
     // Link moving on doesn't change a picked room
-    link = json(R"({"valid": true, "stage": "sea", "room": 44})");
+    link_place = json(R"({"valid": true, "stage": "sea", "room": 44})");
     frame();
     assert(state.room == 13);
     // a room that can't be read: said, nothing listed
