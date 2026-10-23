@@ -61,6 +61,7 @@
 #include "../overlay/guest_hud.h"
 #include "../screenshot.h"
 #include "../dsweep.h"
+#include "hidden_presentation.h"
 
 // The game's own icon in the Dock: meta/iconTex.tga of the game folder (uncompressed 32-bit TGA,
 // 128x128 in Wind Waker HD), as the SDL host does for its windows. Nothing happens without it.
@@ -292,7 +293,7 @@ static void screen_changed(int i) {
         scr.visible = screen_visible(win);
     }
 #ifdef WWHD_HAS_VULKAN
-    else gfxvk::screen_changed(i, screen_visible(win));
+    else gfxvk::screen_changed(i, screen_visible(win) || (i == 0 && gfx::hidden::mode().test_present));
 #endif
 }
 
@@ -348,7 +349,7 @@ static void attach_metal_layers() {
         layer.pixelFormat = MTLPixelFormatBGRA8Unorm;
         layer.framebufferOnly = YES;
         layer.maximumDrawableCount = 3;
-        if (hidden_windows()) scr.visible = false;  // never on screen: no drawables
+        if (!gfx::hidden::mode().presents()) scr.visible = false;  // never on screen: no drawables
     }
 }
 
@@ -670,8 +671,10 @@ void display_attach_vulkan(void** tv, void** drc) {
 // after the Vulkan renderer started: windows that are never shown get no presentation
 void display_vulkan_started() {
 #ifdef WWHD_HAS_VULKAN
-    if (hidden_windows())
+    if (!gfx::hidden::mode().presents())
         for (int i = 0; i < 2; i++) gfxvk::screen_changed(i, false);
+    else if (hidden_windows())  // proof runs (WWHD_TEST_PRESENT_HIDDEN): the hidden TV window presents
+        gfxvk::screen_changed(0, true);
 #endif
 }
 void display_detach() {

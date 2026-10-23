@@ -473,6 +473,14 @@ int main(int argc, char** argv) {
         // 60 fps (frame interpolation) is on unless chosen otherwise (settings.ini, read when the
         // renderer starts); platform/perf_hint.cpp pauses it where the phone cannot keep up
         if (!getenv("WWHD_INTERP") && !getenv("WWHD_TRUE60")) interp::set_mode(1);
+        // setup's models step (ModelPrepareActivity, tools/android/android_models.py): the game's output (its
+        // WWHD-PROGRESS lines) goes to WWHD_STDOUT_FILE, which setup reads as the desktop setup reads a game's
+        // output; env.txt then adds options but never replaces one the step set
+        const char* sweep = getenv("WWHD_DSWEEP");
+        if (const char* out = getenv("WWHD_STDOUT_FILE"); out && *out) {
+            if (freopen(out, "a", stdout)) setvbuf(stdout, nullptr, _IOLBF, 0);
+            else fprintf(stderr, "cannot write %s\n", out);
+        }
         // env.txt there: one NAME=value per line (the WWHD_ options of the README); # comments
         if (FILE* f = fopen("env.txt", "r")) {
             char line[512];
@@ -481,11 +489,19 @@ int main(int argc, char** argv) {
                 char* eq = strchr(line, '=');
                 if (line[0] == '#' || !eq || eq == line) continue;
                 *eq = 0;
+                if (sweep && *sweep && getenv(line)) {
+                    LOG("[boot] env.txt: %s left as the models step set it", line);
+                    continue;
+                }
                 setenv(line, eq + 1, 1);
                 LOG("[boot] env.txt: %s=%s", line, eq + 1);
             }
             fclose(f);
         }
+        // the models step's own working folder: an attempt's log and crash reports stay out of the player's
+        // captures/ (a model that stops the game is expected there, not a crash to report)
+        if (const char* cwd = getenv("WWHD_CWD"); cwd && *cwd && chdir(cwd) != 0)
+            fprintf(stderr, "cannot enter %s\n", cwd);
     }
 #endif
     bool warm_shaders = false;
