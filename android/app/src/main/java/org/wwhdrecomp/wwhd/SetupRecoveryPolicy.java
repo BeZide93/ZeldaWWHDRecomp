@@ -8,7 +8,8 @@ public final class SetupRecoveryPolicy {
             boolean checkUpdate, boolean inputsChanged) {
         if (manualPause) return false;
         if ("running".equals(state) || "importing".equals(state) ||
-                "preparing".equals(state) || "activating".equals(state) || "paused".equals(state))
+                "preparing".equals(state) || "activating".equals(state) || "paused".equals(state) ||
+                "preparing models".equals(state))  // setup's models step (ModelsStep.STATE)
             return true;
         return "complete".equals(state) && checkUpdate && inputsChanged;
     }
