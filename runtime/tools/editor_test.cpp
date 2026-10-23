@@ -165,6 +165,11 @@ struct FakeHost : editor::Host {
         const auto it = model_failures.find(mod + ":" + model);
         return it == model_failures.end() ? std::string() : it->second;
     }
+    Value kit_list;  // list_kit_materials' result for sea room 11 (kit_materials); null: the room can't be read
+    Value kit_materials(const std::string& stage, unsigned room, std::string& why) override {
+        if (kit_list.type == Value::Null || stage != "sea" || room != 11) return why = "the game's rooms can't be read here", Value();
+        return kit_list;
+    }
     std::set<std::string> collision_pending;  // "mod:model" whose collision is being prepared
     bool collision_preparing(const std::string& mod, const std::string& model) override { return collision_pending.contains(mod + ":" + model); }
     bool prepare_model(const std::string& mod, const std::string&, const Value& model, std::string& note, std::string&) override {
@@ -2039,6 +2044,80 @@ void own_models(const fs::path& examples) {
     fs::remove_all(dir, ec);
 }
 
+// A model with the game's materials (the import dialog's "Use the game's materials (kit)", issue #280): check_model with
+// kit says which of its materials are the room's, which have their own texture and which are neither; import_model
+// refuses one that is neither (its build would fail later), takes a mapping for it, and says the same in its note.
+void kit_import(const fs::path& examples) {
+    FakeHost host;
+    host.kit_list = json(R"({"materials": [{"material": "grass_v", "textures": ["a_kusa"], "triangles": 900},
+                                          {"material": "rock_v", "textures": ["m_ren16"], "triangles": 400}], "main": "grass_v"})");
+    const fs::path dir = temp_dir("kit-import");
+    fs::copy(examples / "sdk-v3-windfall", dir, fs::copy_options::recursive);
+    std::ifstream in(dir / "manifest.json");
+    std::stringstream text;
+    text << in.rdbuf();
+    in.close();
+    editor::Session w(&host);
+    w.add_package("sdk-v3-windfall", "Windfall", dir.string(), mods::json::parse(text.str()));
+    // one cube drawn in four parts: a game material (Blender's copy suffix), a texture of its own, a name the room
+    // doesn't have, and a collision mesh with a col_* material (not drawn, not reported)
+    auto doc = static_model_fixture::cube_document();
+    doc["materials"] = json(R"([{"name": "grass_v.001"}, {"name": "my_sign", "pbrMetallicRoughness": {"baseColorTexture": {"index": 0}}},
+                                {"name": "my_stone"}, {"name": "col_grass"}])");
+    Value prim = doc["meshes"].array[0]["primitives"].array[0];
+    doc["meshes"].array[0]["primitives"] = json("[]");
+    for (int m : {0, 1, 2}) {
+        prim["material"] = double(m);
+        doc["meshes"].array[0]["primitives"].array.push_back(prim);
+    }
+    Value col = doc["meshes"].array[0];
+    col["primitives"] = json("[]");
+    prim["material"] = 3.0;
+    col["primitives"].array.push_back(prim);
+    doc["meshes"].array.push_back(col);
+    doc["nodes"] = json(R"([{"name": "ext", "mesh": 0}, {"name": "ext_col", "mesh": 1}])");
+    doc["scenes"].array[0]["nodes"] = json("[0, 1]");
+    {
+        const auto bytes = static_model_fixture::glb(doc, static_model_fixture::cube_binary());
+        std::ofstream o(dir / "kit.glb", std::ios::binary);
+        o.write(reinterpret_cast<const char*>(bytes.data()), std::streamsize(bytes.size()));
+    }
+    Value p = json(R"({"kit": {"stage": "sea", "room": 11}})");
+    p["file"] = (dir / "kit.glb").string();
+    Value r = w.run("check_model", p);
+    const Value& report = r.get("result").get("kit_report");
+    CHECK(ok(r) && r.get("result").get("kind").string() == "kit" && report.get("materials").array.size() == 3);
+    CHECK(report.get("materials").array[0].get("kind").string() == "game" && report.get("materials").array[0].get("game").string() == "grass_v");
+    CHECK(report.get("own").array.size() == 1 && report.get("own").array[0].string() == "my_sign");
+    CHECK(report.get("unknown").array.size() == 1 && report.get("unknown").array[0].string() == "my_stone");
+    // imported as it is: refused, with the room's names; nothing is added
+    r = w.run("import_model", p);
+    CHECK(!ok(r) && r.get("error").string().find("\"my_stone\" has no texture and is not a material of sea room 11: name it as one of the room's (grass_v, rock_v)") != std::string::npos);
+    CHECK(w.manifest("sdk-v3-windfall")->get("models").array.empty() || !std::any_of(w.manifest("sdk-v3-windfall")->get("models").array.begin(),
+          w.manifest("sdk-v3-windfall")->get("models").array.end(), [](const Value& m) { return m.get("id").string() == "kit"; }));
+    // mapped (the dialog's "my material -> game material" table): checked and imported, the note says which is which
+    p["materials"] = json(R"({"my_stone": "rock_v"})");
+    r = w.run("check_model", p);
+    CHECK(ok(r) && r.get("result").get("kit_report").get("unknown").array.empty() &&
+          r.get("result").get("kit_report").get("materials").array[2].get("game").string() == "rock_v");
+    r = w.run("import_model", p);
+    CHECK(ok(r) && r.get("result").get("model").get("kind").string() == "kit" && r.get("result").get("model").get("materials").get("my_stone").string() == "rock_v");
+    CHECK(r.get("result").get("kit_report").get("game").array.size() == 2);
+    CHECK(r.get("result").get("note").string().rfind("Game materials of sea room 11: grass_v.001, my_stone. Own textures: my_sign.", 0) == 0);
+    CHECK(host.prepared == "sdk-v3-windfall:kit");
+    // the room can't be read (no game files): checked all the same, the report says why it is missing
+    host.kit_list = Value();
+    p.object.erase("materials");
+    r = w.run("check_model", p);
+    CHECK(ok(r) && r.get("result").get("kit_report").type == Value::Null && !r.get("result").get("kit_report_error").string().empty());
+    // without kit: the import's own check as before (no report)
+    p.object.erase("kit");
+    r = w.run("check_model", p);
+    CHECK(r.get("result").get("kit_report").type == Value::Null);
+    std::error_code ec;
+    fs::remove_all(dir, ec);
+}
+
 int main(int argc, char** argv) {
     // editor_test --game <game dir> [stage room]: what the editor reads from a game folder (manual check)
     if (argc >= 3 && std::string(argv[1]) == "--game") {
@@ -2070,6 +2149,7 @@ int main(int argc, char** argv) {
     live_kinds_note();
     building(argv[1]);
     own_models(argv[1]);
+    kit_import(argv[1]);
     game_objects();
     route_commands();
     path_commands();

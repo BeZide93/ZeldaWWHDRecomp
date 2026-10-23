@@ -1107,6 +1107,12 @@ add_executable(editor_resident_ui_test runtime/tools/editor_resident_ui_test.cpp
 target_compile_options(editor_resident_ui_test PRIVATE -UNDEBUG)
 target_link_libraries(editor_resident_ui_test PRIVATE imgui)
 add_test(NAME editor_resident_ui COMMAND editor_resident_ui_test)
+# issue #280: the model import's "Use the game's materials (kit)" option (overlay/editor_kit_import.h): the room picker,
+# the room's materials with Copy names, the name mapping and the commands it builds
+add_executable(editor_kit_import_ui_test runtime/tools/editor_kit_import_ui_test.cpp runtime/src/overlay/editor_kit_import.cpp)
+target_compile_options(editor_kit_import_ui_test PRIVATE -UNDEBUG)
+target_link_libraries(editor_kit_import_ui_test PRIVATE imgui)
+add_test(NAME editor_kit_import_ui COMMAND editor_kit_import_ui_test)
 if(APPLE)
   add_executable(pip_preview_ui_test runtime/tools/pip_preview_ui_test.cpp runtime/src/gfx/display_modes.cpp)
   target_include_directories(pip_preview_ui_test PRIVATE ${IMGUI_DIR} runtime/src runtime/include

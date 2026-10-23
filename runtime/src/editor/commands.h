@@ -541,6 +541,12 @@ bool check_model_bytes(const std::vector<uint8_t>& bytes, Value& info, std::stri
 inline constexpr size_t kMaxImportBytes = 64 * 1024 * 1024;
 bool import_model_file(const std::string& path, std::vector<uint8_t>& bytes, Value& info, std::string& why);
 bool check_kit_model_file(const std::string& path, const Value& declaration, Value& info, std::string& why);
+// A kit model's visible materials against a kit room's (list_kit_materials' result) and the declaration's "materials" and
+// "material", as kit_model.py names them: {materials: [{name, kind: game|own|unknown, game?, default?}], game: [names],
+// own: [names], unknown: [names]}. "unknown": no texture and no material of the room (its build would refuse it).
+Value kit_material_report(const std::vector<uint8_t>& glb, const Value& listed, const Value& declaration);
+// The report in a sentence for the import's note ("Game materials of sea room 11: ... Own textures: ...").
+std::string kit_report_note(const Value& report, const Value& kit);
 // A model's place relative to its own origin (issue #280). Bounds are in game units, the GLB's metres x 100, as
 // check_model_file's "minimum" and "maximum" give them.
 // How far the geometry lies from the origin across the ground (x, z): 0 when the origin is under or inside it.

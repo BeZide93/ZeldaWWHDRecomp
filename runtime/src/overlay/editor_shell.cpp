@@ -10,6 +10,7 @@
 #include <cstring>
 #include <map>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "../editor/demo_tracks.h"
@@ -47,6 +48,7 @@ struct ShellState {
     bool outliner = true, inspector = true, problems = false, test = false, log = false;
     bool story_tab = false;  // show the Outliner's Story tab once
     bool stages_tab = false;  // show the Outliner's Stages tab once
+    bool models_tab = false;  // show the Outliner's Models tab once (test aid)
     bool focus_inspector = false, focus_problems = false;
     bool quests = false, flags = false, search = false, focus_quests = false;  // the quest editor's windows
     bool quests_focused = false;  // Ctrl+C / Ctrl+V are the quest editor's there
@@ -1831,7 +1833,7 @@ void panels(float w, float h) {
                     editor_ui::actor_list(snap.manifest);
                     ImGui::EndTabItem();
                 }
-                if (ImGui::BeginTabItem("Models")) {
+                if (ImGui::BeginTabItem("Models", nullptr, std::exchange(S.models_tab, false) ? ImGuiTabItemFlags_SetSelected : 0)) {
                     editor_ui::models_area(snap.manifest);
                     ImGui::EndTabItem();
                 }
@@ -2156,6 +2158,7 @@ void register_layers() {
         S.reset_layout = w.find("resetlayout") != std::string::npos;  // as Reset layout at the first frame
         if (w.find("nooutliner") != std::string::npos) S.outliner = false;
         S.stages_tab = w.find("stages") != std::string::npos;  // the Outliner's Stages tab
+        S.models_tab = w.find("models") != std::string::npos;  // the Outliner's Models tab
         if (w.find("noinspector") != std::string::npos) S.inspector = false;
     }
     if (const char* e = std::getenv("WWHD_TEST_EDITOR_PLACING")) S.placing = e;

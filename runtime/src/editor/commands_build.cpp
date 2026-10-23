@@ -461,6 +461,86 @@ bool check_kit_model_file(const std::string& path, const Value& p, Value& info, 
     return true;
 }
 
+Value kit_material_report(const std::vector<uint8_t>& glb, const Value& listed, const Value& declaration) {
+    Value out;
+    out["materials"] = array();
+    for (const char* k : {"game", "own", "unknown"}) out[k] = array();
+    if (glb.size() < 20 || std::memcmp(glb.data(), "glTF", 4)) return out;
+    const uint32_t json_length = uint32_t(glb[12]) | uint32_t(glb[13]) << 8 | uint32_t(glb[14]) << 16 | uint32_t(glb[15]) << 24;
+    if (json_length > glb.size() - 20) return out;
+    Value doc;
+    try {
+        doc = mods::json::parse(std::string(reinterpret_cast<const char*>(glb.data() + 20), json_length));
+    } catch (...) {
+        return out;
+    }
+    // the room's names, the mapping and the default, as kit_model.py's Names resolves them (a Blender ".001" ignored)
+    std::set<std::string> game;
+    for (const auto& m : listed.get("materials").array) game.insert(m.get("material").string());
+    const auto plain = [](std::string n) {
+        const auto dot = n.rfind('.');
+        if (dot != std::string::npos && n.size() - dot == 4 && std::all_of(n.begin() + long(dot) + 1, n.end(), [](unsigned char c) { return c >= '0' && c <= '9'; }))
+            n.resize(dot);
+        return n;
+    };
+    const std::string fallback = declaration.get("material").type == Value::String ? declaration.get("material").text : std::string();
+    const auto resolve = [&](const std::string& name) -> std::string {
+        for (const auto& n : {name, plain(name)})
+            if (declaration.get("materials").get(n).type == Value::String) return declaration.get("materials").get(n).text;
+        for (const auto& n : {name, plain(name)})
+            if (game.count(n)) return n;
+        return {};
+    };
+    // the visible primitives' materials, in the file's order (a node or mesh named *_col is collision only)
+    const auto& materials = doc.get("materials").array;
+    std::vector<int> used;
+    for (const auto& node : doc.get("nodes").array) {
+        if (node.get("mesh").type != Value::Number) continue;
+        const size_t mi = size_t(node.get("mesh").number);
+        if (mi >= doc.get("meshes").array.size()) continue;
+        const auto& mesh = doc.get("meshes").array[mi];
+        if (node.get("name").string().ends_with("_col") || mesh.get("name").string().ends_with("_col")) continue;
+        for (const auto& p : mesh.get("primitives").array) {
+            const int m = p.get("material").type == Value::Number ? int(p.get("material").number) : -1;
+            if (std::find(used.begin(), used.end(), m) == used.end()) used.push_back(m);
+        }
+    }
+    std::sort(used.begin(), used.end());
+    for (const int m : used) {
+        const Value* mat = m >= 0 && size_t(m) < materials.size() ? &materials[size_t(m)] : nullptr;
+        const std::string name = mat ? mat->get("name").string() : std::string();
+        Value e;
+        e["name"] = name;
+        if (mat && mat->get("pbrMetallicRoughness").get("baseColorTexture").type != Value::Null) {
+            e["kind"] = "own";
+        } else if (const std::string named = resolve(name); !named.empty()) {
+            e["kind"] = "game", e["game"] = named;
+        } else if (name.empty() || name.starts_with("col_") || !fallback.empty()) {
+            e["kind"] = "game", e["game"] = fallback.empty() ? listed.get("main").string() : fallback, e["default"] = true;
+        } else {
+            e["kind"] = "unknown";
+        }
+        out[e.get("kind").string()].array.push_back(Value(name));
+        out["materials"].array.push_back(e);
+    }
+    return out;
+}
+
+std::string kit_report_note(const Value& report, const Value& kit) {
+    const auto names = [](const Value& list) {
+        std::string s;
+        for (const auto& n : list.array) s += (s.empty() ? "" : ", ") + (n.string().empty() ? std::string("(unnamed)") : n.string());
+        return s;
+    };
+    const std::string room = kit.get("stage").string() + " room " + std::to_string(int(kit.get("room").number));
+    std::string s;
+    if (!report.get("game").array.empty()) s += "Game materials of " + room + ": " + names(report.get("game")) + ".";
+    if (!report.get("own").array.empty()) s += std::string(s.empty() ? "" : " ") + "Own textures: " + names(report.get("own")) + ".";
+    if (!report.get("unknown").array.empty())
+        s += std::string(s.empty() ? "" : " ") + "Not materials of " + room + " and without a texture: " + names(report.get("unknown")) + ".";
+    return s;
+}
+
 // ---------------------------------------------------------------- problems and export
 std::vector<Problem> package_problems(const std::string& mod, const Value& manifest, const std::vector<std::pair<std::string, Value>>& all,
                                       const std::string& dir) {
@@ -1117,6 +1197,24 @@ Value Session::dispatch_build(const std::string& command, const Value& p, std::s
         return r;
     }
     if (command == "check_model") {
+        if (p.get("kit").type != Value::Null) {
+            // with a kit room (the import dialog's "Use the game's materials"): checked as import_model with kit checks it,
+            // and which of its materials are the room's ("kit_report"; "kit_report_error" when the room can't be read)
+            if (!check_kit_model_file(text(p, "file"), p, r, why)) return r;
+            if (host_) {
+                std::string w;
+                const Value listed = host_->kit_materials(p.get("kit").get("stage").string(), unsigned(std::max(0.0, p.get("kit").get("room").number)), w);
+                if (w.empty()) {
+                    std::ifstream f(utf8_path(text(p, "file")), std::ios::binary);
+                    const std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+                    r["kit_report"] = kit_material_report(bytes, listed, p);
+                } else {
+                    r["kit_report_error"] = w;
+                }
+            }
+            ok = true;
+            return r;
+        }
         std::vector<uint8_t> bytes;  // what import_model would put into the package ("import_fixes": what it changes)
         if (!import_model_file(text(p, "file"), bytes, r, why)) return r;
         ok = true;
@@ -1146,6 +1244,28 @@ Value Session::dispatch_build(const std::string& command, const Value& p, std::s
         std::vector<uint8_t> fixed;  // a static or skinned model as the package keeps it (model_import.h)
         if (kit ? !check_kit_model_file(text(p, "file"), p, info, why) : !import_model_file(text(p, "file"), fixed, info, why)) return r;
         const fs::path from = utf8_path(text(p, "file"));
+        // a kit model: which of its materials are the room's (said after the import); one with no texture that the room
+        // doesn't have would make the build fail later, so it is refused now with the names to choose from
+        Value kit_report;
+        if (kit && host_) {
+            std::string w;
+            const Value listed = host_->kit_materials(p.get("kit").get("stage").string(), unsigned(std::max(0.0, p.get("kit").get("room").number)), w);
+            if (w.empty()) {
+                std::ifstream f(from, std::ios::binary);
+                const std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+                kit_report = kit_material_report(bytes, listed, p);
+                if (!kit_report.get("unknown").array.empty()) {
+                    std::string unknown, names;
+                    for (const auto& n : kit_report.get("unknown").array) unknown += (unknown.empty() ? "\"" : ", \"") + n.string() + "\"";
+                    for (const auto& m : listed.get("materials").array) names += (names.empty() ? "" : ", ") + m.get("material").string();
+                    return why = "the material" + std::string(kit_report.get("unknown").array.size() > 1 ? "s " : " ") + unknown +
+                                 " ha" + (kit_report.get("unknown").array.size() > 1 ? "ve" : "s") + " no texture and " +
+                                 (kit_report.get("unknown").array.size() > 1 ? "are" : "is") + " not a material of " + p.get("kit").get("stage").string() +
+                                 " room " + std::to_string(int(p.get("kit").get("room").number)) + ": name it as one of the room's (" + names +
+                                 "), map it with \"materials\" or give it a texture of its own", r;
+                }
+            }
+        }
         const std::string id = p.get("id").type == Value::String ? p.get("id").text : slug(from.stem().string());
         if (!id_ok(id)) return why = "a model id is 1 to 32 lower-case letters, digits, '-', '_' or '.'", r;
         if (by_id(pkg->manifest.get("models"), id)) return why = "the mod has a model \"" + id + "\" already", r;
@@ -1192,6 +1312,7 @@ Value Session::dispatch_build(const std::string& command, const Value& p, std::s
         }
         r["model"] = entry;
         r["info"] = info;
+        if (kit_report.type == Value::Object) r["kit_report"] = kit_report;
         // what the import changed to make the file fit (model_import.h): said first, the file in the package is the fixed one
         std::string fixes;
         for (const auto& n : info.get("import_fixes").array) fixes += (fixes.empty() ? "" : " ") + n.string();
@@ -1204,6 +1325,7 @@ Value Session::dispatch_build(const std::string& command, const Value& p, std::s
             if (host_->prepare_model(pkg->mod, pkg->dir, request, note, w)) r["note"] = note;
             else r["note"] = "the model is in the package; it is prepared when the game starts (" + w + ")";
         }
+        if (kit_report.type == Value::Object) r["note"] = kit_report_note(kit_report, p.get("kit")) + (r.get("note").string().empty() ? std::string() : " " + r.get("note").string());
         if (!fixes.empty()) r["note"] = "Imported with changes: " + fixes + (r.get("note").string().empty() ? std::string() : " " + r.get("note").string());
         if (info.get("import_warnings").type == Value::Array) {
             r["warnings"] = info.get("import_warnings");
