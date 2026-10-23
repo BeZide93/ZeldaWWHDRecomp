@@ -6,6 +6,7 @@
 // structured settings query "layout-pane:<Layout>/<pane>". The pack is the one the game itself opened (the
 // language source and content mods applied, before the port adds mod item icons).
 #pragma once
+#include <array>
 #include <cstdint>
 #include <map>
 #include <string>
@@ -25,6 +26,7 @@ struct Pane {
     float scale_x = 1, scale_y = 1, rotation = 0; // accumulated scale; the pane's own Z rotation (degrees)
     bool visible = true;                          // the pane and all its parents visible
     uint8_t alpha = 255;
+    std::array<Colour, 4> colours{{{255,255,255,255}, {255,255,255,255}, {255,255,255,255}, {255,255,255,255}}}; // TL, TR, BL, BR, linear
 };
 struct Layout {
     std::map<std::string, Material> materials;

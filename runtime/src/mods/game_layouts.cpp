@@ -187,7 +187,10 @@ Layout parse_bflyt(const Bytes& d) {
             for (uint32_t k = 0; k < n; k++) {
                 const size_t m = o + be32(d, o + 12 + 4 * k);
                 Material mat;
-                const std::string name = cstr(d, m, 28);
+                std::string name = cstr(d, m, 28);
+                // NintendoWare pads some authored material names with spaces.
+                // Public layout specs contain identifiers, so expose the unpadded name.
+                while (!name.empty() && name.back() == ' ') name.pop_back();
                 mat.black = {d.at(m + 0x1C), d.at(m + 0x1D), d.at(m + 0x1E), d.at(m + 0x1F)};
                 mat.white = {d.at(m + 0x20), d.at(m + 0x21), d.at(m + 0x22), d.at(m + 0x23)};
                 const uint32_t maps = be32(d, m + 0x24) & 3;
@@ -221,6 +224,10 @@ Layout parse_bflyt(const Bytes& d) {
             p.y = oy + (bv == 1 ? -p.height / 2 : bv == 2 ? p.height / 2 : 0);
             p.visible = parent.visible && own_visible;
             if (magic == "pic1" && size >= 0x66) {
+                for (size_t vertex = 0; vertex < 4; ++vertex) {
+                    const size_t at = o + 0x54 + vertex * 4;
+                    p.colours[vertex] = {d[at], d[at + 1], d[at + 2], d[at + 3]};
+                }
                 const uint32_t mi = be16(d, o + 0x64);
                 if (mi < material_names.size()) {
                     p.material = material_names[mi];

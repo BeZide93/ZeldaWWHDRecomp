@@ -22,6 +22,7 @@
 #include "graphics_switch.h"
 #include "restart_dialog.h"
 #include "quit_dialog.h"
+#include "../file_select_quit.h"
 #include "gyro_popup.h"
 #include "popup.h"
 #include "widgets.h"
@@ -2021,6 +2022,11 @@ void tab_controls() {
     ImGui::SetCursorPosX(std::max(ImGui::GetCursorPosX(), ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x - flow::check("List view")));
     ImGui::Checkbox("List view", &U.list_view);
     help("A plain table of all inputs instead of the controller drawing");
+    if (check("File select Quit button", m.file_select_quit, &v)) {
+        m.file_select_quit = v;
+        input_map::set_current(m);
+    }
+    help("Show a controller and mouse Quit button on the file selection screen.");
     if (check("Skip controller selection", m.skip_controller_selection, &v)) {
         m.skip_controller_selection = v;
         input_map::set_current(m);
@@ -2713,6 +2719,7 @@ bool blocks_input() { return captures(); }
 // A platform's input layer (extensions.h, the world editor): its mode while the menu is closed, and
 // whether its overlay windows were under the pointer at the last frame.
 std::atomic<bool> g_layer_mouse{false};
+std::atomic<float> g_quit_pointer_x{-1}, g_quit_pointer_y{-1};
 int layer_mode() {
     if (!ext::sealed() || is_open()) return 0;
     const auto& layer = ext::input_layer();
@@ -2720,9 +2727,9 @@ int layer_mode() {
 }
 bool layer_takes_pointer() {
     const int m = layer_mode();
-    return m == 1 || (m == 2 && g_layer_mouse.load());
+    return file_select_quit::pointer(g_quit_pointer_x.load(), g_quit_pointer_y.load()) || m == 1 || (m == 2 && g_layer_mouse.load());
 }
-bool pointer_layer_active() { return layer_mode() != 0; }
+bool pointer_layer_active() { return file_select_quit::visible() || layer_mode() != 0; }
 bool captures() { return is_open() || text_entry::active(); }
 bool dialog_open() { return is_open() && g_dialog_open.load(); }
 bool alive() { return now_s() - g_last_frame.load(std::memory_order_relaxed) < 1.0; }
@@ -2824,12 +2831,14 @@ void set_clipboard_text(const char* utf8) {
 bool wants_text() { return (is_open() || layer_mode() != 0) && g_wants_text.load(); }
 void set_stereo_pointer_visible(bool visible) { g_stereo_pointer_visible=visible; }
 bool mouse_move(float nx, float ny, bool touch) {
+    g_quit_pointer_x = nx; g_quit_pointer_y = ny;
     const int layer = layer_mode();
-    if (g_no_host_mouse || (!captures() && stereo::requestedMode==stereo::Off && !layer)) return false;
+    if (g_no_host_mouse || (!captures() && stereo::requestedMode==stereo::Off && !layer && !file_select_quit::visible())) return false;
     push({Event::MousePos, 0, false, nx, ny, 0, touch});
     return captures() || layer_takes_pointer();
 }
 void test_pointer(float nx, float ny, bool down) {
+    g_quit_pointer_x = nx; g_quit_pointer_y = ny;
     push({Event::MousePos, 0, false, nx, ny, 0, false});
     push({Event::MouseButton, 0, down, 0, 0, 0, false});
 }
@@ -3028,7 +3037,7 @@ ImDrawData* frame(float pw, float ph, void (*renderer_init)()) {
     // a mod install keeps running (and shows its progress) while the menu is closed
     const bool mods_busy = !setup_run.id.empty() || (U.init && modsui::wants_background()) || modsui::startup_notice_pending();
     if (!open) gfx::g_pip_preview=false;
-    if (!open && !perf && !text && toast.empty() && !guesthud::active() && !mods_busy && !stereoPointer && drawn_layers.empty()) {
+    if (!open && !perf && !text && toast.empty() && !guesthud::active() && !file_select_quit::visible() && !mods_busy && !stereoPointer && drawn_layers.empty()) {
         if (U.init) {  // forget events and pressed keys while nothing is shown
             std::lock_guard<std::mutex> lk(g_mu);
             g_events.clear();
@@ -3108,6 +3117,7 @@ ImDrawData* frame(float pw, float ph, void (*renderer_init)()) {
     const int layer = open ? 0 : layer_mode();
     g_wants_text = (open || layer) && io.WantTextInput;
     guesthud::frame();
+    if (!open && !text) file_select_quit::frame(io.DisplaySize.x, io.DisplaySize.y);
     gfx::g_pip_preview=false;
     if (open) settings_window();
     else modsui::background(mods_host());

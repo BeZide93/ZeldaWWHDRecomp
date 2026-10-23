@@ -1,3 +1,4 @@
+#include "file_select_quit.h"
 #include "platform/process_peak_rss.h"
 #include "platform/present_observer.h"
 #ifdef __ANDROID__
@@ -1232,6 +1233,7 @@ PadState read() {
     } else {
         mods::quick_use_filter_pad(s);  // final merged/polled pad, never overlay-owned input
     }
+    file_select_quit::filter(s);
     return s;
 }
 

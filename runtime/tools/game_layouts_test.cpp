@@ -1,5 +1,6 @@
 // game_layouts (runtime/src/mods/game_layouts.h): reading layout textures and panes back. The archives are
 // written by the port's own layout writer (lyt_build), so no game file is needed.
+#include <algorithm>
 #include <cassert>
 #include <cstdarg>
 #include <cmath>
@@ -112,6 +113,12 @@ static void layout_panes_and_material() {
       ]})";
     const auto files = lyt_build::build_files(json, ".");
     const game_layouts::Layout lay = game_layouts::parse_bflyt(files.at("blyt/T_00.bflyt"));
+    // Authored native window materials can have trailing padding spaces.
+    Bytes padded = files.at("blyt/T_00.bflyt");
+    const auto name = std::search(padded.begin(), padded.end(), "M_00", "M_00" + 4);
+    assert(name != padded.end());
+    *(name + 4) = ' ';
+    assert(game_layouts::parse_bflyt(padded).materials.count("M_00") == 1);
     const game_layouts::Pane* room = lay.find("P_Room_00");
     assert(room && room->kind == "pic1" && room->texture == "Tex_00^l" && room->material == "M_00");
     assert(std::fabs(room->x - (0.5f * (100 - 308))) < 1e-3f && std::fabs(room->y - (0.5f * (-40 - 295))) < 1e-3f);
