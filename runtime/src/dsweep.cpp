@@ -69,6 +69,7 @@ namespace {
 std::atomic<int> g_tag{0};
 std::atomic<bool> g_title_seen{false};
 std::atomic<int64_t> g_last_draw_ns{0};  // the last actor draw (a title sweep: the title's idle intro draws none)
+std::atomic<uint64_t> g_last_draw_step{0};  // ... its logic step
 
 struct Config {
     bool on = false;
@@ -1680,8 +1681,12 @@ uint32_t pad_buttons(uint64_t frame) {
     if (g_file_select.load(std::memory_order_relaxed)) return g_in_file_select.load(std::memory_order_relaxed) ? 0 : 0x8000u;
     if (g_visiting.load(std::memory_order_relaxed)) return 0;
     if (!g_title_seen.load(std::memory_order_relaxed)) return frame >= 120 ? 0x8000u : 0u;
+    // (no actor draw for 90 logic steps, or 2 seconds: uncapped, a record-only sweep plays the whole intro in about
+    // two seconds, and A after it opened the file select, where the sweep stopped)
     const int64_t last = g_last_draw_ns.load(std::memory_order_relaxed);
-    return last && now_ns() - last > 2'000'000'000 ? 0x8000u : 0u;
+    const uint64_t lastStep = g_last_draw_step.load(std::memory_order_relaxed);
+    const bool idle = last && (now_ns() - last > 2'000'000'000 || interp::executed_steps() - lastStep > 90);
+    return idle ? 0x8000u : 0u;
 }
 std::atomic<bool> g_finished{false};
 bool exit_requested() { return (g_finished || g_abort) && std::getenv("WWHD_DSWEEP_EXIT"); }
@@ -1913,7 +1918,10 @@ void after_actor_draw(Cpu* c, uint32_t actor) {
     room_test(c, actor);
     publish_resident();
     const Config& cfg = config();
-    if (cfg.title) g_last_draw_ns.store(now_ns(), std::memory_order_relaxed);
+    if (cfg.title) {
+        g_last_draw_ns.store(now_ns(), std::memory_order_relaxed);
+        g_last_draw_step.store(interp::executed_steps(), std::memory_order_relaxed);
+    }
     time_of_day(actor);
     const uint64_t now = interp::executed_steps();
     if (!cfg.on || now < cfg.start) return;
