@@ -7,6 +7,11 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Less shader stutter on Windows, Linux and Mac (Vulkan)**: after setup's models step, the game now builds every
+  recorded shader pipeline in the background while you play, on low-priority threads, starting once the game is in
+  play so the boot isn't slowed. In our tests over 19 places, pipelines built mid-play dropped from about 2,100 to 9.
+  The models step now also visits every room with a player start, every sea island and each particle effect once,
+  and a stage whose name matched a skip entry is no longer left out (the whole sea was skipped before).
 - **World editor: use the game's materials without MCP** (#280, for mod makers). The model import has a new option
   **Use the game's materials (kit)**: pick the room (Link's by default), copy its material names for Blender, and the
   dialog shows which of your materials draw with the game's own textures, with a picker to map your own names onto
