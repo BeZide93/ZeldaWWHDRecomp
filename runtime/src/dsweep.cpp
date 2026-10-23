@@ -121,6 +121,7 @@ struct Model {
 struct Entry {
     std::string stage, arc;
     size_t order = 0;  // its place in the archive and stage lists (several processes: the order of the whole work)
+    bool deferred = false;  // an object archive the game itself held when its turn came: tried again at the end
     std::string id() const { return stage.empty() ? arc : stage + "_" + arc; }
 };
 // WWHD_DSWEEP_PART=<i>/<n>: this process does part i (0..n-1) of the work, n processes at once (setup's models step on
@@ -1376,6 +1377,18 @@ void step(Cpu* c, uint32_t host) {
         }
         if (g.queue.empty()) return begin_environment(c);
         g.entry = g.queue.back();
+        // an object archive the game loaded meanwhile (the title's idle story intro loads its Demo archives): the
+        // sweep neither loads nor releases what the game holds (releasing it under the game stopped the game when
+        // the intro deleted its actors); it goes last, and is swept as it is if the game still holds it then
+        if (g.entry.stage.empty() && find_info(g.entry.arc)) {
+            if (!g.entry.deferred) {
+                g.queue.pop_back();
+                g.entry.deferred = true;
+                g.queue.insert(g.queue.begin(), g.entry);
+                LOG("[dsweep] archive %s is held by the game: later", g.entry.arc.c_str());
+                return;
+            }
+        }
         if (!g.entry.stage.empty()) {
             static bool once = false;  // the phase's start, for setup's timing (setup.log)
             if (!once) once = true, phase_time("rooms");
@@ -1388,6 +1401,17 @@ void step(Cpu* c, uint32_t host) {
         g.phase = g.entry.stage.empty() ? Phase::Loading : Phase::StageLoading;
         g.frames = 0;
         g.requested = g.owned = false;
+        if (g.entry.stage.empty() && find_info(g.archive)) {  // (still held by the game: swept, not loaded or released)
+            ++g.archives;
+            g.models.clear();
+            g.cursor = 0;
+            g_tag = 0;
+            pipeline_groups::set_sweeping(0);
+            add_models(c, find_info(g.archive));
+            g.phase = Phase::Sweeping;
+            return;
+        }
+        g.owned = g.entry.stage.empty();
         return step(c, host);
     case Phase::StageLoading: {
         // the game's stage resource loader (dComIfG_setStageRes / syncStageRes, with any stage's name): the
@@ -1442,6 +1466,20 @@ void step(Cpu* c, uint32_t host) {
             g_tag = 0;
             pipeline_groups::set_sweeping(0);
             if (const uint32_t info = find_info(g.archive)) add_models(c, info);
+            else {
+                // complete, but not in the resource table as a usable archive: not released (releasing it stopped
+                // the game); tried once more at the end
+                LOG("[dsweep] %s: loaded, but not in the resource table%s", g.archive.c_str(),
+                    g.entry.deferred ? "" : "; later");
+                g.owned = false;
+                if (!g.entry.deferred) {
+                    g.entry.deferred = true;
+                    g.queue.insert(g.queue.begin(), g.entry);
+                    g.archive.clear();
+                    g.phase = Phase::NextArchive;
+                    return;
+                }
+            }
             g.phase = Phase::Sweeping;
             return;
         }
@@ -1467,7 +1505,9 @@ void step(Cpu* c, uint32_t host) {
         free_heaps(c, 0);  // every instance goes before its archive does
         g.models.clear();
         if (!g.archive.empty()) {
-            if (g.entry.stage.empty()) call(c, GC(0x025204C8), {phase, name});  // dComIfG_resDelete
+            if (g.entry.stage.empty()) {
+                if (g.owned) call(c, GC(0x025204C8), {phase, name});  // dComIfG_resDelete
+            }
             else if (g.owned) {  // the stage resource loader's release (dComIfG_deleteStageRes)
                 const uint32_t ss = safe_strings(g.entry.stage, g.entry.arc);
                 call(c, GC(0x0260E8A8), {ld32(GD(0x101F4F54)), ss, ss + 8});
