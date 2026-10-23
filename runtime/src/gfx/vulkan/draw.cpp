@@ -2503,9 +2503,22 @@ StageResources bind_stage(const uint32_t *r, vk::Shader *sh,
       static uint64_t checks = 0, mismatches = 0;
       vk::pack_uniforms_into(r, *sh, fresh, sx, sy, eyeOffset, stereo::frame.convergence);
       ++checks;
-      if (fresh != supportUniforms && mismatches++ < 16)
-        LOG("[vulkan uniform verify] MISMATCH: %s shader %016llx, %zu vs %zu bytes", sh->vertex ? "vertex" : "pixel",
-            (unsigned long long)sh->key, supportUniforms.size(), fresh.size());
+      if (fresh != supportUniforms && mismatches++ < 16) {
+        // where: the first differing byte, and the guest uniform-block entry it was copied from (if any)
+        size_t at = 0;
+        while (at < fresh.size() && at < supportUniforms.size() && fresh[at] == supportUniforms[at]) ++at;
+        uint32_t source = 0;
+        const int base = sh->uniforms.offset_remapped;
+        const uint32_t blockBase = sh->vertex ? mmSQ_VTX_UNIFORM_BLOCK_START : mmSQ_PS_UNIFORM_BLOCK_START;
+        if (sh->dec && base >= 0)
+          for (const auto& group : sh->dec->list_remappedUniformEntries_bufferGroups)
+            for (const auto& entry : group.entries)
+              if (at >= size_t(base + entry.mappedIndexOffset) && at < size_t(base + entry.mappedIndexOffset + 16))
+                source = r[blockBase + group.kcacheBankIdOffset / 4] + entry.indexOffset;
+        LOG("[vulkan uniform verify] MISMATCH: %s shader %016llx, %zu vs %zu bytes, first difference at +%zu%s%08X",
+            sh->vertex ? "vertex" : "pixel", (unsigned long long)sh->key, supportUniforms.size(), fresh.size(), at,
+            source ? ", read from guest memory at " : ", from registers ", source);
+      }
       if ((checks & 0xFFFFF) == 0)
         LOG("[vulkan uniform verify] %llu checks, %llu mismatches", (unsigned long long)checks,
             (unsigned long long)mismatches);
