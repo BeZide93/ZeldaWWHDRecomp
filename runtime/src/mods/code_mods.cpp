@@ -135,10 +135,11 @@ void request(bool on,const std::string& mod){std::lock_guard guard(mutex);if(sta
 void dismiss(){std::lock_guard guard(mutex);state.requested=false;}
 Status status(){
     std::lock_guard guard(mutex);
-    if(state.building&&!status_path.empty())try {
-        auto v=read(status_path);state.stage=v.get("stage").string();
-        state.done=unsigned(v.get("done").number);state.total=unsigned(v.get("total").number);
-    }catch(...){} // atomic status may not have been published yet
+    // setup publishes the status atomically; before its first publication a poll finds nothing
+    if(state.building&&!status_path.empty())if(auto v=poll_build_json(status_path))try {
+        state.stage=v->get("stage").string();
+        state.done=unsigned(v->get("done").number);state.total=unsigned(v->get("total").number);
+    }catch(...){}
     return state;
 }
 void cancel(){

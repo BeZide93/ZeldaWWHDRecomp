@@ -1,41 +1,26 @@
-// Build metadata is atomically replaced by setup while the game polls it.
+// Build metadata is atomically replaced by setup while the game polls it (issue #282).
 #pragma once
 #include "mod_json.h"
+#include "../platform/shared_read.h"
 #include <filesystem>
-#include <fstream>
-#ifdef _WIN32
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-#include <windows.h>
-#endif
+#include <optional>
+#include <string>
 
 namespace mods::code {
+constexpr size_t build_json_limit = 1024 * 1024;
+// Configuration the game needs (guest-sdk.json, code-mods-active.json, ready.json, the final status):
+// unavailable or damaged raises the message the player sees.
 inline json::Value read_build_json(const std::filesystem::path& path) {
-    constexpr size_t limit=1024*1024;
-    const auto fail=[] { exception_report::raise("Code-mod build configuration is unavailable; run setup again from a complete release folder"); };
     std::string data;
-#ifdef _WIN32
-    struct File {
-        HANDLE handle;
-        ~File(){if(handle!=INVALID_HANDLE_VALUE)CloseHandle(handle);}
-    } file{CreateFileW(path.c_str(),GENERIC_READ,FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE,
-                       nullptr,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,nullptr)};
-    if(file.handle==INVALID_HANDLE_VALUE)fail();
-    LARGE_INTEGER size{};
-    if(!GetFileSizeEx(file.handle,&size)||size.QuadPart<0||size.QuadPart>limit)fail();
-    data.resize(size_t(size.QuadPart));
-    DWORD count=0;
-    if(!ReadFile(file.handle,data.data(),DWORD(data.size()),&count,nullptr)||count!=data.size())fail();
-#else
-    std::ifstream file(path,std::ios::binary);
-    if(!file)fail();
-    // Bound the read itself, including a file that grows after opening.
-    data.resize(limit+1);
-    file.read(data.data(),std::streamsize(data.size()));
-    data.resize(size_t(file.gcount()));
-    if(file.bad()||data.size()>limit)fail();
-#endif
+    if (!host::read_shared(path, data, build_json_limit))
+        exception_report::raise("Code-mod build configuration is unavailable; run setup again from a complete release folder");
     return json::parse(data);
+}
+// Progress polled every frame while setup runs: a poll that finds no publication yet returns nothing
+// and the next frame polls again. Never raises.
+inline std::optional<json::Value> poll_build_json(const std::filesystem::path& path) {
+    std::string data;
+    if (!host::read_shared(path, data, build_json_limit) || data.empty()) return std::nullopt;
+    try { return json::parse(data); } catch (const std::exception&) { return std::nullopt; }
 }
 }
