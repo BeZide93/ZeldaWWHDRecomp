@@ -7,6 +7,11 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Floating-point values are now loaded and stored exactly like on the Wii U.** The game's float loads and stores
+  now move the bits the way the console's CPU does: special values (signalling NaNs) are no longer changed on the way,
+  and a value that doesn't fit single precision is stored the way the console stores it. In our test runs the game
+  plays exactly the same as before, with no measurable speed cost (measured on an Android phone). The decompiled
+  game code is now checked against the same exact behaviour.
 - **Fixed: building code mods could fail on Windows with "Access Denied"** (#282, thanks @Eggtooth). While setup
   builds code mods, the game reads the build's progress file for the progress bar. Windows refused to replace that
   file while the game had it open, so the build stopped at a random point. Setup now replaces it the way Windows 10
