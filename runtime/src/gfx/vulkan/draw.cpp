@@ -2491,6 +2491,25 @@ StageResources bind_stage(const uint32_t *r, vk::Shader *sh,
     const size_t capacity=preparation_stats_enabled()?supportUniforms.capacity():0;
     vk::pack_uniforms_into(r, *sh, supportUniforms, sx, sy, eyeOffset, stereo::frame.convergence,
                            replayOut ? &supportRows : nullptr);
+    // WWHD_VK_UNIFORM_VERIFY=1 (debug): packs again into a separate buffer and compares, byte for
+    // byte, with what this draw uploads; any change to how support uniforms are packed or reused
+    // must keep "0 mismatches"
+    static const bool verifyPack = [] {
+      const char* e = std::getenv("WWHD_VK_UNIFORM_VERIFY");
+      return e && std::strcmp(e, "1") == 0;
+    }();
+    if (verifyPack) {
+      static thread_local std::vector<uint8_t> fresh;
+      static uint64_t checks = 0, mismatches = 0;
+      vk::pack_uniforms_into(r, *sh, fresh, sx, sy, eyeOffset, stereo::frame.convergence);
+      ++checks;
+      if (fresh != supportUniforms && mismatches++ < 16)
+        LOG("[vulkan uniform verify] MISMATCH: %s shader %016llx, %zu vs %zu bytes", sh->vertex ? "vertex" : "pixel",
+            (unsigned long long)sh->key, supportUniforms.size(), fresh.size());
+      if ((checks & 0xFFFFF) == 0)
+        LOG("[vulkan uniform verify] %llu checks, %llu mismatches", (unsigned long long)checks,
+            (unsigned long long)mismatches);
+    }
     if(preparation_stats_enabled()) {
       ++R.cpuPreparation.packCalls;
       R.cpuPreparation.packBytes+=supportUniforms.size();
