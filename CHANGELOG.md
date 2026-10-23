@@ -15,14 +15,14 @@ what is on `devel` and not released yet (also in the
   (ZeldaWWHDMods#6, thanks @alexander-beepx). An old rule from before Android supported code mods still blocked them in
   the Community list. They can now be installed on Android like on desktop (Code-mod support must be on).
 
+- **Fixed: Link stayed invisible after some conversations with frame interpolation on** (#283, thanks @aaronlink127
+  and @Omaley360 for the report, save state and confirmation). Some conversation shots hide Link for a moment; with
+  interpolation at 60 fps and above he could stay hidden for a long while afterwards (the cabana door on Private
+  Oasis, residents on Windfall). He now reappears exactly when he does at 30 fps.
 - **Fixed: shader preparation failed when the game is on a network share (NAS)** (#290). Setup created its shader
   folder with "only this user" permissions that many network shares can't apply, so even setup itself couldn't write
   into it. The folder now gets the same permissions as the rest of the game folder. Also, "Setup in a console window"
   no longer warns that network paths are not supported.
-- **Fixed: building code mods could fail on Windows with "Access Denied"** (#282). While setup builds code mods, the
-  game reads the build's progress file for the progress bar; when setup replaced that file at the same moment,
-  Windows refused it and the whole build stopped. Setup now waits a moment and tries again, and the game reads the
-  file in a way that lets it be replaced.
 - **Less shader stutter on Windows, Linux and Mac (Vulkan)**: after setup's models step, the game now builds every
   recorded shader pipeline in the background while you play, on low-priority threads, starting once the game is in
   play so the boot isn't slowed. In our tests over 19 places, pipelines built mid-play dropped from about 2,100 to 9.
