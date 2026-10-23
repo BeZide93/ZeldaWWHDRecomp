@@ -50,6 +50,7 @@ const uint32_t kIdTable = GD(0x100DE8F4), kIdTableCount = GD(0x100C45C0);  // ar
 const uint32_t kMessageResources = GD(0x101F4AE8), kLabelVtable = GD(0x100E0A68);  // message resources; a label string's vtable
 const uint32_t kDemoMessageFlag = GD(0x101F3480);  // fopMsgM_demoMsgFlagCheck's byte
 constexpr uint32_t kManager = 0x52C4, kPlayer = 0x5B34, kFlagBytes = 1280;
+constexpr uint32_t kActorVtable = 0xB4, kSetPlayerPosAndAngle = 0x114;  // daPy_lk_c: its vtable; setPlayerPosAndAngle(cXyz*, s16) in it
 // guest record (arena)
 constexpr uint32_t kMarker = 0x444D4F31;  // 'DMO1'
 constexpr uint32_t kDraining = 9;  // released; archives are given back after a few frames
@@ -732,6 +733,27 @@ namespace {
 // (0,0,0) instead of the origin, and Link, who takes his slot's place in his demo clips, stood at the
 // world origin and fell out of his room (the scene was interrupted). The game's own values come back
 // once the demo is cleared (tick()).
+// Link with a position track starts the demo at its first key. Of his demo modes, only the placing
+// ones the game's own cutscenes start with (and his clips) move him onto his track: in wait, walk and
+// the others he stayed where he stood, so a demo whose keys are away from him (made with the editor's
+// fly camera somewhere else) played without him in the picture, or with him walking there from afar.
+// daPy_lk_c::setPlayerPosAndAngle(cXyz*, s16), the virtual those placing modes call, places him.
+void place_link(Cpu* c) {
+    const uint32_t play = call(c, kPlay, {}), link = play ? ld32(play + kPlayer) : 0;
+    if (!link) return;
+    const demo_scene::Vec origin{u32_as_f32(ld32(g_arena + Origin)), u32_as_f32(ld32(g_arena + Origin + 4)), u32_as_f32(ld32(g_arena + Origin + 8))};
+    const auto start = demo_scene::link_start(g_demo, origin, u32_as_f32(ld32(g_arena + Origin + 12)));
+    if (!start) return;
+    const uint32_t vtable = ld32(link + kActorVtable), place = vtable ? ld32(vtable + kSetPlayerPosAndAngle) : 0;
+    if (!place) return;
+    const float dx = u32_as_f32(ld32(link + 0x314)) - start->position.x, dy = u32_as_f32(ld32(link + 0x318)) - start->position.y, dz = u32_as_f32(ld32(link + 0x31C)) - start->position.z;
+    const uint32_t at = g_arena + Scratch + 0x70;
+    st32(at, f32_as_u32(start->position.x)); st32(at + 4, f32_as_u32(start->position.y)); st32(at + 8, f32_as_u32(start->position.z));
+    const int16_t heading = start->heading ? int16_t(int32_t(*start->heading * 32768.f / 180.f)) : int16_t(ld16(link + 0x32A));
+    call(c, place, {link, at, uint32_t(int32_t(heading))});
+    LOG("[demo] Link starts at his first position key %.0f,%.0f,%.0f (he stood %.0f units from it)", start->position.x, start->position.y, start->position.z,
+        std::sqrt(dx * dx + dy * dy + dz * dz));
+}
 void manager_create(Cpu* c) {
     if (recorded() && c->r[3] == g_arena + Stb) {
         const uint32_t control = ld32(kDemoControl);
@@ -758,8 +780,9 @@ void manager_create(Cpu* c) {
         const uint32_t slot = pool && id && id <= 32 ? call(c, kDemoActor, {pool, id}) : 0;
         if (slot && (ld16(slot + 4) & 0x0E)) { st16(slot + 4, uint16_t(ld16(slot + 4) & ~0x0Eu)); ++cleared; }
     }
-    *c = saved;
     if (cleared) LOG("[demo] created: %u actor slots wait for the first update", cleared);
+    place_link(c);
+    *c = saved;
 }
 // Phases 3 and 5: carried actors and the demo's time/weather changes, each demo frame
 void parts_update(Cpu* c) {
