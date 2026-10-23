@@ -22,6 +22,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import signal
 import subprocess
@@ -77,6 +78,31 @@ def process_alive(pid, marker=b':modelprep'):
             return False
         except OSError:
             return True  # another user's process: the stall rule still ends a stuck attempt
+
+
+# the game's staged cache writes (gfx/vulkan/atomic_temporary.h: <cache>.t<8 hex>; up to v0.2.12
+# <cache>.tmp-<pid>-<clock>-<n>), renamed over the cache once written
+STAGED = re.compile(r'\.t[0-9a-f]{8}$|\.tmp-[0-9]+-[0-9]+-[0-9]+$')
+
+
+def remove_staged(live, log=lambda text: None):
+    """Removes the staged cache writes an attempt left when it stopped mid-write (a model that stops the game, the
+    app closed). Only between attempts: no game writes the live caches then (the step does not run while the game
+    plays). The runtime itself removes a staged file only a day later (another process may still be writing it)."""
+    removed = 0
+    try:
+        for path in Path(live).rglob('*'):
+            if STAGED.search(path.name) and path.is_file() and not path.is_symlink():
+                try:
+                    size = path.stat().st_size
+                    path.unlink()
+                    removed += size
+                    log('removed %s (%d bytes, a write the game did not finish)' % (path.name, size))
+                except OSError:
+                    pass
+    except OSError:
+        pass
+    return removed
 
 
 class Attempt:
@@ -146,8 +172,9 @@ class Launcher:
     """model_sweep.run's popen on Android: requests attempts from the setup screen (model-attempt.json)."""
 
     def __init__(self, job, clock=time.monotonic, sleep=time.sleep, alive=process_alive,
-                 launch_seconds=LAUNCH_SECONDS, quit_seconds=20):
+                 launch_seconds=LAUNCH_SECONDS, quit_seconds=20, live=None, log=lambda text: None):
         self.job = Path(job)
+        self.live, self.log = live, log  # the live caches: their unfinished writes go before each attempt
         self.clock, self.sleep, self.alive = clock, sleep, alive
         self.launch_seconds, self.quit_seconds = launch_seconds, quit_seconds
         self.current = None
@@ -155,6 +182,8 @@ class Launcher:
 
     def __call__(self, args, env=None, stdout=None, stderr=None, cwd=None):
         attempt = Attempt(self, uuid.uuid4().hex, self.clock)
+        if self.live:  # (model_sweep.run starts an attempt only after the previous one ended)
+            remove_staged(self.live, self.log)
         # only the game's own options: nothing of the setup process's environment reaches the game
         options = {k: str(v) for k, v in (env or {}).items() if k.startswith('WWHD_')}
         output = getattr(stdout, 'name', None)
@@ -340,6 +369,8 @@ def run(job, game, cache_root, package=None, launcher=None, sweeper=None, clock=
     if model_sweep.status(root, RENDERER, identity) == 'done':
         return finish('done')
     launcher = launcher or Launcher(job, clock=clock)
+    if launcher.live is None:
+        launcher.live, launcher.log = root / 'live', log
     progress = Progress(job, model_sweep.state_dir(root, RENDERER), clock=clock)
 
     def cancelled():

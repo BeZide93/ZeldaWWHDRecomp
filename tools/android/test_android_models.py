@@ -147,6 +147,23 @@ class AndroidModelsTest(unittest.TestCase):
         self.assertEqual(again['status'], 'done')
         self.assertEqual(activity.requests, [])
 
+    def test_unfinished_cache_writes_go_before_each_attempt(self):
+        live = self.root / 'live'
+        (live / 'vulkan-shaders').mkdir(parents=True)
+        kept = ['vk-3fddc0632cf6.bin', 'vk-3fddc0632cf6.bin.recipes', 'vulkan-shaders/spirv.bin', 'notes.t1234567',
+                'vk-3fddc0632cf6.bin.tzzzzzzzz']
+        staged = ['vk-3fddc0632cf6.bin.recipes.t99fd27d0', 'vulkan-shaders/spirv.bin.t0a1b2c3d',
+                  'vk-3fddc0632cf6.bin.tmp-123-456-7']
+        for name in kept + staged:
+            (live / name).write_bytes(b'x')
+
+        def written_mid_attempt(activity):  # an attempt that stops mid-write leaves one for the next attempt
+            (live / 'shaders.bin.tdeadbeef').write_bytes(b'x')
+        result, activity, logs = self.sweep([('crash', 'Bb'), 'done'], before=written_mid_attempt)
+        self.assertEqual(result['status'], 'done')
+        self.assertEqual(sorted(str(p.relative_to(live)) for p in live.rglob('*') if p.is_file()), sorted(kept))
+        self.assertEqual(sum('a write the game did not finish' in l for l in logs), 4)
+
     def test_no_setup_screen_pauses_without_skipping(self):
         result, activity, _ = self.sweep(['absent'], launch_seconds=.3)
         self.assertEqual(result, {'schema': 1, 'status': 'paused', 'reason': 'screen'})
