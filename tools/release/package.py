@@ -48,6 +48,7 @@ TOOL_FILES = [
     "tools/recomp/builds.py",
     "tools/recomp/crlive.py",
     "tools/recomp/leaflocal.py",
+    "tools/recomp/rawstore.py",
     "tools/guestmod/build_guest_mod.py",
     "tools/guestmod/guestmod.py",
     "tools/story_mods/npc_catalogue.py",  # the NPC catalogue from the player's game files (story_npc_catalogue.h)
