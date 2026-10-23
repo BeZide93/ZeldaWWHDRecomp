@@ -691,7 +691,9 @@ void begin(Cpu* c) {
             for (size_t i = 1; i < words.size(); ++i) {
                 const Entry e{words[0], words[i]};
                 ++g.listed;
-                if (!g.done.count(e.id()) && !g.skip.count(e.id()) && !g.skip.count(e.stage) &&
+                // a whole stage only by "stage-<stage>": skip names are shared with object archives and actors
+                // (the actor "sea" on the list left out every sea room)
+                if (!g.done.count(e.id()) && !g.skip.count(e.id()) && !g.skip.count("stage-" + e.stage) &&
                     e.stage.size() < 32 && e.arc.size() < 32)
                     g.queue.push_back(e);
                 else g.done.insert(e.id());
@@ -845,7 +847,7 @@ void begin_visits() {
     g_visits.clear();
     auto add = [&](const Visit& v) {
         if (v.stage == "sea_T" || v.stage == "Name" || g.done.count("visit-" + v.id()) || g.done.count("visit-" + v.stage) ||
-            g.skip.count("visit-" + v.stage) || g.skip.count(v.stage) || g.skip.count(v.id()))
+            g.skip.count("visit-" + v.stage) || g.skip.count(v.id()))  // (not a bare name: actors share them)
             return;
         g_visits.push_back(v);
     };
