@@ -176,13 +176,11 @@ def environment(base, game, cache_env, renderer, state, archives, scratch, stage
         # the particle sweep (dsweep.cpp) only on request: measured on 19 places it recorded nothing they still build
         if os.environ.get('WWHD_SETUP_MODEL_SWEEP_PARTICLES') == '1':
             env['WWHD_DSWEEP_PARTICLES'] = '1'
-    # speed settings (each measured on its own; dsweep.cpp): stage visits end once nothing new appears for that many
-    # steps ("<steps>[,<minimum>]"); actors shown in groups of that many
-    for setting, game_var in (('WWHD_SETUP_MODEL_SWEEP_VISIT_IDLE', 'WWHD_DSWEEP_VISIT_IDLE'),
-                              ('WWHD_SETUP_MODEL_SWEEP_ACTOR_GROUP', 'WWHD_DSWEEP_ACTOR_GROUP'),
+    # speed settings (each measured on its own; dsweep.cpp): actors shown in groups of that many; record only
+    for setting, game_var in (('WWHD_SETUP_MODEL_SWEEP_ACTOR_GROUP', 'WWHD_DSWEEP_ACTOR_GROUP'),
                               ('WWHD_SETUP_MODEL_SWEEP_RECORD_ONLY', 'WWHD_DSWEEP_RECORD_ONLY')):
         value = os.environ.get(setting, '')
-        if re.fullmatch(r'\d+(,\d+)?', value) and value != '0':
+        if re.fullmatch(r'\d+', value) and value != '0':
             env[game_var] = value
     # measurements only: the Vulkan renderer's key log (one line per pipeline it creates, with the sweep's batch)
     if os.environ.get('WWHD_SETUP_MODEL_SWEEP_KEY_LOG'):

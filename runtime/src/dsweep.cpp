@@ -889,22 +889,6 @@ uint64_t g_file_select_from = 0, g_file_select_in = 0;
 // own environment (lighting, fog, sky, its actors) for kVisitSteps, filed under "<stage>_Stage". The file select
 // (reached from the title only) then follows in a new attempt ("restart" in progress.txt).
 constexpr unsigned kVisitSteps = 150, kVisitTimeout = 3000;
-// WWHD_DSWEEP_VISIT_IDLE=<steps>[,<minimum>]: a visit ends once nothing new was recorded (no pipeline the renderer had
-// not made before) for <steps> logic steps, after at least <minimum> steps there (default 60); kVisitSteps at most
-struct VisitIdle { unsigned idle = 0, minimum = 60; };
-const VisitIdle& visit_idle() {
-    static const VisitIdle value = [] {
-        VisitIdle v;
-        if (const char* e = std::getenv("WWHD_DSWEEP_VISIT_IDLE"); e && *e) {
-            char* p = nullptr;
-            v.idle = unsigned(std::strtoul(e, &p, 10));
-            if (p && *p == ',') v.minimum = unsigned(std::strtoul(p + 1, nullptr, 10));
-            v.minimum = std::min(v.minimum, kVisitSteps);
-        }
-        return v;
-    }();
-    return value;
-}
 struct Visit {
     std::string stage;
     int room = 0, point = 0, layer = -1;
@@ -1040,11 +1024,11 @@ void visit_step(const std::string& current) {
             g_visit_created = created, g_visit_new = now;
         }
     }
-    const VisitIdle& idle = visit_idle();
-    const bool settled = idle.idle && g_visit_in && now - g_visit_in >= idle.minimum && now - g_visit_new >= idle.idle;
-    const bool shown = g_visit_in && (now - g_visit_in >= kVisitSteps || settled);
+    // (a visit cannot end early once nothing new appears: some stages make new pipelines after quiet pauses of up to
+    // 147 steps, and which ones varies from run to run; measured 2026-10-23, the log line below keeps the numbers)
+    const bool shown = g_visit_in && now - g_visit_in >= kVisitSteps;
     if (!shown && now - g_visit_asked < kVisitTimeout) return;
-    if (shown)  // (the last new pipeline: for choosing the idle time)
+    if (shown)  // (the last new pipeline and the longest pause before one)
         LOG("[dsweep] visit %s: there after %llu steps, last new pipeline at +%llu (longest pause before one %llu), "
             "left at +%llu", v.id().c_str(), (unsigned long long)(g_visit_in - g_visit_asked),
             (unsigned long long)(g_visit_new - g_visit_in), (unsigned long long)g_visit_gap,

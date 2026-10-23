@@ -215,11 +215,11 @@ class SpeedTests(unittest.TestCase):
             seen.append(env)
             Path(env['WWHD_DSWEEP_STATE'], 'progress.txt').write_text('start\nsweep-done\n')
             return _Proc(0)
-        with mock.patch.dict(os.environ, {'WWHD_SETUP_MODEL_SWEEP_VISIT_IDLE': '30,60',
-                                          'WWHD_SETUP_MODEL_SWEEP_ACTOR_GROUP': '8',
+        with mock.patch.dict(os.environ, {'WWHD_SETUP_MODEL_SWEEP_ACTOR_GROUP': '8',
                                           'WWHD_SETUP_MODEL_SWEEP_RECORD_ONLY': 'yes'}):
             self.assertEqual(self.sweep(game), 'done')
-        self.assertEqual((seen[0]['WWHD_DSWEEP_VISIT_IDLE'], seen[0]['WWHD_DSWEEP_ACTOR_GROUP']), ('30,60', '8'))
+        self.assertEqual(seen[0]['WWHD_DSWEEP_ACTOR_GROUP'], '8')
+        self.assertNotIn('WWHD_DSWEEP_VISIT_IDLE', seen[0])
         self.assertNotIn('WWHD_DSWEEP_RECORD_ONLY', seen[0])  # not a number: ignored
 
     def test_process_count(self):
