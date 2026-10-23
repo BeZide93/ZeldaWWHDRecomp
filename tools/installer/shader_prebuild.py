@@ -10,6 +10,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import secrets
 import subprocess
 import sys
 import tempfile
@@ -33,6 +34,21 @@ def longpath(path):
         return path
     path = os.path.abspath(path).replace('/', '\\')
     return '\\\\?\\UNC\\' + path[2:] if path.startswith('\\\\') else '\\\\?\\' + path
+
+
+def create_generation(root):
+    """Inherit the cache folder's ACL, including on SMB (Python 3.13+ on Windows)."""
+    for _ in range(100):
+        path = Path(root) / ('generation-' + secrets.token_hex(4))
+        try:
+            # mkdtemp uses mode 0o700: Windows installs a private ACL which some
+            # NAS servers cannot map back to the creating user. Plain mkdir
+            # inherits permissions just like the other persistent cache folders.
+            os.mkdir(longpath(path))
+        except FileExistsError:
+            continue
+        return path
+    raise FileExistsError('Could not allocate a unique shader generation folder')
 
 
 def file_hash(path):
@@ -604,7 +620,7 @@ def prepare(game, template, executable, cache_root, package, renderer='vulkan',
             return dict(status='skipped', message='Previous preparation failed; request Rebuild shader cache to retry')
         root.mkdir(parents=True, exist_ok=True)
         migrate_legacy_caches(root)
-        staging = Path(tempfile.mkdtemp(prefix='generation-', dir=root))
+        staging = create_generation(root)
         assembly = (ASSEMBLY_SHARE if len(renderers) == 1 else ASSEMBLY_SHARE_SEVERAL) if executable else 1.0
         reporter.begin('Resolving shaders from your game files', 0.0, assembly)
         assembled = template
