@@ -10,6 +10,7 @@
 #include "overlay/hostui.h"
 #include "overlay/overlay.h"
 #include "runtime.h"
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <chrono>
@@ -25,9 +26,12 @@ double now() { return std::chrono::duration<double>(std::chrono::steady_clock::n
 std::atomic<double> last_idle{0};
 std::atomic<bool> ask{false}, modal{false};
 std::atomic<uint32_t> presses{0};
+std::atomic<bool> tv_visible{true};
+std::mutex view_mutex;
+Rect tv_region{0, 0, 0, 0};
+View presented_view;
 std::mutex input_mutex;
 Routing routing;
-uint32_t previous = 0, release = 0;
 struct Letter {
     int width = 0, height = 0, left = 0, advance = 0;
 };
@@ -239,11 +243,8 @@ void label(ImDrawList *d, const char *s, ImVec2 center, float size, ImU32 color)
         x += g.advance * scale;
     }
 }
-struct Box {
-    float x, y, w, h;
-    bool contains(float px, float py) const { return px >= x && px <= x + w && py >= y && py <= y + h; }
-};
-Box quit_box{520, 605, 240, 100};
+using Box = Rect;
+constexpr Box quit_box = kQuitBox;
 bool button(ImDrawList *d, Box b, const char *name, bool selected, float scale, float ox, float oy) {
     auto p = [&](float x, float y) { return ImVec2(ox + x * scale, oy + y * scale); };
     ImGui::SetCursorScreenPos(p(b.x, b.y));
@@ -348,7 +349,7 @@ void observe(Cpu *cpu) {
     }
 }
 bool visible() {
-    if (!input_map::file_select_quit() || overlay::is_open())
+    if (!input_map::file_select_quit() || overlay::is_open() || !tv_visible.load())
         return false;
     const double age = now() - last_idle.load();
     if (age < 0 || age > .25)
@@ -359,31 +360,30 @@ bool visible() {
 bool confirming() { return modal.load(); }
 void filter(input::PadState &pad) {
     std::lock_guard lock(input_mutex);
-    const bool show = visible();
-    const uint32_t raw = pad.buttons | (pad.lx < -.5f ? input::kLeft : 0) | (pad.lx > .5f ? input::kRight : 0);
-    if (!input_map::file_select_quit()) {
-        previous = raw;
-        routing.x_held = (raw & input::kX) != 0;
-        release = 0;
+    const auto event = routing.route(pad, input_map::file_select_quit(), visible(), modal.load());
+    if (event.dismiss) {
         ask = false;
         modal = false;
+        presses = 0;
         return;
     }
-    if (routing.filter(pad, show) && !modal.load()) {
+    if (event.open) {
         ask = true;
         modal = true;
     }
-    if (modal.load()) {
-        presses.fetch_or(raw & ~previous);
-        release |= raw;
-        pad = input::PadState{};
-    } else {
-        release &= raw;
-        pad.buttons &= ~release;
-    }
-    previous = raw;
+    presses.fetch_or(event.pressed);
 }
-bool pointer(float x, float y) { return visible() && (modal.load() || quit_box.contains(x * 1280, y * 720)); }
+bool pointer(float x, float y) {
+    if (!visible())
+        return false;
+    std::lock_guard lock(view_mutex);
+    return modal.load() || presented_view.contains(x, y);
+}
+void set_tv_region(float x, float y, float width, float height, bool shown) {
+    std::lock_guard lock(view_mutex);
+    tv_region = {x, y, width, height};
+    tv_visible = shown && width > 0 && height > 0;
+}
 bool image_texture(uint64_t id) {
     for (const auto *image : srgb_art)
         if (uint64_t(image->GetTexID()) == id)
@@ -425,7 +425,23 @@ void frame(float width, float height) {
         ImGui::RegisterUserTexture(texture.get());
     }
     load_art();
-    const float scale = height / 720.f, ox = (width - 1280 * scale) * .5f, oy = 0;
+    View view;
+    {
+        std::lock_guard lock(view_mutex);
+        const auto &pixels = ImGui::GetIO().DisplayFramebufferScale;
+        Rect region = tv_region;
+        if (region.w > 0 && region.h > 0) {
+            region.x /= pixels.x;
+            region.w /= pixels.x;
+            region.y /= pixels.y;
+            region.h /= pixels.y;
+        } else {
+            region = {0, 0, width, height};
+        }
+        view = {width, height, region};
+        presented_view = view;
+    }
+    const float scale = view.scale(), ox = view.origin_x(), oy = view.origin_y();
     ImGui::SetNextWindowPos(ImVec2(0, 0));
     ImGui::SetNextWindowSize(ImVec2(width, height));
     ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.f);
@@ -434,6 +450,7 @@ void frame(float width, float height) {
                  ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoSavedSettings |
                      ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoBringToFrontOnFocus);
     auto *d = ImGui::GetWindowDrawList();
+    d->PushClipRect(ImVec2(view.tv.x, view.tv.y), ImVec2(view.tv.x + view.tv.w, view.tv.y + view.tv.h), true);
     const bool opening = ask.exchange(false);
     static bool yes = false;
     if (opening) {
@@ -448,14 +465,15 @@ void frame(float width, float height) {
             presses = 0;
             LOG("[file-select-quit] mouse: asking");
         }
-        prompt(d, ImVec2(ox + (quit_box.x - 30) * scale, (quit_box.y + quit_box.h * .5f) * scale), 23 * scale);
+        prompt(d, ImVec2(ox + (quit_box.x - 30) * scale, oy + (quit_box.y + quit_box.h * .5f) * scale), 23 * scale);
     } else {
-        d->AddRectFilled(ImVec2(0, 0), ImVec2(width, height), IM_COL32(0, 0, 0, 100));
+        d->AddRectFilled(ImVec2(view.tv.x, view.tv.y), ImVec2(view.tv.x + view.tv.w, view.tv.y + view.tv.h),
+                         IM_COL32(0, 0, 0, 100));
         // The same wave-edged paper textures as the native sequence dialogs.
         auto image = [&](int index, float x, float y, float w, float h, bool flip_x = false, bool flip_y = false) {
             if (art[index])
-                d->AddImage(art[index]->GetTexRef(), ImVec2(ox + x * scale, y * scale),
-                            ImVec2(ox + (x + w) * scale, (y + h) * scale), ImVec2(flip_x ? 1 : 0, flip_y ? 1 : 0),
+                d->AddImage(art[index]->GetTexRef(), ImVec2(ox + x * scale, oy + y * scale),
+                            ImVec2(ox + (x + w) * scale, oy + (y + h) * scale), ImVec2(flip_x ? 1 : 0, flip_y ? 1 : 0),
                             ImVec2(flip_x ? 0 : 1, flip_y ? 0 : 1), IM_COL32(255, 255, 255, 255));
         };
         image(3, 350, 255, 580, 200);
@@ -467,7 +485,7 @@ void frame(float width, float height) {
         image(5, 370, 435, 540, 40, false, true);
         image(6, 330, 275, 40, 160);
         image(6, 910, 275, 40, 160, true);
-        label(d, "Quit the game?", ImVec2(width * .5f, 300 * scale), 38 * scale, IM_COL32(0, 56, 0, 255));
+        label(d, "Quit the game?", ImVec2(ox + 640 * scale, oy + 300 * scale), 38 * scale, IM_COL32(0, 56, 0, 255));
         const uint32_t pressed = presses.exchange(0);
         if (pressed & input::kLeft)
             yes = false;
@@ -485,6 +503,7 @@ void frame(float width, float height) {
             hostui::post([] { hostui::quit(); });
         }
     }
+    d->PopClipRect();
     ImGui::End();
     ImGui::PopStyleVar(2);
 }

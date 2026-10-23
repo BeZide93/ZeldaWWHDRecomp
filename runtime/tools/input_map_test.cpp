@@ -15,6 +15,7 @@
 #include "mouse_bindings.h"
 #include "camera_invert.h"
 #include "controller_selection.h"
+#include "file_select_quit.h"
 #include "platform/touch_face.h"
 #include "overlay/settings_shortcut.h"
 #include "overlay/binding_capture.h"
@@ -1159,6 +1160,28 @@ int main() {
         input_map::Mapping loaded;
         CHECK(input_map::from_json(input_map::to_json(mapping), loaded));
         CHECK(!loaded.file_select_quit);
+    }
+    // Quit consumes the mapped Wii U X action. Its displayed host identity is
+    // resolved from the same face preset as the game's existing prompt glyphs.
+    for (auto layout : {FaceLayout::kPosition, FaceLayout::kLabels}) {
+        auto mapping = Mapping::defaults();
+        apply_face_layout(mapping, layout);
+        float physical[kPadCount]{};
+        const int button = mapping.pad[kX];
+        physical[button] = 1;
+        const auto delivered = controller_state(mapping, physical);
+        CHECK(delivered.buttons == input::kX);
+        for (bool shown : {false, true}) {
+            file_select_quit::Routing routing;
+            auto filtered = delivered;
+            CHECK(routing.filter(filtered, shown) == shown);
+            CHECK(filtered.buttons == (shown ? 0u : input::kX));
+        }
+        for (auto prompts : {Mapping::Prompts::kXbox, Mapping::Prompts::kPlayStation}) {
+            mapping.prompts = prompts;
+            const auto look = prompt_style(mapping, PadFamily::kUnknown);
+            CHECK(look.buttons[2] == button - kPadA);
+        }
     }
     test_shortcuts();
     for (int mode : {touch_buttons::Automatic, touch_buttons::AlwaysShow, touch_buttons::Hide})

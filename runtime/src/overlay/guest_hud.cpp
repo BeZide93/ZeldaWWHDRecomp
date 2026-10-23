@@ -70,7 +70,8 @@ bool image_texture(uint64_t id) {
 }
 void set_tv_region(float x,float y,float width,float height,bool visible) {
     tv_x=x;tv_y=y;tv_width=width;tv_height=height;tv_visible=visible;
-    if(visible&&height>0)store().note_pixels(0,height/720.f);
+    file_select_quit::set_tv_region(x,y,width,height,visible);
+    if(visible&&height>0&&active())store().note_pixels(0,height/720.f);
 }
 void backend_destroyed() {
     file_select_quit::backend_destroyed();
