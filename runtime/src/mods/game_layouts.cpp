@@ -193,7 +193,12 @@ Layout parse_bflyt(const Bytes& d) {
                 while (!name.empty() && name.back() == ' ') name.pop_back();
                 mat.black = {d.at(m + 0x1C), d.at(m + 0x1D), d.at(m + 0x1E), d.at(m + 0x1F)};
                 mat.white = {d.at(m + 0x20), d.at(m + 0x21), d.at(m + 0x22), d.at(m + 0x23)};
-                const uint32_t maps = be32(d, m + 0x24) & 3;
+                const uint32_t flags = be32(d, m + 0x24);
+                const uint32_t maps = flags & 3;
+                // Text materials have no texture maps; their optional shadow
+                // colour block follows the flags (black RGB, white RGBA, pad).
+                if (!maps && (flags & 0x20000))
+                    mat.shadow_white = {d.at(m + 0x2B), d.at(m + 0x2C), d.at(m + 0x2D), d.at(m + 0x2E)};
                 for (uint32_t t = 0; t < maps; t++) {
                     const uint32_t index = be16(d, m + 0x28 + 4 * t);
                     if (index < textures.size()) mat.textures.push_back(textures[index]);
@@ -234,6 +239,22 @@ Layout parse_bflyt(const Bytes& d) {
                     const Material& mat = out.materials[p.material];
                     if (!mat.textures.empty()) p.texture = mat.textures[0];
                     if (p.texture.size() > 6 && p.texture.compare(p.texture.size() - 6, 6, ".bflim") == 0) p.texture.resize(p.texture.size() - 6);
+                }
+            }
+            if (magic == "txt1" && size >= 0xA0) {
+                p.text.width = bef(d, o + 0x70) * std::fabs(p.scale_x);
+                p.text.height = bef(d, o + 0x74) * std::fabs(p.scale_y);
+                p.text.shadow = d[o + 0x5E] & 1;
+                p.text.shadow_x = bef(d, o + 0x84) * p.scale_x;
+                p.text.shadow_y = -bef(d, o + 0x88) * p.scale_y;
+                const uint32_t mi = be16(d, o + 0x58);
+                if (mi < material_names.size()) {
+                    p.material = material_names[mi];
+                    p.text.ink = out.materials[p.material].white;
+                    const Colour vertex{d[o + 0x94], d[o + 0x95], d[o + 0x96], d[o + 0x97]};
+                    const auto& shade = out.materials[p.material].shadow_white;
+                    p.text.shade = {uint8_t(vertex.r * shade.r / 255), uint8_t(vertex.g * shade.g / 255),
+                                    uint8_t(vertex.b * shade.b / 255), uint8_t(vertex.a * shade.a / 255)};
                 }
             }
             last = {ox, oy, p.scale_x, p.scale_y, p.width, p.height, p.visible, p.alpha};

@@ -18,8 +18,15 @@ using Bytes = std::vector<uint8_t>;
 
 struct Image { uint32_t width = 0, height = 0; Bytes rgba; bool srgb = false; };  // srgb: an sRGB format (RGB decoded on sampling)
 struct Colour { uint8_t r = 0, g = 0, b = 0, a = 0; };
-struct Material { Colour black, white{255, 255, 255, 255}; std::vector<std::string> textures; };
+struct Material { Colour black, white{255, 255, 255, 255}; std::vector<std::string> textures; Colour shadow_white{255, 255, 255, 255}; };
+struct TextStyle {
+    float width = 0, height = 0;
+    float shadow_x = 0, shadow_y = 0;
+    bool shadow = false;
+    Colour ink{0, 0, 0, 255}, shade{255, 255, 255, 100}; // linear RGB, straight alpha
+};
 struct Pane {
+    TextStyle text;  // populated for txt1 panes
     std::string name, kind, texture, material;  // kind: pan1, pic1, txt1, wnd1, prt1, bnd1
     float x = 0, y = 0;                           // centre in root-pane coordinates (+y up, as in the layout)
     float width = 0, height = 0;                  // size with the accumulated scale
