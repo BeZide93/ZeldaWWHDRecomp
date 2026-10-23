@@ -132,7 +132,9 @@ public:
   // The submitted bytes of the block at addr when the snapshot holds at least `size` of them
   // (`size` 0: any), else nullptr.
   const uint8_t* find(uint32_t addr, uint32_t size) const {
-    auto& c = cache_[(addr >> 4) & (kCache - 1)];
+    // blocks are 0x100..0x400 aligned: a multiplicative hash spreads them over the slots
+    // ((addr >> 4) & 63 put every 0x400-aligned block into one slot)
+    auto& c = cache_[(addr * 2654435761u) >> (32 - kCacheBits)];
     uint32_t index;
     if (c.addr == addr && c.index) index = c.index - 1;
     else {
@@ -157,7 +159,8 @@ private:
   struct Slot {
     uint32_t addr, index;  // index + 1 (0: empty)
   };
-  static constexpr size_t kCache = 64;
+  static constexpr unsigned kCacheBits = 8;
+  static constexpr size_t kCache = size_t(1) << kCacheBits;
   uint64_t id_ = 0;
   std::vector<uint32_t> addrs_;  // sorted
   std::vector<Entry> entries_;
