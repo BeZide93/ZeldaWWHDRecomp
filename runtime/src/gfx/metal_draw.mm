@@ -964,6 +964,14 @@ static id<MTLRenderPipelineState> get_pipeline(const uint32_t* regs, Shader* vs,
         render_objects::set_pipelines(g_pipelines.size());
         cache_record_pipeline(regs, vs, ps, fsKey, tf);
         pipeline_groups::note_created();
+        // the setup's model sweep, record only (WWHD_DSWEEP_RECORD_ONLY=1): the recipe is appended, the pipeline never
+        // built; its draws are left out (nobody sees the hidden sweep)
+        static const bool recordOnly = [] { const char* e = getenv("WWHD_DSWEEP_RECORD_ONLY"); return e && *e == '1'; }();
+        if (recordOnly && !g_cache_replaying) {
+            pl->attempts = kCompileAttempts;
+            pl->status = CS_FAILED;
+            return nil;
+        }
     }
     const int attempt = ++pl->attempts;
     const bool injectFailure = attempt <= g_test_fail_compiles;
@@ -1710,7 +1718,9 @@ static void cache_load() {
             const uint8_t* end = p + raw.size();
             if (hdr[0] == kRecPipeline) {
                 PipelineRecipe r;
-                if (get(p, end, r) && g_known_pipelines.insert(hash_bytes(raw.data(), raw.size())).second) {
+                // (record only: known, so not appended again, but never built)
+                static const bool recordOnly = [] { const char* e = getenv("WWHD_DSWEEP_RECORD_ONLY"); return e && *e == '1'; }();
+                if (get(p, end, r) && g_known_pipelines.insert(hash_bytes(raw.data(), raw.size())).second && !recordOnly) {
                     g_pending_pipelines.push_back(r);
                     pipelines++;
                 }
