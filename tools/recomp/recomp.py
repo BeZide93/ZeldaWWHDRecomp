@@ -33,6 +33,7 @@ Code-quality passes (each on by default; the variable set to 0 when generating t
   WWHD_RECOMP_LEAF         leaf functions keep guest registers and CR bits in C locals (leaflocal.py)
   WWHD_RECOMP_NONLEAF      functions with calls keep guest registers in C locals between calls (leaflocal.py)
   WWHD_RECOMP_GQR          paired-single loads/stores through GQRs the game never writes skip the GQR check
+  WWHD_RECOMP_RAWSTORE     an stfs of a register still holding an lfs value stores the loaded word (rawstore.py)
 WWHD_RECOMP_PLAIN=1 turns them all off: the output is then the same as without these passes (the
 plain c->r[N] form that tools/true60 and tools/verify read).
 Checking builds (set to 1): WWHD_RECOMP_CR_CHECK (a dropped CR bit that is read aborts),
@@ -64,6 +65,7 @@ from rpx import R_PPC_ADDR16_HA, R_PPC_ADDR16_LO, R_PPC_ADDR16_HI
 import ppc2c
 import crlive
 import leaflocal
+import rawstore
 
 
 class _Output(io.StringIO):
@@ -100,6 +102,8 @@ NONLEAF = ppc2c.pass_on("WWHD_RECOMP_NONLEAF")
 # paired-single loads and stores through GQRs the game never writes skip the GQR check
 # (static_float_gqrs): on unless WWHD_RECOMP_GQR=0
 GQR_STATIC = ppc2c.pass_on("WWHD_RECOMP_GQR")
+# lfs -> stfs copies store the loaded word, bit-identical (rawstore.py): on unless WWHD_RECOMP_RAWSTORE=0
+RAWSTORE = ppc2c.pass_on("WWHD_RECOMP_RAWSTORE")
 
 
 def unknown_build_message(path):
@@ -128,6 +132,9 @@ DATA_IMPORT_STRIDE = 0x1000
 
 
 class Recompiler:
+    raw_stores = 0     # rawstore.py statistics (report.txt)
+    single_stores = 0
+
     def __init__(self, path, build=None, mod_hooks=False, decomp_hooks=None):
         """`build` is which build of the game `path` is (tools/recomp/builds.py); by default it is
         identified by its SHA-256, and an rpx that is none of them is refused."""
@@ -341,6 +348,11 @@ class Recompiler:
             # checking build: plain functions store every CR bit, but they still check what they read
             # (a bit another function dropped)
             body = [(a, w, crlive.rewrite(s, None, 0, True, a)) for a, w, s in body]
+        raws = set()
+        if RAWSTORE:
+            body, raws = rawstore.transform(body, self.labels, self.sites)
+            self.raw_stores += sum(1 for _, _, s in body if "st32(ea, fw" in s)
+            self.single_stores += sum(1 for _, _, s in body if "st32(ea, f32_as_u32((float)" in s)
         # restrict: guest memory never aliases the register file, so the compiler may keep
         # registers in host registers across guest loads/stores
         name = self.sym(start)
@@ -354,6 +366,8 @@ class Recompiler:
             # guest mods: the check sits in the game's code (f_X, or f_X_orig behind a port hook), so the
             # port's own hooks (interpolation, true 60) stay outermost and mods hook the game's code
             out.append("    PPC_MOD_HOOK(%d, 0x%08Xu);" % (self.ordinal[start], start))
+        if raws:
+            out.append("    uint32_t %s;" % ", ".join("fw%d" % n for n in sorted(raws)))
         tail_wb = ""
         stmts = [s for _, _, s in body]
         if LEAF and not plain and leaflocal.eligible(stmts):
@@ -551,6 +565,8 @@ class Recompiler:
             if (LEAF or NONLEAF) and not self.mod_hooks:
                 f.write("leaf functions with registers in locals: %d\n" % self.leaf_count)
                 f.write("functions with calls with registers in locals: %d\n" % self.nonleaf_count)
+            if RAWSTORE:
+                f.write("raw lfs->stfs copies (rawstore.py): %d, stores of single results: %d\n" % (self.raw_stores, self.single_stores))
             f.write("unhandled instruction kinds:\n")
             for k, v in self.unhandled.most_common():
                 f.write("  %6d  %s\n" % (v, k))
