@@ -7,6 +7,11 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Fixed: building code mods could fail on Windows with "Access Denied"** (#282, thanks @Eggtooth). While setup
+  builds code mods, the game reads the build's progress file for the progress bar. Windows refused to replace that
+  file while the game had it open, so the build stopped at a random point. Setup now replaces it the way Windows 10
+  and later allow for open files, and a progress update that still can't get through is skipped instead of failing
+  the build.
 - **Quit button on the file select screen** (#278, thanks @Tamryell and @CaptainLibrary). The save-slot screen has a
   **Quit** button at the bottom in the game's own style: press **X** (or click it) and confirm with Yes (No is
   selected first). Handy with a controller, on the couch or with remote play. Settings → Controls can hide it.
