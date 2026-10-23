@@ -525,8 +525,9 @@ wait timers disabled. CPU time excludes sleeping and GPU waits.
 | Environment option | Scope and correctness constraints |
 | --- | --- |
 | `WWHD_VK_REUSE_UNIFORM_SNAPSHOTS` | Reuses immutable uniform slices after full fresh byte comparison within the same device/submission generation. Support uniforms are packed and texture/AO patches applied before lookup; allocation alignment and zero padding remain unchanged. |
-| `WWHD_VK_PREFETCH_UNIFORMS` | Off by default (experiment, issue #178). Prefetches the guest uniform-block memory a draw's support uniforms will read, right after the shader lookup. Changes no data. |
 | `WWHD_VK_UNIFORM_VERIFY` | Debug check. Packs each stage's support uniforms a second time and compares the bytes with those the draw uses; logs mismatches and a count every 2^20 checks. |
+| `WWHD_GX2_SUBMITTED_UNIFORMS` | On by default (both renderers). Draws in a called display list read their uniform blocks as they were when the game submitted the call, as the console's GPU does; `0` reads them whenever the render thread gets to the draw (the old behaviour, which made pictures depend on thread timing). See `runtime/src/gx2/submitted_uniforms.h`. |
+| `WWHD_GX2_SUBMITTED_STATS` | Debug. Logs, every 1000 display-list calls, how many uniform blocks and bytes their submissions copied. |
 | `WWHD_VK_REUSE_FEEDBACK_IMAGES` | Retains compatible feedback-copy images in separate shader-stage/texture-unit slots, bounded to 128 MiB of retained image allocations. Every attachment alias still receives a fresh copy, with barriers preserving prior reads before overwrite. Replaced resources remain fence-retired. |
 | `WWHD_VK_SKIP_REDUNDANT_BINDS` | Omits only exact consecutive descriptor bindings, including layout, sets, dynamic offsets, command buffer, and submission generation. It can bind just the changed stage; resource preparation still runs. Pass changes reset the tracked state. |
 | `WWHD_VK_DESCRIPTOR_RANKS` | Precomputes descriptor binding ranks and compacts active writes/offsets in binding order. Invalid or duplicate metadata falls back to the original sorting path. |

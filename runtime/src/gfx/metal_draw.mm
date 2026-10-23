@@ -167,6 +167,29 @@ static Upload upload(const void* data, uint32_t size) {
     return u;
 }
 
+// Submitted uniform blocks (gx2/submitted_uniforms.h): uploaded once per submission and reused by
+// the draws of the call while the upload chunk they are in is still the current one (a retired
+// chunk is recycled when its command buffer completes)
+static Upload submitted_upload(uint32_t addr, uint32_t size, const uint8_t* bytes) {
+    struct Item { uint32_t size; Upload u; };
+    static std::unordered_map<uint32_t, Item> items;
+    static uint64_t itemsFor = 0;
+    static id<MTLBuffer> itemsChunk = nil;
+    if (itemsFor != gx2::submitted_uniforms_id() || itemsChunk != g_pool_cur) {
+        items.clear();
+        itemsFor = gx2::submitted_uniforms_id();
+    }
+    auto it = items.find(addr);
+    if (it != items.end() && it->second.size == size) return it->second.u;
+    Upload u = upload(bytes, size);
+    if (u.buf != itemsChunk) {  // the upload began a new chunk: the earlier items are in a retired one
+        items.clear();
+        itemsChunk = u.buf;
+    }
+    items[addr] = {size, u};
+    return u;
+}
+
 // called before a command buffer commits: buffers used so far are recycled when it completes
 void pool_retire(id<MTLCommandBuffer> cmd) {
     std::vector<id<MTLBuffer>> used;
@@ -1386,7 +1409,13 @@ static void bind_stage(id<MTLRenderCommandEncoder> enc, const uint32_t* regs, Sh
             for (auto& g : dec->list_remappedUniformEntries_bufferGroups) {
                 uint32_t addr = regs[blockBase + g.kcacheBankIdOffset / 4];
                 if (!addr) continue;
-                for (auto& e : g.entries) memcpy(dst + e.mappedIndexOffset, mem::ptr(addr + e.indexOffset), 16);
+                // a block of a display list: its bytes as submitted (gx2/submitted_uniforms.h);
+                // entries past the block's end still read guest memory, as before
+                const uint32_t blockSize = std::min<uint32_t>(regs[blockBase + g.kcacheBankIdOffset / 4 + 1] + 1, 0x10000);
+                const uint8_t* submitted = gx2::submitted_uniform_block(addr, blockSize);
+                for (auto& e : g.entries)
+                    memcpy(dst + e.mappedIndexOffset,
+                           submitted && e.indexOffset + 16 <= blockSize ? submitted + e.indexOffset : mem::ptr(addr + e.indexOffset), 16);
             }
             // Apply once before the Gaussian/mip chain, preserving the game's threshold and haze.
             if (!vertex && (regs[mmSQ_PGM_START_PS] << 8) == 0x44F91200)
@@ -1443,6 +1472,14 @@ static void bind_stage(id<MTLRenderCommandEncoder> enc, const uint32_t* regs, Sh
         uint32_t off = 0;
         id<MTLBuffer> gb = addr ? guest_buffer(addr, &off) : nil;
         if (!gb) continue;
+        // a block of a display list: its bytes as submitted (gx2/submitted_uniforms.h), uploaded
+        // once per submission and upload pool chunk (guest memory is what the GPU reads later)
+        if (const uint8_t* submitted = gx2::submitted_uniform_block(addr, size)) {
+            Upload u = submitted_upload(addr, size, submitted);
+            if (vertex) [enc setVertexBuffer:u.buf offset:u.offset atIndex:binding];
+            else [enc setFragmentBuffer:u.buf offset:u.offset atIndex:binding];
+            continue;
+        }
         if (g_snapshot) {
             Upload u = upload(mem::ptr(addr), size);
             if (vertex) [enc setVertexBuffer:u.buf offset:u.offset atIndex:binding];

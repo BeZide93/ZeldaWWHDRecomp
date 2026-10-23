@@ -2423,8 +2423,9 @@ StageResources bind_stage(const uint32_t *r, vk::Shader *sh,
     return write;
   };
   // guestAddr: a guest uniform block (bytes == mem::ptr(guestAddr)), served by the buffer cache if on
+  // known: an upload slice already holding these bytes (a submitted block uploaded by an earlier draw)
   auto uniform = [&](int binding, const void *bytes, size_t size, size_t logicalSlot,
-                     uint32_t guestAddr = 0) {
+                     uint32_t guestAddr = 0, const UploadSlice* known = nullptr) {
     if (binding < 0)
       return;
     if (size > R.properties.limits.maxUniformBufferRange)
@@ -2445,8 +2446,9 @@ StageResources bind_stage(const uint32_t *r, vk::Shader *sh,
       return snapshot(source, length, R.properties.limits.minUniformBufferOffsetAlignment);
     };
     UploadSlice cachedSlice;
-    const bool cached = guestAddr && buffer_cache_enabled() &&
-        cached_guest_range(guestAddr, uint32_t(size), rprof::kUpUbo, cachedSlice);
+    const bool cached = known || (guestAddr && buffer_cache_enabled() &&
+        cached_guest_range(guestAddr, uint32_t(size), rprof::kUpUbo, cachedSlice));
+    if (known) cachedSlice = *known;
     const auto b = cached ? cachedSlice
         : reuseUniforms
         ? uniformCache.get(R.device, R.submissionGeneration,
@@ -2563,17 +2565,40 @@ StageResources bind_stage(const uint32_t *r, vk::Shader *sh,
     if (m.uniformBuffersBindingPoint[i] >= 0) {
       uint32_t addr = r[block + i * 7];
       uint32_t size = std::min<uint32_t>(r[block + i * 7 + 1] + 1, 0x10000);
+      // a block of a display list: its bytes as submitted (gx2/submitted_uniforms.h), uploaded once
+      // per submission and upload generation, not through the buffer cache (which holds guest memory)
+      const uint8_t* submitted = addr ? gx2::submitted_uniform_block(addr, size) : nullptr;
+      const unsigned char* source = submitted ? submitted : static_cast<const unsigned char*>(addr ? mem::ptr(addr) : nullptr);
       // Only a block holding a camera projection gets an eye copy; the others keep their
       // buffer-cache upload by address.
       if (sh->vertex && eyeOffset != 0 && addr &&
-          stereo::has_camera_projection(static_cast<const unsigned char*>(mem::ptr(addr)), size)) {
+          stereo::has_camera_projection(source, size)) {
         static thread_local std::vector<uint8_t> eyeBlock;
-        eyeBlock.resize(size);memcpy(eyeBlock.data(),mem::ptr(addr),size);
+        eyeBlock.resize(size);memcpy(eyeBlock.data(),source,size);
         stereo::EyeRows blockRows;
         stereo::project_uniform_block(eyeBlock.data(),size,eyeOffset,stereo::frame.convergence,nullptr,
                                       replayOut ? &blockRows : nullptr);
         uniform(m.uniformBuffersBindingPoint[i],eyeBlock.data(),size,size_t(i));
         eyeUniform(m.uniformBuffersBindingPoint[i],eyeBlock.data(),size,blockRows);
+      } else if (submitted) {
+        struct Uploaded { uint32_t size; UploadSlice slice; };
+        static std::unordered_map<uint32_t, Uploaded> uploaded;
+        static uint64_t uploadedFor = 0, uploadedGeneration = 0;
+        static VkDevice uploadedDevice = VK_NULL_HANDLE;
+        if (uploadedFor != gx2::submitted_uniforms_id() || uploadedGeneration != R.submissionGeneration ||
+            uploadedDevice != R.device) {
+          uploaded.clear();
+          uploadedFor = gx2::submitted_uniforms_id();
+          uploadedGeneration = R.submissionGeneration;
+          uploadedDevice = R.device;
+        }
+        auto it = uploaded.find(addr);
+        if (it != uploaded.end() && it->second.size == size)
+          uniform(m.uniformBuffersBindingPoint[i], submitted, size, size_t(i), 0, &it->second.slice);
+        else {
+          uniform(m.uniformBuffersBindingPoint[i], submitted, size, size_t(i));
+          if (lastUpload.buffer) uploaded[addr] = {size, lastUpload};
+        }
       } else uniform(m.uniformBuffersBindingPoint[i], addr ? mem::ptr(addr) : nullptr,
               size, size_t(i), addr);
       if (addr) rprof::guest_read(rprof::kUpUbo, addr, size);
