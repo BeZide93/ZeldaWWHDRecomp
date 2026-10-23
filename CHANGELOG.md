@@ -7,6 +7,9 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Quit button on the file select screen** (#278, thanks @Tamryell and @CaptainLibrary). The save-slot screen has a
+  **Quit** button at the bottom in the game's own style: press **X** (or click it) and confirm with Yes (No is
+  selected first). Handy with a controller, on the couch or with remote play. Settings → Controls can hide it.
 - **Shader preparation's models step is steadier and quicker.** It shows the game's characters in groups of 8 instead
   of one at a time, and four crashes in the step are fixed (a title-screen button pressed twice, an area requested
   before the previous one was released, and two cases where it released files the game was still using). Four
