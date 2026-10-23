@@ -7,6 +7,9 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Fixed: Android said "Not available for this version of the game" for every code mod in Mods > Community**
+  (ZeldaWWHDMods#6, thanks @alexander-beepx). An old rule from before Android supported code mods still blocked them in
+  the Community list. They can now be installed on Android like on desktop (Code-mod support must be on).
 - **Less shader stutter on Windows, Linux and Mac (Vulkan)**: after setup's models step, the game now builds every
   recorded shader pipeline in the background while you play, on low-priority threads, starting once the game is in
   play so the boot isn't slowed. In our tests over 19 places, pipelines built mid-play dropped from about 2,100 to 9.
