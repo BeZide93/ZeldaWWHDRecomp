@@ -851,21 +851,22 @@ void begin_visits() {
             return;
         g_visits.push_back(v);
     };
+    // the rooms with a player start (the rooms' places, places.txt) and the scene layers their placements use
+    std::map<std::pair<std::string, int>, int> spawn;
+    std::map<std::pair<std::string, int>, std::set<int>> layers;
+    std::map<std::string, std::set<int>> stageLayers;
+    if (!g.state_dir.empty())
+        for (auto& line : lines(g.state_dir + "/places.txt")) {
+            char kind[8] = {}, stage[16] = {};
+            int a = 0, b = 0;
+            if (std::sscanf(line.c_str(), "%7s %15s %d %d", kind, stage, &a, &b) != 4) continue;
+            if (!std::strcmp(kind, "spawn")) spawn.emplace(std::make_pair(std::string(stage), a), b);
+            else if (a < 0) stageLayers[stage].insert(b);
+            else layers[{stage, a}].insert(b);
+        }
     if (!std::strcmp(list, "all")) {
-        // every room with a player start (the rooms' places, places.txt), once with the layer the game picks and
-        // once per further scene layer its placements (or the stage's) use
-        std::map<std::pair<std::string, int>, int> spawn;
-        std::map<std::pair<std::string, int>, std::set<int>> layers;
-        std::map<std::string, std::set<int>> stageLayers;
-        if (!g.state_dir.empty())
-            for (auto& line : lines(g.state_dir + "/places.txt")) {
-                char kind[8] = {}, stage[16] = {};
-                int a = 0, b = 0;
-                if (std::sscanf(line.c_str(), "%7s %15s %d %d", kind, stage, &a, &b) != 4) continue;
-                if (!std::strcmp(kind, "spawn")) spawn.emplace(std::make_pair(std::string(stage), a), b);
-                else if (a < 0) stageLayers[stage].insert(b);
-                else layers[{stage, a}].insert(b);
-            }
+        // every room with a player start, once with the layer the game picks and once per further scene layer its
+        // placements (or the stage's) use
         for (const auto& [place, point] : spawn) {
             add({place.first, place.second, point, -1});
             std::set<int> all = layers[place];
@@ -874,10 +875,17 @@ void begin_visits() {
         }
         LOG("[dsweep] visits: %zu places (rooms with a player start, per scene layer)", g_visits.size());
     } else {
+        // "<stage> <room>", or "<stage> *": every room of that stage with a player start, at its first start, with
+        // the layer the game picks (the sea: each island is its own room, entered by sailing there)
         for (auto& line : lines(list)) {
-            char stage[16] = {};
-            int room = 0;
-            if (std::sscanf(line.c_str(), "%15s %d", stage, &room) >= 1) add({stage, room, 0, -1});
+            char stage[16] = {}, room[8] = {};
+            if (std::sscanf(line.c_str(), "%15s %7s", stage, room) < 1) continue;
+            if (!std::strcmp(room, "*")) {
+                for (const auto& [place, point] : spawn)
+                    if (place.first == stage) add({stage, place.second, point, -1});
+            } else {
+                add({stage, std::atoi(room), 0, -1});
+            }
         }
     }
     if (g_visits.empty()) return begin_file_select();

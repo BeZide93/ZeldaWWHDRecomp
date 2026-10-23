@@ -27,6 +27,8 @@ MAX_ATTEMPTS = 40          # attempts in a row that finish no archive or actor (
 MAX_ATTEMPTS_TOTAL = 1000  # attempts in all (actors that stop the game: a few seconds each)
 DEFAULT_SKIP = Path(__file__).with_name('model_sweep_skip.txt')
 # models drawn per batch (two frames each); WWHD_SETUP_MODEL_SWEEP_BATCH=n for measurements only
+# stages whose rooms are separate places (islands): visited at every room with a player start, not only the first
+ISLAND_STAGES = ('sea',)
 MODELS_PER_BATCH = max(1, min(8, int(os.environ.get('WWHD_SETUP_MODEL_SWEEP_BATCH', '1') or 1)))
 STARTUP_SECONDS = 300     # until an attempt's first progress line (the game starting up)
 STALL_SECONDS = 60         # no new line in progress.txt for this long: the attempt counts as a crash (a model, room or
@@ -188,8 +190,9 @@ def run(executable, game, cache_root, renderer, identity, cache_env, line=lambda
     if os.environ.get('WWHD_SETUP_MODEL_SWEEP_VISITS', '1') != '0':
         visits = state / 'visits.txt'
         rooms = {s: sorted(int(a[4:]) for a in names if a.startswith('Room')) for s, names in stage_archives(game).items()}
-        visits.write_text(''.join('%s %d\n' % (s, r[0]) for s, r in rooms.items() if r and s not in ('sea_T', 'Name')),
-                          encoding='utf-8')
+        # the sea: every island (each its own room, reached by sailing) at its player start
+        visits.write_text(''.join('%s *\n' % s if s in ISLAND_STAGES else '%s %d\n' % (s, r[0])
+                                  for s, r in rooms.items() if r and s not in ('sea_T', 'Name')), encoding='utf-8')
     stages = state / 'stages.txt'
     stages.write_text(''.join('%s %s\n' % (stage, ' '.join(names)) for stage, names in stage_archives(game).items()),
                       encoding='utf-8')
