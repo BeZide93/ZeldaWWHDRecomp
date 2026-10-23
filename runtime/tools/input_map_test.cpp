@@ -1151,6 +1151,15 @@ static void test_screen_layouts() {
 }
 
 int main() {
+    // Old controls files default to showing Quit; an explicit choice round-trips.
+    {
+        auto mapping = input_map::Mapping::defaults();
+        CHECK(mapping.file_select_quit);
+        mapping.file_select_quit = false;
+        input_map::Mapping loaded;
+        CHECK(input_map::from_json(input_map::to_json(mapping), loaded));
+        CHECK(!loaded.file_select_quit);
+    }
     test_shortcuts();
     for (int mode : {touch_buttons::Automatic, touch_buttons::AlwaysShow, touch_buttons::Hide})
         for (bool controller : {false, true}) {

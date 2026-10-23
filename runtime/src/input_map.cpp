@@ -824,7 +824,7 @@ std::string to_json(const Mapping& m) {
              "    \"skip_controller_selection\": %s,\n    \"invert_camera_y\": %s%s",
              m.deadzone, m.left_range, m.right_range, m.skip_controller_selection ? "true" : "false", m.invert_camera_y ? "true" : "false",
              m.face_auto ? ",\n    \"face_layout\": \"auto\"" : "");
-    o += opt + prompts + "\n  },\n  \"shortcuts_version\": " + std::to_string(kShortcutsVersion) + ",\n  \"shortcuts\": {\n";
+    o += opt + prompts + std::string(",\n    \"file_select_quit\": ") + (m.file_select_quit ? "true" : "false") + "\n  },\n  \"shortcuts_version\": " + std::to_string(kShortcutsVersion) + ",\n  \"shortcuts\": {\n";
     for (int a = 0; a < kShortcutCount; ++a) {
         const auto& b = m.shortcuts[a];
         o += "    " + quote(shortcut_info(a).id) + ": {\"keys\": [";
@@ -898,6 +898,7 @@ bool from_json(const std::string& text, Mapping& out, std::string* error) {
             m.left_range = std::clamp((float)r->n, kMinStickRange, kMaxStickRange);
         if (const Json* r = op->get("right_stick_range"); r && r->type == Json::Num)
             m.right_range = std::clamp((float)r->n, kMinStickRange, kMaxStickRange);
+        if (const Json* i = op->get("file_select_quit"); i && i->type == Json::Bool) m.file_select_quit = i->b;
         if (const Json* i = op->get("skip_controller_selection"); i && i->type == Json::Bool) m.skip_controller_selection = i->b;
         if (const Json* i = op->get("invert_camera_y"); i && i->type == Json::Bool) m.invert_camera_y = i->b;
         if (const Json* i = op->get("background_controllers"); i && i->type == Json::Bool) m.background_controllers = i->b;
@@ -1010,6 +1011,7 @@ static Mapping g_map = Mapping::defaults();
 static std::atomic<uint32_t> g_gen{1};
 static std::atomic<bool> g_skip_controller_selection{true};
 static std::atomic<bool> g_background_controllers{false};
+static std::atomic<bool> g_file_select_quit{true};
 static std::atomic<bool> g_invert_camera_y{false};
 
 // the dominant pad's labels as note_face_labels last reported them (its own lock: set_current
@@ -1094,12 +1096,14 @@ void set_current(const Mapping& requested, bool save) {
     }
     g_skip_controller_selection = m.skip_controller_selection;
     g_background_controllers = m.background_controllers;
+    g_file_select_quit = m.file_select_quit;
     g_gen++;
     if (save && !save_file(default_path(), m))
         fprintf(stderr, "[input] could not save controls to %s\n", default_path().c_str());
 }
 
 uint32_t generation() { return g_gen.load(); }
+bool file_select_quit() { return g_file_select_quit.load(std::memory_order_relaxed); }
 bool skip_controller_selection() { return g_skip_controller_selection.load(std::memory_order_relaxed); }
 bool background_controllers() { return g_background_controllers.load(std::memory_order_relaxed); }
 bool invert_camera_y() { return g_invert_camera_y.load(std::memory_order_relaxed); }

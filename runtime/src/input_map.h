@@ -94,6 +94,7 @@ struct Mapping {
     // so a worn stick that only reaches 0.9 delivers full deflection at about 1.11.
     float left_range = 1.0f;
     float right_range = 1.0f;
+    bool file_select_quit = true; // show the controller/mouse Quit button on file select
     bool skip_controller_selection = true; // title: choose the configured Wii U controller
     // Issue #267: controllers keep driving the game while no game window has the focus (a second
     // screen, streaming, remote play). Controllers only: keyboard and mouse are still released on
@@ -246,6 +247,7 @@ void set_current(const Mapping& m, bool save = true);  // applies immediately; s
 uint32_t generation();  // bumps on every set_current
 bool skip_controller_selection();
 bool background_controllers();  // current().background_controllers, any thread (hosts poll it)
+bool file_select_quit();
 bool invert_camera_y();  // current().invert_camera_y without copying the mapping (camera hooks)
 
 }  // namespace input_map

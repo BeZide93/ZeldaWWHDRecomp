@@ -3722,3 +3722,14 @@ add_test(NAME story_scenes_editor_preview COMMAND story_scenes_editor_preview_te
 if(WIN32)
   add_executable(unc_console_fixture runtime/tools/unc_console_fixture.c)
 endif()
+
+# File-select Quit only takes X while the host button is visible.
+add_executable(file_select_quit_test runtime/tools/file_select_quit_test.cpp)
+target_include_directories(file_select_quit_test PRIVATE runtime/src)
+target_compile_options(file_select_quit_test PRIVATE -UNDEBUG)
+add_test(NAME file_select_quit_input COMMAND file_select_quit_test)
+foreach(fixture guest_hud_renderer_test input_sdl_test overlay_input_integration_test pip_preview_ui_test)
+  if(TARGET ${fixture})
+    target_sources(${fixture} PRIVATE runtime/tools/file_select_quit_stub.cpp)
+  endif()
+endforeach()
