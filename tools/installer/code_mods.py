@@ -7,12 +7,28 @@ import shutil
 import time
 
 
+def atomic_replace(src, dst):
+    """Publish a file, tolerating transient Windows readers for at most two seconds."""
+    deadline = time.monotonic() + 2.0
+    delay = 0.01
+    while True:
+        try:
+            os.replace(src, dst)
+            return
+        except PermissionError:
+            remaining = deadline - time.monotonic()
+            if os.name != 'nt' or remaining <= 0:
+                raise
+            time.sleep(min(delay, remaining))
+            delay = min(delay * 2, 0.1)
+
+
 def atomic_json(path, value):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(path.name + '.tmp')
     tmp.write_text(json.dumps(value), encoding='utf-8')
-    os.replace(tmp, path)
+    atomic_replace(tmp, path)
 
 
 def file_sha256(stream):

@@ -19,6 +19,7 @@ import time
 # The game starts this helper as a script with the Windows release's embeddable Python, which is isolated: the
 # script's folder is not on sys.path, so its sibling model_sweep.py is found through this (issue #280).
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from code_mods import atomic_replace  # noqa: E402
 
 SCHEMA = 1
 
@@ -111,7 +112,7 @@ def atomic_json(path, value):
             stream.write(json.dumps(value, sort_keys=True, indent=2) + '\n')
             stream.flush()
             os.fsync(stream.fileno())
-        os.replace(temporary, path)
+        atomic_replace(temporary, path)
     finally:
         temporary.unlink(missing_ok=True)
 

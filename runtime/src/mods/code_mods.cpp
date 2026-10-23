@@ -1,5 +1,6 @@
 #include "../exception_report.h"
 #include "code_mods.h"
+#include "code_mods_io.h"
 #include "guest_build.h"
 #include "packages.h"
 #include "../overlay/hostui.h"
@@ -29,10 +30,7 @@ struct Worker {
     std::thread thread;
     ~Worker(){if(thread.joinable()){stopping=true;if(!cancel_path.empty())std::ofstream(cancel_path)<<"cancel";thread.join();}}
 } worker;
-json::Value read(const fs::path& path) {
-    if(!fs::is_regular_file(path)||fs::file_size(path)>1024*1024)exception_report::raise("Code-mod build configuration is unavailable; run setup again from a complete release folder");
-    std::ifstream f(path);return json::parse(std::string{std::istreambuf_iterator<char>(f),{}});
-}
+json::Value read(const fs::path& path) { return read_build_json(path); }
 }
 namespace {
 bool g_fixed_build=false;  // startup(..., true): the decomp version
