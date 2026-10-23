@@ -20,6 +20,8 @@ what is on `devel` and not released yet (also in the
 - **Quit button on the file select screen** (#278, thanks @Tamryell and @CaptainLibrary). The save-slot screen has a
   **Quit** button at the bottom in the game's own style: press **X** (or click it) and confirm with Yes (No is
   selected first). Handy with a controller, on the couch or with remote play. Settings → Controls can hide it.
+  The button and its Yes/No question use the game's own lettering, button plates and selection highlight, read from
+  your game files, so they look like the game's Return/Erase/Copy/Start buttons.
 - **Shader preparation's models step is steadier.** Four crashes in the step are fixed (a title-screen button
   pressed twice, an area requested before the previous one was released, and two cases where it released files the
   game was still using). Four characters that always stopped the step are now skipped from the start instead of after
