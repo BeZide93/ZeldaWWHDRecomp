@@ -69,8 +69,32 @@ void mouse_binding_wheel(float delta, bool eligible) {
     std::lock_guard lk(g_mu); g_mouse_bindings.wheel(delta, eligible);
 }
 static bool g_keys[256]={},g_script_keys[256]={};
-static std::atomic<bool> g_gameplay_focus{false};
+static std::atomic<bool> g_gameplay_focus{false},g_window_focus{false};
 bool gameplay_focused(){return g_gameplay_focus.load(std::memory_order_relaxed);}
+bool window_focused(){return g_window_focus.load(std::memory_order_relaxed);}
+// ---- controllers in the background (issue #267) ---------------------------------------------------
+// SDL drops controller presses and stick moves while it has windows and none of them has the keyboard
+// focus, unless SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS is set. SDL watches that hint (a hint
+// callback), so it applies at once, also after the joystick subsystem started. Controls > "Controller
+// input when the game isn't focused" sets it; keyboard and mouse are released on focus loss either
+// way (handle_event, mouse_sdl.cpp). Android: the app is in front or paused, the option does nothing.
+bool background_controllers(){
+#ifdef __ANDROID__
+ return false;
+#else
+ return input_map::background_controllers();
+#endif
+}
+static void apply_background_hint(){
+ static int applied=-1;
+ const bool on=background_controllers();
+ if(applied==(int)on)return;
+ if(!SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS,on?"1":"0"))LOG("[input] background controller hint: %s",SDL_GetError());
+ if(applied>=0||on)LOG("[input] controller input while the game isn't focused: %s",on?"on":"off");
+ applied=on;
+}
+// the controllers reach the game now: a game window has the focus, or the background option is on
+static bool controllers_live(){return SDL_GetKeyboardFocus()!=nullptr||background_controllers();}
 static PadState g_pad;
 static float g_values[input_map::kPadCount]={};
 static bool g_touch=false;static float g_tx=0,g_ty=0;
@@ -281,7 +305,8 @@ static PadState keyboard_state(bool host){bool keys[256];for(int i=0;i<256;i++)k
 // requests by more than kRumbleRefreshMs; should the main loop stall (SDL ends a rumble only while
 // it pumps events), a watchdog thread stops the motors after kRumbleStallMs.
 // The motors are still while the option is off, the settings overlay is open (the game sees no
-// input then), no game window has the keyboard (SDL reads no controllers in the background), and
+// input then), no game window has the keyboard (SDL reads no controllers in the background; with
+// "Controller input when the game isn't focused" on they keep running there, as the game plays on), and
 // from the moment the process ends (quit, exit, crash): it ends without SDL_Quit, and XInput and
 // HIDAPI controllers keep the last motor level they were sent after it.
 constexpr Uint32 kRumbleRefreshMs=150,kRumbleStallMs=300;
@@ -334,7 +359,7 @@ static void apply_rumble(){
 #endif
  // the share of "on" over the next host frame (the motor spins up and down slower than that)
  float level=rumble::host_level(1000000/60);
- if(overlay::is_open()||!SDL_GetKeyboardFocus())level=0;  // the game cannot stop it from here
+ if(overlay::is_open()||!controllers_live())level=0;  // the game cannot stop it from here
 #ifdef __ANDROID__
  if(phone)phone_rumble_level((Uint16)(std::clamp(level,0.f,1.f)*0xFFFFu));
 #endif
@@ -394,11 +419,11 @@ static void update_sensors(){
  int n=0;for(auto [id,pad]:g_controllers)if(SDL_GamepadConnected(pad)&&has_motion(pad))n++;
  motion::set_gyro_controllers(n);
  static bool focused=true;
- const bool focus=SDL_GetKeyboardFocus()!=nullptr;
+ const bool focus=controllers_live();  // (the background option: SDL keeps sending samples there)
  if(focus!=focused){
   focused=focus;
   if(focus)for(auto& [id,t]:g_sensor_seen)t=SDL_GetTicks();  // events were paused: a fresh start for the watchdog
-  if(g_sensors_on)LOG("[gyro] the game window %s the focus%s",focus?"has":"lost",focus?"":": SDL pauses controller events until it is back");
+  if(g_sensors_on)LOG("[gyro] %s",focus?"controller events reach the game again":"the game window lost the focus: SDL pauses controller events until it is back");
  }
  if(want==g_sensors_on){
   if(!want||!focus||getenv("WWHD_NO_HOST_INPUT"))return;
@@ -609,6 +634,7 @@ void init(){
  wwhd_trace::sink = [](const char* line) { LOG("[overlay-trace] %s",line); };
  if(!wwhd_trace::handoff()) LOG("[overlay] diagnostic mouse handoff disabled (WWHD_OVERLAY_MOUSE_HANDOFF=0)");
  input_map::load_startup();
+ apply_background_hint();  // before the controllers open (SDL also follows a later change)
  // WWHD_NO_GAMEPAD only hides the GamePad screen window; WWHD_NO_CONTROLLERS turns off host controllers
  if(!getenv("WWHD_NO_CONTROLLERS")) {
   if(!SDL_InitSubSystem(SDL_INIT_GAMEPAD)){LOG("[input] SDL gamepad initialization: %s",SDL_GetError());return;}
@@ -836,6 +862,8 @@ void handle_event(const SDL_Event& event){
 void update(){
  update_overlay_window(SDL_GetKeyboardFocus());
  g_gameplay_focus.store(SDL_GetKeyboardFocus()!=nullptr&&!text_prompt_active(),std::memory_order_relaxed);
+ g_window_focus.store(SDL_GetKeyboardFocus()!=nullptr,std::memory_order_relaxed);
+ apply_background_hint();  // the Controls option, applied before this poll reads the controllers
  if(wwhd_trace::enabled()) {
   overlay_trace_sdl::begin(overlay::is_open());
   for(auto [id,pad]:g_controllers) overlay_trace_sdl::pad(id,pad);

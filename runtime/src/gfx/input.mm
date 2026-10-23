@@ -56,8 +56,23 @@ void mouse_binding_wheel(float delta, bool eligible) {
     std::lock_guard lk(g_mu); g_mouse_bindings.wheel(delta, eligible);
 }
 static bool g_keys[256];
-static std::atomic<bool> g_gameplay_focus{false};
+static std::atomic<bool> g_gameplay_focus{false}, g_window_focus{false};
 bool gameplay_focused() { return g_gameplay_focus.load(std::memory_order_relaxed); }
+bool window_focused() { return g_window_focus.load(std::memory_order_relaxed); }
+// ---- controllers in the background (issue #267)
+// GameController.framework stops sending controller input to an app that is not in front unless
+// GCController.shouldMonitorBackgroundEvents is set (macOS 11.3+); Controls > "Controller input when
+// the game isn't focused" sets it. Keyboard and mouse are released on focus loss either way.
+bool background_controllers() { return input_map::background_controllers(); }
+static void apply_background_controllers() {  // main thread
+    static int applied = -1;
+    const bool on = background_controllers();
+    if (applied == (int)on) return;
+    if (@available(macOS 11.3, *)) GCController.shouldMonitorBackgroundEvents = on;
+    else if (on) LOG("[input] controller input in the background needs macOS 11.3 or later");
+    if (applied >= 0 || on) LOG("[input] controller input while the game isn't focused: %s", on ? "on" : "off");
+    applied = on;
+}
 static PadState g_pad;  // controller part, refreshed on the main thread
 static bool g_touch;
 static float g_tx, g_ty;
@@ -437,6 +452,7 @@ void init() {
                                                       object:nil queue:nil usingBlock:^(NSNotification*) {
         release_keys();
     }];
+    apply_background_controllers();  // before discovery; the poll below follows later changes
     [GCController startWirelessControllerDiscoveryWithCompletionHandler:nil];
     // the Automatic face preset follows the pad that was plugged in first (issue #78 follow-up)
     g_connect_order = [NSMutableArray array];
@@ -459,6 +475,8 @@ void init() {
         // one gate per controller as on the SDL host (overlay/release_gate.h, issue #153); the overlay
         // polls the Home / Select shortcut on its frame (and the platform shortcuts: an input one took
         // counts as captured, overlay/extensions.h)
+        g_window_focus.store(NSApp.isActive, std::memory_order_relaxed);
+        apply_background_controllers();
         static overlay::DeviceGates<uintptr_t> gates;
         gates.combine(devices_values(), overlay::captures() || overlay::shortcut_took_input(), v, game);
         input_map::consume_shortcut_buttons(input_map::current(), v, game);
