@@ -26,8 +26,13 @@ int main(int argc,char** argv) {
     // Read as fast as possible, independently of the writer, until the parent says "stop".
     std::atomic<bool> stop{false};
     std::thread control([&]{std::string line;while(std::getline(std::cin,line)&&line!="stop"){}stop=true;});
+    // The parent's seed publication (done -1) is read before the writer starts.
+    // Publication counters stay signed: the seed is -1 (converting -1.0 to an unsigned type is undefined
+    // behaviour; x86-64 gives ULONG_MAX, arm64 0).
+    unsigned long reads=0;
+    long long last=(long long)mods::code::read_build_json(path).get("done").number;
+    assert(last==-1);
     std::cout<<"ready"<<std::endl;
-    unsigned long reads=0,last=0;
     std::string raw;
     while(!stop) {
         // Mostly bare open-read-close cycles, so a handle is open nearly all the time (the worst case
@@ -42,7 +47,7 @@ int main(int argc,char** argv) {
         assert(value.get("payload").string().size()==512*1024);
         auto polled=mods::code::poll_build_json(path);
         assert(polled&&polled->get("stage").string()=="building");
-        const auto done=(unsigned long)value.get("done").number;
+        const auto done=(long long)value.get("done").number;
         assert(done>=last);  // never an older publication after a newer one
         last=done;++reads;
     }

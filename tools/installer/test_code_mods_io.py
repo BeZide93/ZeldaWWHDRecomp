@@ -26,20 +26,32 @@ def main():
             fallbacks.append(src)
             real_replace(src, dst)
         code_mods.os.replace = replace
-        with subprocess.Popen([sys.argv[1], str(path)], stdin=subprocess.PIPE,
-                              stdout=subprocess.PIPE, text=True) as reader:
-            assert reader.stdout.readline().strip() == 'ready'
-            errors = []
-            try:
+        reader = subprocess.Popen([sys.argv[1], str(path)], stdin=subprocess.PIPE,
+                                  stdout=subprocess.PIPE, text=True)
+        errors, published = [], 0
+        try:
+            if reader.stdout.readline().strip() == 'ready':
                 for i in range(PUBLISHES):
                     code_mods.atomic_json(path, dict(value, done=i))
-            except BaseException as error:
-                errors.append(error)
-            reader.stdin.write('stop\n')
-            reader.stdin.flush()
-            reads = reader.stdout.readline().strip()
-            assert reader.wait(timeout=30) == 0, 'the game-side reader failed a read'
-        code_mods.os.replace = real_replace
+                    published += 1
+                    if reader.poll() is not None:
+                        break  # the reader failed: stop publishing, report it below
+        except BaseException as error:
+            errors.append(error)
+        finally:
+            code_mods.os.replace = real_replace
+            # A reader that already exited (its own message, an assertion, is above) closed the pipe.
+            for action in (lambda: reader.stdin.write('stop\n'), reader.stdin.flush, reader.stdin.close):
+                try:
+                    action()
+                except OSError:
+                    pass
+            reads = reader.stdout.read().strip()
+            reader.stdout.close()
+            code = reader.wait(timeout=30)
+        if code != 0:
+            raise SystemExit('the game-side reader failed (exit status %d) after %d publishes; '
+                             'its message is above' % (code, published))
         assert not errors, errors
         assert reads.isdigit() and int(reads) > 0, reads
         if os.name == 'nt':
