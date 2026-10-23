@@ -181,7 +181,7 @@ def environment(base, game, cache_env, renderer, state, archives, scratch, stage
                               ('WWHD_SETUP_MODEL_SWEEP_RECORD_ONLY', 'WWHD_DSWEEP_RECORD_ONLY')):
         # actors in groups of 8 by default (same recipes as one at a time, measured 2026-10-23; 16 changed the skip
         # list); WWHD_SETUP_MODEL_SWEEP_ACTOR_GROUP=1 shows them one at a time again
-        value = os.environ.get(setting, '8' if game_var == 'WWHD_DSWEEP_ACTOR_GROUP' else '')
+        value = os.environ.get(setting, '')
         if re.fullmatch(r'\d+', value) and value not in ('0', '1'):
             env[game_var] = value
     # measurements only: the Vulkan renderer's key log (one line per pipeline it creates, with the sweep's batch)

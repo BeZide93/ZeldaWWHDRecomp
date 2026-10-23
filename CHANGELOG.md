@@ -15,11 +15,10 @@ what is on `devel` and not released yet (also in the
 - **Quit button on the file select screen** (#278, thanks @Tamryell and @CaptainLibrary). The save-slot screen has a
   **Quit** button at the bottom in the game's own style: press **X** (or click it) and confirm with Yes (No is
   selected first). Handy with a controller, on the couch or with remote play. Settings → Controls can hide it.
-- **Shader preparation's models step is steadier and quicker.** It shows the game's characters in groups of 8 instead
-  of one at a time, and four crashes in the step are fixed (a title-screen button pressed twice, an area requested
-  before the previous one was released, and two cases where it released files the game was still using). Four
-  characters that always stopped the step are now skipped from the start instead of after a restart. The step
-  records the same shaders as before.
+- **Shader preparation's models step is steadier.** Four crashes in the step are fixed (a title-screen button
+  pressed twice, an area requested before the previous one was released, and two cases where it released files the
+  game was still using). Four characters that always stopped the step are now skipped from the start instead of after
+  a restart. The step records the same shaders as before.
 - **Controllers can keep playing while the game isn't focused** (#267, thanks @Linken17). Settings → Controls →
   **Controller input when the game isn't focused** (off by default): for a second screen, streaming or remote play.
   Only controllers: keyboard and mouse still work only while the game window is active, and a controller press in
