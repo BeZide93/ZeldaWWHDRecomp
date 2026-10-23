@@ -7,6 +7,10 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Controllers can keep playing while the game isn't focused** (#267, thanks @Linken17). Settings → Controls →
+  **Controller input when the game isn't focused** (off by default): for a second screen, streaming or remote play.
+  Only controllers: keyboard and mouse still work only while the game window is active, and a controller press in
+  the background never opens Settings. Not on Android. On macOS it needs macOS 11.3 or later.
 - **Fixed: Android said "Not available for this version of the game" for every code mod in Mods > Community**
   (ZeldaWWHDMods#6, thanks @alexander-beepx). An old rule from before Android supported code mods still blocked them in
   the Community list. They can now be installed on Android like on desktop (Code-mod support must be on).
