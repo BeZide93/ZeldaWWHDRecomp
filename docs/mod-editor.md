@@ -371,6 +371,34 @@ A material without a texture that is none of the room's is refused with the room
 The details, limits and the costs are in [Game materials](world-objects.md#game-materials) and [Game materials on
 your own sea models](world-objects.md#game-materials-on-your-own-sea-models).
 
+### Replacing, watching and removing a model
+
+Each model in Outliner → **Models** has three actions:
+
+- **Replace from file…** imports a new version of the model under the same name (for example after you
+  changed it in Blender). Every placement that uses it keeps its place and shows the new version as soon as
+  it is prepared (the status bar says so), its own `_col` collision included. The new file is fixed and
+  checked as an import is; a model with game materials keeps its room and its name mapping. When placements
+  stand on the model's collision, the new file needs its `_col` mesh too, and a model that placements use
+  stays static or animated as it was (import a new model to change that). The version before is kept as
+  `models/.previous/<file>` in the package (hidden, never exported); Replace isn't an undo step, so replace
+  again with the older file to go back.
+- **Watch file** (off by default): while it is on, saving the file again (for example exporting from
+  Blender over it) replaces the model by itself. The editor waits until the file has stayed the same for a
+  second and is a whole `.glb` (one still being written is left alone), then replaces it once per change.
+  It watches the file the model was imported or last replaced from in this editor session, and it is off
+  again after a restart.
+- **Remove** takes the model out of the mod. When placements use it, the confirmation lists them and offers
+  **Remove those too** (the model and those placements go together) or **Cancel**; a model that an item
+  holds (its held model) can't be removed until the item has another one. Removing is one undo step:
+  **Undo** brings the model, its placements and its file back. The file waits in `models/.removed`
+  (hidden, never exported).
+
+With a tool client: `replace_model {"model": "windfall_ext", "file": "..."}`, `watch_model {"model":
+"windfall_ext", "on": true}` and `remove_model {"model": "windfall_ext", "actors": true, "confirm": true}`;
+`list_model_files` says where each model came from, whether it is watched and what uses it. The game asks
+you before a tool client replaces a model or starts watching its file.
+
 ### When a model doesn't show
 
 The status bar, and **Check** (as a warning), say why:
@@ -854,8 +882,8 @@ The editor's status bar shows **MCP: off**, **MCP: on, port N** or **MCP: connec
 ### Allow / Deny
 
 Some commands remove or replace things, or write outside the open mod: `new_mod`, `remove_actor`, `remove_letter`, `remove_chart`, `remove_item`,
-`revert_package`, `save_package`, `export_package`, `reset_quest`, `load_state`, and `import_model` when it
-replaces a file. The client
+`revert_package`, `save_package`, `export_package`, `reset_quest`, `load_state`, `remove_model`, and `import_model` when it
+replaces a file (`replace_model` and turning `watch_model` on ask without `"confirm"`). The client
 must ask for them with `"confirm": true`, and then the game asks **you**: a window "Claude wants to: …"
 with **Allow** and **Deny**. Nothing happens until you press **Allow**; without an answer within two
 minutes the request is refused. Undo works for these changes as in the editor.
@@ -932,6 +960,10 @@ separated by `;`, or `@file` with one such line per row. Results go to the log.
 | `check_model` | `file`, `kit`?, `materials`?, `material`? | check a `.glb` file; `import_fixes` lists what the import would change ([What the import fixes](#what-the-import-fixes-for-you)); with `kit`, checked as a model with game materials and `kit_report` says which of its materials are the room's, which have their own texture and which are neither |
 | `import_model` | `file`, `id`?, `confirm`?, `kit`?, `materials`?, `material`?, `mod`? | copy a `.glb` into the mod and add the model, fixed where it can be (`fixes`); with `kit`, a model with game materials ([Game materials](world-objects.md#game-materials)) |
 | `set_model_kit` | `model`, `kit`?, `materials`?, `material`?, `mod`? | change a kit model's kit room and material names; built again, live |
+| `replace_model` | `model`, `file`?, `mod`? | a model's new version under the same id: its placements keep their places and show it, collision included, when it is prepared; the file before is kept as `models/.previous/<file>`; not an undo step ([Replacing, watching and removing a model](#replacing-watching-and-removing-a-model)) |
+| `watch_model` | `model`, `on`, `file`?, `mod`? | watch the model's file for this session: a change that has settled replaces the model by itself |
+| `remove_model` | `model`, `confirm`, `actors`?, `mod`? | remove a model (one undo step); refused while placements use it unless `actors` is true (they go with it) and while an item holds it |
+| `list_model_files` | `mod`? | the open mod's models: the file each came from in this session, whether it is watched, its placements and the items that hold it |
 | `reload_model` | `model`, `mod`? | a model's changed file in the package: the import's fixes applied to it; a kit model is built again and its actors take it live, another model at the next start |
 | `place_world_object` | `id`, `model`, `collision`, `stage`, `room`, `position`, `behaviour`?, `buoyancy`?, `drift`?, `anchor`?, `grapple_points`?, `distant`?, `shoreline`?, `chart_marker`?, `arrival`?, `calm_water`?, `rotation`?, `scale`?, `mod`? | place a static, floating or drifting object of the mod with collision (one Undo step) |
 | `set_world_object` | `id`, `collision`?, `behaviour`?, `buoyancy`?, `drift`?, `anchor`?, `grapple_points`?, `distant`?, `shoreline`?, `chart_marker`?, `arrival`?, `calm_water`?, `mod`? | change a world object's collision, behaviour and motion together (`null` removes one) |

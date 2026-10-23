@@ -655,14 +655,17 @@ bool register_model(const std::string& mod,const std::string& model,const std::s
     g_models.emplace(key,ModelResource{archive,index,minimum,maximum,skinned,std::move(clips),std::move(rig)});return true;
 }
 bool editor_register_model(const std::string& mod,const std::string& model,const std::string& archive,bool skinned,std::string& why){
-    if(g_models.contains({mod,model}))return true;
+    // the same archive again: nothing to do; another one (the editor's replace_model, issue #287): the model's new
+    // version, which its actors take when they are declared again
+    const auto known=g_models.find({mod,model});if(known!=g_models.end()&&known->second.archive==archive)return true;
+    const bool replaced=known!=g_models.end();
     story_notebook::WorldPoint minimum,maximum;
     if(!actor_model_cache::bounds_for(archive,minimum,maximum))return why="the prepared model has no bounds",false;
     for(const auto& entry:g_models)if(entry.second.archive==archive)return why="actor model archive identity collision",false;
     auto clips=actor_model_cache::clips_for(archive);auto rig=actor_model_cache::rig_for(archive);
     if(rig.joint_names.size()!=rig.joint_parents.size()||rig.joint_names.size()>32||clips.size()>8||(!skinned&&(!clips.empty()||!rig.joint_names.empty())))return why="invalid prepared model rig or clips",false;
-    g_models.emplace(std::make_pair(mod,model),ModelResource{archive,1,minimum,maximum,skinned,std::move(clips),std::move(rig)});
-    LOG("[actors] %s:%s model prepared for the editor (%s)",mod.c_str(),model.c_str(),archive.c_str());
+    g_models.insert_or_assign(std::make_pair(mod,model),ModelResource{archive,1,minimum,maximum,skinned,std::move(clips),std::move(rig)});
+    LOG("[actors] %s:%s model %s for the editor (%s)",mod.c_str(),model.c_str(),replaced?"replaced":"prepared",archive.c_str());
     return true;
 }
 bool has_model(const std::string& mod,const std::string& model){return g_models.contains({mod,model});}

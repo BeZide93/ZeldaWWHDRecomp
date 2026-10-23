@@ -28,6 +28,7 @@ struct Snapshot {
     Value locations;  // list_locations (refreshed every second)
     Value villagers;  // list_villagers: the game's villagers the NPC catalogue knows, loaded now (twice a second)
     Value stages;     // list_stages: the open mod's stages, built or not (once a second, when it has any)
+    Value model_files;  // list_model_files: the open mod's models, the file each came from, which are watched (twice a second)
     std::vector<editor::LogEntry> log;
 };
 void refresh();               // once per frame, before drawing: the snapshot and finished commands

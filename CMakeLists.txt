@@ -1113,6 +1113,11 @@ add_executable(editor_kit_import_ui_test runtime/tools/editor_kit_import_ui_test
 target_compile_options(editor_kit_import_ui_test PRIVATE -UNDEBUG)
 target_link_libraries(editor_kit_import_ui_test PRIVATE imgui)
 add_test(NAME editor_kit_import_ui COMMAND editor_kit_import_ui_test)
+# issue #287: an imported model's Replace from file, Watch file and Remove in the Outliner (overlay/editor_model_actions.h)
+add_executable(editor_model_actions_ui_test runtime/tools/editor_model_actions_ui_test.cpp runtime/src/overlay/editor_model_actions.cpp)
+target_compile_options(editor_model_actions_ui_test PRIVATE -UNDEBUG)
+target_link_libraries(editor_model_actions_ui_test PRIVATE imgui)
+add_test(NAME editor_model_actions_ui COMMAND editor_model_actions_ui_test)
 if(APPLE)
   add_executable(pip_preview_ui_test runtime/tools/pip_preview_ui_test.cpp runtime/src/gfx/display_modes.cpp)
   target_include_directories(pip_preview_ui_test PRIVATE ${IMGUI_DIR} runtime/src runtime/include

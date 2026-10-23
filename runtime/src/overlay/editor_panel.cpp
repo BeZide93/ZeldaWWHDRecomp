@@ -20,6 +20,7 @@
 namespace render { uint64_t frame_count(); }  // gfx/renderer.h: the game's frame (test aids)
 #include "../editor/mcp_game.h"
 #include "editor_kit_import.h"
+#include "editor_model_actions.h"
 #include "editor_live_kinds.h"
 #include "editor_resident.h"
 #include "../mods/story_enemy_variants.h"
@@ -55,6 +56,7 @@ struct UiState {
     std::string import_checked;
     editor_kit_import::State kit;  // "Use the game's materials (kit)"
     Value import_done;       // the last import_model's result (its kit report)
+    editor_model_actions::State model_actions;  // Replace, Watch, Remove (issue #287)
 } U;
 
 Snapshot g_snap;
@@ -490,6 +492,8 @@ void refresh() {
             g_snap.stages = m && m->get("stages").type == Value::Array ? s.run("list_stages", Value(), false).get("result") : Value();
         }
         if (frame - villagers_at >= 30) {
+            // where each own model came from and which are watched (issue #287)
+            g_snap.model_files = m && m->get("models").type == Value::Array ? s.run("list_model_files", Value(), false).get("result") : Value();
             g_snap.villagers = s.run("list_villagers", Value(), false).get("result");
             villagers_at = frame;
         }
@@ -829,11 +833,31 @@ void models_area(const Value& m) {
         ImGui::TextColored(kHead, "%s", md.get("id").string().c_str());
         ImGui::SameLine();
         muted(md.get("kind").string("static") + ", " + md.get("source").string());
+        // the placements and items from the open mod as it is now (the confirmation lists them)
+        Value files;
+        for (const auto& f : snapshot().model_files.get("models").array)
+            if (f.get("model") == md.get("id")) files = f;
+        files["placements"] = list();
+        files["items"] = list();
         std::string users;
         for (const auto& a : m.get("actors").array)
-            if (a.get("model") == md.get("id")) users += (users.empty() ? "" : ", ") + a.get("id").string();
+            if (a.get("model") == md.get("id") || a.get("distant").get("model") == md.get("id") || a.get("shoreline").get("model") == md.get("id") ||
+                a.get("collision").get("mesh") == md.get("id")) {
+                users += (users.empty() ? "" : ", ") + a.get("id").string();
+                files["placements"].array.push_back(a.get("id"));
+            }
+        for (const auto& i : m.get("items").array)
+            if (i.get("held_model") == md.get("id")) files["items"].array.push_back(i.get("id"));
         ImGui::Indent();
         muted(users.empty() ? "not used by an actor yet" : "used by " + users);
+        editor_model_actions::draw(
+            U.model_actions, md, files, [](const std::string& name, const Value& p, std::function<void(const Value&)> then) { command(name, p, std::move(then)); },
+            [](std::function<void(std::string)> picked) {
+                hostui::choose_file("Choose the model's new version (.glb)", "glb", false, [picked](std::string path) {
+                    editor_mcp::user_picked(path);  // tool clients may read what the player picked
+                    picked(path);
+                });
+            });
         ImGui::Unindent();
     }
     if (m.get("models").array.empty()) muted("This mod has no models of its own yet.");

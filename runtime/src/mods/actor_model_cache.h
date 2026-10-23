@@ -9,7 +9,10 @@
 namespace actor_model_cache {
 std::string prepare(const std::string& mod,const story_notebook::ManifestModel& model,
                     const std::string& package_dir,const std::string& data_dir,
-                    const std::vector<std::string>& python,const std::string& tool,const std::string& game_dir,bool collision=false,bool shoreline=false,const std::string& material={});
+                    const std::vector<std::string>& python,const std::string& tool,const std::string& game_dir,bool collision=false,bool shoreline=false,const std::string& material={},
+                    unsigned generation=0);
+// `generation` (the editor's replace_model, issue #287): a model's file replaced while the game runs gets an archive of
+// its own (0: the model's usual archive, as the start-up prepares it), so the actors drawing it load the new version.
 std::shared_ptr<const story_world_collision::mesh::Mesh> collision_for(const std::string& archive);
 // Validated render triangles; zero means the archive is not prepared.
 unsigned triangles_for(const std::string& archive);

@@ -268,6 +268,13 @@ const std::vector<CommandInfo> kCommands = {
      true},
     {"reload_model", "Takes a model's changed file in the package (after you exported it again from Blender): the import's fixes are applied to it; a kit model is built again from your game files and the actors drawing it take it while the game runs, another model at the next start.",
      {{"model", "string", "the model's id", true}, {"mod", "string", ""}}},
+    {"replace_model", "Replaces an imported model's file with a new .glb under the same id (fixed as import_model fixes it; a kit model keeps its room and names): every placement using it keeps its place and shows the new version, its collision included, as soon as it is prepared. The file before is kept as models/.previous/<file>. Not an undo step (replace it again to go back). Without file: the file it was last imported or replaced from.",
+     {{"model", "string", "the model's id", true}, {"file", "string", "the new .glb file"}, {"mod", "string", ""}}},
+    {"remove_model", "Removes an imported model from the mod (an undo step). Refused while placements use it (the error lists them) unless actors is true, which removes those placements in the same step; refused while an item holds it. Its file goes to models/.removed and an undo brings it back.",
+     {{"model", "string", "the model's id", true}, {"actors", "boolean", "also remove the placements that use it"}, {"confirm", "boolean", "must be true", true}, {"mod", "string", ""}}, true, true},
+    {"watch_model", "Watches an imported model's file (for this editor session; off by default): when the file changes on disk and has stayed the same for a second, replace_model runs by itself. Without file: the file it was last imported or replaced from.",
+     {{"model", "string", "the model's id", true}, {"on", "boolean", "true watches, false stops", true}, {"file", "string", "the .glb file to watch"}, {"mod", "string", ""}}},
+    {"list_model_files", "The open mod's models: the file each was imported or replaced from in this session, whether it is watched, the placements that use it and the items that hold it.", {{"mod", "string", ""}}},
     {"model_clips", "A model's animation clips (for a route's walk and idle clips).", {{"model", "string", "the model's id", true}, {"mod", "string", ""}}},
     {"check_package", "Every problem of the open mod's package, each with the actor, model, scene or quest it is about.", {{"mod", "string", ""}}},
     {"export_package", "Checks the open mod and writes its package (manifest and its own files) into a new or empty folder.",
@@ -1311,6 +1318,7 @@ bool Session::restore(const std::string& mod, const Value& manifest, Value& resu
     const bool story_changed = story_reload::story_changed(p->manifest, manifest);
     const Value before = p->manifest;
     p->manifest = manifest;
+    sync_model_files(*p, before);  // a removed model's file back (undo), or aside again (redo)
     result["mod"] = mod;
     if (paths_changed) apply_paths(*p, result);
     if (actors_changed) apply_live(*p, before, result);
