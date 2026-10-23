@@ -253,8 +253,13 @@ def rebuild(setup, ctx, hooks, status_file=None, cancel_file=None):
 
     def progress(stage, done=0, total=0):
         if status_file:
-            atomic_json(status_file, {'state': 'building', 'stage': stage,
-                                     'done': done, 'total': total})
+            # Progress is informational: a publication that still loses to a reader after
+            # atomic_replace's retries is skipped (the next one follows), never a failed build.
+            try:
+                atomic_json(status_file, {'state': 'building', 'stage': stage,
+                                         'done': done, 'total': total})
+            except PermissionError:
+                pass
 
     try:
         check()
