@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """Hidden file-select Quit proof. All mutable data and captures stay in WORK.
 
-BINARY GAME SAVE WORK --case on|off|confirm|quit --size 1920x1080
+BINARY GAME SAVE WORK --case on|off|confirm|quit|mouse|cancel|copy|erase
 SAVE is an existing save directory; only cking.sav is copied. Captures are
 composed presents (including the host UI), rather than player screenshots.
+Uses macOS Metal's hidden presentation path. Other aspect ratios exercise
+letterboxing; mouse input clicks near the visible button edges.
 """
 import argparse
 import json
@@ -18,11 +20,13 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ("binary", "game", "save", "work"):
         parser.add_argument(name, type=lambda p: Path(p).resolve())
-    parser.add_argument("--case", choices=("on", "off", "confirm", "quit", "mouse", "cancel"), default="on")
-    parser.add_argument("--size", choices=("1920x1080", "1280x720"), default="1920x1080")
+    parser.add_argument("--case", choices=("on", "off", "confirm", "quit", "mouse", "cancel", "copy", "erase"), default="on")
+    parser.add_argument("--size", choices=("1920x1080", "1280x720", "1280x960", "2560x1080", "1080x1920"), default="1920x1080")
     parser.add_argument("--prompts", choices=("original", "xbox", "playstation"), default="original")
+    parser.add_argument("--layout", choices=("position", "labels"), default="position")
+    parser.add_argument("--slot-timeout", type=int, default=180, help="seconds to wait for a game-session slot")
     args = parser.parse_args()
-    deadline = time.monotonic() + 180
+    deadline = time.monotonic() + args.slot_timeout
     announced = False
     while True:
         commands = subprocess.check_output(["ps", "-axo", "command"], text=True).splitlines()
@@ -35,8 +39,13 @@ def main():
             announced = True
         if time.monotonic() >= deadline:
             raise RuntimeError("Two other game sessions are still running")
-        time.sleep(2)
-    run = args.work / (args.case + "-" + args.size + ("-" + args.prompts if args.prompts != "original" else ""))
+        time.sleep(.1)
+    tag = args.case + "-" + args.size
+    if args.prompts != "original":
+        tag += "-" + args.prompts
+    if args.layout != "position":
+        tag += "-" + args.layout
+    run = args.work / tag
     run.mkdir(parents=True, exist_ok=False)
     user = run / "user"
     (run / "save" / "user").mkdir(parents=True)
@@ -45,9 +54,17 @@ def main():
     if source.exists():
         shutil.copy2(source, run / "save" / "user" / "cking.sav")
     controls = user / "controls.json"
-    controls.write_text(json.dumps({"options": {"file_select_quit": args.case != "off", "button_prompts": args.prompts}}))
+    mapping = {"options": {"file_select_quit": args.case != "off", "button_prompts": args.prompts}}
+    if args.layout == "labels":
+        mapping["controller"] = {name: name for name in ("A", "B", "X", "Y")}
+    controls.write_text(json.dumps(mapping))
     presses = "180-185:8000"
-    captures = "400,500"
+    captures = "150,230,400,500" if args.case == "on" else "400,500"
+    if args.case == "off":
+        # With the host button disabled, X reaches the native file selector.
+        # The extra capture verifies that this face input has no native action.
+        presses += ",550-555:2000"
+        captures += ",610"
     if args.case in ("confirm", "quit", "cancel"):
         presses += ",550-555:2000"
         captures += ",610"
@@ -58,20 +75,39 @@ def main():
         captures += ",610"
     if args.case == "quit":
         presses += ",640-645:0400,680-685:8000"
+    sticks = ""
+    if args.case in ("copy", "erase"):
+        presses += ",550-555:8000"
+        sticks = "600-605:-1:0"
+        if args.case == "copy":
+            presses += ",650-655:8000,750-755:4000,850-855:4000"
+            captures += ",610,710,910"
+        else:
+            sticks += ",650-655:-1:0"
+            presses += ",700-705:8000,800-805:4000,900-905:4000"
+            captures += ",660,760,960"
     env = dict(os.environ, WWHD_USER_DIR=str(user), WWHD_CONTROLS=str(controls),
                WWHD_STATE_DIR=str(user / "states"), WWHD_DISPLAY_SETTINGS=str(user / "display.json"),
                WWHD_HIDDEN_WINDOWS="1", WWHD_NO_AUDIO="1", WWHD_NO_HOST_INPUT="1", WWHD_NO_GAMEPAD="1",
                WWHD_RENDERER_RUNTIME="metal", WWHD_INTERP="0", WWHD_LANGUAGE="1",
+               WWHD_ASPECT="16:9",
                WWHD_INTERP_PACED="0", WWHD_DISPLAY_HZ="0", WWHD_DRC_MODE="off",
                WWHD_SHADER_CACHE=str(args.work / "shader-cache.bin"),
                WWHD_VK_SHADER_CACHE=str(args.work / "vk-cache"),
                WWHD_SIM_SCREEN=args.size, WWHD_DUMP_FRAMES=captures, WWHD_DUMP_PRESENT="1",
-               WWHD_PRESS=presses, WWHD_LOG_BUTTONS="1", WWHD_TEST_FILE_QUIT_TRACE="1")
+               WWHD_PRESS=presses, WWHD_STICK=sticks, WWHD_LOG_BUTTONS="1", WWHD_TEST_FILE_QUIT_TRACE="1")
     if args.case == "mouse":
-        env["WWHD_TEST_POST_MOUSE"] = "540:move:0.5:0.91,550:click:0.5:0.91,650:click:0.6055:0.5625"
+        width, height = map(int, args.size.split("x"))
+        scale = min(width / 1280, height / 720)
+        origin_x, origin_y = (width - 1280 * scale) / 2, (height - 720 * scale) / 2
+        def point(x, y):
+            return f"{(origin_x + x * scale) / width:.6f}:{(origin_y + y * scale) / height:.6f}"
+        quit_point = point(525, 610)  # just inside the native plate's top-left edge
+        yes_point = point(890, 450)   # just inside the confirmation's bottom-right edge
+        env["WWHD_TEST_POST_MOUSE"] = f"540:move:{quit_point},550:down:{quit_point},555:up:{quit_point},640:move:{yes_point},650:down:{yes_point},655:up:{yes_point}"
     log_path = run / "log.txt"
     clean = False
-    stop_frame = {"on": 500, "off": 500, "confirm": 610, "cancel": 710}.get(args.case)
+    stop_frame = {"on": 500, "off": 610, "confirm": 610, "cancel": 710, "copy": 910, "erase": 960}.get(args.case)
     with log_path.open("w") as log:
         process = subprocess.Popen([str(args.binary), "--game", str(args.game), "--save", str(run / "save")],
                                    cwd=run, env=env, stdout=log, stderr=subprocess.STDOUT)
@@ -97,6 +133,8 @@ def main():
         "cancel": "[file-select-quit] answer: No",
         "confirm": "[file-select-quit] asking",
         "on": "[file-select-quit] loaded runtime menu font",
+        "copy": "caption=5 wait=0 step=1 state=1049a79c",
+        "erase": "caption=2 wait=0 step=1 state=1049a718",
     }.get(args.case)
     shutdown = clean and "[quit] Settings > Quit Game: quitting" in text
     default_no_and_back = text.count("[file-select-quit] answer: No") == 2 and "answer: Yes" not in text
@@ -109,7 +147,8 @@ def main():
                   captures=[p.name for p in sorted(run.glob("*_present.png"))])
     (run / "result.json").write_text(json.dumps(result, indent=2) + "\n")
     print(json.dumps(result, indent=2), flush=True)
-    passed = result["expected_log_found"] and bool(result["captures"])
+    required = {f"frame_{frame}_present.png" for frame in captures.split(",")}
+    passed = result["expected_log_found"] and required.issubset(result["captures"])
     if args.case in ("quit", "mouse"):
         passed &= shutdown
     if args.case == "cancel":
