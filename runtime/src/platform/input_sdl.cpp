@@ -741,6 +741,51 @@ static void post_test_keys(){
   SDL_PushEvent(&e);
  }
 }
+// debug: WWHD_TEST_VIRTUAL_PAD=2000-2010:a,2100-2105:start attaches an SDL virtual gamepad and holds its
+// buttons (SDL gamepad button names) during TV frame ranges. Unlike WWHD_PRESS the presses take SDL's own
+// path, focus filter included (issue #267: a hidden run has no focus, so they reach the game only with
+// controller input in the background on). Just before the first range a window focus loss is posted for
+// the TV window, as the window manager sends it. Needs host input (no WWHD_NO_HOST_INPUT); to leave real
+// controllers out, start with SDL_JOYSTICK_HIDAPI=0 SDL_JOYSTICK_MFI=0 SDL_JOYSTICK_IOKIT=0 (macOS).
+static void test_virtual_pad(){
+ struct Hold{uint64_t from,to;SDL_GamepadButton button;};
+ static const std::vector<Hold> holds=[]{
+  std::vector<Hold> v;const char* e=getenv("WWHD_TEST_VIRTUAL_PAD");
+  for(const char* p=e;p&&*p;){
+   char* end;const uint64_t a=strtoull(p,&end,10);if(*end!='-')break;
+   const uint64_t b=strtoull(end+1,&end,10);if(*end!=':')break;p=end+1;
+   const size_t len=strcspn(p,",");const std::string name(p,len);p+=len+(p[len]==',');
+   const SDL_GamepadButton button=SDL_GetGamepadButtonFromString(name.c_str());
+   if(button==SDL_GAMEPAD_BUTTON_INVALID){LOG("[input] WWHD_TEST_VIRTUAL_PAD: unknown button %s",name.c_str());continue;}
+   v.push_back({a,b,button});
+  }
+  return v;
+ }();
+ static SDL_Joystick* pad=nullptr;static bool failed=false;
+ if(holds.empty()||failed||!SDL_WasInit(SDL_INIT_GAMEPAD))return;
+ if(!pad){
+  SDL_VirtualJoystickDesc d;SDL_INIT_INTERFACE(&d);
+  d.type=SDL_JOYSTICK_TYPE_GAMEPAD;d.naxes=SDL_GAMEPAD_AXIS_COUNT;d.nbuttons=SDL_GAMEPAD_BUTTON_COUNT;d.name="WWHD test virtual pad";
+  const SDL_JoystickID id=SDL_AttachVirtualJoystick(&d);
+  pad=id?SDL_OpenJoystick(id):nullptr;
+  LOG("[input] test virtual pad %u %s",(unsigned)id,pad?"attached":SDL_GetError());
+  if(!pad){failed=true;return;}
+ }
+ const uint64_t frame=render::frame_count();
+ static bool focusPosted=false;
+ if(!focusPosted&&g_prompt_window&&frame+1>=holds.front().from){
+  focusPosted=true;SDL_Event e{};e.type=SDL_EVENT_WINDOW_FOCUS_LOST;e.window.windowID=SDL_GetWindowID(g_prompt_window);SDL_PushEvent(&e);
+  LOG("[input] test virtual pad: focus loss posted at frame %llu (a window has the keyboard: %s; controller input in the background: %s)",
+      (unsigned long long)frame,SDL_GetKeyboardFocus()?"yes":"no",background_controllers()?"on":"off");
+ }
+ static bool held[SDL_GAMEPAD_BUTTON_COUNT]={};
+ bool want[SDL_GAMEPAD_BUTTON_COUNT]={};
+ for(const Hold& h:holds)if(frame>=h.from&&frame<=h.to)want[h.button]=true;
+ for(int b=0;b<SDL_GAMEPAD_BUTTON_COUNT;b++)if(want[b]!=held[b]){
+  held[b]=want[b];SDL_SetJoystickVirtualButton(pad,b,want[b]);
+  LOG("[input] test virtual pad: %s %s at frame %llu",SDL_GetGamepadStringForButton((SDL_GamepadButton)b),want[b]?"down":"up",(unsigned long long)frame);
+ }
+}
 // The overlay's text prompt (overlay/text_entry.h) while the menu is not over it: typed text (SDL text
 // input, input method composition) and the keys of every game window. True = the prompt took the event.
 static bool text_entry_event(const SDL_Event& event){
@@ -900,6 +945,7 @@ void update(){
   }
  }
  post_test_keys();
+ test_virtual_pad();
  using namespace input_map;
  // v: every device combined (strongest input wins), as the settings overlay reads it; game: the same with
  // each device's inputs that the overlay or the text prompt had and that are still held left out
