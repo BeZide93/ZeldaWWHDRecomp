@@ -67,8 +67,16 @@ def process_alive(pid, marker=b':modelprep'):
     try:
         with open('/proc/%d/cmdline' % int(pid), 'rb') as stream:
             return marker in stream.read()
-    except (OSError, ValueError, TypeError):
+    except (FileNotFoundError, ProcessLookupError, ValueError, TypeError):
         return False
+    except OSError:  # not readable here: ask the kernel (the app's processes share one user)
+        try:
+            os.kill(int(pid), 0)
+            return True
+        except ProcessLookupError:
+            return False
+        except OSError:
+            return True  # another user's process: the stall rule still ends a stuck attempt
 
 
 class Attempt:
