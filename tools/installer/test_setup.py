@@ -354,37 +354,157 @@ class SetupPython(unittest.TestCase):
 
 
 class AtomicReplace(unittest.TestCase):
-    def test_transient_windows_readers(self):
-        from unittest.mock import patch
-        with patch.object(setup.code_mods.os, 'name', 'nt'), \
-             patch.object(setup.code_mods.os, 'replace', side_effect=[PermissionError(), PermissionError(), None]) as replace, \
-             patch.object(setup.code_mods.time, 'sleep') as sleep:
+    """Publishing files the running game polls (issue #282: WinError 5 replacing code-mods-status.json)."""
+    cm = setup.code_mods
+
+    def test_windows_uses_posix_rename_first(self):
+        with mock.patch.object(self.cm.os, 'name', 'nt'), \
+             mock.patch.object(self.cm, '_posix_rename', return_value=True) as posix, \
+             mock.patch.object(self.cm.os, 'replace') as replace:
             setup.atomic_replace('source', 'destination')
-        self.assertEqual(replace.call_count, 3)
+        posix.assert_called_once_with('source', 'destination')
+        replace.assert_not_called()
+
+    def test_unsupported_posix_rename_falls_back_to_os_replace(self):
+        with mock.patch.object(self.cm.os, 'name', 'nt'), \
+             mock.patch.object(self.cm, '_posix_rename', return_value=False), \
+             mock.patch.object(self.cm.os, 'replace') as replace:
+            setup.atomic_replace('source', 'destination')
+        replace.assert_called_once_with('source', 'destination')
+
+    def test_other_platforms_never_use_the_windows_rename(self):
+        with mock.patch.object(self.cm.os, 'name', 'posix'), \
+             mock.patch.object(self.cm, '_posix_rename') as posix, \
+             mock.patch.object(self.cm.os, 'replace') as replace:
+            setup.atomic_replace('source', 'destination')
+        posix.assert_not_called()
+        replace.assert_called_once_with('source', 'destination')
+
+    def test_transient_windows_readers(self):
+        # a reader without delete sharing (a virus scanner) blocks even the POSIX rename for a moment
+        with mock.patch.object(self.cm.os, 'name', 'nt'), \
+             mock.patch.object(self.cm, '_posix_rename', side_effect=[PermissionError(), False, True]) as posix, \
+             mock.patch.object(self.cm.os, 'replace', side_effect=[PermissionError()]) as replace, \
+             mock.patch.object(self.cm.time, 'sleep') as sleep:
+            setup.atomic_replace('source', 'destination')
+        self.assertEqual(posix.call_count, 3)
+        self.assertEqual(replace.call_count, 1)
         self.assertEqual(sleep.call_count, 2)
-        replace.assert_called_with('source', 'destination')
 
     def test_persistent_denial(self):
-        from unittest.mock import patch
         error = PermissionError('locked')
-        with patch.object(setup.code_mods.os, 'name', 'nt'), \
-             patch.object(setup.code_mods.os, 'replace', side_effect=error) as replace, \
-             patch.object(setup.code_mods.time, 'monotonic', side_effect=[0, 0, 1, 2]), \
-             patch.object(setup.code_mods.time, 'sleep'):
+        with mock.patch.object(self.cm.os, 'name', 'nt'), \
+             mock.patch.object(self.cm, '_posix_rename', return_value=False), \
+             mock.patch.object(self.cm.os, 'replace', side_effect=error) as replace, \
+             mock.patch.object(self.cm.time, 'monotonic', side_effect=[0, 0, 1, 6]), \
+             mock.patch.object(self.cm.time, 'sleep'):
             with self.assertRaises(PermissionError) as caught:
                 setup.atomic_replace('source', 'destination')
         self.assertIs(caught.exception, error)
         self.assertEqual(replace.call_count, 3)
 
     def test_other_errors_and_platforms_do_not_retry(self):
-        from unittest.mock import patch
         for platform, error in [('nt', FileNotFoundError()), ('posix', PermissionError())]:
             with self.subTest(platform=platform, error=error), \
-                 patch.object(setup.code_mods.os, 'name', platform), \
-                 patch.object(setup.code_mods.os, 'replace', side_effect=error) as replace:
+                 mock.patch.object(self.cm.os, 'name', platform), \
+                 mock.patch.object(self.cm, '_posix_rename', return_value=False), \
+                 mock.patch.object(self.cm.os, 'replace', side_effect=error) as replace:
                 with self.assertRaises(type(error)):
                     setup.atomic_replace('source', 'destination')
                 replace.assert_called_once()
+
+    def test_windows_errors_map_like_os_replace(self):
+        self.assertIsInstance(self.cm._windows_error(5, 'a', 'b'), PermissionError)
+        self.assertIsInstance(self.cm._windows_error(32, 'a', 'b'), PermissionError)
+        other = self.cm._windows_error(3, 'a', 'b')
+        self.assertNotIsInstance(other, PermissionError)
+        self.assertIsInstance(other, OSError)
+
+    def test_extended_paths(self):
+        if os.name != 'nt':
+            self.skipTest('Windows path forms')
+        self.assertEqual(self.cm._extended_path('C:\\a\\b.json'), '\\\\?\\C:\\a\\b.json')
+        self.assertEqual(self.cm._extended_path('C:/a/b.json'), '\\\\?\\C:\\a\\b.json')
+        self.assertEqual(self.cm._extended_path('\\\\server\\share\\b.json'), '\\\\?\\UNC\\server\\share\\b.json')
+        self.assertEqual(self.cm._extended_path('\\\\?\\C:\\a'), '\\\\?\\C:\\a')
+
+    @unittest.skipUnless(os.name == 'nt', 'Windows rename semantics')
+    def test_replaces_a_file_the_game_holds_open(self):
+        """The real Windows behaviour: a reader that allows delete sharing (the game's) blocks os.replace,
+        not the POSIX-semantics rename, and keeps reading the contents it opened."""
+        import ctypes
+        from ctypes import wintypes
+        kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
+        kernel32.CreateFileW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, ctypes.c_void_p,
+                                         wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE]
+        kernel32.CreateFileW.restype = wintypes.HANDLE
+        kernel32.ReadFile.argtypes = [wintypes.HANDLE, ctypes.c_void_p, wintypes.DWORD,
+                                      ctypes.POINTER(wintypes.DWORD), ctypes.c_void_p]
+        kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+        with tempfile.TemporaryDirectory(prefix='wwhd-282, ') as d:
+            target = os.path.join(d, 'code-mods-status.json')
+            with open(target, 'w') as f:
+                f.write('old')
+            # GENERIC_READ, FILE_SHARE_READ|WRITE|DELETE, OPEN_EXISTING: runtime/src/platform/shared_read.h
+            handle = kernel32.CreateFileW(target, 0x80000000, 7, None, 3, 0, None)
+            self.assertNotEqual(handle, ctypes.c_void_p(-1).value, ctypes.get_last_error())
+            try:
+                with open(target + '.tmp', 'w') as f:
+                    f.write('new')
+                with self.assertRaises(PermissionError):  # the root cause of #282
+                    os.replace(target + '.tmp', target)
+                self.assertTrue(self.cm._posix_rename(target + '.tmp', target),
+                                'FileRenameInfoEx POSIX rename unavailable on this Windows/volume')
+                with open(target) as f:
+                    self.assertEqual(f.read(), 'new')
+                self.assertFalse(os.path.exists(target + '.tmp'))
+                buffer, count = ctypes.create_string_buffer(16), wintypes.DWORD()
+                self.assertTrue(kernel32.ReadFile(handle, buffer, 16, ctypes.byref(count), None))
+                self.assertEqual(buffer.raw[:count.value], b'old')
+            finally:
+                kernel32.CloseHandle(handle)
+            # and through the public helper, with nothing open
+            with open(target + '.tmp', 'w') as f:
+                f.write('newer')
+            setup.atomic_replace(target + '.tmp', target)
+            with open(target) as f:
+                self.assertEqual(f.read(), 'newer')
+
+    def test_progress_publication_never_fails_the_build(self):
+        """A progress update that still loses to a reader is skipped; the final status is published."""
+        from pathlib import Path
+        from types import SimpleNamespace
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            (root / "game/code").mkdir(parents=True)
+            (root / "game/code/cking.rpx").write_bytes(b"synthetic input")
+            (root / "sdk").mkdir()
+            data = root / "data"
+            ctx = SimpleNamespace(data_dir=str(data), game_dir=str(root / "game"),
+                                  manifest={"toolchain": {}, "exe": "fixture"}, args=SimpleNamespace(jobs=1))
+            status = data / "code-mods-status.json"
+            real = self.cm.atomic_json
+
+            def contended(path, value):
+                if Path(path) == status and value.get('state') == 'building':
+                    raise PermissionError(13, 'Access is denied', str(path))
+                real(path, value)
+
+            def compile_code(tc, manifest, gen, obj, jobs, **kwargs):
+                Path(obj).mkdir(); kwargs["progress"](1, 1)
+                return []
+            tc = SimpleNamespace(cc=["fixture compiler"], env={})
+            with mock.patch.multiple(setup, PKG=root, PORTABLE=False), \
+                 mock.patch.object(setup, "get_toolchain", return_value=tc), \
+                 mock.patch.object(setup, "run_logged", return_value="fixture compiler version"), \
+                 mock.patch.object(setup, "free_space", return_value=20 << 30), \
+                 mock.patch.object(setup, "recompile", side_effect=lambda game, gen, hooks=False: Path(gen).mkdir()), \
+                 mock.patch.object(setup, "compile_gamecode", side_effect=compile_code), \
+                 mock.patch.object(setup, "link_game", side_effect=lambda *a: Path(a[-1]).write_bytes(b"exe")), \
+                 mock.patch.object(self.cm, "atomic_json", side_effect=contended):
+                result = self.cm.rebuild(setup, ctx, True, status)
+            self.assertEqual(result["state"], "ready")
+            self.assertEqual(json.loads(status.read_text())["state"], "ready")
 
 
 class Keys(unittest.TestCase):
