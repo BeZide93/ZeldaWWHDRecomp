@@ -20,7 +20,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef _WIN32
+#include <windows.h>
+#else
 #include <sys/mman.h>
+#endif
 
 static int fails;
 #define CHECK(cond, ...)                                  \
@@ -109,11 +113,18 @@ static void round_trip(Cpu* c, uint32_t w) {
 
 int main(int argc, char** argv) {
     int exhaustive = argc > 1 && !strcmp(argv[1], "--exhaustive");
-    void* page = PPC_MEM_BASE + kSrc;
+    void* page = PPC_MEM_BASE + kSrc;  /* the guest page the round trips use, at its guest address */
+#ifdef _WIN32
+    if (VirtualAlloc(page, 0x10000, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE) != page) {
+        fprintf(stderr, "ppc_f32_exact_test: VirtualAlloc guest page failed (%lu)\n", (unsigned long)GetLastError());
+        return 1;
+    }
+#else
     if (mmap(page, 0x10000, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON | MAP_FIXED, -1, 0) != page) {
         perror("ppc_f32_exact_test: mmap guest page");
         return 1;
     }
+#endif
     static Cpu cpu;
     Cpu* c = &cpu;
     memset(c, 0, sizeof *c);

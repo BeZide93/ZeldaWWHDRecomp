@@ -23,7 +23,7 @@ CC = os.environ.get("CC") or shutil.which("cc") or shutil.which("clang") or shut
 class F32Exact(unittest.TestCase):
     def build_run(self, opt, *args):
         with tempfile.TemporaryDirectory() as tmp:
-            exe = os.path.join(tmp, "t")
+            exe = os.path.join(tmp, "t.exe" if os.name == "nt" else "t")
             subprocess.run([CC, "-std=c11", opt, "-ffp-contract=off", "-fno-strict-aliasing", "-fwrapv", "-w",
                             "-I" + os.path.join(ROOT, "runtime", "include"), SRC, "-o", exe], check=True)
             r = subprocess.run([exe, *args], capture_output=True, text=True)
