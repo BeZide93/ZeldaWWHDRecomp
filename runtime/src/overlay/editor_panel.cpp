@@ -32,7 +32,8 @@
 
 namespace editor_ui {
 namespace {
-const ImVec4 kMuted(0.62f, 0.66f, 0.72f, 1), kGood(0.45f, 0.82f, 0.52f, 1), kBad(0.95f, 0.55f, 0.45f, 1), kHead(0.95f, 0.85f, 0.55f, 1);
+const ImVec4 kMuted(0.62f, 0.66f, 0.72f, 1), kGood(0.45f, 0.82f, 0.52f, 1), kBad(0.95f, 0.55f, 0.45f, 1), kHead(0.95f, 0.85f, 0.55f, 1),
+    kWarn(1.0f, 0.80f, 0.35f, 1);
 
 struct UiState {
     int area = 0, select_area = -1;
@@ -865,6 +866,8 @@ void import_area() {
                                num(i, "size") / 1024, int(num(i, "vertices")), int(num(i, "triangles")), i.get("texture").string().c_str(),
                                int(num(i, "bones")));
             if (!clips.empty()) muted("clips: " + clips);
+            // what the import changes to make the file fit (model_import.h): the copy in the package gets it, the file stays
+            for (const auto& fix : i.get("import_fixes").array) wrapped(kWarn, fix.string());
             if (ImGui::Button("Import into the package")) {
                 Value p;
                 p["file"] = std::string(U.import_path);

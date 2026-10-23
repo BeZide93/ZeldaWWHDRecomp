@@ -224,6 +224,7 @@ public:
     // frame interpolation (interp.cpp): the logic step lists are committed in, and the fraction between
     // the step before and this one of the frame being drawn (1: exact, or interpolation off)
     void set_step(uint64_t step) {step_.store(step,std::memory_order_relaxed);}
+    uint64_t step() const {return step_.load(std::memory_order_relaxed);}
     void set_fraction(float t) {fraction_.store(std::isfinite(t)?std::clamp(t,0.f,1.f):1.f,std::memory_order_relaxed);}
     void note(const std::string& owner,const std::string& message) {std::lock_guard lock(mutex);errors[owner]=message;}
     std::string error(const std::string& owner) {std::lock_guard lock(mutex);auto it=errors.find(owner);return it==errors.end()?std::string{}:it->second;}

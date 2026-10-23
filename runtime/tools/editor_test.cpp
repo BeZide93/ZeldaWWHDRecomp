@@ -9,6 +9,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <map>
 #include <set>
 #include <sstream>
 #include <string>
@@ -40,6 +41,7 @@
 #include "overlay/editor_live_kinds.h"
 #include "mods/story_mail_book.h"
 #include "mods/story_enemy_variants.h"
+#include "static_model_fixture.h"
 
 
 namespace fs = std::filesystem;
@@ -156,7 +158,15 @@ struct FakeHost : editor::Host {
         p.angle = 16384;
         return p;
     }
-    bool focus(const editor::WorldPoint&, std::string&) override { return ++focused, true; }
+    editor::WorldPoint last_focus;
+    bool focus(const editor::WorldPoint& at, std::string&) override { return last_focus = at, ++focused, true; }
+    std::map<std::string, std::string> model_failures;  // "mod:model" -> why it could not be prepared
+    std::string model_failure(const std::string& mod, const std::string& model) override {
+        const auto it = model_failures.find(mod + ":" + model);
+        return it == model_failures.end() ? std::string() : it->second;
+    }
+    std::set<std::string> collision_pending;  // "mod:model" whose collision is being prepared
+    bool collision_preparing(const std::string& mod, const std::string& model) override { return collision_pending.contains(mod + ":" + model); }
     bool prepare_model(const std::string& mod, const std::string&, const Value& model, std::string& note, std::string&) override {
         prepared = mod + ":" + model.get("id").string();
         prepared_collision = model.get("collision").boolean;
@@ -1864,6 +1874,171 @@ void export_command() {
     CHECK(host.calls == 2);
 }
 
+// Own models made away from their origin (issue #280: a Windfall extension modelled on the island's export keeps the
+// room's coordinates): added at Link, such a model goes to the room's origin unturned, so it stands where it was
+// modelled; focus frames the model, not its origin; a model the computer could not prepare is a warning that says why;
+// a file Blender writes with several objects is fixed on import.
+void own_models(const fs::path& examples) {
+    // the pieces
+    {
+        const editor::WorldPoint lo{-9364, -350, -7907}, hi{-2583, 1160, -2766};  // the issue's extension, game units
+        CHECK(std::fabs(editor::origin_gap(lo, hi) - std::sqrt(2583.0 * 2583 + 2766.0 * 2766)) < 1);
+        CHECK(editor::off_origin(lo, hi));
+        CHECK(editor::origin_gap({-50, 0, -50}, {50, 100, 50}) == 0 && !editor::off_origin({-50, 0, -50}, {50, 100, 50}));
+        CHECK(!editor::off_origin({200, 0, 200}, {900, 50, 900}));             // a little off: under 10 m
+        CHECK(!editor::off_origin({2000, 0, -50000}, {60000, 50, 50000}));     // a big island beside its origin: under a quarter of its width
+        editor::WorldPoint a, b;
+        editor::placed_bounds({100, 0, 0}, {200, 10, 10}, json(R"({"position": {"x": 1000, "y": 5, "z": 0}, "rotation": {"x": 0, "y": 90, "z": 0}})"), a, b);
+        CHECK(std::fabs(a.x - 1000) < 0.01 && std::fabs(b.x - 1010) < 0.01 && std::fabs(a.z + 200) < 0.01 && std::fabs(b.z + 100) < 0.01 && std::fabs(b.y - 15) < 0.01);
+        editor::placed_bounds({100, 0, 0}, {200, 10, 10}, json(R"({"position": {"x": 0, "y": 0, "z": 0}, "scale": {"x": 2, "y": 1, "z": 1}})"), a, b);
+        CHECK(std::fabs(a.x - 200) < 0.01 && std::fabs(b.x - 400) < 0.01);
+        const auto windfall = editor::room_origin("sea", 11);
+        CHECK(windfall.x == 0 && windfall.y == 0 && windfall.z == -200000);
+        const auto stage = editor::room_origin("M_NewD2", 3);
+        CHECK(stage.x == 0 && stage.y == 0 && stage.z == 0);
+    }
+    FakeHost host;
+    const fs::path dir = temp_dir("own-models");
+    fs::copy(examples / "sdk-v3-windfall", dir, fs::copy_options::recursive);
+    std::ifstream in(dir / "manifest.json");
+    std::stringstream text;
+    text << in.rdbuf();
+    in.close();
+    editor::Session w(&host);
+    w.add_package("sdk-v3-windfall", "Windfall", dir.string(), mods::json::parse(text.str()));
+    auto write = [&](const fs::path& file, const std::vector<uint8_t>& bytes) {
+        std::ofstream o(file, std::ios::binary);
+        o.write(reinterpret_cast<const char*>(bytes.data()), std::streamsize(bytes.size()));
+    };
+    // a cube 60 m west and 50 m south of its origin (metres in the file)
+    auto doc = static_model_fixture::cube_document();
+    doc["nodes"].array[0]["translation"] = json("[-60, 0, -50]");
+    write(dir / "extension.glb", static_model_fixture::glb(doc, static_model_fixture::cube_binary()));
+    Value p;
+    p["file"] = (dir / "extension.glb").string();
+    Value r = w.run("import_model", p);
+    CHECK(ok(r) && r.get("result").get("info").get("minimum").get("x").number == -6050);
+    CHECK(r.get("result").get("fixes").type == Value::Null);  // a file that fits is kept as it is
+    // added at Link (sea room 44): at the room's origin, unturned, with the note
+    r = w.run("add_actor", json(R"({"type": "model", "model": "extension", "id": "ext"})"));
+    CHECK(ok(r));
+    const Value& placed = r.get("result").get("actor");
+    CHECK(placed.get("position").get("x").number == -200000 && placed.get("position").get("y").number == 0 && placed.get("position").get("z").number == 300000);
+    CHECK(placed.get("rotation").type == Value::Null);
+    const std::string note = r.get("result").get("note").string();
+    CHECK(note.find("modelled away from its origin") != std::string::npos && note.find("origin of sea room 44 (-200000, 0, 300000)") != std::string::npos &&
+          note.find("around (-206000, 0, 295000)") != std::string::npos);
+    // focus: the model where it is drawn, not the actor's origin
+    CHECK(ok(w.run("focus", json(R"({"id": "ext"})"))));
+    CHECK(std::fabs(host.last_focus.x + 206000) < 1 && std::fabs(host.last_focus.z - 295000) < 1);
+    // at a given position: kept, and the note says where it is drawn
+    r = w.run("add_actor", json(R"({"type": "model", "model": "extension", "id": "ext-2", "at": "position", "position": {"x": 1000, "y": 0, "z": -200000}, "stage": "sea"})"));
+    CHECK(ok(r) && r.get("result").get("actor").get("position").get("x").number == 1000);
+    CHECK(r.get("result").get("note").string().find("drawn around (-50") != std::string::npos);
+    // a model at its origin: placed at Link as always, no note about it
+    write(dir / "post.glb", static_model_fixture::glb(static_model_fixture::cube_document(), static_model_fixture::cube_binary()));
+    p["file"] = (dir / "post.glb").string();
+    CHECK(ok(w.run("import_model", p)));
+    r = w.run("add_actor", json(R"({"type": "model", "model": "post", "id": "post"})"));
+    CHECK(ok(r) && r.get("result").get("actor").get("position").get("x").number == 1 && r.get("result").get("note").string().find("origin") == std::string::npos);
+    // no collision of its own: the small cylinder as before, no world object
+    CHECK(r.get("result").get("actor").get("behaviour").type == Value::Null && r.get("result").get("actor").get("collision").get("radius").number == 30);
+    // normals against their faces' winding are kept but said (the model is lit from the wrong side); agreeing ones aren't
+    {
+        auto normals = [&](float sign) {
+            auto bin = static_model_fixture::cube_binary();
+            for (size_t n = 0; n < 8; ++n)
+                for (size_t c = 0; c < 3; ++c) {
+                    const float value = sign * ((n & (1u << c)) ? 0.577f : -0.577f);
+                    std::memcpy(bin.data() + 96 + n * 12 + c * 4, &value, 4);
+                }
+            return bin;
+        };
+        Value q;
+        // the fixture cube's faces wind inward (seen from inside), so its normals agree with them pointing to the centre
+        write(dir / "outward.glb", static_model_fixture::glb(static_model_fixture::cube_document(), normals(-1)));
+        q["file"] = (dir / "outward.glb").string();
+        r = w.run("check_model", q);
+        CHECK(ok(r) && r.get("result").get("import_warnings").type == Value::Null);
+        write(dir / "inward.glb", static_model_fixture::glb(static_model_fixture::cube_document(), normals(1)));
+        q["file"] = (dir / "inward.glb").string();
+        r = w.run("check_model", q);
+        CHECK(ok(r) && r.get("result").get("import_warnings").array.size() == 1 &&
+              r.get("result").get("import_warnings").array[0].string().find("100% of its normals point into the model") != std::string::npos);
+        r = w.run("import_model", q);
+        CHECK(ok(r) && r.get("result").get("note").string().find("Recalculate Outside") != std::string::npos);
+    }
+    // a model with collision of its own (a "<name>_col" mesh with a col_* material), as an island-export extension
+    // has: a static world object on its own collision, which is prepared at once (issue #280)
+    {
+        auto doc = static_model_fixture::cube_document();
+        doc["materials"].array.push_back(json(R"({"name": "col_grass"})"));
+        doc["meshes"].array.push_back(doc["meshes"].array[0]);
+        doc["meshes"].array[1]["primitives"].array[0]["material"] = double(doc["materials"].array.size() - 1);
+        doc["meshes"].array[1]["primitives"].array[0]["attributes"].object.erase("TEXCOORD_0");
+        doc["nodes"] = json(R"([{"name": "ground", "mesh": 0}, {"name": "ground_col", "mesh": 1}])");
+        doc["scenes"].array[0]["nodes"] = json("[0, 1]");
+        write(dir / "ground.glb", static_model_fixture::glb(doc, static_model_fixture::cube_binary()));
+        p["file"] = (dir / "ground.glb").string();
+        r = w.run("import_model", p);
+        CHECK(ok(r));
+        host.prepared.clear();
+        host.prepared_collision = false;
+        r = w.run("add_actor", json(R"({"type": "model", "model": "ground", "id": "ground"})"));
+        const Value& g = r.get("result").get("actor");
+        CHECK(ok(r) && g.get("behaviour").string() == "static" && g.get("collision").get("mesh").string() == "ground" && g.get("collision").get("radius").type == Value::Null);
+        CHECK(host.prepared == "sdk-v3-windfall:ground" && host.prepared_collision);
+        CHECK(r.get("result").get("note").string().find("stands on its own collision") != std::string::npos);
+        std::vector<story_notebook::ManifestActor> actors;
+        std::string why;
+        CHECK(story_notebook::parse_actors(*w.manifest("sdk-v3-windfall"), actors, why));
+        CHECK(std::any_of(actors.begin(), actors.end(), [](const auto& a) { return a.id == "ground" && a.world_object() && a.collision_mesh == "ground"; }));
+        // the import prepared it with its collision already
+        p["file"] = (dir / "ground.glb").string();
+        p["id"] = "ground-2";
+        host.prepared_collision = false;
+        CHECK(ok(w.run("import_model", p)) && host.prepared == "sdk-v3-windfall:ground-2" && host.prepared_collision);
+        p.object.erase("id");
+        // its collision still being prepared (no query can be made yet): placed all the same, the game checks its place
+        // when the collision is ready; a collision that can't be had is still the refusal
+        host.query_fails = true;
+        CHECK(!ok(w.run("add_actor", json(R"({"type": "model", "model": "ground-2", "id": "ground-b"})"))));
+        host.collision_pending.insert("sdk-v3-windfall:ground-2");
+        CHECK(ok(w.run("add_actor", json(R"({"type": "model", "model": "ground-2", "id": "ground-b"})"))));
+        host.collision_pending.clear();
+        host.query_fails = false;
+    }
+    // a model this computer could not prepare: a warning in the problems, with the reason, never "after a restart"
+    host.model_failures["sdk-v3-windfall:extension"] = "Static model conversion failed (ModuleNotFoundError: No module named 'notebook_model')";
+    r = w.run("check_package");
+    bool warned = false;
+    for (const auto& problem : r.get("result").get("problems").array)
+        if (problem.get("kind").string() == "model" && problem.get("id").string() == "extension" && problem.get("severity").string() == "warning" &&
+            problem.get("message").string().find("No module named 'notebook_model'") != std::string::npos)
+            warned = true;
+    CHECK(ok(r) && warned);
+    // Blender's way: two mesh objects ("name.001"), one moved; the import merges them and says so
+    {
+        auto two = static_model_fixture::cube_document();
+        two["nodes"] = json(R"([{"name": "polySurface4323", "mesh": 0}, {"name": "polySurface4323.001", "mesh": 1, "translation": [3, 0, 0]}])");
+        two["meshes"].array.push_back(two["meshes"].array[0]);
+        two["scenes"].array[0]["nodes"] = json("[0, 1]");
+        write(dir / "parts.glb", static_model_fixture::glb(two, static_model_fixture::cube_binary()));
+        p["file"] = (dir / "parts.glb").string();
+        r = w.run("check_model", p);
+        CHECK(ok(r) && r.get("result").get("import_fixes").array.size() >= 1 && r.get("result").get("triangles").number == 24);
+        r = w.run("import_model", p);
+        CHECK(ok(r) && r.get("result").get("note").string().rfind("Imported with changes: The 2 mesh objects polySurface4323, polySurface4323.001 are merged", 0) == 0);
+        std::ifstream f(dir / "models" / "parts.glb", std::ios::binary);
+        const std::vector<uint8_t> kept((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+        static_models::ModelInfo info;
+        std::string why;
+        CHECK(static_models::validate_glb(kept, info, why) && info.triangle_count == 24);
+    }
+    std::error_code ec;
+    fs::remove_all(dir, ec);
+}
+
 int main(int argc, char** argv) {
     // editor_test --game <game dir> [stage room]: what the editor reads from a game folder (manual check)
     if (argc >= 3 && std::string(argv[1]) == "--game") {
@@ -1894,6 +2069,7 @@ int main(int argc, char** argv) {
     package_files(argv[1]);
     live_kinds_note();
     building(argv[1]);
+    own_models(argv[1]);
     game_objects();
     route_commands();
     path_commands();

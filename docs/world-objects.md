@@ -122,8 +122,11 @@ Two material kinds are available:
 `doubleSided: true` draws both faces of either kind, each lit from its own side;
 use it for cut-out cards. The converter adds a mirrored copy of those faces, so
 they count twice toward the vertex and triangle limits.
-Blended transparency (`alphaMode` `BLEND`) isn't supported: the model is refused
-with a message. Paint a cut-out's soft edges hard, or use `MASK`.
+Blended transparency (`alphaMode` `BLEND`) isn't supported: a package with such a
+model is refused with a message. The world editor's import turns it into a cut-out
+(`MASK` at 0.5) when the texture has transparent parts, else opaque, and says so
+([What the import fixes](mod-editor.md#what-the-import-fixes-for-you)). Paint a
+cut-out's soft edges hard, or use `MASK`.
 
 Every material is lit the same way, by the game's own lighting for objects, so
 the materials of one model match at every time of day. The converter takes the
@@ -654,6 +657,85 @@ Use the export as a reference only:
 The same exporter runs outside the game:
 `python3 tools/story_mods/export_glb.py --game <game folder> --stage sea --room 44 --out outset.glb --collision --actors`
 (or `--piece <id>` in place of `--stage` and `--room`).
+
+## Build next to a game island
+
+To extend one of the game's islands (a new hill beside Windfall, a pier at Outset), model your part in
+Blender next to the island's export, so it fits the island's shape, and bring only your part back. It comes
+back at the same place and the same scale:
+
+1. In the editor, export the island's room: `export_glb {"stage": "sea", "room": 11, "collision": true}`
+   (Windfall). Import the file into Blender (File → Import → glTF 2.0). It is room-local: the sea square's
+   centre is the origin, 1 m is 100 game units, Y is up in the file (Z up in Blender).
+2. Model your part in its own object, next to the island, in the export's coordinates. Leave the object's
+   origin where it is: don't move the model to the origin. Make its collision a second object named
+   `<name>_col` (for example `windfall_ext_col`) with `col_*` materials.
+3. Export only your objects: select them and export with Include → **Selected Objects** (or hide the
+   export's objects), with the settings in [What the import fixes](mod-editor.md#what-the-import-fixes-for-you).
+   The export's own objects and textures are the game's: never in your file or your mod.
+4. In the editor, import the file (Outliner → Models, or `import_model`). Several objects, quads, vertex
+   colours, a blended material or too large textures are fixed on import, each with a note.
+5. Go to the island (Link in its sea square) and add it: **Add actor → Your model**, or `add_actor
+   {"type": "model", "model": "windfallextension"}`. A model made away from its origin is placed at the
+   room's origin, the square's centre at sea level, unturned, so it stands where you modelled it; the status
+   bar says so. A model with a `_col` mesh (step 2) is added as a static world object on that collision, so
+   Link walks on it and its walls stop him; its collision is prepared at once and the object appears when it
+   is ready. The same with a command, at a position you choose:
+
+   ```text
+   place_world_object {"id": "windfall-ext", "model": "windfallextension", "collision": {"mesh": "windfallextension"},
+                       "stage": "sea", "room": 11, "position": {"x": 0, "y": 0, "z": -200000}}
+   ```
+
+   The position is the square's centre: for sea room `n`, x = −300000 + 100000 × ((n − 1) mod 7) and
+   z = −300000 + 100000 × ((n − 1) div 7), so Windfall (11) is at (0, 0, −200000) and Outset (44) at
+   (−200000, 0, 300000). Don't scale or turn it: scale 1 and no rotation keep it where you modelled it.
+6. `focus {"id": "windfall-ext"}` shows it. After a change in Blender, export again over the package's
+   copy (`models/<id>.glb` in the mod's folder) and run `reload_model {"model": "windfallextension"}`: the
+   import's fixes are applied to it again; a kit model is built again at once, another model is taken at
+   the next start.
+
+**Your model** without a `_col` mesh gets a small solid cylinder at its origin, as a prop; with one (or as a kit
+model) it is a world object that uses its collision and, as a kit model or with a distant model, is seen from
+across its square ([Island presentation](#island-presentation)). An actor added before this, with the cylinder,
+keeps it: remove it and add the model again, or give it its collision with `set_world_object {"id":
+"windfallextension", "behaviour": "static", "collision": {"mesh": "windfallextension"}}`.
+
+**Why your part looks brighter than the island.** A model with textures of its own is lit as the game lights an
+object (a barrel, a sign): with the object light of the place it stands, at the full brightness of its texture.
+The island's own ground is lit with the room's background light and darkened by its vertex colours (Windfall's
+grass by about a third). Your textures, even a copy of the island's, are therefore drawn brighter and flatter
+than the ground next to them, whatever their size. Use the island's own materials (below) and it is drawn as
+the island is.
+
+### Game materials on your own sea models
+
+Your part looks most like the island when it uses the island's own materials: Windfall's grass, its
+stone walls, its wooden planks. Don't keep the export's textures in your model (they are the game's
+pictures, and a package never carries them); name your materials after the game's and let the game draw
+them from the player's own files. Such a model is a [kit model](#game-materials):
+
+1. In Blender, give each surface a material named exactly as the export's material for it, for example
+   the name of Windfall's grass material from the reference. A material appended from the export keeps
+   its name; delete its Image Texture node. A `.001` suffix Blender adds is ignored. `list_kit_materials
+   {"stage": "sea", "room": 11}` lists the room's material names with their textures and how much of the
+   room uses each.
+2. Materials with textures of your own (a new sign, a roof) keep their Image Texture as before; they are
+   drawn as any mod model's.
+3. Import it as a kit model of the island's room:
+
+   ```text
+   import_model {"file": "C:/Users/me/windfall_ext.glb", "kit": {"stage": "sea", "room": 11}}
+   ```
+
+   To keep your own material names, map them: `"materials": {"ext_grass": "<grass material>"}`.
+4. Place it with `place_world_object` as in step 5 above (a kit model is a static world object, turned
+   about the vertical axis only, at scale 1). It is lit with the room's light, its fog and its weather,
+   and its game textures move where the room animates them (water, foam).
+
+A material that names a game material and still carries a texture is refused, with the reason, in the
+editor and when the package is checked: remove its image. [Game materials](#game-materials) has the
+details and the limits.
 
 ## Climbable walls and hookshot surfaces
 

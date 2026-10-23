@@ -33,6 +33,7 @@
 #include "../hle/save_root.h"
 #include "../input.h"
 #include "../mods/guest_mods.h"
+#include "../mods/code_mods.h"
 #include "../mods/mod_actor.h"
 #include "../mods/actor_model_cache.h"
 #include "../mods/packages.h"
@@ -42,6 +43,8 @@
 #include "../mods/story_npc_catalogue.h"
 #include "../mods/story_demo.h"
 #include "../mods/story_items.h"
+#include "../mods/story_bag.h"
+#include "../mods/item_icons.h"
 #include "../mods/story_mail.h"
 #include "../mods/story_mail_book.h"
 #include "../mods/story_manifest.h"
@@ -88,6 +91,9 @@ std::mutex g_status_mu;
 std::string g_status;
 // island buildings being prepared for a mod (prepare_piece): "preparing", "ready", "failed: ..."
 std::mutex g_piece_mutex;
+// models whose collision prepare_model is preparing ({mod, model}): Host::collision_preparing
+std::mutex g_collision_mutex;
+std::set<std::pair<std::string, std::string>> g_collision_preparing;
 std::map<std::pair<std::string, std::string>, std::string> g_piece_states;
 // "a villager of the island (Grandma)": the character's name when the NPC catalogue knows the code
 void name_layout_conflicts(const story_notebook::ManifestActor& actor, Value& result) {
@@ -578,6 +584,15 @@ void scene_preview_end(const std::string& status);
 std::atomic<bool> g_test{false};
 std::vector<uint8_t> g_story_before;  // game thread
 fs::path editor_dir() { return fs::path(ss::states_dir()) / "editor-test"; }
+// the environment of this process and the one it starts (Restart and return)
+void set_env(const char* name, const std::string& value) {
+#ifdef _WIN32
+    _putenv_s(name, value.c_str());
+#else
+    setenv(name, value.c_str(), 1);
+#endif
+}
+
 std::string safe(const std::string& id) {
     std::string s;
     for (char ch : id) s += (std::isalnum((unsigned char)ch) || ch == '-' || ch == '_') ? ch : '_';
@@ -625,13 +640,36 @@ std::string joined(const std::vector<std::string>& list) {
     for (const auto& x : list) s += (s.empty() ? "" : ", ") + x;
     return s;
 }
+// What the running game can take of a mod's items live (story_reload::LiveIcons): the item icons' spare
+// frames of the editor launch mode (item_icons.h)
+story_reload::LiveIcons live_icons(const std::string& mod) {
+    story_reload::LiveIcons l;
+    if (!story_items::installed_hooks() || !item_icons::live_icons()) return l;
+    l.placed = [mod](const std::string& id) { return item_icons::has_frame(story_items::item_key(mod, id)); };
+    l.spare = item_icons::free_spares();
+    return l;
+}
+// The items of story_later, each "<id> (<why>)"
+std::vector<std::string> items_later(const std::string& mod, const Value& started, const Value& manifest) {
+    std::vector<std::string> out;
+    if (!story_items::installed_hooks()) {
+        // no item hooks this session: every item that changed waits
+        for (const auto& i : manifest.get("items").array) {
+            bool same = false;
+            for (const auto& j : started.get("items").array) same |= i == j;
+            if (!same) out.push_back(i.get("id").string() + " (the game had no mod items at start-up)");
+        }
+        return out;
+    }
+    return story_reload::restart_items(started, manifest, live_icons(mod));
+}
 // What of a story change waits for a restart (the note of apply_story)
-std::vector<std::string> story_later(const Value& started, const Value& manifest) {
+std::vector<std::string> story_later(const std::string& mod, const Value& started, const Value& manifest) {
     std::vector<std::string> later;
     const bool items_changed = !(started.get("items") == manifest.get("items"));
     if (items_changed && !story_items::installed_hooks()) later.push_back("the items (the game had no mod items at start-up)");
     else
-        for (const auto& i : story_reload::restart_items(started, manifest)) later.push_back("item " + i);
+        for (const auto& i : items_later(mod, started, manifest)) later.push_back("item " + i);
     for (const auto& id : story_reload::gone(
              [&] {
                  std::vector<std::string> ids;
@@ -690,9 +728,22 @@ void story_tick() {
             std::vector<story_notebook::ManifestItem> list;
             std::string w;
             if (story_notebook::parse_items(ch.manifest, list, w)) {
-                const auto live = story_reload::live_items(ch.started, ch.manifest);
-                for (const auto& item : list)
-                    if (std::find(live.begin(), live.end(), item.id) != live.end() && story_items::define(mod, ch.dir, item, w)) items++;
+                const auto live = story_reload::live_items(ch.started, ch.manifest, live_icons(mod));
+                for (const auto& item : list) {
+                    if (std::find(live.begin(), live.end(), item.id) == live.end()) continue;
+                    const std::optional<story_items::Item> before = story_items::find(mod, item.id);
+                    if (!story_items::define(mod, ch.dir, item, w)) {
+                        set_status("Item " + item.id + " is not changed in the game: " + w);
+                        continue;
+                    }
+                    items++;
+                    // a new item or a new icon (#270): its icon frame (a spare one for a new item) is drawn again
+                    const std::optional<story_items::Item> now = story_items::find(mod, item.id);
+                    if (now && item_icons::live_icons() && (!before || before->icon_hash != now->icon_hash || !item_icons::has_frame(now->key))) {
+                        if (item_icons::live_icon(now->key, now->icon_path) < 0) LOG("[editor] item %s: no icon frame left this session", item.id.c_str());
+                        story_bag::forget_icon(now->key);
+                    }
+                }
             }
         }
         // the loaded Quest Log keeps its step numbers: say where one now names another step
@@ -743,7 +794,11 @@ public:
                 // a world object where it can't stand: not in the game until it is moved (said as such, not as a restart)
                 std::string list, room, held;
                 for (const auto& p : pending) {
-                    std::string& to = p.find("(Reload room)") != std::string::npos ? room : p.find(": can't stand here") != std::string::npos ? held : list;
+                    // a model that could not be prepared: not in the game until its cause is fixed (a restart fails the same way)
+                    const bool not_in_game = p.find(": can't stand here") != std::string::npos || p.find(" could not be prepared: ") != std::string::npos;
+                    // a model still being prepared: it appears by itself when ready (no restart)
+                    const bool soon = p.find("(Reload room)") != std::string::npos || p.find(" is being prepared: ") != std::string::npos;
+                    std::string& to = soon ? room : not_in_game ? held : list;
                     to += (to.empty() ? "" : "; ") + p;
                 }
                 std::string status = held.empty() ? "" : "Not in the game: " + held;
@@ -802,7 +857,7 @@ public:
             std::lock_guard<std::mutex> lk(g_story_mu);
             g_story_pending[mod] = {name, dir, started, manifest};
         }
-        const auto later = story_later(started, manifest);
+        const auto later = story_later(mod, started, manifest);
         note = "Quests, quest talks, letters and charts change in the game at the next calm moment (after a talk, a letter or a scene).";
         if (!later.empty()) note += " After a restart (save, then start the game again): " + joined(later) + ".";
         return true;
@@ -1338,12 +1393,14 @@ public:
                 try {
                     set = guestmods::editor_build_kit_model(mod, dir, mods::packages::package_data_directory(mod), model);
                 } catch (const std::exception& e) {
-                    return set_status("Model " + model.get("id").string() + ": " + e.what());
+                    actor_model_cache::note_failure(mod, model.get("id").string(), e.what());
+                    return set_status("Model " + model.get("id").string() + " could not be built: " + e.what());
                 }
                 post([mod, model, set](Cpu*) {
                     std::string w;
                     if (!story_kit_models::register_for_mod(mod, model.get("id").string(), *set, true, w))
                         return set_status("Model " + model.get("id").string() + ": " + w + " (it is prepared when the game starts)");
+                    actor_model_cache::clear_failure(mod, model.get("id").string());
                     set_status("Model " + model.get("id").string() + " is ready: built from your game files (" +
                                std::to_string(set->archive_bytes / 1024) + " KiB); actors can use it now");
                     reapply_mod(mod, model.get("id").string());
@@ -1352,10 +1409,30 @@ public:
             note = "The model is being built from your game files; actors using it appear when it is ready.";
             return true;
         }
-        std::thread([mod, dir, model] {
+        const bool collision = model.get("collision").boolean;
+        const std::pair<std::string, std::string> key{mod, model.get("id").string()};
+        if (collision) {
+            std::lock_guard guard(g_collision_mutex);
+            g_collision_preparing.insert(key);
+        }
+        std::thread([mod, dir, model, collision, key] {
+            struct Done {  // no longer "being prepared" once this ends (registered on the game thread, or failed)
+                bool on;
+                std::pair<std::string, std::string> key;
+                ~Done() {
+                    if (!on) return;
+                    std::lock_guard guard(g_collision_mutex);
+                    g_collision_preparing.erase(key);
+                }
+            };
+            auto done = std::make_shared<Done>(collision, key);
             std::string archive, w;
-            if (!guestmods::editor_prepare_model(mod, dir, mods::packages::package_data_directory(mod), model, archive, w)) return set_status("Model " + model.get("id").string() + ": " + w);
-            post([mod, model, archive](Cpu*) {
+            if (!guestmods::editor_prepare_model(mod, dir, mods::packages::package_data_directory(mod), model, archive, w)) {
+                // remembered (actor_model_cache::failure_for): its actors say why, not "after a restart"
+                actor_model_cache::note_failure(mod, model.get("id").string(), w);
+                return set_status("Model " + model.get("id").string() + " could not be prepared, its actors are not in the game: " + w);
+            }
+            post([mod, model, archive, done](Cpu*) {
                 std::string w2;
                 if (model.get("collision").boolean && !mod_actor::register_collision(mod, model.get("id").string(), actor_model_cache::collision_for(archive)))
                     return set_status("Model " + model.get("id").string() + ": prepared collision could not be registered");
@@ -1367,6 +1444,11 @@ public:
         }).detach();
         note = "The model is being prepared for the game; actors using it appear when it is ready.";
         return true;
+    }
+    std::string model_failure(const std::string& mod, const std::string& model) override { return actor_model_cache::failure_for(mod, model); }
+    bool collision_preparing(const std::string& mod, const std::string& model) override {
+        std::lock_guard guard(g_collision_mutex);
+        return g_collision_preparing.contains({mod, model});
     }
     bool prepare_piece(const std::string& mod, const std::string& id, std::string& note, std::string& why) override {
         if (!story_game_pieces::catalogue().find(id)) return why = "no such building", false;
@@ -1539,6 +1621,29 @@ public:
         return g_scene_state;
     }
     bool play(bool from_camera, bool restore, std::string& why) override { return request_play(from_camera, restore, why); }
+    bool restart_and_return(std::string& why) override {
+        if (!ss::in_gameplay()) return why = "no Quest Log is being played (nothing to return to)", false;
+        const std::string path = (editor_dir() / "return.wwstate").string();
+        const bool playing = g_playing.load(), test = g_test.load();
+        std::error_code ec;
+        fs::create_directories(editor_dir(), ec);
+        set_status("Restart and return: saving where Link is...");
+        ss::request_save_portable_file(path, [path, playing, test](bool ok, const std::string& w) {
+            if (!ok) {
+                set_status("Restart and return: not restarted, the place could not be saved (" + w + ")");
+                return;
+            }
+            // the next start finds it (the environment is the new process's): return_tick() below
+            set_env("WWHD_EDITOR_RETURN", path);
+            set_env("WWHD_EDITOR_RETURN_MODE", playing ? "play" : test ? "test" : "edit");
+            LOG("[editor] restart and return: %s saved, starting again", path.c_str());
+            hostui::post([] {
+                std::string e;
+                if (!mods::code::relaunch(e)) set_status("Restart and return: the game could not start again (" + e + ")");
+            });
+        });
+        return true;
+    }
     bool stop(std::string& why) override;
     bool playing() override { return g_playing; }
     // any thread, cheap: the game thread's last copy of the story area (records_tick)
@@ -2039,8 +2144,52 @@ void villagers_tick() {
 }
 }  // namespace
 
+namespace {
+// Restart and return (Host::restart_and_return): after the start, once the player picked the Quest Log and the
+// editor's view is up, the saved place is loaded, then Play or test mode as before. Game thread.
+void return_tick() {
+    static std::string path = [] {
+        const char* e = std::getenv("WWHD_EDITOR_RETURN");
+        return std::string(e ? e : "");
+    }();
+    static const std::string mode = [] {
+        const char* e = std::getenv("WWHD_EDITOR_RETURN_MODE");
+        return std::string(e ? e : "edit");
+    }();
+    static bool told = false;
+    if (path.empty()) return;
+    if (!told) {
+        told = true;
+        set_status("Restart and return: choose your Quest Log; the game puts Link back where he was");
+        // a later restart of this process starts as usual
+        set_env("WWHD_EDITOR_RETURN", "");
+    }
+    if (!ss::in_gameplay() || !g_flying || !g_free_jobs.empty()) return;
+    const std::string file = path;
+    path.clear();
+    LOG("[editor] restart and return: loading %s (%s)", file.c_str(), mode.c_str());
+    ss::request_load_portable_file(file, [](bool ok, const std::string& why) {
+        if (!ok) {
+            set_status("Restart and return: the saved place could not be loaded (" + why + ")");
+            return;
+        }
+        set_status("Restart and return: back where you were");
+        if (mode == "play") g_play_after = 1;  // Play from Link once the editor's view is back
+        else {
+            std::string w;
+            if (mode == "test" && !g_host.set_test_mode(true, w)) set_status("Restart and return: test mode: " + w);
+            // the fly camera starts again at the game camera, behind Link at his place
+            run_async("fly_camera", mods::json::parse(R"({"on": false})"), [](const Value&) {
+                run_async("fly_camera", mods::json::parse(R"({"on": true})"), nullptr);
+            });
+        }
+    });
+}
+}  // namespace
+
 void logic_service(Cpu* c) {
     if (!enabled()) return;
+    return_tick();
     t_game = c;
     records_tick();
     villagers_tick();
@@ -2116,8 +2265,10 @@ void toggle_play() {
 }
 std::mutex g_view_mu;
 CameraView g_camera;  // under g_view_mu
+// the game camera as drawn last: the editor's overlays project with it, and (in every launch mode) a mod
+// item's get icon (story_item_get_icon.h)
 void camera_drawn(uint32_t cam) {
-    if (!enabled() || !cam) return;
+    if (!cam) return;
     CameraView v;
     v.valid = true;
     for (int i = 0; i < 3; i++) {
@@ -2132,6 +2283,15 @@ void camera_drawn(uint32_t cam) {
     for (int i = 0; i < 16; i++) v.proj[i] = float(ldf32(cam + 0x1A4 + 4 * i));
     std::lock_guard<std::mutex> lk(g_view_mu);
     g_camera = v;
+}
+std::vector<std::string> items_after_restart(const std::string& mod) {
+    static std::map<std::string, std::vector<std::string>> last;  // render thread
+    try_with_session([&](Session& session) {
+        const Value* started = session.started(mod);
+        const Value* now = session.manifest(mod);
+        last[mod] = started && now ? items_later(mod, *started, *now) : std::vector<std::string>{};
+    });
+    return last[mod];
 }
 CameraView camera_view() {
     std::lock_guard<std::mutex> lk(g_view_mu);

@@ -11,6 +11,7 @@
 025D4654  # fopAc_Draw: one-shot no-draw requests of the step's logic hold for its in-between frames
 02715310  # HD UI screens' update after the process executes (end of fpcM_Management): logic, once per step
 025C5A8C  # shared minigame timer: HD puts its update in the draw slot; logic once per 30 Hz step
+0260C74C  # ResLoadTask::calc (sead task, calc on every frame): archive loads advance once per 30 Hz step
 @026277A8 # Boat-race timer formatting: presentation-only fractional milliseconds
 @026E9C24 # Shared HUD timer formatting: presentation-only fractional milliseconds
 024FFC40  # camera_draw: blended camera on logic passes
@@ -224,6 +225,7 @@
 02570210  # dKyr_drawLenzflare: lens flare from the eye the pass was drawn with (interp.cpp)
 02571B1C  # dKyr_drawSibuki: sea spray in the rain around the eye the pass was drawn with (interp.cpp)
 025F06A8  # mDoGph_calcFade: the screen fade advances once per logic step, shown at the pass fraction (interp.cpp)
+0252F5A0  # GC mDoGph calcFade (snapshot fade, event director fades): advanced once per logic step (interp.cpp)
 025F0840  # mDoGph_calcMonotone: trace only (WWHD_INTERP_FADE_TRACE)
 024142F0  # daPy_swBlur_c::draw: sword trail drawn at the pass fraction (interp_fx.cpp)
 020CDF78  # daBoomerang_blur_c::draw: boomerang trail drawn at the pass fraction (interp_fx.cpp)
@@ -289,3 +291,8 @@
 
 023F22FC  # daPy_lk_c::setDemoData: event commands only on full steps (may replace model heaps)
 027C93A8  # shadow cascade setup (worker): the step's exact camera on passes before a logic pass (interp.cpp)
+
+# Shared HUD particle coordinate capture and per-emitter drawing projection (aspect.cpp).
+02704D2C # hdPaneUtil::getGlobalTranslation: remember the source pane without changing guest coordinates
+0282D9C0 # JPA draw: live pane anchor and TV 2D aspect projection; world and DRC untouched
+025A847C # dPa shared emitter factory: bind captured pane anchors and reset pooled emitters

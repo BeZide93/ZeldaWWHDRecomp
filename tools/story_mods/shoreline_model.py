@@ -20,7 +20,11 @@ import re
 import struct
 import tempfile
 
-import notebook_model as base
+import sys
+# Windows' embeddable Python runs isolated: the script's own folder is not on sys.path, so the
+# sibling modules are found through it explicitly (issue #280).
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import notebook_model as base  # noqa: E402
 from skinned_actor_model import append_dictionary, append_string
 
 VERSION = 4

@@ -94,6 +94,16 @@ void startup(int argc,char** argv,bool fixed_build){
         std::string error;if(!replace(exe.string(),error))fprintf(stderr,"[code mods] %s; retaining previous build\n",error.c_str());
     }catch(const std::exception& e){fprintf(stderr,"[code mods] %s; retaining previous build\n",e.what());}
 }
+bool relaunch(std::string& error){
+#ifdef __ANDROID__
+    error="Close and reopen the app";return false;
+#else
+    if(launch_args.empty()){error="Restart command is unavailable";return false;}
+    const auto exe=fs::path(host::exe_dir())/fs::path(launch_args[0]).filename();
+    if(!fs::is_regular_file(exe)){error="The game's executable was not found";return false;}
+    return replace(exe.string(),error);
+#endif
+}
 bool restart(std::string& error){
     auto failed=[&]{std::lock_guard guard(mutex);state.error=error;return false;};
 #ifdef __ANDROID__

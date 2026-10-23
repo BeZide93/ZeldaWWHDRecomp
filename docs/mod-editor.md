@@ -152,7 +152,10 @@ more of the same; **Stop placing** in the toolbar or Esc ends it.
   Mothula (on the ground or winged), Morth, Magtail, Poe, Armos, Armos Knight, Kargaroc, Wizzrobe, Warship, Gyorgs (one to five), Floormaster, Big Octo (a target only). The Inspector's **Variant** changes a placed one, and **Sets switch when defeated**
   picks one of the mod's switches to set once every enemy naming it is defeated.
 - **Your models:** one of the mod's models (static or skinned), your own enemy (a skinned model with
-  flinch, stun, death and idle clips), a prop Link can carry.
+  flinch, stun, death and idle clips), a prop Link can carry. A static model with collision of its own (a
+  `<name>_col` mesh, see [World objects](world-objects.md#author-collision-in-the-glb)) is added as a
+  static world object standing on that collision, so Link walks on it; without one it gets a small solid
+  cylinder at its origin.
 - **Game objects:** the game's own palm trees, trees, tables and more, and island buildings (see below).
 
 Each new actor gets the flags it needs, named after it (for example `sign-read`, `pot-broken`,
@@ -271,6 +274,99 @@ it breaks:
 **Import into the package** copies the file into the mod's `models` folder and adds the model. The editor
 prepares it for the game while you work; when the status bar says it is ready, actors can use it without
 a restart.
+
+### What the import fixes for you
+
+A model straight from Blender often breaks one of the limits above in a way the editor can repair. The
+check lists what the import will change, and the import changes it in the copy it puts into the package
+(your own file stays as it is) and says so in the status bar:
+
+- **Several mesh objects** (Blender's `name.001` copies, a model made of parts): merged into one model,
+  each object's own position, rotation and scale applied. A mesh object named `<name>_col`, or one whose
+  materials are all `col_*` surfaces, stays collision.
+- **Faces that aren't plain triangles**: triangle strips and fans become triangles. Loose edges and loose
+  vertices (lines and points) are left out; the game draws faces only.
+- **Vertex colours, a second UV map, tangents**: left out. The model draws with its positions, normals and
+  first UV map. A mesh without normals gets flat ones.
+- **Normals pointing into the model** (against the way its faces are wound, as after flipping faces in
+  Blender): kept, since they may be meant so, but said, because the model is then lit from the wrong side
+  and looks dark where the light falls. In Blender: Edit Mode, select all, Mesh → Normals → Recalculate
+  Outside, and export again.
+- **Blended transparency** (`alphaMode` `BLEND`): drawn as a cut-out (`MASK`, alpha below 0.5 see-through)
+  when the texture has transparent parts, else opaque.
+- **Textures**: a JPEG, a 16-bit or palette PNG is converted to a plain PNG; a texture over 512 pixels, or
+  of a size the game can't take (width a multiple of 64, height of 8), is scaled to the nearest size it
+  takes; when all textures of the model together are over 1 MiB, the largest are halved until they fit.
+  A file of up to 64 MB can be imported this way; the model in the package is at most 8 MB.
+- Normal, occlusion, emissive and metal/roughness textures and optional glTF extensions (specular, IOR)
+  are left out.
+
+What it can't repair is said as it is: a visible face without a material or without a base colour texture,
+shape keys, a required extension (Draco compression, WebP or KTX2 textures), more than 16 materials or
+more than 4096 vertices and 8192 triangles. A file that already fits is kept byte for byte.
+
+These Blender export settings (File → Export → glTF 2.0) give a file that needs no fixing: Format **glTF
+Binary (.glb)**; Include: **Selected Objects** (or Visible Objects) so nothing else goes along; Transform:
+**+Y Up**; Data → Mesh: **Apply Modifiers**, **UVs** and **Normals** on, **Tangents** off, vertex colours off
+(Blender 4.2 and later: Use Vertex Color **None**), **Loose Edges** and **Loose Points**
+off; Material: **Export**, Images **Automatic** or **PNG**; Shape Keys, Skinning and Animation off (on for an
+animated model); Compression off.
+
+### Models made on an island export
+
+A model you build in Blender next to one of the game's islands (from `export_glb`, see [Export the game's
+islands](world-objects.md#export-the-games-islands-for-reference)) keeps the export's coordinates: its
+geometry lies far from its own origin, where the island's square has its centre. Added with **Your model**
+at Link or the camera, such a model is placed at the origin of the room Link is in (a sea square's centre at
+sea level, a stage's own origin), unturned, so it stands exactly where you modelled it; the status bar says
+so and where its middle is. Its handle is that origin: move or turn it as a whole. Placed at a position you
+give, it keeps the position and the note says where it is drawn. **Focus** on it frames the model, not its
+origin. [Build next to a game island](world-objects.md#build-next-to-a-game-island) has the whole round trip.
+
+**Collision.** Give the model a second mesh object named `<name>_col` (for example `windfall_ext_col`), a
+simpler copy of what Link should walk on and bump into, with materials named `col_grass`, `col_stone`,
+`col_wood` and so on ([the list](world-objects.md#author-collision-in-the-glb)). **Your model** then adds it
+as a static world object standing on that collision: Link walks on it, its walls stop him, the ship runs
+into it. Without a `_col` mesh it gets only a small solid cylinder at its origin. A world object keeps clear
+of the island's own things (villagers and their routes, start points, doors); if your part covers one, it
+says *can't stand here* with what is in the way, and the game leaves it out until it is moved or the model
+leaves that spot free.
+
+### Using the game's own materials
+
+A model can draw its surfaces with the game's own materials, Windfall's grass, Dragon Roost's rock, instead
+of pictures of its own. It then looks exactly like the island next to it: the game's full-size textures,
+its light through the day and its vertex-colour shading. A copy of the game's texture in your own material
+doesn't: your own materials are lit as objects are (a barrel, a sign), at the texture's full brightness, so
+they look brighter and flatter than the island's ground beside them.
+
+1. Find the names. `export_glb {"stage": "sea", "room": 11}` writes the room (here Windfall) as a GLB whose
+   materials carry the game's names; `list_kit_materials {"stage": "sea", "room": 11}` lists them with their
+   textures. Import the export into Blender as a reference.
+2. In your model, name each surface's material exactly as the game's (append the material from the
+   reference, or type its name; Blender's `.001` suffix is ignored) and **delete its Image Texture node**: a
+   game material never carries a picture, since a package never contains the game's pictures. To keep your
+   own names, map them on import instead: `"materials": {"my_grass": "<the game material>"}`.
+3. Materials with pictures of your own (a new sign) keep their Image Texture; one model can mix both.
+4. Optionally add a colour attribute (vertex colours, exported as `COLOR_0`) to shade it as the game's
+   ground is (darker at the foot of cliffs); white draws at full brightness.
+5. Import it with the room it takes the materials from: `import_model {"file": "...", "kit": {"stage":
+   "sea", "room": 11}}`. It is built from your game files, and Link can stand on its `_col` mesh as above.
+
+The details, limits and the costs are in [Game materials](world-objects.md#game-materials) and [Game materials on
+your own sea models](world-objects.md#game-materials-on-your-own-sea-models).
+
+### When a model doesn't show
+
+The status bar, and **Check** (as a warning), say why:
+
+- *could not be prepared: …*: the model couldn't be converted on this computer, with the converter's
+  reason. A restart prepares it the same way and fails again, so fix the cause (the reason names it) and
+  import the file again.
+- *is being prepared*: it appears by itself when it is ready.
+- *can't stand here*: a world object in the way of something of the island; [Limits and
+  placement](world-objects.md#limits-and-placement) lists what counts.
+- *was modelled away from its origin*: it is drawn where the note says, not at its handle (above).
 
 ## Water: ponds, rivers and waterfalls
 
@@ -475,8 +571,8 @@ form below adds a new one. Every change is one command, so Undo and Redo work fo
 Under each entry, **Used by** lists everything that names it. A chart or item that is still used can't be
 removed: change or remove those first (**Remove…** says so). **JSON** shows the whole entry to edit by hand
 (a field you take out is removed). Letters and charts change in the game at once, as quests do; of an item,
-its name, description, how many and use do, while a new item, its icon, held model and **hold_up** wait
-for a restart (see [Story changes while the game runs](#story-changes-while-the-game-runs)).
+its name, description, how many, use and icon do, and a new item works at once (up to eight per start),
+while a removed item, its held model and **hold_up** wait for a restart (see [Story changes while the game runs](#story-changes-while-the-game-runs)).
 
 ## Story changes while the game runs
 
@@ -491,13 +587,19 @@ the game again. Save the package to keep your changes: the next start reads the 
 
 These wait for a restart (save, then start the game again); the status bar names them after the change:
 
-- a new item and a removed item, and an item's icon, held model and **hold_up** (the game builds them
-  into its menus when it starts); its name, description, how many and use change at once;
+- a removed item, and an item's held model and **hold_up**; its name, description, how many, use and icon
+  change at once. A new item works at once too (its icon in the Delivery Bag, on the buttons and over Link's
+  head when he gets it): the editor starts the game with eight spare icon places, so up to eight items can be
+  added per start; the ninth waits for a restart. The Story tab says **Takes effect after a restart** next to
+  an item whose change waits, with **Restart and return here**: the editor saves the changed packages, the
+  game starts again and, once you choose your Quest Log on the title screen, Link is back where he was (in
+  Play or test mode as before; a portable state, so enemies and running scenes start fresh);
 - a removed chart: the chart list keeps it until a restart. A new or changed chart shows in the chart
   list at once; its treasure's salvage point is set up when Link enters the sea room, so it follows
   there after **Reload room** or the next visit;
 - what the game did not run at start-up: the King of Red Lions' lines when no quest had one, items when
-  no mod had any, a chart's treasure when no mod had a chart, and all of the story when the Story
+  the Story Notebook package was off (with it on, the editor starts the item and chest hooks even when no mod
+  has items, so a chest that holds a new item appears at once), a chart's treasure when no mod had a chart, and all of the story when the Story
   Notebook package was not on;
 - scenes (see [Scenes](#scenes)).
 
@@ -777,7 +879,7 @@ separated by `;`, or `@file` with one such line per row. Results go to the log.
 | `get_actor`, `get_scene` | `id`, `mod`? | one entry as the manifest declares it |
 | `list_actor_types` | | what `add_actor` places, and what appears without a restart |
 | `list_game_objects` | `category`?, `query`? | the game's own objects `add_actor` places as `game:<id>`, with variants, limits and whether your game files have them, and island buildings it places as `piece:<id>` (`state`: preparing, ready or the reason it failed) |
-| `add_actor` | `type`, `id`?, `at`? (`link`, `camera`, `position`), `position`?, `stage`?, `room`?, `angle`?, `snap`?, `model`?, `options`?, `mod`? | place a new actor (on the ground unless `snap` is false); `type` `game:<id>` places a game object (`options.variant`), `piece:<id>` an island building (made from your game files first: `state`, `note`) |
+| `add_actor` | `type`, `id`?, `at`? (`link`, `camera`, `position`), `position`?, `stage`?, `room`?, `angle`?, `snap`?, `model`?, `options`?, `mod`? | place a new actor (on the ground unless `snap` is false); `type` `game:<id>` places a game object (`options.variant`), `piece:<id>` an island building (made from your game files first: `state`, `note`); a model made away from its origin goes to the room's origin ([Models made on an island export](#models-made-on-an-island-export)) |
 | `remove_actor` | `id`, `confirm`, `mod`? | remove an actor (needs `"confirm": true`) |
 | `duplicate_actor` | `id`, `new_id`?, `offset`?, `mod`? | a copy next to it, with flags of its own |
 | `place_actor` | `id`, `at` (`link`, `camera`, `ground`, `position`), `position`?, `snap`?, `mod`? | move an actor to Link, the camera, the ground below it or a position |
@@ -809,10 +911,10 @@ separated by `;`, or `@file` with one such line per row. Results go to the log.
 | `pick` | `origin`, `direction`, `range`? | the first ground a ray meets |
 | `ground` | `position` | the ground height below a point |
 | `focus` | `id` or `position`, `distance`?, `yaw`?, `eye`?, `mod`? | fly the camera to an actor (a world object: its whole extent in view) or a place; `distance` back, looking along `yaw` degrees, or from `eye` (any height, below an island say) |
-| `check_model` | `file` | check a `.glb` file |
-| `import_model` | `file`, `id`?, `confirm`?, `kit`?, `materials`?, `material`?, `mod`? | copy a `.glb` into the mod and add the model; with `kit`, a model with game materials ([Game materials](world-objects.md#game-materials)) |
+| `check_model` | `file` | check a `.glb` file; `import_fixes` lists what the import would change ([What the import fixes](#what-the-import-fixes-for-you)) |
+| `import_model` | `file`, `id`?, `confirm`?, `kit`?, `materials`?, `material`?, `mod`? | copy a `.glb` into the mod and add the model, fixed where it can be (`fixes`); with `kit`, a model with game materials ([Game materials](world-objects.md#game-materials)) |
 | `set_model_kit` | `model`, `kit`?, `materials`?, `material`?, `mod`? | change a kit model's kit room and material names; built again, live |
-| `reload_model` | `model`, `mod`? | build a kit model again from its changed file; its actors take it live |
+| `reload_model` | `model`, `mod`? | a model's changed file in the package: the import's fixes applied to it; a kit model is built again and its actors take it live, another model at the next start |
 | `place_world_object` | `id`, `model`, `collision`, `stage`, `room`, `position`, `behaviour`?, `buoyancy`?, `drift`?, `anchor`?, `grapple_points`?, `distant`?, `shoreline`?, `chart_marker`?, `arrival`?, `calm_water`?, `rotation`?, `scale`?, `mod`? | place a static, floating or drifting object of the mod with collision (one Undo step) |
 | `set_world_object` | `id`, `collision`?, `behaviour`?, `buoyancy`?, `drift`?, `anchor`?, `grapple_points`?, `distant`?, `shoreline`?, `chart_marker`?, `arrival`?, `calm_water`?, `mod`? | change a world object's collision, behaviour and motion together (`null` removes one) |
 | `preview_collision`, `placement_conflicts` | `id`, `mod`? | a world object's collision as a wireframe, and what its place conflicts with |
@@ -828,6 +930,7 @@ separated by `;`, or `@file` with one such line per row. Results go to the log.
 | `undo`, `redo`, `history` | | |
 | `validate` | `mod`? | the checks, with the first problem |
 | `check_package` | `mod`? | every problem, each with what it is about |
+| `restart_and_return` | `confirm` | save every changed package, start the game again with the same arguments and put Link back where he is (after you choose the Quest Log), in Play or test mode as before (needs `"confirm": true`; not on Android) |
 | `save_package` | `confirm`, `mod`? | write `manifest.json` (needs `"confirm": true`) |
 | `revert_package` | `confirm`, `mod`? | forget unsaved changes (needs `"confirm": true`) |
 | `export_package` | `path`, `confirm`, `mod`? | check, then write the package into a new or empty folder |

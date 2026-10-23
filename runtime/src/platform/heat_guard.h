@@ -8,6 +8,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
+#include <cstdint>
 
 namespace heat_guard {
 // The values HeatGuardDevice.java passes (keep both in step).
@@ -49,9 +50,9 @@ inline bool next_paused(bool paused, float headroom, Limits l) {
 // 40 C or more (the setup's battery limits start at 41-42 C) or the hottest CPU/GPU sensor at 90 C or
 // more (Snapdragon cores sit in the 70s under gaming load and throttle only near their 95-105 C junction
 // limits). While paused, 60 fps resumes early once both readings are clearly cool (battery below 38 C
-// and CPU/GPU below 80 C), so a high headroom alone never keeps it paused. Phones keep the headroom
+// and CPU/GPU below 80 C), subject to the sustained-cooling timer below. Phones keep the headroom
 // rule (tuned on fanless phones, which throttle by skin temperature before their cores get that hot),
-// and with no readable temperature the headroom alone decides as before.
+// and missing temperatures cannot confirm a new handheld pause.
 struct Temperatures {
     float battery = NAN;       // C, NaN when unreadable
     float hottest_core = NAN;  // hottest CPU/GPU thermal zone, C, NaN when unreadable
@@ -68,13 +69,40 @@ inline bool cool(Temperatures t) {
 inline bool checks_temperatures(DeviceClass device) { return device == kFanHandheld; }
 
 // next_paused with the temperature check: on a fan handheld with readable temperatures a pause needs
-// hot(), and a pause ends once cool(). Elsewhere it is the headroom rule above.
+// hot(), and a pause can end once cool(). Elsewhere it is the headroom rule above.
 inline bool next_paused(bool paused, float headroom, Limits l, DeviceClass device, Temperatures t) {
     const bool next = next_paused(paused, headroom, l);
-    if (!next || !checks_temperatures(device) || !known(t)) return next;
+    if (!next || !checks_temperatures(device)) return next;
+    if (!known(t)) return paused;
     if (!paused) return hot(t);
     return !cool(t);
 }
+
+// Release only after five seconds of consecutive cool samples. Calls use monotonic milliseconds;
+// missing headroom or a sampling gap cannot count as evidence of sustained cooling. Off is immediate.
+constexpr int64_t kClearMillis = 5000;
+struct State {
+    bool paused = false;
+    int64_t cool_since = -1, last_sample = -1;
+    bool update(float headroom, Limits l, DeviceClass device, Temperatures t, int64_t now) {
+        if (!l.active) { paused = false; cool_since = -1; last_sample = now; return false; }
+        const bool next = next_paused(paused, headroom, l, device, t);
+        if (!paused) {
+            paused = next;
+            cool_since = -1;
+        } else {
+            const bool clear = !std::isnan(headroom) && !next;
+            if (!clear || now < last_sample || (last_sample >= 0 && now - last_sample > 2000))
+                cool_since = -1;
+            if (clear) {
+                if (cool_since < 0) cool_since = now;
+                if (now - cool_since >= kClearMillis) { paused = false; cool_since = -1; }
+            }
+        }
+        last_sample = now;
+        return paused;
+    }
+};
 
 // "normal" / "relaxed" / "off" (also 0 / 1 / 2); anything else is Normal, the safe default.
 inline Setting parse(const char* v) {

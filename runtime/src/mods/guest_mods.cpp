@@ -70,6 +70,7 @@
 #include "story_notebook.h"
 #include "story_items.h"
 #include "story_item_models.h"
+#include "story_item_get_icon.h"
 #include "story_actor_textures.h"
 #include "story_prop_textures.h"
 #include "story_props.h"
@@ -474,7 +475,7 @@ void load_world(const std::string& mod,const mods::json::Value& manifest,const s
     // served to the game; a stage the player's files can't make is left out with a line in the log
     if(manifest.get("stages").type!=mods::json::Value::Null){
         std::vector<std::string> python;std::string tool;
-        try{const auto bridge=BuildBridge::installed(std::string(),false);python=bridge.python;tool=(std::filesystem::path(bridge.builder).parent_path().parent_path()/"story_mods"/"stage_builder.py").string();}
+        try{const auto bridge=BuildBridge::installed(std::string(),false);python=bridge.tool_python();tool=(std::filesystem::path(bridge.builder).parent_path().parent_path()/"story_mods"/"stage_builder.py").string();}
         catch(const std::exception& e){LOG("[mod-stages] %s: the stage builder is unavailable: %s",mod.c_str(),e.what());}
         mod_stages::declare(mod,manifest,package_dir,data_dir,python,tool,config::game_dir);
     }
@@ -516,7 +517,7 @@ void load_world(const std::string& mod,const mods::json::Value& manifest,const s
         try {
             const auto bridge=BuildBridge::installed(std::string(),false);
             const auto tool=std::filesystem::path(bridge.builder).parent_path().parent_path()/"story_mods"/"game_piece_model.py";
-            const auto set=story_game_pieces::build(id,story_game_pieces::cache_directory(data_dir),bridge.python,tool.string(),config::game_dir);
+            const auto set=story_game_pieces::build(id,story_game_pieces::cache_directory(data_dir),bridge.tool_python(),tool.string(),config::game_dir);
             if(!story_game_pieces::register_for_mod(mod,*set,id,false,why))failure=why;
         } catch(const std::exception& e) {failure=e.what();}
         if(failure.empty())continue;
@@ -549,12 +550,13 @@ void load_world(const std::string& mod,const mods::json::Value& manifest,const s
                 const auto tool=std::filesystem::path(bridge.builder).parent_path().parent_path()/"story_mods"/"kit_model.py";
                 // only a distant model: its game textures at the size of the game's own distant views
                 const bool distant_only=distant_uses&&!actor_uses&&!collision_uses;
-                const auto set=story_kit_models::build(mod,model,package_dir,story_kit_models::cache_directory(data_dir),bridge.python,tool.string(),config::game_dir,distant_only);
+                const auto set=story_kit_models::build(mod,model,package_dir,story_kit_models::cache_directory(data_dir),bridge.tool_python(),tool.string(),config::game_dir,distant_only);
                 if(distant_uses&&set->pieces[0].triangles>1024)throw std::runtime_error("a distant model may have 1 to 1024 triangles");
                 if(!story_kit_models::register_for_mod(mod,model.id,*set,false,why))throw std::runtime_error(why);
             } catch(const std::exception& e) {
                 LOG("[world] %s: model %s is not ready and its actors are left out: %s",mod.c_str(),model.id.c_str(),e.what());
                 {std::lock_guard guard(g_world_model_notes_mutex);g_world_model_notes.push_back({mod,"Model "+model.id+" is not ready: "+e.what()});}
+                actor_model_cache::note_failure(mod,model.id,e.what());
                 failed_models.push_back(model.id);
             }
             continue;
@@ -564,7 +566,7 @@ void load_world(const std::string& mod,const mods::json::Value& manifest,const s
         try {
             const auto bridge=BuildBridge::installed(std::string(),false);
             const auto tool=std::filesystem::path(bridge.builder).parent_path().parent_path()/"story_mods"/(model.kind=="skinned"?"skinned_actor_model.py":"actor_model.py");
-            const auto archive=actor_model_cache::prepare(mod,model,package_dir,data_dir,bridge.python,tool.string(),config::game_dir,collision_uses,shoreline_uses,shoreline_material);
+            const auto archive=actor_model_cache::prepare(mod,model,package_dir,data_dir,bridge.tool_python(),tool.string(),config::game_dir,collision_uses,shoreline_uses,shoreline_material);
             if(visual_uses&&(actor_model_cache::triangles_for(archive)==0||actor_model_cache::triangles_for(archive)>1024))exception_report::raise("Distant and shoreline models must contain 1..1024 render triangles");
             if(collision_uses&&!mod_actor::register_collision(mod,model.id,actor_model_cache::collision_for(archive)))exception_report::raise("Prepared collision unavailable");
             story_notebook::WorldPoint minimum,maximum;
@@ -574,6 +576,7 @@ void load_world(const std::string& mod,const mods::json::Value& manifest,const s
         } catch(const std::exception& e) {
             LOG("[world] %s: model %s is not ready and its actors are left out: %s",mod.c_str(),model.id.c_str(),e.what());
             {std::lock_guard guard(g_world_model_notes_mutex);g_world_model_notes.push_back({mod,"Model "+model.id+" is not ready: "+e.what()});}
+            actor_model_cache::note_failure(mod,model.id,e.what());
             failed_models.push_back(model.id);
         }
     }
@@ -1031,7 +1034,7 @@ void prepare_npc_catalogue() {
             const auto bridge=BuildBridge::installed(std::string(),false);
             const auto tool=std::filesystem::path(bridge.builder).parent_path().parent_path()/"story_mods"/"npc_catalogue.py";
             std::filesystem::create_directories(dir/"recipes",ec);
-            auto command=bridge.python;command.push_back(tool.string());command.insert(command.end(),{"--game",config::game_dir,"--out",file.string(),"--json"});
+            auto command=bridge.tool_python();command.push_back(tool.string());command.insert(command.end(),{"--game",config::game_dir,"--out",file.string(),"--json"});
             for(const auto& [place,text]:story_notebook::npc_recipes()) {
                 const auto recipe=dir/"recipes"/(place+".recipe.json");
                 std::ofstream(recipe,std::ios::binary)<<text;
@@ -1060,7 +1063,7 @@ std::string notebook_model(const std::filesystem::path& glb,const std::string& d
         const auto bridge=BuildBridge::installed(std::string(),false);
         const auto tool=std::filesystem::path(bridge.builder).parent_path().parent_path()/"story_mods"/"notebook_model.py";
         std::filesystem::create_directories(data_dir,ec);
-        auto command=bridge.python;command.push_back(tool.string());
+        auto command=bridge.tool_python();command.push_back(tool.string());
         command.insert(command.end(),{"--game",config::game_dir,"--glb",glb.string(),"--out",out.string()});
         const auto process=host::run_process(command);
         LOG("[notebook] the notebook's model built from %s: %s",glb.filename().string().c_str(),process.code==0?"ok":(process.output+process.error).c_str());
@@ -1311,6 +1314,13 @@ void init() {
         if(!items.empty()){story_items::note_import();story_notebook::note_import();story_mail::note_import();}
         load_world(pkg.id,manifest,path.string(),packages::package_data_directory(pkg.id));
     }
+    // The world editor (--editor, #270): mod items and chests that hold them work while the game runs. The item
+    // hooks and the chest item hook are there from the start even when no package declared an item or such a
+    // chest, so an item or a chest added in the editor needs no restart (story_actors no longer leaves the
+    // chest out). Inert until something uses them; only with the Story Notebook (items need it).
+    if(editor::launch_mode()&&g_story_package){
+        story_items::note_import();story_notebook::note_import();story_mail::note_import();story_treasure_chest::note_placed_chests();
+    }
     // The item icons (item_icons.h): the notebook (key 0), then the mod items in declaration order (frames
     // 56...), built into the game's 2D pack before the game opens it; the mod items draw from those frames.
     // (test aid WWHD_TEST_ITEM_ICONS=a.png,b.png adds pictures as more items)
@@ -1323,7 +1333,8 @@ void init() {
             for(size_t a=0;a<list.size();){size_t b=list.find(',',a);if(b==std::string::npos)b=list.size();
                 if(b>a)icons.push_back({key++,list.substr(a,b-a)});a=b+1;}
         }
-        item_icons::set_items(icons,g_icon_cache);
+        // the world editor: spare frames for items added while the game runs (item_icons.h, live icons)
+        item_icons::set_items(icons,g_icon_cache,editor::launch_mode()?item_icons::kSpareFrames:0);
         story_items::set_frame_source(item_icons::frame);
     }
     // Every service below claims game functions in the hook-flag table (g_mod_hook_flags), which only game
@@ -1558,6 +1569,7 @@ void init() {
     // Mod items (story_items.h): the game's item tables answer for the port's item numbers, only when a
     // loaded mod declares items.
     story_items::set_game_calls(call_original,[](Cpu* c,uint32_t fn,std::initializer_list<uint32_t> args){return guest_call(c,fn,args);});
+    if(editor::launch_mode())item_icons::set_game_calls([](Cpu* c,uint32_t fn,std::initializer_list<uint32_t> args){return guest_call(c,fn,args);},story_lyt_screen::safe_string("BtnItemIcon_00"));
     story_items::set_presenter(story_notebook::show_info);
     if(story_items::imported())story_mail::set_item_get_next(story_items::hooks::exec_item_get);
     // a mod treasure chart's chest (story_treasure_chest.h): its stand-in's execItemGet, before the mod items'
@@ -1586,6 +1598,17 @@ void init() {
     story_items::set_get_text(story_mail::item_get_text);
     story_item_models::set_text(story_items::arm_get_text);
     if(!story_item_models::install([](uint32_t fn){auto it=g_chains.find(fn);return it==g_chains.end()?std::string():it->second.replace_mod;},[](uint32_t fn,PpcFunc hook){int i=ordinal_of(fn);if(i<0)fatal("item model hook missing");auto&ch=g_chains[fn];ch.addr=fn;ch.ordinal=uint32_t(i);ch.replace=hook;ch.replace_mod="the port's item models";g_mod_hook_flags[i]=1;}))exception_report::raise("Item model hook conflict");
+    // a mod item's get moment from a chest (story_item_get_icon.h): its icon over Link's head in the place of
+    // the stand-in's card; the demo item's draw hook also asks the held models first. With mod items, chests
+    // of them, or in the editor launch mode (an item added there gets its chest at once).
+    story_item_get_icon::configure(call_original,[]{
+        const editor::CameraView v=editor::camera_view();story_item_get_icon::Camera c;c.valid=v.valid;
+        for(int i=0;i<3;i++)c.eye[i]=v.eye[i],c.center[i]=v.center[i],c.up[i]=v.up[i];
+        c.fovy=v.fovy;c.aspect=v.aspect;for(int i=0;i<16;i++)c.proj[i]=v.proj[i];return c;
+    },item_icons::picture);
+    story_treasure_chest::set_icon_presenter([](uint16_t key,const std::string& png,bool on){if(on)story_item_get_icon::show(key,png);else story_item_get_icon::hide();});
+    if(story_items::imported()||story_treasure_chest::placed_chests()||story_item_models::declared()||editor::launch_mode())
+        story_item_get_icon::install([](uint32_t fn){auto it=g_chains.find(fn);return it==g_chains.end()?std::string():it->second.replace_mod;},[](uint32_t fn,PpcFunc hook){int i=ordinal_of(fn);if(i<0)fatal("[guestmods] item get: %08X is not a game function",fn);auto&ch=g_chains[fn];ch.addr=fn;ch.ordinal=uint32_t(i);ch.replace=hook;ch.replace_mod="the port's item get";g_mod_hook_flags[i]=1;});
     story_item_buttons::set_game_calls(call_original,[](Cpu* c,uint32_t fn,std::initializer_list<uint32_t> args){return guest_call(c,fn,args);});
     story_item_buttons::install([](uint32_t addr) {
         auto it=g_chains.find(addr);return it==g_chains.end()?std::string():it->second.replace_mod;
@@ -1653,7 +1676,7 @@ bool editor_prepare_model(const std::string& mod,const std::string& package_dir,
     try {
         const auto bridge=BuildBridge::installed(std::string(),false);
         const auto tool=std::filesystem::path(bridge.builder).parent_path().parent_path()/"story_mods"/(model.kind=="skinned"?"skinned_actor_model.py":"actor_model.py");
-        archive=actor_model_cache::prepare(mod,model,package_dir,data_dir,bridge.python,tool.string(),config::game_dir,collision,shoreline,shoreline?shore.text:std::string());
+        archive=actor_model_cache::prepare(mod,model,package_dir,data_dir,bridge.tool_python(),tool.string(),config::game_dir,collision,shoreline,shoreline?shore.text:std::string());
         return true;
     } catch(const std::exception& e) {return why=e.what(),false;}
 }
@@ -1665,13 +1688,13 @@ std::shared_ptr<const story_game_pieces::BuiltSet> editor_build_kit_model(const 
     if(models.size()!=1||models[0].kind!="kit")throw std::runtime_error("not a kit model");
     const auto bridge=BuildBridge::installed(std::string());
     const auto tool=std::filesystem::path(bridge.builder).parent_path().parent_path()/"story_mods"/"kit_model.py";
-    return story_kit_models::build(mod,models[0],package_dir,story_kit_models::cache_directory(data_dir),bridge.python,tool.string(),config::game_dir);
+    return story_kit_models::build(mod,models[0],package_dir,story_kit_models::cache_directory(data_dir),bridge.tool_python(),tool.string(),config::game_dir);
 }
 
 std::shared_ptr<const story_game_pieces::BuiltSet> editor_build_piece(const std::string& id,const std::string& cache_dir){
     const auto bridge=BuildBridge::installed(std::string(),false);
     const auto tool=std::filesystem::path(bridge.builder).parent_path().parent_path()/"story_mods"/"game_piece_model.py";
-    return story_game_pieces::build(id,cache_dir,bridge.python,tool.string(),config::game_dir);
+    return story_game_pieces::build(id,cache_dir,bridge.tool_python(),tool.string(),config::game_dir);
 }
 
 std::vector<ModIdentity> enabled_mods() {
@@ -1790,7 +1813,7 @@ void logic_service(Cpu* c) {
             }
         }
     }
-    story_item_models::tick(c);mod_actor::heap_sample(c);actor_sweep(c);story_scenes::tick(c,false,2);story_actors::service(c);
+    story_item_models::tick(c);story_item_get_icon::logic(hud::store().step());item_icons::service(c);mod_actor::heap_sample(c);actor_sweep(c);story_scenes::tick(c,false,2);story_actors::service(c);
     mod_stages::logic(c);
     story_native_wait_runtime::logic(c);
     story_scenes::demo_tick(c);
@@ -1804,6 +1827,7 @@ void state_loaded() {
     hud::store().reset();
     pcm::store().reset();
     story_item_models::state_loaded();
+    story_item_get_icon::state_loaded();
     story_mail::state_loaded();
     story_scenes::state_loaded();
     story_actors::state_loaded();

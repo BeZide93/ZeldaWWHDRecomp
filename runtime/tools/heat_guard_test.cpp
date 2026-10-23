@@ -91,9 +91,9 @@ int main() {
         assert(!next_paused(false, 1.00f, l, kFanHandheld, Temperatures{39.9f, 89.9f}));
         // the headroom still has to reach the limit: hot sensors alone never pause
         assert(!next_paused(false, 0.95f, l, kFanHandheld, Temperatures{45.0f, 95.0f}));
-        // no readable temperature: the headroom alone decides, as before
-        assert(next_paused(false, 1.00f, l, kFanHandheld, Temperatures{}));
-        // while paused: warm (85 C) keeps the pause, cool (below 38 C and 80 C) ends it at once,
+        // no readable temperature: cannot confirm a new handheld pause
+        assert(!next_paused(false, 1.00f, l, kFanHandheld, Temperatures{}));
+        // instantaneous release candidate: warm (85 C) keeps the pause, cool permits release,
         // a headroom below 0.90 ends it whatever the temperatures
         assert(next_paused(true, 1.20f, l, kFanHandheld, Temperatures{33.0f, 85.0f}));
         assert(next_paused(true, 1.20f, l, kFanHandheld, Temperatures{38.0f, 70.0f}));
@@ -108,6 +108,39 @@ int main() {
         assert(next_paused(true, 0.65f, p, kPhone, Temperatures{30.0f, 60.0f}));
         assert(!next_paused(false, 0.71f, p, kPhone, Temperatures{45.0f, 95.0f}));
         assert(!checks_temperatures(kPhone) && checks_temperatures(kFanHandheld));
+    }
+
+    // #277 replay and timed hysteresis exercise the state used by perf_hint.cpp.
+    {
+        const auto l = limits(kFanHandheld, kNormal);
+        State state;
+        int64_t now = 0;
+        for (float h : {0.99f, 1.01f, 1.38f, 0.89f, 1.09f}) {
+            assert(!state.update(h, l, kFanHandheld, {30.5f, 77.2f}, now));
+            now += 1000;
+            assert(!state.update(h, l, kFanHandheld, {}, now));
+            now += 1000;
+        }
+        assert(state.update(1.1f, l, kFanHandheld, {40.f, 92.f}, 10000));
+        assert(state.update(0.89f, l, kFanHandheld, {}, 11000));
+        assert(state.update(1.1f, l, kFanHandheld, {39.f, 85.f}, 12000));
+        assert(state.update(1.1f, l, kFanHandheld, {31.f, 70.f}, 13000));
+        assert(state.update(NAN, l, kFanHandheld, {}, 14000));
+        for (int64_t t = 15000; t < 20000; t += 1000)
+            assert(state.update(1.1f, l, kFanHandheld, {31.f, 70.f}, t));
+        assert(state.update(1.1f, l, kFanHandheld, {31.f, 70.f}, 19999));
+        assert(!state.update(1.1f, l, kFanHandheld, {31.f, 70.f}, 20000));
+        assert(state.update(1.1f, l, kFanHandheld, {40.f, 92.f}, 21000));
+        assert(!state.update(1.1f, limits(kFanHandheld, kOff), kFanHandheld, {}, 21001));
+        // Phones also need sustained headroom below their existing resume limit.
+        State phone;
+        const auto p = limits(kPhone, kNormal);
+        assert(phone.update(.8f, p, kPhone, {}, 0));
+        assert(phone.update(.5f, p, kPhone, {}, 1000));
+        assert(phone.update(.5f, p, kPhone, {}, 10000)); // sampling gap
+        for (int64_t t = 11000; t < 15000; t += 1000)
+            assert(phone.update(.5f, p, kPhone, {}, t));
+        assert(!phone.update(.5f, p, kPhone, {}, 15000));
     }
 
     // the setting's names (saved value and WWHD_HEAT_GUARD)

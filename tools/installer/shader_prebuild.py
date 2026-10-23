@@ -11,8 +11,13 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import tempfile
 import time
+
+# The game starts this helper as a script with the Windows release's embeddable Python, which is isolated: the
+# script's folder is not on sys.path, so its sibling model_sweep.py is found through this (issue #280).
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 SCHEMA = 1
 

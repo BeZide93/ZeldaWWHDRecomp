@@ -128,6 +128,16 @@ struct BuildBridge {
         }
         return b;
     }
+    // The interpreter command for a tools/story_mods tool the game starts itself (the model, stage, island
+    // building and catalogue builders): `python -c tool_bootstrap TOOL ARGS...`, so the
+    // tool's own folder is on sys.path under every Python. The Windows release's embeddable Python leaves it
+    // out (its python314._pth lists only its own folders): every own model of the world editor failed there
+    // with "No module named 'notebook_model'" (issue #280), as package tools did before (issue #224).
+    std::vector<std::string> tool_python() const {
+        auto command=python;
+        command.insert(command.end(),{"-c",tool_bootstrap});
+        return command;
+    }
     mods::json::Value run(const std::string& package,uint32_t base,bool inspect,const std::string& build="USA") const {
         auto command=python;command.push_back(builder);command.push_back(package);
         command.insert(command.end(),{"--base",std::to_string(base),"--build",build,"--json"});

@@ -47,10 +47,46 @@ void call(Gate& g, uint64_t step, float frac, State& s, Orig&& orig) {
     s = g.after;  // the exact state of the step
 }
 
+// The GameCube fade the HD code keeps (mDoGph_gInf_c::calcFade of the GC code, 0252F5A0; started by
+// 0252F54C / 0252F590: the snapshot fade d_ovlp_fade3 and the event director's FADE): +0 rate (0..1,
+// drawn as the HD wipe's texture scale), +4 speed, +C on. The HD display's per-frame child 13 calls it
+// on every drawn pass, so it ran 2x/4x/8x too fast, and the logic that waits for it (d_ovlp_fade3,
+// the event director, hdFaderMgr::isFading) went on at a different step than at 30 fps. Gated like the
+// fader: advanced on the logic pass only, shown at the pass's fraction (the update run from the step's
+// start with the speed scaled); the shown state stays in guest memory until the next call takes it
+// back (`shown`), the speed stays exact. `s` is the guest state; orig(s) runs the game's update on it.
+struct RateGate {
+    uint64_t step = ~0ull;
+    State before, after, shown;
+    bool have = false;
+};
+template <class Orig>
+void rate_call(RateGate& g, uint64_t step, bool logic, float frac, State& s, Orig&& orig) {
+    if (g.have && s == g.shown) s = g.after;  // the step's exact state (nothing changed it since)
+    if (logic || g.step != step || !(s == g.after)) {  // the step's advance, or the game started a fade
+        g.before = s;
+        orig(s);
+        g.after = s;
+        g.step = step;
+        g.have = true;
+    }
+    g.shown = g.after;
+    if (frac < 1.0f && g.before.fade) {
+        State v = g.before;
+        v.speed = frac * g.before.speed;
+        orig(v);
+        v.speed = g.after.speed;
+        g.shown = v;
+    }
+    s = g.shown;
+}
+
 // The HD display's fader (the stage fades: dOvlpFd_startFadeInHD 02728CB8 starts it, 26 frames)
 // is advanced by the per-frame function's child 13 (02728A74), which runs on every drawn pass:
-// +0 state (0/1 idle, 2/3 fading), +4 duration << 16 | frame counter, +8 alpha (0..255, read when the
-// fader layer is painted; while the fade counts, the child sets it from the counter). Gated the same
+// +0 state (0/1 idle, 2/3 fading), +4 duration << 16 | frame counter, +8 colour (bytes r, g, b, alpha;
+// read when the fader layer is painted; while the fade counts, the child sets the alpha byte from the
+// counter; mDoGph_setFadeColor 025F05F8 sets the colour: black for most stage changes, light grey
+// A0A0A0 for the white fades of exits to the outside, other colours in cutscenes). Gated the same
 // way: the child advances it on the logic pass only (on the other passes its advance is taken back),
 // and while the fade counts on, every pass shows the alpha at its fraction between the alpha shown at
 // the end of the previous step and the step's own.
@@ -61,6 +97,18 @@ void call(Gate& g, uint64_t step, float frac, State& s, Orig&& orig) {
 // came on every pass, the hold passes advanced the fade a second time). A fade the game starts or
 // changes (state or counter written) is taken as it is and shown exactly for its first step; while
 // the fader idles, an alpha the game writes is kept.
+// The colour word is blended per byte (blend_rgba): blended as one number (a float of 0xA0A0A0xx has
+// no room for the low byte), every blended pass of a white fade showed alpha 0 or 0x100 (#273: white
+// fades flickered between the fade and no fade at all; black fades, 0x000000xx, were exact).
+// a colour word (4 bytes) at fraction `frac` from `a` to `b`, per byte
+inline uint32_t blend_rgba(uint32_t a, uint32_t b, float frac) {
+    uint32_t r = 0;
+    for (int sh = 0; sh < 32; sh += 8) {
+        const float x = (float)(a >> sh & 0xFF), y = (float)(b >> sh & 0xFF);
+        r |= (uint32_t)((1.0f - frac) * x + frac * y + 0.5f) << sh;
+    }
+    return r;
+}
 struct Fader {
     uint32_t w[3] = {0, 0, 0};  // state, duration/counter, alpha
     bool operator==(const Fader& o) const { return w[0] == o.w[0] && w[1] == o.w[1] && w[2] == o.w[2]; }
@@ -97,10 +145,7 @@ void fader_call(FaderGate& g, uint64_t step, bool logic, float frac, Fader& f, C
         f = g.after;  // its advance taken back: once per step
     }
     g.shown = g.after;
-    if (frac < 1.0f && g.blend) {
-        const float a = (1.0f - frac) * (float)g.before.w[2] + frac * (float)g.after.w[2];
-        g.shown.w[2] = (uint32_t)(a + 0.5f);
-    }
+    if (frac < 1.0f && g.blend) g.shown.w[2] = blend_rgba(g.before.w[2], g.after.w[2], frac);
     f = g.shown;
 }
 

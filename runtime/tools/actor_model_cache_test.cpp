@@ -40,6 +40,8 @@ int main(int argc,char** argv){
     if(argc>1&&std::string(argv[1])=="--converter"){
         std::string output,identity,collision_output;for(int i=2;i+1<argc;++i){if(std::string(argv[i])=="--out")output=argv[i+1];if(std::string(argv[i])=="--identity")identity=argv[i+1];if(std::string(argv[i])=="--collision-out")collision_output=argv[i+1];}
         if(std::string(argv[2])=="fail")return 1;
+        // a Python 3.13+ traceback's last line, coloured (issue #280: the Windows release's tools could not import their siblings)
+        if(std::string(argv[2])=="fail_colour"){std::cout<<"Traceback (most recent call last):\n  File \"actor_model.py\"\n\x1b[1;35mModuleNotFoundError\x1b[0m: \x1b[35mNo module named 'notebook_model'\x1b[0m\n";return 1;}
         if(std::string(argv[2])=="reuse"&&!fs::is_regular_file(output))return 2;
         if(std::string(argv[2])!="missing"&&std::string(argv[2])!="reuse"){std::ofstream file(output,std::ios::binary);file.write("Yaz0synthetic-test",18);}
         mods::json::Value result;
@@ -70,6 +72,19 @@ int main(int argc,char** argv){
     for(const auto& path:{first+".szs","/vol/content/Common/Object/../Object/"+first+".szs","/vol/content/Common/object/"+first+".szs",guest+"/tail","/vol/content/Common/Object/"+first+".bfres"})assert(actor_model_cache::archive_for(path).empty());
     auto fails=[&](const std::string& tool){bool threw=false;try{prepare("owner",tool);}catch(const std::exception&){threw=true;}assert(threw&&actor_model_cache::triangles_for(first)==0&&actor_model_cache::archive_for(guest).empty()&&!actor_model_cache::bounds_for(first,minimum,maximum));};
     fails("fail");prepare("owner","ok");fails("wrong");
+    // why a model could not be prepared: kept per (mod, model) until it is prepared, one plain line (issue #280)
+    {
+        prepare("owner","ok");assert(actor_model_cache::failure_for("owner","post").empty()&&!actor_model_cache::preparing("owner","post"));
+        fails("fail_colour");
+        const auto why=actor_model_cache::failure_for("owner","post");
+        assert(why=="Static model conversion failed (ModuleNotFoundError: No module named 'notebook_model'); check the model and player game resources");
+        assert(actor_model_cache::failure_for("other","post").empty()&&!actor_model_cache::preparing("owner","post"));
+        prepare("owner","ok");assert(actor_model_cache::failure_for("owner","post").empty());
+        actor_model_cache::note_failure("owner","kit-rock","a name the kit room doesn't have");assert(actor_model_cache::failure_for("owner","kit-rock")=="a name the kit room doesn't have");
+        actor_model_cache::clear_failure("owner","kit-rock");assert(actor_model_cache::failure_for("owner","kit-rock").empty());
+        assert(actor_model_cache::plain_reason("\x1b[31mred\x1b[0m\r\n  line\ttwo  ")=="red line two");
+        assert(actor_model_cache::plain_reason(std::string(300,'x')).size()==203);
+    }
     for(const char* invalid:{"triangles_missing","triangles_wrong","triangles_fraction","triangles_string"}){prepare("owner","ok");fails(invalid);}
     fs::remove(file);fails("missing");
     auto prepare_collision=[&](const std::string& tool){return actor_model_cache::prepare("owner",model,(root/"package with spaces").string(),(root/"data").string(),command,tool,"game with spaces",true);};

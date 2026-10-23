@@ -63,6 +63,8 @@ const std::vector<CommandInfo> kCommands = {
     {"history", "The undo and redo steps.", {}},
     {"validate", "Checks the open mod as the mod manager does.", {{"mod", "string", ""}}},
     {"save_package", "Writes the open mod's manifest into its package folder (replaces manifest.json).", {{"mod", "string", ""}, {"confirm", "boolean", "must be true: the file is replaced", true}}, false, true},
+    {"restart_and_return", "Saves every changed package, then starts the game again with the same arguments and puts Link back where he is now (after the Quest Log is picked on the title screen), in Play or test mode as before: for changes that take effect only after a restart.",
+     {{"confirm", "boolean", "must be true: the game restarts", true}}, false, true},
     {"revert_package", "Forgets the unsaved changes (an undo step).", {{"mod", "string", ""}, {"confirm", "boolean", "must be true", true}}, true, true},
     {"reload_room", "Leaves and enters the current room again (Link stays where he is): every actor of the room is created again.", {}},
     {"list_locations", "Warp destinations: the islands, the game's stages and rooms, the installed packages' stages, and the open mod's actors and quest places.", {{"group", "string", "Islands, Rooms, Mod stages or Quest"}}},
@@ -249,8 +251,8 @@ const std::vector<CommandInfo> kCommands = {
     {"set_drops", "Sets what an enemy or prop drops: up to eight of the mod's items.", {{"id", "string", "", true}, {"drops", "array", "[{item: item:<id>, quantity}]", true}, {"mod", "string", ""}}, true},
     {"preview_dialogue", "Shows an actor's dialogue (or given lines) in the game's own message box; close hides it.",
      {{"id", "string", "the actor"}, {"lines", "any", "lines instead of the actor's"}, {"close", "boolean", "hide the box"}, {"mod", "string", ""}}},
-    {"check_model", "Checks a .glb file for the game: size, triangles, texture, bones, clips and material.", {{"file", "string", "the .glb file", true}}},
-    {"import_model", "Copies a .glb file into the open mod's models folder, adds it to the package and prepares it for the game. With kit, its texture-free materials are game materials of that room (docs/world-objects.md#game-materials), built from your game files.",
+    {"check_model", "Checks a .glb file for the game: size, triangles, texture, bones, clips and material; import_fixes lists what the import changes to make it fit (several objects merged, strips and loose edges, vertex colours, blended materials, texture sizes).", {{"file", "string", "the .glb file", true}}},
+    {"import_model", "Copies a .glb file into the open mod's models folder (fixed where it breaks a rule the editor can repair; fixes says what changed), adds it to the package and prepares it for the game. A model made away from its origin (on an island export) is placed at the room's origin by add_actor. With kit, its texture-free materials are game materials of that room (docs/world-objects.md#game-materials), built from your game files.",
      {{"file", "string", "the .glb file", true}, {"id", "string", "the model's id (default: the file name)"}, {"confirm", "boolean", "replace a different file of the same name"},
       {"kit", "object", "{stage, room}: the room of the game whose materials the model's texture-free materials name (a kit model)"},
       {"materials", "object", "a kit model's material names -> the kit room's materials (default: a material's own name)"},
@@ -260,7 +262,7 @@ const std::vector<CommandInfo> kCommands = {
      {{"model", "string", "the model's id", true}, {"kit", "object", "{stage, room}"}, {"materials", "object", "material names -> kit materials (null: none)"},
       {"material", "string", "the kit material for its other texture-free materials (\"\": none)"}, {"mod", "string", ""}},
      true},
-    {"reload_model", "Builds a kit model again from its file in the package (after you changed it in Blender) and your game files; the actors drawing it take it while the game runs.",
+    {"reload_model", "Takes a model's changed file in the package (after you exported it again from Blender): the import's fixes are applied to it; a kit model is built again from your game files and the actors drawing it take it while the game runs, another model at the next start.",
      {{"model", "string", "the model's id", true}, {"mod", "string", ""}}},
     {"model_clips", "A model's animation clips (for a route's walk and idle clips).", {{"model", "string", "the model's id", true}, {"mod", "string", ""}}},
     {"check_package", "Every problem of the open mod's package, each with the actor, model, scene or quest it is about.", {{"mod", "string", ""}}},
@@ -653,6 +655,12 @@ bool world_placements(Host* host, const std::string& mod, const Value& before, c
                 why.clear();
                 continue;
             }
+            // a model whose collision is still being prepared ("Your model" with its own _col meshes, issue #280): the
+            // game checks its place when the collision is ready (mod_actor::declare), as above
+            if (!actor.collision_mesh.empty() && host->collision_preparing(mod, actor.collision_mesh)) {
+                why.clear();
+                continue;
+            }
             why = "world object " + actor.id + ": " + (why.empty() ? "placement coverage or collision is unavailable" : why);
             return false;
         }
@@ -1025,6 +1033,10 @@ Session::Package* Session::package(const Value& params, std::string& why) {
 const Value* Session::manifest(const std::string& mod) const {
     auto* p = find(mod);
     return p ? &p->manifest : nullptr;
+}
+const Value* Session::started(const std::string& mod) const {
+    auto* p = find(mod);
+    return p ? &p->started : nullptr;
 }
 std::string Session::package_dir(const std::string& mod) const {
     auto* p = find(mod);
@@ -1579,6 +1591,28 @@ Value Session::dispatch(const std::string& command, const Value& p, std::string&
         const bool valid = validate_package(pkg->mod, pkg->manifest, all_manifests(), problem) && model_files(pkg->dir, pkg->manifest, problem) && world_placements(host_, pkg->mod, pkg->manifest, pkg->manifest, true, problem);
         r["valid"] = valid;
         if (!valid) r["problem"] = problem;
+        ok = true;
+        return r;
+    }
+    if (command == "restart_and_return") {
+        if (!host_) return why = "the game is not running", r;
+        if (!p.get("confirm").boolean) return why = "needs \"confirm\": true (the game restarts)", r;
+        // the changes that wait for a restart are in the packages: saved first
+        Value saved;
+        saved.type = Value::Array;
+        for (const auto& pkg : packages_) {
+            if (!dirty(pkg.mod)) continue;
+            Value sp;
+            sp["mod"] = pkg.mod, sp["confirm"] = true;
+            std::string w;
+            bool sok = false;
+            dispatch("save_package", sp, w, sok);
+            if (!sok) return why = "not restarted: " + pkg.mod + " could not be saved (" + w + ")", r;
+            saved.array.push_back(Value(pkg.mod));
+        }
+        if (!host_->restart_and_return(why)) return r;
+        r["saved"] = saved;
+        r["requested"] = true;
         ok = true;
         return r;
     }

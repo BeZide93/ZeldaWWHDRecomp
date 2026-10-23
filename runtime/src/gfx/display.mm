@@ -41,6 +41,7 @@
 #include <vector>
 
 #include "../aspect.h"
+#include "../mods/fast_forward.h"
 #include "display.h"
 #include "display_modes.h"
 #include "headless_compose.h"
@@ -852,8 +853,9 @@ static void present_to_layer(Screen& scr, void (^draw)(id<MTLTexture>)) {
     if (!scr.layer || !scr.tex) return;
     MTLPixelFormat want = scr.srgb ? MTLPixelFormatBGRA8Unorm_sRGB : MTLPixelFormatBGRA8Unorm;
     if (scr.layer.pixelFormat != want) scr.layer.pixelFormat = want;
-    // uncapped (gx2::uncapped, debug): presentation does not wait for the display
-    const bool sync = !gx2::uncapped();
+    // Fast Forward retains the accelerated guest-vsync schedule, but must not also
+    // wait for the physical display (90/120 logic frames/s on a 60 Hz display).
+    const bool sync = !gx2::uncapped() && !mods::fast_forward_active();
     if (scr.layer.displaySyncEnabled != sync) {
         scr.layer.displaySyncEnabled = sync;
         if (&scr == &R.tv) interp::set_present_vsync(sync);

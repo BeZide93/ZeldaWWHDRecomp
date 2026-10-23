@@ -5,16 +5,47 @@ package org.wwhdrecomp.wwhd;
  *
  * Heat: pause at Android thermal status SEVERE, at a battery temperature of 45.0 °C, or at
  * 42.0 °C while Android also reports MODERATE or higher; resume at LIGHT or lower and at most
- * 41.0 °C. The user may continue anyway (heat override), which skips that pause for the rest of
- * the setup run. Android thermal status CRITICAL or higher always pauses: the phone throttles hard
- * or shuts down at that level whatever setup does.
+ * 41.0 °C for five seconds, with any readable CPU/GPU sensor below 80 °C. A heat pause never ends
+ * on its own (#277): once that cool-down rule holds the user may Continue
+ * ({@link #continueAfterCooling}), and at any time the user may continue anyway (heat override),
+ * which skips heat pauses for the rest of the setup run. Android thermal status CRITICAL or higher
+ * always pauses: the phone throttles hard or shuts down at that level whatever setup does.
  *
  * A SEVERE status that no temperature backs up is ignored (see {@link #thermalStatusUnreliable}).
  */
 public final class SetupPolicy {
     public static final int THERMAL_LIGHT = 1, THERMAL_MODERATE = 2, THERMAL_SEVERE = 3, THERMAL_CRITICAL = 4;
+    public static final long HEAT_CLEAR_MILLIS = 5000;
+    private long coolSince = -1, lastSample = -1;
     private boolean hot;
+    /** A heat pause that waits for the user's tap (#277); it survives cooling down. */
+    private boolean heatWait;
     private boolean low;
+
+    /** Whether setup is held by a heat pause that waits for the user. */
+    public boolean heatWaiting() { return heatWait; }
+
+    /** Whether the held heat pause may end with Continue: the cool-down rule holds. */
+    public boolean heatCooled() { return heatWait && !hot; }
+
+    /**
+     * The user's Continue on a heat pause: ends it once the device has cooled down (true); while
+     * still hot it changes nothing (false). A later real heat condition pauses again.
+     */
+    public boolean continueAfterCooling() {
+        if (!heatCooled()) return false;
+        heatWait = false;
+        return true;
+    }
+
+    /**
+     * Restores a heat pause recorded before the setup service restarted. The device then has to
+     * meet the cool-down rule again before Continue is offered.
+     */
+    public void restoreHeatWait(boolean waiting) {
+        heatWait = waiting;
+        if (waiting) { hot = true; coolSince = -1; }
+    }
 
     /** Readable PowerManager thermal status (none ... shutdown), "n/a" when unknown. */
     public static String thermalName(int status) {
@@ -37,9 +68,9 @@ public final class SetupPolicy {
      * reports NONE at the same readings). So SEVERE is believed only when a real temperature agrees:
      *  - the battery is at least 40.0 °C (setup's own battery limits start at 41-42 °C), or
      *  - the hottest CPU/GPU sensor is at least 90 °C: Snapdragon cores sit in the 70s under gaming
-     *    load and only throttle near their 95-105 °C junction limits, or
-     *  - there is no battery temperature: nothing contradicts the status, so it is acted on as before.
-     * Otherwise (SEVERE, a battery below 40.0 °C, CPU/GPU sensors below 90 °C or unreadable) the status
+     *    load and only throttle near their 95-105 °C junction limits.
+     * Missing readings do not confirm SEVERE either (#277).
+     * Otherwise (SEVERE without either temperature confirming it) the status
      * is treated as unknown; setup's battery temperature limits still apply. NONE ... MODERATE are not
      * doubted (they never pause on their own), and CRITICAL or higher is always believed: Android
      * throttles hard or shuts down at that level anyway. The thermal headroom is not used: the EVO
@@ -51,12 +82,11 @@ public final class SetupPolicy {
     public static final float THERMAL_TRUST_CORE_CELSIUS = 90f;
 
     /**
-     * Whether a reported thermal status contradicts the temperatures. temperatureTenths: battery
+     * Whether SEVERE lacks confirmation from real temperatures. temperatureTenths: battery
      * (-1 or Integer.MIN_VALUE: unknown); hottestCore: hottest CPU/GPU sensor in °C (NaN: unknown).
      */
     public static boolean thermalStatusUnreliable(int thermal, int temperatureTenths, float hottestCore) {
         if (thermal != THERMAL_SEVERE) return false;
-        if (temperatureTenths == -1 || temperatureTenths == Integer.MIN_VALUE) return false;
         if (temperatureTenths >= THERMAL_TRUST_BATTERY_TENTHS) return false;
         return !(hottestCore >= THERMAL_TRUST_CORE_CELSIUS);  // NaN (unreadable) does not confirm it
     }
@@ -108,7 +138,7 @@ public final class SetupPolicy {
     public static String reportThermal(int thermal, int temperatureTenths, float hottestCore) {
         if (!thermalStatusUnreliable(thermal, temperatureTenths, hottestCore)) return thermalName(thermal);
         return thermalName(thermal) + " (reported by the system; battery " +
-            String.format(java.util.Locale.ROOT, "%.1f C", temperatureTenths / 10f) +
+            (temperatureTenths >= 0 ? String.format(java.util.Locale.ROOT, "%.1f C", temperatureTenths / 10f) : "n/a") +
             ", CPU/GPU " + coreText(hottestCore) + ", looks unreliable)";
     }
 
@@ -137,11 +167,18 @@ public final class SetupPolicy {
     }
 
     public static String description(String reason, int thermal, int temperatureTenths, float hottestCore) {
+        return description(reason, thermal, temperatureTenths, hottestCore, false);
+    }
+
+    /** As above; cooled: a heat pause whose device has cooled down and now waits for Continue. */
+    public static String description(String reason, int thermal, int temperatureTenths, float hottestCore,
+                                     boolean cooled) {
         if ("heat".equals(reason))
-            return description(reason) + " (" + readings(thermal, temperatureTenths, hottestCore) + ")";
+            return (cooled ? "The Android device has cooled down" : description(reason)) +
+                " (" + readings(thermal, temperatureTenths, hottestCore) + ")";
         if ("critical".equals(reason))
             return description(reason) + " (" + readings(thermal, temperatureTenths, hottestCore) + "). " +
-                "Setup continues once it cools down. Continue anyway does not apply here: " +
+                "Setup waits until it cools down. Continue anyway does not apply here: " +
                 "at this level the Android device throttles hard or shuts down regardless.";
         return description(reason);
     }
@@ -182,18 +219,45 @@ public final class SetupPolicy {
     /**
      * The pause reason, or null to run. heatOverride and batteryOverride are the user's
      * "Continue anyway" for this setup run; they never skip a manual pause or CRITICAL status.
+     * A heat pause stays until {@link #continueAfterCooling} or heatOverride ends it.
      */
     public String update(int thermal, int temperatureTenths, int batteryPercent,
                          boolean charging, boolean manual, boolean heatOverride, boolean batteryOverride) {
+        return update(thermal, temperatureTenths, Float.NaN, batteryPercent, charging, manual,
+            heatOverride, batteryOverride, System.nanoTime() / 1000000L);
+    }
+
+    /** Raw sensor snapshot and monotonic milliseconds; also used by deterministic replay tests. */
+    public String update(int reported, int temperatureTenths, float hottestCore, int batteryPercent,
+                         boolean charging, boolean manual, boolean heatOverride, boolean batteryOverride,
+                         long now) {
+        int thermal = trustedThermal(reported, temperatureTenths, hottestCore);
         boolean known = temperatureTenths >= 0;
         if (thermal >= THERMAL_SEVERE || (known && temperatureTenths >= 450) ||
-            (known && temperatureTenths >= 420 && thermal >= THERMAL_MODERATE)) hot = true;
-        else if (thermal <= THERMAL_LIGHT && (!known || temperatureTenths <= 410)) hot = false;
+            (known && temperatureTenths >= 420 && thermal >= THERMAL_MODERATE)) {
+            hot = true;
+            coolSince = -1;
+        } else if (hot) {
+            // At least one real temperature is required; every readable temperature must be cool.
+            // A missing/delayed sample breaks the run.
+            boolean cool = thermal <= THERMAL_LIGHT && (known || !Float.isNaN(hottestCore)) &&
+                (!known || temperatureTenths <= 410) &&
+                !(hottestCore >= 80f);
+            if (!cool || now < lastSample || (lastSample >= 0 && now - lastSample > 2000)) coolSince = -1;
+            if (cool) {
+                if (coolSince < 0) coolSince = now;
+                if (now - coolSince >= HEAT_CLEAR_MILLIS) { hot = false; coolSince = -1; }
+            }
+        }
+        lastSample = now;
+        // A heat pause holds until the user taps (#277); Continue anyway drops it for this run.
+        if (heatOverride) heatWait = false;
+        else if (hot) heatWait = true;
         if (charging || batteryPercent >= 30) low = false;
         else if (batteryPercent >= 0 && batteryPercent <= 20) low = true;
         if (manual) return "manual";
         if (thermal >= THERMAL_CRITICAL) return "critical";
-        if (hot && !heatOverride) return "heat";
+        if (heatWait) return "heat";
         if (batteryOverride) return null;
         if (low) return "battery";
         if (!charging && batteryPercent < 0) return "battery_unknown";

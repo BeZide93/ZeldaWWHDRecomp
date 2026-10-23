@@ -74,12 +74,13 @@ run() {  # run EXE NAME FPS [VAR=value ...]
 # (and with the blended camera). Link's eye and mouth texture controllers (+0x66C, +0x6C4, +0x71C: the frames his
 # draw sets from m3530/m3532 on every draw); the King of Red Lions' HD sea-shadow animation (00A5 +0x5BC,
 # played by its shadow draw), its wake's particle track callback (00A5 +0xD0DC: positions its particle
-# draw stores); its sail's render packet (00AB +0x3BC, 0x2100 bytes); the water pillars' tevStr
+# draw stores) and the same callback's points in the harbour boats (ikada 0044 +0x508: dPa_trackEcallBack
+# mPos, written and read only by its draw); its sail's render packet (00AB +0x3BC, 0x2100 bytes); the water pillars' tevStr
 # (01C1 +0x204); and every material animator's evaluation cache (the frame drawing last
 # evaluated, WWHD_PROC_DIGEST_ANM_CACHE). The logic does not read these. DRAW_SKIP=0 hashes them too.
 skip0=A8:64F0:98,6B:3D0:30,A8:6D9C:6,A8:713C:6,A8:71DC:6,1DC:508:8,A8:48C:168
 skip=$skip0
-[ "${DRAW_SKIP:-1}" = 1 ] && skip=$skip0,AE:3AC:1344,A8:66C:4:58:3,A5:5BC:3C,A5:D0DC:50,AB:3BC:2100,1C1:204:1C8,*:110:1C8
+[ "${DRAW_SKIP:-1}" = 1 ] && skip=$skip0,AE:3AC:1344,A8:66C:4:58:3,A5:5BC:3C,A5:D0DC:50,44:508:24,AB:3BC:2100,1C1:204:1C8,*:110:1C8
 anm=0
 [ "${DRAW_SKIP:-1}" = 1 ] && anm=1
 bad=0

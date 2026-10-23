@@ -7,6 +7,10 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Fixed: Fast Forward's 3x and 4x ran only as fast as 2x** (#268). On a 60 Hz display the game waited for the screen
+  after every step, which capped it at twice the normal speed. While Fast Forward is held, the game no longer waits
+  for the screen, so 3x and 4x really run three and four times as fast, with or without frame interpolation and
+  in True 60. Normal pacing comes back cleanly when you let go.
 - **Experimental setup step: "Preparing shaders: models"** (off by default). When switched on in setup, it draws every
   object model, every stage's rooms and the characters and objects they place, the sky and weather at different times of
   day, plants and the file select once with the game's own code, so their shaders are ready before you play: in our test
@@ -23,12 +27,38 @@ what is on `devel` and not released yet (also in the
 - **Even more moves smoothly** with frame interpolation: camera shake, the sky's clouds, eye movements, lava, scene
   wipes, chains, the Swift Sail and boost blur, debris, Valoo, light beams and searchlights.
 - **Fixed: fade-ins and fade-outs flickered** with frame interpolation (#273). Fades between scenes are smooth again
-  at 40, 60 and 120 fps.
+  at 40, 60 and 120 fps, including fades to white (for example leaving the Forbidden Woods). Wipes in cutscenes keep
+  the same length at every frame rate.
 - **More moves smoothly** with frame interpolation: boss hit flashes, sand floors, cloth and flags, water masks, shadows
   and mod HUDs. Objects at the screen edge no longer pop in or out between the game's steps.
 - **Mods can use the game's own HUD art** (for mod makers): a guest mod can draw any texture or pane of the game's
   2D layouts (map frames, icons, markers) from the player's own game files, check whether one exists first, and
   ask for it enlarged smoothly and sharpened.
+- **Fixed on Android: the "too warm" pause during setup could flash on and off in a loop** (#277) on some handhelds
+  (AYANEO Pocket EVO and Pocket S). A heat pause now needs a real temperature to confirm it and always waits for you:
+  **Continue anyway** works at any time, and **Continue** appears once the device has cooled down. Setup never goes on
+  by itself after a heat pause, also when the app was in the background.
+- **Fixed: some effects were drawn in the wrong place at aspect ratios other than 16:9** (#275): the elemental arrow
+  glow and rupee sparkles now sit where they belong at every aspect ratio, also after switching it while playing or
+  loading a save state.
+- **Fixed: a possible crash at 40 and 120 fps when the scene changes** (a door, warp or loading zone while the camera
+  moves), in development builds since the frame interpolation logic changes. Also: archive loads and the camera now
+  follow the game's steps exactly at every frame rate, so scene changes and distant islands play the same as at 30 fps.
+- **Fixed: the mouse camera's up/down was inverted in some interiors** (#274), for example Grandma's house and the
+  Pictograph shop. Mouse and right stick now look up and down the same way everywhere, with and without "Invert camera
+  up/down", and switching that setting while playing no longer leaves the camera inverted until a restart.
+- **World editor: custom items** (#269, #270, for mod makers): opening a chest with a custom item no longer crashes,
+  and the item's own icon is held up over Link's head. New items and icon changes now work while the game runs (a chest
+  with a new item appears at once); changes that still need a restart are marked "Takes effect after a restart", and
+  "Restart and return here" restarts the game and brings you back to the same spot.
+- **World editor: own 3D models** (#280, for mod makers): own models now work in the Windows release (their converter
+  could not start there before). A model built on an exported island stands exactly where it was modelled, the editor
+  says why a model can't be shown instead of asking for a restart, and the import fixes common Blender exports by itself
+  (several objects, quads, vertex colours, blended materials, large textures) with a note for each fix. A model with
+  its own `_col` collision meshes now gets that collision when added as **Your model**, so Link walks on it and its
+  walls stop him, and the import warns when a mesh's normals point inward (the model then looks dark where it is lit).
+  The editor docs explain how to use the game's own materials and textures for a model. All of the game's model tools
+  also start correctly under the Windows release's Python (no more "No module named …").
 - **New setting: Shader compile** (Settings → Graphics). **Off** (the default) draws everything exactly and waits for
   shaders that aren't ready yet, as before. **Fast** keeps playing while new shaders compile and may leave out a few
   objects for a frame or two, for fewer stutters on first visits.

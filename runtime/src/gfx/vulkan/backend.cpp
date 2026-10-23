@@ -2671,7 +2671,7 @@ static bool present(Screen &s) {
     if(secondary && R.secondaryInjectAcquireLoss.exchange(false))return VK_ERROR_SURFACE_LOST_KHR;
 #endif
     if (handoff_trace::enabled()) handoff_trace::emit(handoff_trace::Lane::Producer, handoff_trace::Kind::AcquireBegin, 0, R.frame, &s == &R.tv ? 1 : 2, acquireIndex);
-    const auto result = vkAcquireNextImageKHR(R.device, s.swapchain, secondary ? 0 : UINT64_MAX,
+    const auto result = vkAcquireNextImageKHR(R.device, s.swapchain, present_acquire_timeout(secondary),
                                 acquireSemaphore, VK_NULL_HANDLE, &index);
     if (handoff_trace::enabled()) handoff_trace::emit(handoff_trace::Lane::Producer, handoff_trace::Kind::AcquireEnd, 0, R.frame, &s == &R.tv ? 1 : 2, uint64_t(int64_t(result)));
     return result;

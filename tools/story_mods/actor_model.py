@@ -15,7 +15,10 @@ import sys
 import tempfile
 import zlib
 
-import notebook_model as base
+# Windows' embeddable Python runs isolated: the script's own folder is not on sys.path, so the
+# sibling modules are found through it explicitly (issue #280).
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import notebook_model as base  # noqa: E402
 
 BuildError = base.BuildError
 MAX_SOURCE = 8 * 1024 * 1024

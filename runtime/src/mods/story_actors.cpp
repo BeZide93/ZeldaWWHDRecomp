@@ -1047,7 +1047,12 @@ bool live_capable(const std::string& mod,const ManifestActor& a,std::string& why
     if(a.actor=="resident"&&!(a.resident==kYm1?g_ym1_hooks:goron_type(a.resident)?g_goron_hooks:g_resident_hooks))return why="the first resident of this kind appears after a restart",false;
     if(a.kind=="mod"){
         if(!mod_actor::live_ready())return why="the first mod model actor appears after a restart",false;
-        if(!g_models.contains({mod,a.model}))return why="model "+a.model+" is not prepared yet: it appears after a reload or restart",false;if(!visual_ready(mod,a,why))return false;
+        if(!g_models.contains({mod,a.model})){
+            // a model that failed to prepare fails again after a restart: say why, never "after a restart" (issue #280)
+            if(const auto failed=actor_model_cache::failure_for(mod,a.model);!failed.empty())return why="model "+a.model+" could not be prepared: "+failed,false;
+            if(actor_model_cache::preparing(mod,a.model))return why="model "+a.model+" is being prepared: it appears when it is ready",false;
+            return why="model "+a.model+" is not prepared yet: it appears after a reload or restart",false;
+        }if(!visual_ready(mod,a,why))return false;
     }
     return true;
 }

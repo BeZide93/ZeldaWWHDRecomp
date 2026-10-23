@@ -23,7 +23,12 @@ blending would need depth sorting the actor draw path doesn't do.
 """
 import struct
 
-import notebook_model as base
+import os
+import sys
+# Windows' embeddable Python runs isolated: the script's own folder is not on sys.path, so the
+# sibling modules are found through it explicitly (issue #280).
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import notebook_model as base  # noqa: E402
 
 BuildError = base.BuildError
 

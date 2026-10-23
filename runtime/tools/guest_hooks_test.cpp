@@ -200,9 +200,11 @@ bool installed() {return false;}
 namespace story_treasure_chest {
 void state_loaded() {}
 bool placed_chests() {return false;}
+void note_placed_chests() {}
 void set_placed_chest(bool (*)(uint32_t,std::string&,std::string&)) {}
 void set_item_hook_ready(bool) {}
 void set_item_get_next(void (*)(Cpu*),void (*)(Cpu*,uint32_t)) {}
+void set_icon_presenter(void (*)(uint16_t,const std::string&,bool)) {}
 namespace hooks { void exec_item_get(Cpu*) {} }
 }
 // World runtime has its own actor/scene tests; loader tests only exercise registration.
@@ -217,6 +219,7 @@ bool bounds_for(const std::string&,story_notebook::WorldPoint&,story_notebook::W
 std::string prepare(const std::string&,const story_notebook::ManifestModel&,const std::string&,const std::string&,const std::vector<std::string>&,const std::string&,const std::string&,bool,bool,const std::string&){return {}; }
 bool water_for(const std::string&){return false;}
 std::string material_for(const std::string&){return {};}
+void note_failure(const std::string&,const std::string&,const std::string&){}
 }
 #if defined(GUEST_HOOKS_TEST_NO_HOOKS) || defined(GUEST_HOOKS_TEST_EDITOR)
 namespace editor { bool launch_mode(){return true;} }   // --editor (NO_HOOKS: game code built without --mod-hooks)
@@ -411,9 +414,22 @@ void set_game_calls(void (*)(Cpu*,uint32_t),uint32_t (*)(Cpu*,uint32_t,std::init
 namespace hooks { void exec_item_get(Cpu*) {} }
 }
 namespace item_icons {
-void set_items(const std::vector<Item>&,const std::filesystem::path&) {}
+void set_items(const std::vector<Item>&,const std::filesystem::path&,unsigned) {}
+void set_game_calls(uint32_t (*)(Cpu*,uint32_t,std::initializer_list<uint32_t>),uint32_t) {}
+void service(Cpu*) {}
 int frame(uint16_t) {return -1;}
+Bytes picture(const std::string&) {return {};}
 }
+// the item get's icon (story_item_get_icon_test has its own tests)
+namespace story_item_get_icon {
+void configure(void (*)(Cpu*,uint32_t),Camera (*)(),Picture (*)(const std::string&)) {}
+void show(uint16_t,const std::string&) {}
+void hide() {}
+bool install(const std::function<std::string(uint32_t)>&,const std::function<void(uint32_t,void (*)(Cpu*))>&) {return true;}
+void logic(uint64_t) {}
+void state_loaded() {}
+}
+namespace editor { CameraView camera_view() {return {};} }
 namespace game_layouts {
 bool texture(const std::string&,Image&,std::string& error) {error="no game layouts in this test";return false;}
 bool texture_size(const std::string&,uint32_t&,uint32_t&) {return false;}
@@ -431,6 +447,7 @@ void set_game_calls(void (*)(Cpu*,uint32_t),uint32_t (*)(Cpu*,uint32_t,std::init
 void install(const std::function<void(uint32_t,void (*)(Cpu*))>&) {}
 }
 namespace story_lyt_screen {
+uint32_t safe_string(const char*) {return 0;}
 void set_game_calls(void (*)(Cpu*,uint32_t),uint32_t (*)(Cpu*,uint32_t,std::initializer_list<uint32_t>)) {}
 void install(const std::function<std::string(uint32_t)>&,const std::function<void(uint32_t,void (*)(Cpu*))>&) {}
 void state_loaded() {}

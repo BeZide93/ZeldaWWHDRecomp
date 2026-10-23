@@ -956,7 +956,9 @@ void gx2::set_uncapped(bool on) {
     g_uncapped = on ? 1 : 0;
     LOG("[gx2] uncapped %s", on ? "on (debug: no frame limit, no vsync; the game runs faster than real time)" : "off");
 }
-static bool uncapped_benchmark() { return gx2::uncapped(); }
+// Fast Forward has a selected rate even when debug uncapped is selected: remove
+// only the host presentation limit, retaining the accelerated virtual-vsync waits.
+static bool uncapped_benchmark() { return gx2::uncapped() && !mods::fast_forward_active(); }
 
 // debug: WWHD_LOG_FLIP_PACING=1 logs, every 300 flips, the intervals between flips (the frame times
 // the game sees) and what the flips waited for
