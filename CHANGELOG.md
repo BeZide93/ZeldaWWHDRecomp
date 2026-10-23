@@ -154,7 +154,7 @@ what is on `devel` and not released yet (also in the
   own, and a model entered twice is drawn once instead of looping.
 - **Fixed: the world editor crashed when jumping into a mod's own stage** (e.g. to a quest step there). Every editor
   jump now uses the stage's game name and checks the room, and the game refuses a jump to a place it can't load.
-- **Meta Quest: a floating theater** (#259, thanks to the contributor). On a Quest the game shows on a flat or
+- **Meta Quest: a floating theater** (#259, thanks @pancreations). On a Quest the game shows on a flat or
   curved screen in your room, with controls for 2D/3D, size, distance, passthrough and recentering; the controllers
   work the toolbar and the name keyboard, a gamepad plays the game. If the VR display stops during play, a "VR display
   stopped" panel says so instead of a black view. Other Android devices are unchanged.
@@ -202,7 +202,7 @@ what is on `devel` and not released yet (also in the
 - **Mod SDK: mod dungeon maps for HUD mods** (for mod makers). A guest mod can read the current room's map of a mod
   dungeon (rooms, visited rooms, Link's position, and with the compass the chests), so minimap mods can show mod
   dungeons too.
-- **Vulkan stereo (3D) improvements** (#257, thanks to the contributor). Formats that can't be scaled fall back to
+- **Vulkan stereo (3D) improvements** (#257, thanks @pancreations). Formats that can't be scaled fall back to
   full-size eyes instead of drawing into a cleared image, and stereo modes reuse their image memory between frames.
   Nothing changes with stereo off.
 
@@ -403,10 +403,13 @@ what is on `devel` and not released yet (also in the
   cards, and double-sided faces lit correctly on both sides. New example `world-objects-w5`.
 - **Fixed: island buildings in released builds.** The release packages lacked the converter the island buildings
   need.
-- **Quick-use locked items** (Mods > Built-in, off by default; #196, thanks mhbxyz): while locked onto an enemy, one
+- **Quick-use locked items** (Mods > Built-in, off by default; #196, thanks @mhbxyz): while locked onto an enemy, one
   item-button press equips and uses the bow (including fire, ice and light arrows), boomerang, hookshot or grappling
   rope; bombs are readied and thrown, and equipping the hammer completes one strike. A **Quick-use animation speed**
   of 1x, 1.25x or 1.5x speeds up the supported equip animations.
+- **Camera-directed items** (Mods > Built-in, off by default; #203, thanks @mhbxyz): Link turns once to face where
+  the camera looks when you use the bow, boomerang, hookshot, grappling hook, bombs, hammer or an empty bottle, and
+  Leaf gusts blow in the camera's direction. Aiming and lock-on work as before.
 
 - **Keep game speed now holds the game's speed at 60 fps when the graphics can't keep up** (#178, e.g. Steam Deck):
   in-between frames that don't fit are skipped instead of slowing the game to 21–25 logic steps a second. The
@@ -660,12 +663,14 @@ what is on `devel` and not released yet (also in the
   prompt. The model is converted on your own machine using a material from your own game, so packages never contain
   game files. The Windfall example gained an original carved post (preview, for mod makers).
 
-- **Android handhelds** (thanks to almost-drowned-rat):
+- **Android handhelds** (thanks @almost-drowned-rat):
   - **Full screen** now hides the system bars on Android 11 and newer too, so they no longer cover the top and bottom
     of the picture (based on GreenNaugahyde's Android fork; #212, #225).
   - The app's **files folder** (saves, settings, mods) appears in the system Files app and file picker; the prepared
     game and shader caches are read-only there and console keys are never shown (#213, #226).
   - The system **Back** button or gesture opens and closes Settings, like F1 on desktop (#215, #227).
+- **Meta Quest: "Add the game icon" works** (#249, thanks @rhemfur): on Quest the button now pins a shortcut in the
+  Library, and it says so when no icon can be added.
 
 - **Render-thread fast path** (Vulkan): a draw reuses the previous draw's prepared state when only pointers or
   arithmetic values change, about 6–9% less render-thread CPU in tests (most on devices where the render thread limits
