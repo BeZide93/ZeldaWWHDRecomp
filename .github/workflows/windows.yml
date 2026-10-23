@@ -65,3 +65,9 @@ jobs:
       - name: Installer long path unit tests (python.org Python, as in the release)
         shell: pwsh
         run: python tools/installer/test_setup.py LongPaths
+
+      - name: Shader generation and console setup on local UNC share
+        shell: pwsh
+        env:
+          WWHD_UNC_CONSOLE_FIXTURE: ${{ github.workspace }}/build/windows/unc_console_fixture.exe
+        run: python tools/installer/test_unc_setup.py

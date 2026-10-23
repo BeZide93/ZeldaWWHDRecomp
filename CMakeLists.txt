@@ -3718,3 +3718,7 @@ target_compile_definitions(story_scenes_editor_preview_test PRIVATE STORY_SCENES
 target_include_directories(story_scenes_editor_preview_test PRIVATE runtime/include runtime/src runtime/src/mods)
 target_compile_options(story_scenes_editor_preview_test PRIVATE -UNDEBUG)
 add_test(NAME story_scenes_editor_preview COMMAND story_scenes_editor_preview_test)
+
+if(WIN32)
+  add_executable(unc_console_fixture runtime/tools/unc_console_fixture.c)
+endif()
