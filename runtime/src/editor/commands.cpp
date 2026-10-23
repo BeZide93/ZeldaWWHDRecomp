@@ -379,7 +379,7 @@ const std::vector<CommandInfo> kCommands = {
      {{"scene", "string", "", true}, {"step", "any", "number or id", true}, {"frame", "number", "frames from the demo's start", true}, {"move", "boolean", "move the fly camera (default true)"}, {"mod", "string", ""}}},
     {"set_demo_key", "Sets a key of a demo lane (added when the lane has none at that frame): lanes camera.eye, camera.target, camera.fovy, camera.roll, <actor>.position, <actor>.rotation, <actor>.scale.",
      {{"scene", "string", "", true}, {"step", "any", "number or id", true}, {"lane", "string", "", true}, {"frame", "integer", "0..the demo's frames", true},
-      {"value", "any", "{x, y, z} in the demo's own coordinates, or a number (fovy, roll)"}, {"from", "string", "camera (the fly camera's eye for camera.eye, its target for camera.target) or link (Link's position): instead of value"},
+      {"value", "any", "{x, y, z} in the demo's own coordinates, or a number (fovy, roll)"}, {"from", "string", "camera (the fly camera's eye for camera.eye, its target for camera.target) or link (Link's position): instead of value (given both, value is used when that isn't available)"},
       {"curve", "string", "linear, smooth, bspline or step"}, {"mod", "string", ""}},
      true},
     {"move_demo_key", "Moves a demo key to another frame.", {{"scene", "string", "", true}, {"step", "any", "", true}, {"lane", "string", "", true}, {"frame", "integer", "", true}, {"to", "integer", "", true}, {"mod", "string", ""}}, true},

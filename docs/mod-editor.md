@@ -666,7 +666,7 @@ its lanes under the step bars, on the demo's own frames (30 a second; the ruler 
 
 Click a key to select it; drag it to another frame; **Delete** removes it. **Add key** on a lane adds a key
 at the cursor: for the camera from the fly camera's view, for an actor where the selected key's handle is
-or at Link. The inspector shows the selected key's value, the lane's curve (linear, smooth, bspline,
+or at Link (an actor's first position key goes to Link). The inspector shows the selected key's value, the lane's curve (linear, smooth, bspline,
 step) and the selected event's fields. Every change is one Undo step.
 
 **Actors** of the demo: under **Add an actor**, **What it is** picks the kind (the **(?)** says what each
@@ -702,7 +702,10 @@ the picture.
 
 What the game would refuse (a key past the end, rain above 1, an actor an attachment needs) is refused
 when you make the change, with the reason in the status line; a step that is wrong already (for example
-after editing its JSON) shows the reason in red above its lanes.
+after editing its JSON) shows the reason in red above its lanes. What the game plays but the demo camera
+would not show is named in yellow above the lanes, and in the status line when the scene plays: an actor
+whose position keys never come into the camera's view, or Link without a position key (he then stays
+where he stands).
 
 **Camera key** (at the top) is the quickest way to film a scene: fly to a view, press it, fly on, press it
 again. The first press adds a camera step; with that step selected, each further press adds a key to its
