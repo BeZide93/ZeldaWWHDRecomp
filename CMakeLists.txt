@@ -2296,6 +2296,7 @@ target_link_libraries(overlay_toggle_test PRIVATE imgui)
 add_test(NAME overlay_toggle COMMAND overlay_toggle_test)
 if(WWHD_SDL_HOST)
   add_test(NAME overlay_focus_matrix COMMAND input_sdl_test --menu-matrix)
+  add_test(NAME sdl_background_controllers COMMAND input_sdl_test --background)
 endif()
 
 # Link only the overlay input API and SDL boundary. Dead code elimination drops renderer/game
