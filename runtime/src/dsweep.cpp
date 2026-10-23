@@ -153,6 +153,7 @@ constexpr int kHeaps = 6;   // solid heaps alive at once: a batch's models live 
 constexpr int kDrain = 6;   // frames between an archive's last draw and its release (frames in flight)
 constexpr int kLoadFrames = 900;
 constexpr unsigned kRelease = 4;  // frames between a stage resource's release and the next request
+std::string g_released;           // the stage resource released last: the next request waits until it is gone
 
 struct State {
     Phase phase = Phase::Start;
@@ -1405,6 +1406,10 @@ void step(Cpu* c, uint32_t host) {
         const uint32_t ss = safe_strings(g.entry.stage, g.entry.arc);
         if (!g.requested) {
             if (g.frames++ < kRelease) return;  // the previous archive's release goes first (it frees its heap)
+            // (and until it is out of the path pool: uncapped and record-only, kRelease steps pass in milliseconds,
+            // and a request made while the release was still running failed and stopped the game when released)
+            if (!g_released.empty() && find_path_info(g_released) && g.frames < kLoadFrames) return;
+            g_released.clear();
             if (find_path_info(g.archive)) {  // loaded already (the title's own): swept, not released
                 g.requested = true;
             } else if (call(c, GC(0x0260D618), {task, ss, ss + 8, 0})) {  // requestResource(stage, archive)
@@ -1426,9 +1431,18 @@ void step(Cpu* c, uint32_t host) {
                 for (uint32_t i : path_infos()) all += " [" + cstring(ld32(i + 0x10)) + "|" + cstring(ld32(i + 0x5C)) + "]";
                 LOG("[dsweep] stage resources loaded:%s (root %08X)", all.c_str(), ld32(ld32(GD(0x101F4F28)) + 0x1028));
             }
+            // (not released: a request that left nothing in the path pool has nothing to release, and releasing it
+            // stopped the game; tried once more at the end)
+            if (!g.entry.deferred) {
+                LOG("[dsweep] %s: later", g.archive.c_str());
+                g.entry.deferred = true;
+                g.queue.insert(g.queue.begin(), g.entry);
+                g.archive.clear();
+                g.phase = Phase::NextArchive;
+                return;
+            }
             progress("load-failed " + g.archive);
             g.done.insert(g.archive);
-            if (g.owned) call(c, GC(0x0260E8A8), {task, ss, ss + 8});  // releaseResource
             g.phase = Phase::NextArchive;
             return;
         }
@@ -1456,6 +1470,15 @@ void step(Cpu* c, uint32_t host) {
                 // the game); tried once more at the end
                 LOG("[dsweep] %s: loaded, but not in the resource table%s", g.archive.c_str(),
                     g.entry.deferred ? "" : "; later");
+                if (std::getenv("WWHD_DSWEEP_DEBUG")) {  // debug: the raw entries with that name
+                    const uint32_t control = ld32(GD(0x101F4F28));
+                    for (unsigned i = 0; i < 128 && mem2(control); ++i) {
+                        const uint32_t info = ld32(control + 0x28 + i * 0x20 + 0x18);
+                        if (mem2(info, 0x8C) && cstring(info + 0x1C) == g.archive)
+                            LOG("[dsweep]   info %08X archive %08X res %08X count %d", info, ld32(info + 0x5C),
+                                ld32(info + 0x60), int32_t(ld32(info + 0x84)));
+                    }
+                }
                 g.owned = false;
                 if (!g.entry.deferred) {
                     g.entry.deferred = true;
@@ -1496,6 +1519,7 @@ void step(Cpu* c, uint32_t host) {
             else if (g.owned) {  // the stage resource loader's release (dComIfG_deleteStageRes)
                 const uint32_t ss = safe_strings(g.entry.stage, g.entry.arc);
                 call(c, GC(0x0260E8A8), {ld32(GD(0x101F4F54)), ss, ss + 8});
+                g_released = g.archive;
             }
             progress("archive-done " + g.archive);
             g.done.insert(g.archive);
@@ -1670,8 +1694,14 @@ uint32_t pad_buttons(uint64_t frame) {
     // on the title and opened the file select, where the attempt stalled)
     const int64_t last = g_last_draw_ns.load(std::memory_order_relaxed);
     const uint64_t lastStep = g_last_draw_step.load(std::memory_order_relaxed);
-    const bool idle = last && interp::executed_steps() - lastStep > 90;
-    return idle ? 0x8000u : 0u;
+    // One pulse per intro: A ends the intro, and the way back to the title draws no actor either; a second pulse
+    // there reached the title and opened the file select.
+    static uint64_t pressedFor = ~0ull;  // the last draw's step whose intro got its A
+    static uint64_t pressedFrame = 0;
+    const bool idle = last && interp::executed_steps() - lastStep > 90 && (pressedFor != lastStep || frame - pressedFrame < 6);
+    if (!idle) return 0;
+    if (pressedFor != lastStep) pressedFor = lastStep, pressedFrame = frame;
+    return 0x8000u;
 }
 std::atomic<bool> g_finished{false};
 bool exit_requested() { return (g_finished || g_abort) && std::getenv("WWHD_DSWEEP_EXIT"); }
