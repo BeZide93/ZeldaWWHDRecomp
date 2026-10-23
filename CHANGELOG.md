@@ -7,6 +7,11 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Scenes look the same every run, like on the Wii U.** The game rewrites some per-frame scene settings while the
+  renderer is still drawing the previous frame's display lists, so a few draws could pick up the next frame's values
+  and some pixels (the distant sea at Outset's cliff, the Forbidden Woods canopy) changed from run to run. Display
+  lists now draw with the settings as they were when the game submitted them, as the console's GPU does (Vulkan and
+  Metal). Cost on an Android phone: about 2% render time in the heaviest scene tested, none measurable elsewhere.
 - **Floating-point values are now loaded and stored exactly like on the Wii U.** The game's float loads and stores
   now move the bits the way the console's CPU does: special values (signalling NaNs) are no longer changed on the way,
   and a value that doesn't fit single precision is stored the way the console stores it. In our test runs the game
