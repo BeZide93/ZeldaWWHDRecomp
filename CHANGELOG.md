@@ -7,6 +7,14 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **World editor: use the game's materials without MCP** (#280, for mod makers). The model import has a new option
+  **Use the game's materials (kit)**: pick the room (Link's by default), copy its material names for Blender, and the
+  dialog shows which of your materials draw with the game's own textures, with a picker to map your own names onto
+  the room's materials.
+- **World editor: replace, watch and remove imported models** (#287). **Replace from file…** re-imports a model under
+  the same name, and everything placed with it updates, collision included. **Watch file** re-imports it whenever
+  you save it from Blender. **Remove** lists anything still placed with the model and asks first; Undo brings it all
+  back. Also fixed: a removed object no longer counts as ground for the editor's own checks.
 - **Fixed: characters didn't show up in a scene's Demo step** (#285, for mod makers). Link now starts at his first
   position key instead of walking there from wherever he stood, and game characters created for a demo (a pig, for
   example) follow their keys instead of their own routes. The editor warns in yellow when an actor's keys never come
