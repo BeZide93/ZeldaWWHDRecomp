@@ -564,6 +564,13 @@ bool check_model_bytes(const std::vector<uint8_t>& bytes, Value& info, std::stri
 inline constexpr size_t kMaxImportBytes = 64 * 1024 * 1024;
 bool import_model_file(const std::string& path, std::vector<uint8_t>& bytes, Value& info, std::string& why);
 bool check_kit_model_file(const std::string& path, const Value& declaration, Value& info, std::string& why);
+// A kit model's file as an import keeps it (issue #281): read from `path`, with the textures of its game materials removed
+// (Blender keeps them for its preview; the game draws its own) and checked as check_kit_model_file checks it. Game
+// materials: the declaration's "materials" and "material", an export_glb material's "wwhd" extras, and with `listed` (a kit
+// room's list_kit_materials result; null when it can't be read) the room's material names (a Blender ".001" copy counts)
+// and an image named after one of their textures. info["import_fixes"] says how many were removed and
+// info["preview_textures_removed"] names their materials (absent: none).
+bool prepare_kit_model_file(const std::string& path, const Value& declaration, const Value& listed, std::vector<uint8_t>& bytes, Value& info, std::string& why);
 // A kit model's visible materials against a kit room's (list_kit_materials' result) and the declaration's "materials" and
 // "material", as kit_model.py names them: {materials: [{name, kind: game|own|unknown, game?, default?}], game: [names],
 // own: [names], unknown: [names]}. "unknown": no texture and no material of the room (its build would refuse it).

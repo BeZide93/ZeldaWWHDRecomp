@@ -433,15 +433,8 @@ bool import_model_file(const std::string& path, std::vector<uint8_t>& bytes, Val
 
 // A kit model's file (static_models::validate_kit_glb): its own textures' rules and no game material with a texture; `p`
 // holds the declaration's kit, materials and material (the names it may not embed a texture under).
-bool check_kit_model_file(const std::string& path, const Value& p, Value& info, std::string& why) {
-    std::error_code ec;
-    const fs::path file = utf8_path(path);
-    if (!fs::is_regular_file(file, ec)) return why = "no file " + path, false;
-    const auto& kit = p.get("kit");
-    if (kit.type != Value::Object || kit.get("stage").type != Value::String || kit.get("room").type != Value::Number)
-        return why = "kit is a room of the game: {\"stage\": \"sea\", \"room\": 13}", false;
-    std::ifstream f(file, std::ios::binary);
-    std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+namespace {
+bool check_kit_model_bytes(const std::vector<uint8_t>& bytes, const Value& p, Value& info, std::string& why) {
     std::vector<std::string> names;
     if (p.get("material").type == Value::String) names.push_back(p.get("material").text);
     if (p.get("materials").type == Value::Object)
@@ -459,6 +452,87 @@ bool check_kit_model_file(const std::string& path, const Value& p, Value& info, 
     info["own_materials"] = double(k.own_materials);
     info["own_texture_bytes"] = double(k.own_texture_bytes);
     info["clips"] = array();
+    return true;
+}
+bool read_kit_model_file(const std::string& path, const Value& p, std::vector<uint8_t>& bytes, std::string& why) {
+    std::error_code ec;
+    const fs::path file = utf8_path(path);
+    if (!fs::is_regular_file(file, ec)) return why = "no file " + path, false;
+    const auto& kit = p.get("kit");
+    if (kit.type != Value::Object || kit.get("stage").type != Value::String || kit.get("room").type != Value::Number)
+        return why = "kit is a room of the game: {\"stage\": \"sea\", \"room\": 13}", false;
+    std::ifstream f(file, std::ios::binary);
+    bytes.assign(std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>());
+    return true;
+}
+// a material name without Blender's copy suffix (".001"), as kit_model.py's Names reads it
+std::string plain_material_name(std::string n) {
+    const auto dot = n.rfind('.');
+    if (dot != std::string::npos && n.size() - dot == 4 && std::all_of(n.begin() + long(dot) + 1, n.end(), [](unsigned char c) { return c >= '0' && c <= '9'; }))
+        n.resize(dot);
+    return n;
+}
+}  // namespace
+
+bool check_kit_model_file(const std::string& path, const Value& p, Value& info, std::string& why) {
+    std::vector<uint8_t> bytes;
+    return read_kit_model_file(path, p, bytes, why) && check_kit_model_bytes(bytes, p, info, why);
+}
+
+bool prepare_kit_model_file(const std::string& path, const Value& p, const Value& listed, std::vector<uint8_t>& bytes, Value& info, std::string& why) {
+    std::vector<uint8_t> raw;
+    if (!read_kit_model_file(path, p, raw, why)) return false;
+    bytes = raw;
+    // which of the file's materials are game materials (kit_model.py's classify: they may not embed a texture)
+    std::vector<bool> strip;
+    std::vector<std::string> stripped;
+    if (raw.size() >= 20 && !std::memcmp(raw.data(), "glTF", 4)) {
+        const uint32_t json_length = static_models::le32(raw.data() + 12);
+        Value doc;
+        try {
+            if (json_length <= raw.size() - 20) doc = mods::json::parse(std::string(reinterpret_cast<const char*>(raw.data() + 20), json_length));
+        } catch (...) {
+        }
+        std::set<std::string> game, game_textures;
+        if (p.get("material").type == Value::String) game.insert(p.get("material").text);
+        for (const auto& [from, to] : p.get("materials").object) game.insert(from), game.insert(to.string());
+        for (const auto& m : listed.get("materials").array) {
+            game.insert(m.get("material").string());
+            for (const auto& t : m.get("textures").array) game_textures.insert(t.string());
+        }
+        const auto& images = doc.get("images").array;
+        const auto& textures = doc.get("textures").array;
+        for (const auto& mat : doc.get("materials").array) {
+            const std::string name = mat.get("name").string();
+            const auto& colour = mat.get("pbrMetallicRoughness").get("baseColorTexture");
+            std::string image;  // the colour texture's image name (an image named after a game texture: a game picture)
+            if (colour.get("index").type == Value::Number && colour.get("index").number >= 0 && size_t(colour.get("index").number) < textures.size()) {
+                const auto& source = textures[size_t(colour.get("index").number)].get("source");
+                if (source.type == Value::Number && source.number >= 0 && size_t(source.number) < images.size()) image = images[size_t(source.number)].get("name").string();
+            }
+            const bool named = game.count(name) || game.count(plain_material_name(name)) || mat.get("extras").get("wwhd").get("kit_material").type != Value::Null ||
+                               (!image.empty() && game_textures.count(image));
+            bool textured = colour.type != Value::Null || mat.get("pbrMetallicRoughness").get("metallicRoughnessTexture").type != Value::Null;
+            for (const char* slot : {"normalTexture", "occlusionTexture", "emissiveTexture"}) textured |= mat.get(slot).type != Value::Null;
+            strip.push_back(named);
+            if (named && textured) stripped.push_back(name);
+        }
+    }
+    unsigned removed = 0;
+    if (!stripped.empty() && !model_import::strip_material_textures(raw, strip, bytes, removed, why)) return false;
+    if (!check_kit_model_bytes(bytes, p, info, why)) return false;
+    info["size"] = double(bytes.size());
+    if (removed) {
+        std::string list;
+        info["preview_textures_removed"] = array();
+        for (const auto& n : stripped) {
+            list += (list.empty() ? "" : ", ") + (n.empty() ? std::string("(unnamed)") : n);
+            info["preview_textures_removed"].array.push_back(Value(n));
+        }
+        info["import_fixes"] = array();
+        info["import_fixes"].array.push_back(Value("Removed " + std::to_string(removed) + " preview texture" + (removed > 1 ? "s" : "") + " from kit materials (" + list +
+                                                   "): the game draws its own textures for them, and the package keeps none of the game's pictures."));
+    }
     return true;
 }
 
@@ -545,15 +619,11 @@ std::string kit_report_note(const Value& report, const Value& kit) {
 namespace {
 // A kit model's file against its room (Host::kit_materials): `report` (kit_material_report; null when the room can't be
 // read here) and false with `why` when a material without a texture is none of the room's (its build would fail).
-bool kit_materials_known(Host* host, const fs::path& file, const Value& declaration, Value& report, std::string& why) {
+// `listed`: the room's materials (kit_room_materials; null when they can't be read here); `bytes`: the file as the package keeps it.
+bool kit_materials_known(const Value& listed, const std::vector<uint8_t>& bytes, const Value& declaration, Value& report, std::string& why) {
     report = Value();
-    if (!host) return true;
-    std::string w;
+    if (listed.type == Value::Null) return true;
     const Value& kit = declaration.get("kit");
-    const Value listed = host->kit_materials(kit.get("stage").string(), unsigned(std::max(0.0, kit.get("room").number)), w);
-    if (!w.empty()) return true;
-    std::ifstream f(file, std::ios::binary);
-    const std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
     report = kit_material_report(bytes, listed, declaration);
     const auto& unknown = report.get("unknown").array;
     if (unknown.empty()) return true;
@@ -565,6 +635,14 @@ bool kit_materials_known(Host* host, const fs::path& file, const Value& declarat
           " not a material of " + kit.get("stage").string() + " room " + std::to_string(int(kit.get("room").number)) + ": name it as one of the room's (" +
           room_names + "), map it with \"materials\" or give it a texture of its own";
     return false;
+}
+
+// A kit room's materials (Host::kit_materials) for a declaration's "kit"; null (and `why`) when they can't be read here.
+Value kit_room_materials(Host* host, const Value& declaration, std::string& why) {
+    if (!host) return why = "the game is not running", Value();
+    const Value& kit = declaration.get("kit");
+    Value listed = host->kit_materials(kit.get("stage").string(), unsigned(std::max(0.0, kit.get("room").number)), why);
+    return why.empty() ? listed : Value();
 }
 
 // The actors that draw or stand on a model of the manifest (model, distant or shoreline model, collision mesh) and the
@@ -1310,17 +1388,14 @@ Value Session::dispatch_build(const std::string& command, const Value& p, std::s
         if (p.get("kit").type != Value::Null) {
             // with a kit room (the import dialog's "Use the game's materials"): checked as import_model with kit checks it,
             // and which of its materials are the room's ("kit_report"; "kit_report_error" when the room can't be read)
-            if (!check_kit_model_file(text(p, "file"), p, r, why)) return r;
+            // (the file as the import keeps it: game materials' preview textures removed, "import_fixes" says so)
+            std::string w;
+            const Value listed = kit_room_materials(host_, p, w);
+            std::vector<uint8_t> bytes;
+            if (!prepare_kit_model_file(text(p, "file"), p, listed, bytes, r, why)) return r;
             if (host_) {
-                std::string w;
-                const Value listed = host_->kit_materials(p.get("kit").get("stage").string(), unsigned(std::max(0.0, p.get("kit").get("room").number)), w);
-                if (w.empty()) {
-                    std::ifstream f(utf8_path(text(p, "file")), std::ios::binary);
-                    const std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
-                    r["kit_report"] = kit_material_report(bytes, listed, p);
-                } else {
-                    r["kit_report_error"] = w;
-                }
+                if (w.empty()) r["kit_report"] = kit_material_report(bytes, listed, p);
+                else r["kit_report_error"] = w;
             }
             ok = true;
             return r;
@@ -1351,13 +1426,15 @@ Value Session::dispatch_build(const std::string& command, const Value& p, std::s
         Value info;
         const bool kit = p.get("kit").type != Value::Null;
         if (!kit && (p.get("materials").type != Value::Null || p.get("material").type != Value::Null)) return why = "materials and material need kit (a room of the game)", r;
-        std::vector<uint8_t> fixed;  // a static or skinned model as the package keeps it (model_import.h)
-        if (kit ? !check_kit_model_file(text(p, "file"), p, info, why) : !import_model_file(text(p, "file"), fixed, info, why)) return r;
+        std::vector<uint8_t> fixed;  // the model as the package keeps it (model_import.h; kit: its game materials' preview textures removed)
+        std::string unlisted;
+        const Value listed = kit ? kit_room_materials(host_, p, unlisted) : Value();
+        if (kit ? !prepare_kit_model_file(text(p, "file"), p, listed, fixed, info, why) : !import_model_file(text(p, "file"), fixed, info, why)) return r;
         const fs::path from = utf8_path(text(p, "file"));
         // a kit model: which of its materials are the room's (said after the import); one with no texture that the room
         // doesn't have would make the build fail later, so it is refused now with the names to choose from
         Value kit_report;
-        if (kit && !kit_materials_known(host_, from, p, kit_report, why)) return r;
+        if (kit && !kit_materials_known(listed, fixed, p, kit_report, why)) return r;
         const std::string id = p.get("id").type == Value::String ? p.get("id").text : slug(from.stem().string());
         if (!id_ok(id)) return why = "a model id is 1 to 32 lower-case letters, digits, '-', '_' or '.'", r;
         if (by_id(pkg->manifest.get("models"), id)) return why = "the mod has a model \"" + id + "\" already", r;
@@ -1365,16 +1442,15 @@ Value Session::dispatch_build(const std::string& command, const Value& p, std::s
         const fs::path to = utf8_path(pkg->dir) / utf8_path(source);
         std::error_code ec;
         bool created = false;
-        auto write = [&](const fs::path& where) {  // the fixed model (kit: the file as it is)
-            if (kit) return fs::copy_file(from, where, fs::copy_options::overwrite_existing, ec);
+        auto write = [&](const fs::path& where) {  // the fixed model
             std::ofstream o(where, std::ios::binary | std::ios::trunc);
             o.write(reinterpret_cast<const char*>(fixed.data()), std::streamsize(fixed.size()));
             if (!o) ec = std::make_error_code(std::errc::io_error);
             return bool(o);
         };
         if (fs::exists(to, ec)) {
-            std::ifstream a(from, std::ios::binary), b(to, std::ios::binary);
-            const std::string x = kit ? std::string((std::istreambuf_iterator<char>(a)), {}) : std::string(fixed.begin(), fixed.end());
+            std::ifstream b(to, std::ios::binary);
+            const std::string x(fixed.begin(), fixed.end());
             const std::string y((std::istreambuf_iterator<char>(b)), {});
             if (x != y && !p.get("confirm").boolean) return why = "the package has a different " + source + ": \"confirm\": true replaces it", r;
             if (x != y) write(to);
@@ -1461,8 +1537,18 @@ Value Session::dispatch_build(const std::string& command, const Value& p, std::s
             if (p.object.contains("materials")) { if (p.get("materials").type == Value::Null) entry.object.erase("materials"); else entry["materials"] = p.get("materials"); }
             if (p.object.contains("material")) { if (p.get("material").string().empty()) entry.object.erase("material"); else entry["material"] = p.get("material"); }
         }
+        // the package's file (maybe exported over from Blender): its game materials' preview textures removed in place
         Value info, check = entry;
-        if (!check_kit_model_file((fs::path(utf8_path(pkg->dir)) / utf8_path(entry.get("source").string())).string(), check, info, why)) return r;
+        const fs::path in_package = fs::path(utf8_path(pkg->dir)) / utf8_path(entry.get("source").string());
+        std::string unlisted;
+        std::vector<uint8_t> kept;
+        if (!prepare_kit_model_file(in_package.string(), check, kit_room_materials(host_, entry, unlisted), kept, info, why)) return r;
+        if (info.get("import_fixes").type == Value::Array) {
+            std::ofstream o(in_package, std::ios::binary | std::ios::trunc);
+            o.write(reinterpret_cast<const char*>(kept.data()), std::streamsize(kept.size()));
+            if (!o) return why = "cannot write " + in_package.string(), r;
+            r["fixes"] = info.get("import_fixes");
+        }
         if (command == "set_model_kit") {
             ok = change(*pkg, "Model " + id + " kit", [&](Value& m, std::string&) {
                 for (auto& x : m["models"].array)
@@ -1496,13 +1582,11 @@ Value Session::dispatch_build(const std::string& command, const Value& p, std::s
         const bool kit = md->get("kind").string() == "kit";
         Value info;
         std::vector<uint8_t> fixed;
-        if (kit ? !check_kit_model_file(file, *md, info, why) : !import_model_file(file, fixed, info, why)) return r;
+        std::string unlisted;
+        const Value listed = kit ? kit_room_materials(host_, *md, unlisted) : Value();
+        if (kit ? !prepare_kit_model_file(file, *md, listed, fixed, info, why) : !import_model_file(file, fixed, info, why)) return r;
         Value kit_report;
-        if (kit && !kit_materials_known(host_, utf8_path(file), *md, kit_report, why)) return r;
-        if (kit) {
-            std::ifstream f(utf8_path(file), std::ios::binary);
-            fixed.assign(std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>());
-        }
+        if (kit && !kit_materials_known(listed, fixed, *md, kit_report, why)) return r;
         const std::string kind = info.get("kind").string();
         const auto users = model_actors(pkg->manifest, id);
         const std::string old_kind = md->get("kind").string("static");
@@ -1535,8 +1619,10 @@ Value Session::dispatch_build(const std::string& command, const Value& p, std::s
             return !ec;
         };
         if (!write(target, fixed)) return why = "cannot write " + md->get("source").string() + " in the package", r;
-        const bool has_collision = !kit && kind == "static" && model_has_collision_mesh(pkg->dir, pkg->manifest, id);
-        if (!standing.empty() && !has_collision) {
+        // a kit model's collision is its own _col meshes too (story_kit_models), so it is looked for in its file as well
+        const bool file_collision = (kit || kind == "static") && model_has_collision_mesh(pkg->dir, pkg->manifest, id);
+        const bool has_collision = !kit && file_collision;
+        if (!standing.empty() && !file_collision) {
             write(target, old_bytes);  // put back: the placements would lose their ground
             std::string s;
             for (const auto& u : standing) s += (s.empty() ? "" : ", ") + u;
@@ -1584,6 +1670,11 @@ Value Session::dispatch_build(const std::string& command, const Value& p, std::s
             }
         }
         if (kit_report.type == Value::Object) note = kit_report_note(kit_report, md->get("kit")) + " " + note;
+        if (kit && old_bytes != fixed && info.get("import_fixes").type == Value::Array) {  // what was changed to make the file fit, said first
+            std::string fixes;
+            for (const auto& n : info.get("import_fixes").array) fixes += (fixes.empty() ? "" : " ") + n.string();
+            note = "Replaced with changes: " + fixes + " " + note;
+        }
         r["note"] = note;
         r["changed"] = old_bytes != fixed;
         ok = true;

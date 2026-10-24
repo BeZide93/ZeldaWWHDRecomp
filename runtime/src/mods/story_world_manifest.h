@@ -428,6 +428,13 @@ inline bool parse_models(const mods::json::Value& m,std::vector<ManifestModel>& 
         model.source=source;parsed.push_back(std::move(model));
     }out=std::move(parsed);return true;
 }
+// A model declaration as a package declares it (parse_models' fields), from an editor request that may carry
+// preparation options too ("replace", "collision", "generation", "shoreline"; issue #281): what parse_models reads.
+inline mods::json::Value model_declaration(const mods::json::Value& request){
+    mods::json::Value out;out.type=mods::json::Value::Object;
+    for(const char* key:{"id","source","kind","kit","material","materials"})if(request.object.contains(key))out[key]=request.get(key);
+    return out;
+}
 // a "path" object (ManifestPath); `resident`: a placed resident's route (1..15 points after its
 // position, optional speed, no clips), else a mod actor's (2..16 points, speed, optional clips)
 inline bool parse_path(const mods::json::Value& path,const WorldPoint& start,bool resident,ManifestPath& out,std::string& why){

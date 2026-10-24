@@ -1606,6 +1606,7 @@ add_test(NAME story_actor_nonresident_hook_scope COMMAND story_actors_runtime_te
 add_test(NAME story_actor_villager_catalogue COMMAND story_actors_runtime_test --catalogue)
 add_test(NAME story_actor_resident_routes COMMAND story_actors_runtime_test --routes)
 add_test(NAME story_actor_editor_live COMMAND story_actors_runtime_test --editor)
+add_test(NAME story_actor_editor_left_out_world_object COMMAND story_actors_runtime_test --editor-left-out)
 add_test(NAME story_actor_seated_resident_contract COMMAND story_actors_runtime_test --ym1)
 add_test(NAME story_actor_prop_spawn_contract COMMAND story_actors_runtime_test --props)
 add_test(NAME story_actor_game_objects COMMAND story_actors_runtime_test --game-objects)

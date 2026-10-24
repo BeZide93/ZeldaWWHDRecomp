@@ -1684,7 +1684,9 @@ bool editor_prepare_model(const std::string& mod,const std::string& package_dir,
 }
 
 std::shared_ptr<const story_game_pieces::BuiltSet> editor_build_kit_model(const std::string& mod,const std::string& package_dir,const std::string& data_dir,const mods::json::Value& entry){
-    mods::json::Value manifest;manifest["models"].type=mods::json::Value::Array;manifest["models"].array.push_back(entry);
+    // only the declaration: the editor's request may carry preparation options ("replace" after Replace from file, Watch
+    // file or an import under a removed model's id), which a declaration doesn't take (issue #281)
+    mods::json::Value manifest;manifest["models"].type=mods::json::Value::Array;manifest["models"].array.push_back(story_notebook::model_declaration(entry));
     std::vector<story_notebook::ManifestModel> models;std::string why;
     if(!story_notebook::parse_models(manifest,models,why))throw std::runtime_error(why);
     if(models.size()!=1||models[0].kind!="kit")throw std::runtime_error("not a kit model");

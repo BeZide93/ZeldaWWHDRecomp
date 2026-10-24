@@ -173,8 +173,10 @@ struct FakeHost : editor::Host {
     std::set<std::string> collision_pending;  // "mod:model" whose collision is being prepared
     bool collision_preparing(const std::string& mod, const std::string& model) override { return collision_pending.contains(mod + ":" + model); }
     bool prepared_replace = false;
+    Value prepared_request;  // what the last prepare_model was given (the declaration and the preparation options)
     bool prepare_model(const std::string& mod, const std::string&, const Value& model, std::string& note, std::string&) override {
         prepared = mod + ":" + model.get("id").string();
+        prepared_request = model;
         prepared_collision = model.get("collision").boolean;
         prepared_replace = model.get("replace").boolean;
         note = "prepared";
@@ -2120,6 +2122,135 @@ void kit_import(const fs::path& examples) {
     fs::remove_all(dir, ec);
 }
 
+// A kit model again (issue #281): its Blender preview textures on game materials are removed at import and said so (the
+// package keeps none of the game's pictures, the file's data shrinks); Replace from file and an import under a removed
+// model's id ask the game to prepare it with "replace", which the kit model's build takes out of the declaration
+// (story_notebook::model_declaration) instead of failing with "invalid model declaration".
+void kit_previews_and_replace(const fs::path& examples) {
+    FakeHost host;
+    host.kit_list = json(R"({"materials": [{"material": "grass_v", "textures": ["a_kusa"], "triangles": 900},
+                                          {"material": "rock_v", "textures": ["m_ren16"], "triangles": 400}], "main": "grass_v"})");
+    const fs::path dir = temp_dir("kit-previews");
+    const auto write = [](const fs::path& file, const std::vector<uint8_t>& bytes) {
+        std::ofstream o(file, std::ios::binary);
+        o.write(reinterpret_cast<const char*>(bytes.data()), std::streamsize(bytes.size()));
+    };
+    fs::copy(examples / "sdk-v3-windfall", dir, fs::copy_options::recursive);
+    std::ifstream in(dir / "manifest.json");
+    std::stringstream text;
+    text << in.rdbuf();
+    in.close();
+    editor::Session w(&host);
+    w.add_package("sdk-v3-windfall", "Windfall", dir.string(), mods::json::parse(text.str()));
+    // a cube in three parts: Windfall's grass with Blender's preview image (a picture of its own in the file's data), a
+    // material of its own with its own texture, and the room's stone without a texture
+    auto doc = static_model_fixture::cube_document();
+    std::vector<uint8_t> bin = static_model_fixture::cube_binary();
+    const std::vector<uint8_t> png(bin.begin() + 328, bin.begin() + 429);
+    doc["bufferViews"].array.push_back(json(R"({"buffer": 0, "byteOffset": 432, "byteLength": 101})"));
+    bin.insert(bin.end(), png.begin(), png.end());
+    while (bin.size() % 4) bin.push_back(0);
+    doc["buffers"].array[0]["byteLength"] = double(bin.size());
+    doc["images"] = json(R"([{"bufferView": 5, "mimeType": "image/png", "name": "grass_preview"}, {"bufferView": 4, "mimeType": "image/png", "name": "sign"}])");
+    doc["textures"] = json(R"([{"source": 0}, {"source": 1}])");
+    doc["materials"] = json(R"([{"name": "grass_v.001", "pbrMetallicRoughness": {"baseColorTexture": {"index": 0}}},
+                                {"name": "my_sign", "pbrMetallicRoughness": {"baseColorTexture": {"index": 1}}}, {"name": "rock_v"}, {"name": "col_grass"}])");
+    Value prim = doc["meshes"].array[0]["primitives"].array[0];
+    doc["meshes"].array[0]["primitives"] = json("[]");
+    for (int m : {0, 1, 2}) {
+        prim["material"] = double(m);
+        doc["meshes"].array[0]["primitives"].array.push_back(prim);
+    }
+    // and its collision (ext_col), which placements stand on
+    Value col = doc["meshes"].array[0];
+    col["primitives"] = json("[]");
+    prim["material"] = 3.0;
+    col["primitives"].array.push_back(prim);
+    doc["meshes"].array.push_back(col);
+    doc["nodes"] = json(R"([{"name": "ext", "mesh": 0}, {"name": "ext_col", "mesh": 1}])");
+    doc["scenes"].array[0]["nodes"] = json("[0, 1]");
+    const auto source = static_model_fixture::glb(doc, bin);
+    {
+        std::ofstream o(dir / "ext.glb", std::ios::binary);
+        o.write(reinterpret_cast<const char*>(source.data()), std::streamsize(source.size()));
+    }
+    Value p = json(R"({"kit": {"stage": "sea", "room": 11}, "id": "ext"})");
+    p["file"] = (dir / "ext.glb").string();
+    // checked: the import would remove it; the report then has it as the room's grass
+    Value checked = p;
+    checked.object.erase("id");
+    Value r = w.run("check_model", checked);
+    CHECK(ok(r) && r.get("result").get("preview_textures_removed").array.size() == 1 && r.get("result").get("kit_report").get("game").array.size() == 2 &&
+          r.get("result").get("kit_report").get("own").array.size() == 1);
+    r = w.run("import_model", p);
+    CHECK(ok(r) && r.get("result").get("fixes").array.size() == 1);
+    CHECK(r.get("result").get("note").string().rfind("Imported with changes: Removed 1 preview texture from kit materials (grass_v.001)", 0) == 0);
+    {
+        // the package's file: grass without a texture, the own texture kept, the preview's picture gone from the data
+        std::ifstream f(dir / "models" / "ext.glb", std::ios::binary);
+        const std::vector<uint8_t> kept((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+        CHECK(kept.size() + 100 < source.size());
+        const Value d = mods::json::parse(std::string(reinterpret_cast<const char*>(kept.data() + 20), static_models::le32(kept.data() + 12)));
+        CHECK(d.get("materials").array[0].get("pbrMetallicRoughness").get("baseColorTexture").type == Value::Null);
+        CHECK(d.get("materials").array[1].get("pbrMetallicRoughness").get("baseColorTexture").get("index").number == 0);
+        CHECK(d.get("images").array.size() == 1 && d.get("images").array[0].get("name").string() == "sign" && d.get("bufferViews").array.size() == 5);
+        static_models::KitInfo k;
+        std::string why;
+        CHECK(static_models::validate_kit_glb(kept, {"grass_v", "rock_v"}, k, why) && k.own_materials == 1);
+        CHECK(std::search(kept.begin(), kept.end(), png.begin(), png.end()) != kept.end());  // the own texture's picture, once
+    }
+    // the game builds what it was given: a declaration parse_models takes
+    auto declared = [&](const Value& request) {
+        Value m;
+        m["models"].type = Value::Array;
+        m["models"].array.push_back(request);
+        std::vector<story_notebook::ManifestModel> models;
+        std::string why;
+        return story_notebook::parse_models(m, models, why) && models.size() == 1 && models[0].kind == "kit";
+    };
+    CHECK(host.prepared == "sdk-v3-windfall:ext" && !host.prepared_replace && declared(story_notebook::model_declaration(host.prepared_request)));
+    // a placement standing on it (a kit model is a static world object on its own _col meshes)
+    r = w.run("add_actor", json(R"({"type": "model", "model": "ext", "id": "ext-1", "at": "position", "position": {"x": 1000, "y": 0, "z": -200000}, "stage": "sea"})"));
+    CHECK(ok(r) && r.get("result").get("actor").get("collision").get("mesh").string() == "ext");
+    // Replace from file (and Watch file, which replaces): prepared with "replace", which is no field of a declaration
+    doc["asset"]["generator"] = "Blender, exported again";
+    {
+        const auto again = static_model_fixture::glb(doc, bin);
+        std::ofstream o(dir / "ext.glb", std::ios::binary);
+        o.write(reinterpret_cast<const char*>(again.data()), std::streamsize(again.size()));
+    }
+    r = w.run("replace_model", json(R"({"model": "ext"})"));
+    CHECK(ok(r) && r.get("result").get("changed").boolean && r.get("result").get("note").string().rfind("Replaced with changes: Removed 1 preview texture", 0) == 0);
+    CHECK(host.prepared_replace && !declared(host.prepared_request) && declared(story_notebook::model_declaration(host.prepared_request)));
+    // a new version without its _col mesh: refused while the placement stands on it (the kit file's own collision counts)
+    {
+        Value bare = doc;
+        bare["nodes"] = json(R"([{"name": "ext", "mesh": 0}])");
+        bare["scenes"].array[0]["nodes"] = json("[0]");
+        bare["meshes"].array.pop_back();
+        bare["materials"].array.pop_back();
+        write(dir / "bare.glb", static_model_fixture::glb(bare, bin));
+        Value q = json(R"({"model": "ext"})");
+        q["file"] = (dir / "bare.glb").string();
+        r = w.run("replace_model", q);
+        CHECK(!ok(r) && r.get("error").string().find("no collision mesh") != std::string::npos);
+    }
+    // removed and imported again under its id: the same
+    r = w.run("remove_model", json(R"({"model": "ext", "actors": true, "confirm": true})"));
+    CHECK(ok(r));
+    r = w.run("import_model", p);
+    CHECK(ok(r) && host.prepared_replace && declared(story_notebook::model_declaration(host.prepared_request)));
+    // the room can't be read: a material the declaration maps is still a game material, its texture removed all the same
+    host.kit_list = Value();
+    r = w.run("remove_model", json(R"({"model": "ext", "actors": true, "confirm": true})"));
+    CHECK(ok(r));
+    p["materials"] = json(R"({"grass_v.001": "grass_v"})");
+    r = w.run("import_model", p);
+    CHECK(ok(r) && r.get("result").get("fixes").array.size() == 1 && r.get("result").get("model").get("materials").get("grass_v.001").string() == "grass_v");
+    std::error_code ec;
+    fs::remove_all(dir, ec);
+}
+
 // An imported model replaced, watched and removed (issue #287): Replace keeps the id, so its placements keep their places
 // and the game prepares the new version for them (collision included); Watch replaces it by itself once a changed file
 // has settled and is whole; Remove is one undo step that takes the placements with it only when asked, and an undo
@@ -2296,6 +2427,7 @@ int main(int argc, char** argv) {
     building(argv[1]);
     own_models(argv[1]);
     kit_import(argv[1]);
+    kit_previews_and_replace(argv[1]);
     model_replace_remove(argv[1]);
     game_objects();
     route_commands();
