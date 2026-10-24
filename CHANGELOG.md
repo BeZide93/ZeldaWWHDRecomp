@@ -7,6 +7,10 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Mac (Metal): the distant sea at the horizon no longer flickers between runs.** Metal drew some objects straight
+  from the game's memory while the game was already writing the next frame's positions into it. Vertex data the game
+  rewrites is now copied when a draw is recorded, as on Vulkan. This also fixes a rare case where Metal could reuse
+  overwritten settings from a recycled upload buffer.
 - **The distant sea and grass at Outset's cliff no longer change colour from run to run** (#178). The game shares
   one "current fog" between two CPU cores: while one core briefly switches it to the sea's fog, the other could copy it
   into the scene settings, so some frames picked up the sea fog. The copy now always takes the scene's normal fog,
