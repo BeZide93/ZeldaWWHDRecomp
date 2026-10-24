@@ -42,6 +42,13 @@ public final class ModelsStep {
     /** The player's remembered choice (models-choice.json "enabled"), or the recommendation when there is none. */
     public static boolean chosen(Boolean remembered) { return remembered == null ? RECOMMENDED : remembered; }
 
+    /** Setup's message when the chosen step cannot run: it needs the prepared shaders (the shader template and the
+     *  warm). why: shader preparation's own message (for example the missing template), or null. */
+    public static String skipped(String why) {
+        return "Prepare model shaders skipped: it needs the shader template and the prepared shaders" +
+            (why == null || why.isEmpty() ? "." : " (" + why + ").");
+    }
+
     public enum Outcome { DONE, FAILED, CANCELLED, WAIT_FOR_SCREEN, PAUSED }
 
     /** What the service does with models-result.json. */

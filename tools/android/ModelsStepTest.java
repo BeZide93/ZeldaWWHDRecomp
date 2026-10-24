@@ -24,6 +24,11 @@ public final class ModelsStepTest {
         expect(false, ModelsStep.chosen(false));
         expect(true, ModelsStep.chosen(true));
 
+        // the chosen step without prepared shaders: setup says why it was skipped
+        expect("Prepare model shaders skipped: it needs the shader template and the prepared shaders (Shader template unavailable; shaders will compile during play).",
+            ModelsStep.skipped("Shader template unavailable; shaders will compile during play"));
+        expect("Prepare model shaders skipped: it needs the shader template and the prepared shaders.", ModelsStep.skipped(null));
+
         // the setup screen starts each requested attempt once
         String id = "0123456789abcdef0123456789abcdef";
         expect(true, ModelsStep.launch(id, null));

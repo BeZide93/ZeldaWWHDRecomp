@@ -305,11 +305,17 @@ public class SetupService extends Service {
                     prepared = result.isFile() && SetupStore.read(result).optString("status").equals("ready");
                     if (!prepared) message = "Shader preparation skipped or failed; shaders will compile during play.";
                 }
-                // the optional models step: the game draws its models hidden behind setup's progress screen
-                if (prepared && AndroidGame.modelsChosen(this)) {
-                    SetupStore.write(new File(active, ModelsStep.STEP), new JSONObject().put("schema", 1));
-                    String models = runModels(active);
-                    if (models != null) message = models;
+                // the optional models step: the game draws its models hidden behind setup's progress screen; without
+                // prepared shaders (no template, the warm failed) it cannot run, and setup says so
+                if (AndroidGame.modelsChosen(this)) {
+                    if (prepared) {
+                        SetupStore.write(new File(active, ModelsStep.STEP), new JSONObject().put("schema", 1));
+                        String models = runModels(active);
+                        if (models != null) message = models;
+                    } else {
+                        message = ModelsStep.skipped(message != null ? message :
+                            shaders == null ? null : shaders.optString("message", null));
+                    }
                 }
                 host("complete", null, message);
                 SetupKeyAccess.cleanupCompleted(active);

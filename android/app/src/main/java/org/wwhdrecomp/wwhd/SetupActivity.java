@@ -596,7 +596,11 @@ public class SetupActivity extends Activity {
                 return;
             }
             case "failed": phase(getString(R.string.setup_failed), getString(R.string.setup_failed_detail), -2); return;
-            case "complete": phase(getString(R.string.setup_ready), getString(R.string.setup_ready_detail), 1000); return;
+            case "complete": {  // with what setup left out (for example the models step), said plainly
+                String note = host == null ? "" : host.optString("error");
+                phase(getString(R.string.setup_ready), getString(R.string.setup_ready_detail) + (note.isEmpty() ? "" : "\n" + note), 1000);
+                return;
+            }
             default: phase(getString(R.string.setup_working), null, -1);
         }
     }
