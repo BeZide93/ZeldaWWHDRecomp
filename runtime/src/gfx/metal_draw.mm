@@ -194,6 +194,50 @@ static Upload submitted_upload(uint32_t addr, uint32_t size, const uint8_t* byte
     return u;
 }
 
+// Vertex buffers the CPU rewrites. Metal binds vertex buffers straight from guest memory, and the GPU
+// reads them when it runs, after the render thread recorded the draw; by then the game may already
+// have written the next frame's data into a dynamic buffer, so what a draw showed depended on GPU
+// timing (pictures differed from run to run). A range is bound from guest memory while the CPU never
+// writes it after its first use (static meshes: no copy); once a write to it is seen (write_watch.h),
+// it is copied at record time like Vulkan does, and that copy is reused by later draws while the
+// range is unchanged and its upload chunk is current. Without write tracking: as before.
+// WWHD_METAL_VB_COPY=0 binds every vertex buffer from guest memory again (comparisons).
+struct VertexRange {
+    uint64_t stamp = 0;          // write stamp when armed (static) or when copied (dynamic)
+    uint64_t checkedFrame = ~0ull, seq = 0;
+    bool dynamic = false;
+    Upload copy{nil, 0};
+    uint64_t copyGen = ~0ull;    // g_pool_gen of the chunk holding the copy
+};
+static std::unordered_map<uint64_t, VertexRange> g_vertex_ranges;
+static uint64_t g_vertex_copy_bytes = 0, g_vertex_copies = 0;
+static bool rewritten_vertex_copy(uint32_t addr, uint32_t size, Upload& out) {
+    static const bool off = getenv("WWHD_METAL_VB_COPY") && !atoi(getenv("WWHD_METAL_VB_COPY"));  // comparisons
+    if (off || !wwatch::active() || !size) return false;
+    VertexRange& r = g_vertex_ranges[(uint64_t)addr << 32 | size];
+    if (!r.dynamic) {
+        if (r.checkedFrame == ~0ull) { r.stamp = wwatch::arm(addr, size); r.checkedFrame = R.frame; return false; }
+        if (r.checkedFrame == R.frame) return false;  // checked this frame
+        r.checkedFrame = R.frame;
+        if (!wwatch::written_since(addr, size, r.stamp)) return false;
+        r.dynamic = true;
+        r.copy = Upload{nil, 0};
+    }
+    const uint64_t seq = wwatch::write_seq();
+    if (r.copy.buf && r.copyGen == g_pool_gen && (r.seq == seq || !wwatch::written_since(addr, size, r.stamp))) {
+        r.seq = seq;
+        out = r.copy;
+        return true;
+    }
+    r.stamp = wwatch::arm(addr, size);  // arm before reading (write_watch.h)
+    r.seq = wwatch::write_seq();
+    out = r.copy = upload(mem::ptr(addr), size);
+    r.copyGen = g_pool_gen;
+    g_vertex_copy_bytes += size;
+    ++g_vertex_copies;
+    return true;
+}
+
 // called before a command buffer commits: buffers used so far are recycled when it completes
 void pool_retire(id<MTLCommandBuffer> cmd) {
     std::vector<id<MTLBuffer>> used;
@@ -1908,6 +1952,11 @@ void report_skips() {
         (unsigned long long)g_stat_invalidates, (unsigned long long)g_stat_invalidated_surfaces, (unsigned long long)faults,
         (unsigned long long)protectedPages);
     g_stat_full_checks = g_stat_uploads = g_stat_invalidates = g_stat_invalidated_surfaces = g_stat_hashed_bytes = 0;
+    size_t dynamicRanges = 0;
+    for (auto& [k, r] : g_vertex_ranges) dynamicRanges += r.dynamic;
+    LOG("[gfx] last 300 frames: %llu rewritten vertex buffer copies (%.1f MiB); %zu of %zu vertex ranges rewritten by the CPU",
+        (unsigned long long)g_vertex_copies, g_vertex_copy_bytes / 1048576.0, dynamicRanges, g_vertex_ranges.size());
+    g_vertex_copies = g_vertex_copy_bytes = 0;
 }
 
 
@@ -2149,8 +2198,11 @@ void draw(const uint32_t* regs, uint32_t prim, uint32_t count, uint32_t indexTyp
         uint32_t off = 0;
         id<MTLBuffer> b = guest_buffer(addr, &off);
         if (!b) continue;
+        Upload u;
         if (g_snapshot && size <= kSnapshotLimit) {
-            Upload u = upload(mem::ptr(addr), size);
+            u = upload(mem::ptr(addr), size);
+            [enc setVertexBuffer:u.buf offset:u.offset atIndex:GET_MTL_VERTEX_BUFFER_INDEX(g.attributeBufferIndex)];
+        } else if (rewritten_vertex_copy(addr, size, u)) {
             [enc setVertexBuffer:u.buf offset:u.offset atIndex:GET_MTL_VERTEX_BUFFER_INDEX(g.attributeBufferIndex)];
         } else {
             [enc setVertexBuffer:b offset:off atIndex:GET_MTL_VERTEX_BUFFER_INDEX(g.attributeBufferIndex)];
