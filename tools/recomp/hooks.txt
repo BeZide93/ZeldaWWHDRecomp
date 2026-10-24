@@ -256,6 +256,7 @@
 025D39A8  # dWpotWater_c::execute: spilled water mask placement kept for the draw (interp_fx.cpp)
 025D3968  # dWpotWater_c::draw: spilled water mask with the view of the drawn pass (interp_fx.cpp)
 02736C10  # hdLayerShadow drawShadowPass: cascade split distances put back after the pass is painted (interp_fx.cpp)
+@027FDF78 # environment uniforms (027FDA54) in the shadow pass: the fog it copies is the scene's normal fog (fog_pin.cpp)
 027987BC  # updateShadowSurface: shadow cascade split distances between the steps (interp_fx.cpp)
 027FB678  # uploadShadowEnvironment: shadow cascade fade ranges between the steps (interp_fx.cpp)
 024EC1C8  # dAttDraw_c::draw: in true 60, the attention arrow is built from halfway values and the current camera
