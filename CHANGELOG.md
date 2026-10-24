@@ -7,6 +7,11 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **World editor: kit models are easier to work with** (#281, thanks @KelpyCode). Replace from file and Watch file
+  no longer fail with "invalid model declaration" on a model that uses the game's own materials, and they no longer
+  refuse a new file that has a collision mesh. An object the game left out at start-up because something was in
+  its way now appears as soon as you move it to a clear spot. You can keep a preview picture on a game material in
+  Blender: the import removes it from the package by itself and says so.
 - **Fixed: choosing Continue after a Game Over froze the game with frame interpolation on** (#295, thanks
   @aaronlink127). The Game Over screen's logic runs from a drawing step, so the extra in-between frames moved it
   forward before the save question was open, and the game picked "To Title" by itself. That logic now advances once
