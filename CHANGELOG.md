@@ -10,11 +10,13 @@ what is on `devel` and not released yet (also in the
 - **Mac (Metal): the distant sea at the horizon no longer flickers between runs.** Metal drew some objects straight
   from the game's memory while the game was already writing the next frame's positions into it. Vertex data the game
   rewrites is now copied when a draw is recorded, as on Vulkan. This also fixes a rare case where Metal could reuse
-  overwritten settings from a recycled upload buffer.
+  overwritten settings from a recycled upload buffer. Shader settings outside display lists get the same treatment.
 - **The distant sea and grass at Outset's cliff no longer change colour from run to run** (#178). The game shares
   one "current fog" between two CPU cores: while one core briefly switches it to the sea's fog, the other could copy it
   into the scene settings, so some frames picked up the sea fog. The copy now always takes the scene's normal fog,
-  which is what the Wii U's timing gives. Sea and background fog are unchanged, and there is no speed cost.
+  which is what the Wii U's timing gives. The same race in the other direction (the sea's waves picking up the normal
+  fog, visible as a changing band at the horizon) is fixed too: every fog copy now reads the fog its own thread set.
+  Sea and background fog are unchanged, and there is no speed cost.
 - **World editor: kit models are easier to work with** (#281, thanks @KelpyCode). Replace from file and Watch file
   no longer fail with "invalid model declaration" on a model that uses the game's own materials, and they no longer
   refuse a new file that has a collision mesh. An object the game left out at start-up because something was in
