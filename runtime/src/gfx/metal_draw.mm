@@ -141,6 +141,9 @@ static std::mutex g_pool_mutex;
 static std::vector<id<MTLBuffer>> g_pool_free;
 static std::vector<id<MTLBuffer>> g_pool_used;
 static id<MTLBuffer> g_pool_cur = nil;
+// bumped whenever the current chunk changes: a recycled chunk can come back as the same object, so
+// "still the current chunk" is a generation, not a pointer comparison
+static uint64_t g_pool_gen = 0;
 static uint32_t g_pool_pos = 0;
 constexpr uint32_t kPoolChunk = 8 << 20;
 
@@ -158,6 +161,7 @@ static Upload upload(const void* data, uint32_t size) {
                 break;
             }
         if (!g_pool_cur) g_pool_cur = [R.device newBufferWithLength:want options:MTLResourceStorageModeShared];
+        ++g_pool_gen;
         g_pool_pos = 0;
     }
     Upload u{g_pool_cur, g_pool_pos};
@@ -174,17 +178,17 @@ static Upload submitted_upload(uint32_t addr, uint32_t size, const uint8_t* byte
     struct Item { uint32_t size; Upload u; };
     static std::unordered_map<uint32_t, Item> items;
     static uint64_t itemsFor = 0;
-    static id<MTLBuffer> itemsChunk = nil;
-    if (itemsFor != gx2::submitted_uniforms_id() || itemsChunk != g_pool_cur) {
+    static uint64_t itemsChunk = ~0ull;  // g_pool_gen of the chunk the items are in
+    if (itemsFor != gx2::submitted_uniforms_id() || itemsChunk != g_pool_gen) {
         items.clear();
         itemsFor = gx2::submitted_uniforms_id();
     }
     auto it = items.find(addr);
     if (it != items.end() && it->second.size == size) return it->second.u;
     Upload u = upload(bytes, size);
-    if (u.buf != itemsChunk) {  // the upload began a new chunk: the earlier items are in a retired one
+    if (itemsChunk != g_pool_gen) {  // the upload began a new chunk: the earlier items are in a retired one
         items.clear();
-        itemsChunk = u.buf;
+        itemsChunk = g_pool_gen;
     }
     items[addr] = {size, u};
     return u;
@@ -198,6 +202,7 @@ void pool_retire(id<MTLCommandBuffer> cmd) {
         if (g_pool_cur) {
             g_pool_used.push_back(g_pool_cur);
             g_pool_cur = nil;
+            ++g_pool_gen;
         }
         used.swap(g_pool_used);
     }
