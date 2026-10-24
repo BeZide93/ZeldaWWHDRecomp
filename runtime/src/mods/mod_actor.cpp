@@ -1,3 +1,4 @@
+#include <optional>
 #include <cstdint>
 #include <functional>
 #include <initializer_list>
@@ -841,7 +842,10 @@ bool world_object_query(const std::string&mod,const story_notebook::ManifestActo
     if(spec.water_object()){float radius=0;for(const auto&p:geometry->vertices)radius=std::max(radius,std::sqrt(p.x*p.x+p.y*p.y+p.z*p.z));const float y=spec.position.y-spec.buoyancy.draft;bounds={{spec.position.x-radius,y-2048-radius,spec.position.z-radius},{spec.position.x+radius,y+2048+radius,spec.position.z+radius}};}
     const auto key=std::make_pair(spec.stage,int(spec.room));
     auto found=placement_indexes.find(key);if(found==placement_indexes.end())found=placement_indexes.emplace(key,placement_provider?placement_provider(spec.stage,int(spec.room)):load_native_room(world_game_directory,spec.stage,int(spec.room))).first;
-    auto conflicts=check(spec.stage,int(spec.room),bounds,found->second);
+    // a standing object by its own collision (issue #281: an L-shaped extension's box may cover a villager, a route or
+    // a start point that its triangles don't reach); a floating or drifting one by its whole motion envelope
+    std::optional<Solid> own_solid;if(!spec.water_object())own_solid=placed_solid(*geometry,spec);
+    auto conflicts=check(spec.stage,int(spec.room),bounds,found->second,kClearance,own_solid?&*own_solid:nullptr);
     // A game piece is an island's own building: it stands on the island's ground and against its slopes the
     // way its original did, so the room's walls and ground don't count; everything else (the layout's
     // villagers, routes, doors, chests, cutscene areas and start points, the room's square, other world

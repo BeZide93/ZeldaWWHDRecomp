@@ -464,6 +464,14 @@ where the game stores them (world coordinates, on the sea as in dungeons). An ob
   to the water;
 - other world objects (this mod's and other mods') and the King of Red Lions.
 
+A standing object is measured by its own collision (its `_col` meshes or its collision shape), not by a box
+around it: an L-shaped island extension whose corner is open water may wrap around a villager, a start point
+or a route that none of its triangles comes near. Each of the things above counts when one of the object's
+triangles comes within its reach; the room's walls and ground count when the object's triangles cross them
+more than 150 units above its base (resting on the ground, or reaching a little into a slope under it, is
+fine). Only the room's square is checked by the box: the whole object stays inside the room. A boat's route
+(the one around Windfall at sea level) is named as a boat route; it counts like any other route.
+
 Two static world objects are compared by their own collision, not by boxes around them: an object may
 stand on another's walkable top (an island ground, a platform, a pier) and reach up to 150 units into it
 where the ground slopes under it, as the islands' own buildings do; only a real overlap of their solid
