@@ -7,6 +7,13 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Android: setup now prepares model shaders by default, for far fewer stutters.** "Prepare model shaders
+  (recommended)" is ticked on Android. After setup, the game draws every model, room and placed character once and
+  visits every stage, hidden behind the setup's progress screen, so the shaders are ready before you play. On a
+  Xiaomi 14 this cut shader waits on a 25-place test route from about 1,000 to about 35. It takes about 40 minutes
+  on a recent phone (longer on older ones); you can untick it, and Cancel keeps what was prepared. Desktop setup is
+  unchanged. Also fixed: on a fresh setup, the shaders prepared during setup's warm-up were not kept (Android and
+  desktop Vulkan), and a chosen step that cannot run now says why instead of being skipped silently.
 - **Mac (Metal): the distant sea at the horizon no longer flickers between runs.** Metal drew some objects straight
   from the game's memory while the game was already writing the next frame's positions into it. Vertex data the game
   rewrites is now copied when a draw is recorded, as on Vulkan. This also fixes a rare case where Metal could reuse
