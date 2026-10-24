@@ -2349,6 +2349,22 @@ extern "C" void hook_02715310(Cpu* c) {
     else countdown::refresh(c);
 }
 
+// Game Over's state machine is installed in the leaf process's Draw slot, so the
+// Execute gate above does not hold it back. An extra draw can request the save
+// window and then read its still-idle state before the next scene/UI Execute
+// opens it. That commits the default "To Title" choice, even when the player
+// subsequently selects Continue, leaving the scene waiting for a title reset.
+// This callback only advances logic; the HD UI paints the screen separately.
+// Keep its native return value on presentation passes without advancing it.
+extern "C" void f_025499A0_orig(Cpu* c);
+extern "C" void hook_025499A0(Cpu* c) {
+    if (interp::enabled() && interp::g_hold) {
+        c->r[3] = 1;
+        return;
+    }
+    f_025499A0_orig(c);
+}
+
 namespace interp { bool exact_cull_on(); void edge_draw(const Cpu& call, Cpu* c, uint32_t actor); void actor_keep(uint32_t actor); }
 // fopAc_Draw(fopAc_ac_c*): one-shot "not drawn this frame" requests (fopAcStts_NODRAW_e) made by
 // the step's logic hold for all passes of the step (interp_nodraw.h; issue #126: in conversations

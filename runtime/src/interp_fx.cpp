@@ -2801,6 +2801,9 @@ bool split_blend(SplitRec& r, const std::vector<float>& cur, std::vector<float>&
     return true;
 }
 }  // namespace
+namespace interp_fx {
+bool in_shadow_pass() { return g_in_shadow_pass; }  // fog_pin.cpp
+}
 extern "C" void f_02736C10_orig(Cpu*);
 extern "C" void hook_02736C10(Cpu* c) {
     const bool saved = g_in_shadow_pass;

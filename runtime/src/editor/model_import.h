@@ -31,4 +31,11 @@ bool fix(std::span<const uint8_t> input, Result& out, std::string& why);
 // 64 and its height of 8, all of them together at most `budget` bytes of RGBA8 (halving the largest first).
 void texture_sizes(const std::vector<unsigned>& widths, const std::vector<unsigned>& heights, size_t budget, std::vector<unsigned>& out_widths,
                    std::vector<unsigned>& out_heights);
+// A kit model's file with the textures of its game materials removed (issue #281): Blender keeps a material's image for
+// its preview, but a material named after a kit room's draws the game's own texture, and a package never carries the
+// game's pictures. The materials `strip` marks (by index) lose their texture slots (base colour, metal/roughness,
+// normal, occlusion, emissive); the textures, images and binary data nothing uses any more go with them. `removed`:
+// how many of those materials had a texture. False (with `why`) for a file it can't read; `out` is the input when
+// nothing was removed.
+bool strip_material_textures(std::span<const uint8_t> input, const std::vector<bool>& strip, std::vector<uint8_t>& out, unsigned& removed, std::string& why);
 }  // namespace editor::model_import

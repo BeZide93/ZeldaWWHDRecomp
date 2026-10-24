@@ -7,6 +7,28 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Mac (Metal): the distant sea at the horizon no longer flickers between runs.** Metal drew some objects straight
+  from the game's memory while the game was already writing the next frame's positions into it. Vertex data the game
+  rewrites is now copied when a draw is recorded, as on Vulkan. This also fixes a rare case where Metal could reuse
+  overwritten settings from a recycled upload buffer. Shader settings outside display lists get the same treatment.
+- **The distant sea and grass at Outset's cliff no longer change colour from run to run** (#178). The game shares
+  one "current fog" between two CPU cores: while one core briefly switches it to the sea's fog, the other could copy it
+  into the scene settings, so some frames picked up the sea fog. The copy now always takes the scene's normal fog,
+  which is what the Wii U's timing gives. The same race in the other direction (the sea's waves picking up the normal
+  fog, visible as a changing band at the horizon) is fixed too: every fog copy now reads the fog its own thread set.
+  Sea and background fog are unchanged, and there is no speed cost.
+- **World editor: kit models are easier to work with** (#281, thanks @KelpyCode). Replace from file and Watch file
+  no longer fail with "invalid model declaration" on a model that uses the game's own materials, and they no longer
+  refuse a new file that has a collision mesh. An object the game left out at start-up because something was in
+  its way now appears as soon as you move it to a clear spot. You can keep a preview picture on a game material in
+  Blender: the import removes it from the package by itself and says so. Placement now checks an object by its own
+  shape instead of a box around it, so a large L-shaped piece no longer "hits" villagers, start points or routes
+  that sit in the open space of its corner; anything its shape really reaches still blocks it. The route around
+  Windfall at sea level is now named as the boat route it is.
+- **Fixed: choosing Continue after a Game Over froze the game with frame interpolation on** (#295, thanks
+  @aaronlink127). The Game Over screen's logic runs from a drawing step, so the extra in-between frames moved it
+  forward before the save question was open, and the game picked "To Title" by itself. That logic now advances once
+  per game step, as at 30 fps. Continue, Quit to Title and Save/Cancel work at 30, 40, 60, 120 and 240 fps.
 - **Scenes look the same every run, like on the Wii U.** The game rewrites some per-frame scene settings while the
   renderer is still drawing the previous frame's display lists, so a few draws could pick up the next frame's values
   and some pixels (the distant sea at Outset's cliff, the Forbidden Woods canopy) changed from run to run. Display

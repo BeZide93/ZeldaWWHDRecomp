@@ -1179,7 +1179,7 @@ bool editor_update(const std::string& mod,const std::vector<ManifestActor>& decl
     for(const auto& a:actors)if(!a.rider_of.empty()&&std::find(changed.begin(),changed.end(),a.rider_of)!=changed.end())changed.push_back(a.id);  // a changed Kargaroc: its rider too
     for(const auto& a:actors)if(!a.summon_of.empty()&&std::find(changed.begin(),changed.end(),a.summon_of)!=changed.end())changed.push_back(a.id);  // a changed summoner: its pool too
     std::map<std::string,Actor*> own;for(auto& a:g_actors)if(a.mod==mod)own[a.spec.id]=&a;
-    struct Step {const ManifestActor* spec=nullptr;Actor* actor=nullptr;bool create=false,update=false;};
+    struct Step {const ManifestActor* spec=nullptr;Actor* actor=nullptr;bool create=false,update=false,declare=false;};
     std::vector<Step> plan;std::vector<std::string> later;std::vector<Actor*> remove;
     std::vector<ManifestActor> effective;  // what the game will have: checked like a start-up list
     std::set<std::string> listed;
@@ -1208,6 +1208,12 @@ bool editor_update(const std::string& mod,const std::vector<ManifestActor>& decl
             plan.push_back({&spec,nullptr,true,false});effective.push_back(spec);continue;
         }
         Actor* a=it->second;
+        // a world object the game left out (its place was not clear at start-up, or when it was last changed): never
+        // declared, so nothing to change in place; now that its place is clear it is declared there, moved or not
+        // (issue #281: "the model can't serve this spec" for a move to a clear place)
+        if(spec.kind=="mod"&&a->spec.kind=="mod"&&spec.world_object()&&a->spec.world_object()&&!a->mod_token&&!restart_kind(spec)&&
+           !spec.combat_enabled&&!spec.carry_enabled&&g_models.contains({mod,spec.model})){
+            plan.push_back({&spec,a,false,true,true});effective.push_back(spec);continue;}
         if(!a->removed&&!is_changed(spec.id)){effective.push_back(a->spec);continue;}
         if(a->removed&&same_spec(mod,a->spec,spec)){plan.push_back({&spec,a,false,false});effective.push_back(spec);continue;}  // a removal undone
         const char* kind=restart_kind(a->spec);if(!kind)kind=restart_kind(spec);
@@ -1228,7 +1234,7 @@ bool editor_update(const std::string& mod,const std::vector<ManifestActor>& decl
     std::vector<std::string> flags;for(const auto& a:effective){if(!a.when_flag.empty())flags.push_back(a.when_flag);if(!a.when_not_flag.empty())flags.push_back(a.when_not_flag);if(!a.flag.empty())flags.push_back(a.flag);if(!a.switch_flag.empty())flags.push_back(a.switch_flag);if(a.arrival.enabled)flags.push_back(a.arrival.flag);if(a.chart_marker.enabled&&!a.chart_marker.when_flag.empty())flags.push_back(a.chart_marker.when_flag);for(const auto&t:a.talks){if(!t.when_flag.empty())flags.push_back(t.when_flag);if(!t.when_not_flag.empty())flags.push_back(t.when_not_flag);for(const auto&action:t.then)if(action.kind==story_notebook::StoryAction::Kind::Flag)flags.push_back(action.id);}for(const auto& action:a.then)if(action.kind==story_notebook::StoryAction::Kind::Flag)flags.push_back(action.id);}
     auto saved_flags=g_flag_names;if(!register_flags(mod,flags,why))return false;
     // check every changed mod model first, then apply: a refusal leaves all declarations unchanged
-    for(const bool apply:{false,true})for(const auto& step:plan){if(!step.update||step.spec->kind!="mod")continue;
+    for(const bool apply:{false,true})for(const auto& step:plan){if(!step.update||step.declare||step.spec->kind!="mod")continue;
         const auto& r=g_models.at({mod,step.spec->model});
         if(!step.actor->mod_token||!mod_actor::redeclare(step.actor->mod_token,*step.spec,r.archive,r.index,r.minimum,r.maximum,r.skinned,r.clips,r.rig,apply)){
             g_flag_names=saved_flags;return why="actor "+step.spec->id+": the model can't serve this spec (animation, look_at, rotation or scale)",false;}
@@ -1263,6 +1269,18 @@ bool editor_update(const std::string& mod,const std::vector<ManifestActor>& decl
     for(const auto& step:plan){
         if(step.create)continue;
         Actor* a=step.actor;
+        if(step.declare){
+            // declared now, as start-up would have (story_actors' install); the room creates it when it is ready
+            const auto& r=g_models.at({mod,step.spec->model});
+            const uint32_t token=mod_actor::declare(mod,*step.spec,r.archive,r.index,mod_talked(mod,step.spec->id),r.minimum,r.maximum,r.skinned,r.clips,r.rig);
+            if(!token){later.push_back(step.spec->id+": the game could not add it here (its model can't serve this spec: animation, look_at, rotation or scale); it appears after a restart");
+                if(!a->removed)a->spec=*step.spec;continue;}
+            a->mod_token=token;a->spec=*step.spec;a->removed=false;a->respawn=false;
+            if(!a->spec.talks.empty())mod_actor::set_talk_provider(mod,a->spec.id,mod_talk_provider(mod,a->spec.id));
+            refingerprint(mod,*a);
+            LOG("[actors] %s:%s added by the editor: its place is clear now (it was left out)",mod.c_str(),a->spec.id.c_str());
+            continue;
+        }
         const bool was_removed=a->removed;
         a->removed=false;
         if(was_removed&&a->mod_token)mod_actor::set_removed(a->mod_token,false);

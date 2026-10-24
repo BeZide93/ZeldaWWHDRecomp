@@ -10,6 +10,7 @@
 0200E6EC  # cCt_Counter: frame counters
 025D4654  # fopAc_Draw: one-shot no-draw requests of the step's logic hold for its in-between frames
 02715310  # HD UI screens' update after the process executes (end of fpcM_Management): logic, once per step
+025499A0  # Game Over state machine runs from the leaf Draw slot: logic, once per step
 025C5A8C  # shared minigame timer: HD puts its update in the draw slot; logic once per 30 Hz step
 0260C74C  # ResLoadTask::calc (sead task, calc on every frame): archive loads advance once per 30 Hz step
 @026277A8 # Boat-race timer formatting: presentation-only fractional milliseconds
@@ -255,6 +256,8 @@
 025D39A8  # dWpotWater_c::execute: spilled water mask placement kept for the draw (interp_fx.cpp)
 025D3968  # dWpotWater_c::draw: spilled water mask with the view of the drawn pass (interp_fx.cpp)
 02736C10  # hdLayerShadow drawShadowPass: cascade split distances put back after the pass is painted (interp_fx.cpp)
+@0255F7F8 # fog setter (0255F668): each thread records the fog it sets (fog_pin.cpp)
+@027FDF78 # environment uniforms (027FDA54): the fog copy reads the fog its own thread set last (fog_pin.cpp)
 027987BC  # updateShadowSurface: shadow cascade split distances between the steps (interp_fx.cpp)
 027FB678  # uploadShadowEnvironment: shadow cascade fade ranges between the steps (interp_fx.cpp)
 024EC1C8  # dAttDraw_c::draw: in true 60, the attention arrow is built from halfway values and the current camera

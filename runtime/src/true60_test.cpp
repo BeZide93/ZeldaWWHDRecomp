@@ -46,6 +46,7 @@ namespace interp { uint64_t logic_steps(); uint64_t pass_count(); bool hold_pass
 
 namespace true60_test {
 namespace {
+uint32_t g_gameover_proc = 0;  // diagnostic checkpoint at the native save-window handoff
 struct Poke { double t; uint32_t ptr; bool deref; uint32_t off; std::vector<uint8_t> bytes; bool done = false; };
 std::vector<Poke> parse_pokes() {
     std::vector<Poke> v;
@@ -147,6 +148,33 @@ void timing_checks() {
 
 // called with the scenario time on every controller read (input.mm)
 void tick(double t, bool ended) {
+    // Native-rate checkpoint of the pending save-window request, for the phase regression.
+    // Requires WWHD_PROC_DIGEST and WWHD_FULL_SAVE_STATES=1; never runs without this switch.
+    static int gameover_slot = getenv("WWHD_TEST_GAMEOVER_SAVE") ? atoi(getenv("WWHD_TEST_GAMEOVER_SAVE")) : 0;
+    if (gameover_slot > 0 && g_gameover_proc && ld16(g_gameover_proc + 8) == 0x1E3 && ld8(g_gameover_proc + 0x110) == 3) {
+        ss::request_save(gameover_slot);
+        LOG("[test] Game Over save-window handoff: save slot %d", gameover_slot);
+        gameover_slot = 0;
+    }
+
+    // Opt-in Game Over diagnostic: controller-read boundaries, before the next logic step.
+    // Scalar state only; no save data or assets. WWHD_TEST_GAMEOVER_TRACE=path.
+    if (getenv("WWHD_TEST_GAMEOVER_TRACE")) {
+        static FILE* trace = fopen(getenv("WWHD_TEST_GAMEOVER_TRACE"), "w");
+        const uint32_t play = GD(0x1046F0B0), mgr = ld32(GD(0x101F86B4));
+        const uint32_t f = mgr ? ld32(mgr + 0x440) : 0;
+        const uint32_t ui = ld32(GD(0x101F8344));
+        const uint32_t window = ui ? ld32(ui + 0x1BC) : 0;
+        if (trace) {
+            fprintf(trace, "%.3f %llu %d status=%u next=%u f=%08X,%08X,%08X delay=%u,%u window=%u,%u rate=%.6f on=%u\n", t,
+                (unsigned long long)interp::logic_steps(), interp::hold_pass(), ld8(play + 0x5BE3), ld8(play + 0x514C),
+                f ? ld32(f) : 0, f ? ld32(f + 4) : 0, f ? ld32(f + 8) : 0, f ? ld32(f + 0x1C) : 0, mgr ? ld32(mgr + 0x448) : 0,
+                window ? ld8(window + 0xD1) : 0, window ? ld8(window + 0xD5) : 0,
+                (float)ldf32(GD(0x101D6160)), ld8(GD(0x101D616C)));
+            fflush(trace);
+        }
+    }
+
     // Opt-in live preset regression: WWHD_TEST_CONTROLS=t:path loads a private
     // controls JSON once at scenario time t. Apply through the same live mapping
     // setter as the Controls window, without writing the user's controls file.
@@ -424,6 +452,18 @@ void proc_digest(uint32_t proc) {
         return v;
     }();
     int16_t pname = (int16_t)ld16(proc + 8);
+    if (pname == 0x1E3) g_gameover_proc = proc;
+    if (pname == 0x1E3 && getenv("WWHD_TEST_GAMEOVER_TRACE")) {
+        static int last = -1;
+        int state = ld8(proc + 0x110);
+        if (state != last) {
+            last = state;
+            const uint32_t ui = ld32(GD(0x101F8344)), window = ld32(ui + 0x1BC);
+            LOG("[gameover] step %llu state %d request %u window done %u choice %u",
+                (unsigned long long)step, state, ld8(ui + 0x248), ld8(window + 0xD1), ld8(window + 0xD5));
+        }
+    }
+
     // WWHD_PROC_DIGEST_DUMP=NAME:path also writes the hashed bytes of the processes with that profile
     // name as ADMP records (step, process, size, bytes; see WWHD_ACTOR_DUMP) to path
     static int dump_name = -2;

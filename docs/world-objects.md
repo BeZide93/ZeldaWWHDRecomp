@@ -464,6 +464,14 @@ where the game stores them (world coordinates, on the sea as in dungeons). An ob
   to the water;
 - other world objects (this mod's and other mods') and the King of Red Lions.
 
+A standing object is measured by its own collision (its `_col` meshes or its collision shape), not by a box
+around it: an L-shaped island extension whose corner is open water may wrap around a villager, a start point
+or a route that none of its triangles comes near. Each of the things above counts when one of the object's
+triangles comes within its reach; the room's walls and ground count when the object's triangles cross them
+more than 150 units above its base (resting on the ground, or reaching a little into a slope under it, is
+fine). Only the room's square is checked by the box: the whole object stays inside the room. A boat's route
+(the one around Windfall at sea level) is named as a boat route; it counts like any other route.
+
 Two static world objects are compared by their own collision, not by boxes around them: an object may
 stand on another's walkable top (an island ground, a platform, a pier) and reach up to 150 units into it
 where the ground slopes under it, as the islands' own buildings do; only a real overlap of their solid
@@ -484,7 +492,8 @@ things as they move.
 
 A place that isn't clear is still placed in the editor (and saved), but the object isn't in the game until it
 is moved where it fits; Check and export list it as a problem, and at game start it is left out with a line in
-the log. The editor and MCP give what is in the way, in plain words with the game's own name
+the log. Moved in the editor to a place that fits, it is put into the game there, whether it was left out at
+start-up or later. The editor and MCP give what is in the way, in plain words with the game's own name
 ("a door of the island", KNOB00D); `placement_conflicts` lists every finding. In the editor the selected
 object's footprint shows green or red with the first reason, and hovering it lists them all. Conflicts
 between mod objects and collision-memory budgets are reported alongside native placement findings.
@@ -717,7 +726,8 @@ them from the player's own files. Such a model is a [kit model](#game-materials)
 
 1. In Blender, give each surface a material named exactly as the export's material for it, for example
    the name of Windfall's grass material from the reference. A material appended from the export keeps
-   its name; delete its Image Texture node. A `.001` suffix Blender adds is ignored. `list_kit_materials
+   its name; delete its Image Texture node, or keep it for Blender's preview: the editor's import removes
+   it from the package's copy and says so. A `.001` suffix Blender adds is ignored. `list_kit_materials
    {"stage": "sea", "room": 11}` lists the room's material names with their textures and how much of the
    room uses each.
 2. Materials with textures of your own (a new sign, a roof) keep their Image Texture as before; they are

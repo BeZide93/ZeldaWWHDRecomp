@@ -834,4 +834,161 @@ bool fix(std::span<const uint8_t> input, Result& out, std::string& why) {
     out = std::move(fixed);
     return true;
 }
+
+bool strip_material_textures(std::span<const uint8_t> input, const std::vector<bool>& strip, std::vector<uint8_t>& out, unsigned& removed, std::string& why) {
+    out.assign(input.begin(), input.end());
+    removed = 0;
+    const auto le = [&](size_t at) { return uint32_t(input[at]) | uint32_t(input[at + 1]) << 8 | uint32_t(input[at + 2]) << 16 | uint32_t(input[at + 3]) << 24; };
+    if (input.size() < 20 || std::memcmp(input.data(), "glTF", 4) || le(4) != 2) return why = "not a GLB (glTF 2.0) file", false;
+    const size_t json_length = le(12);
+    if (json_length > input.size() - 20 || le(16) != 0x4E4F534A) return why = "invalid GLB JSON chunk", false;
+    Value doc;
+    try {
+        doc = mods::json::parse(std::string(reinterpret_cast<const char*>(input.data() + 20), json_length));
+    } catch (...) {
+        return why = "invalid GLB JSON", false;
+    }
+    const size_t base = 20 + json_length;
+    std::span<const uint8_t> bin;
+    if (input.size() >= base + 8) {
+        const size_t length = le(base);
+        if (le(base + 4) != 0x004E4942 || length > input.size() - base - 8) return why = "invalid GLB BIN chunk", false;
+        bin = input.subspan(base + 8, length);
+    }
+    if (doc.get("materials").type != Value::Array) return true;
+    // the marked materials' texture slots (a material's own extensions keep theirs: nothing is guessed)
+    bool any = false;
+    for (size_t m = 0; m < doc["materials"].array.size() && m < strip.size(); ++m) {
+        if (!strip[m]) continue;
+        Value& mat = doc["materials"].array[m];
+        bool had = false;
+        if (mat.get("pbrMetallicRoughness").type == Value::Object)
+            for (const char* slot : {"baseColorTexture", "metallicRoughnessTexture"}) had |= mat["pbrMetallicRoughness"].object.erase(slot) > 0;
+        for (const char* slot : {"normalTexture", "occlusionTexture", "emissiveTexture"}) had |= mat.object.erase(slot) > 0;
+        removed += had;
+        any |= had;
+    }
+    if (!any) return true;
+    // what is still used: textures (any "...Texture" slot of any material), their images, and the buffer views of
+    // accessors and images; everything else is dropped and the indices renumbered
+    const auto walk = [](Value& v, const std::function<void(const std::string&, Value&)>& f) {
+        std::function<void(Value&)> go = [&](Value& x) {
+            if (x.type == Value::Object)
+                for (auto& [k, c] : x.object) {
+                    f(k, c);
+                    go(c);
+                }
+            else if (x.type == Value::Array)
+                for (auto& c : x.array) go(c);
+        };
+        go(v);
+    };
+    const auto texture_slot = [](const std::string& key, const Value& v) {
+        return key.size() >= 7 && (key.ends_with("Texture") || key.ends_with("texture")) && v.type == Value::Object && v.get("index").type == Value::Number;
+    };
+    const auto renumber = [](std::vector<long>& map) {
+        long next = 0;
+        for (auto& x : map) x = x ? next++ : -1;
+    };
+    const size_t texture_count = doc.get("textures").array.size(), image_count = doc.get("images").array.size(), view_count = doc.get("bufferViews").array.size();
+    std::vector<long> textures(texture_count, 0), images(image_count, 0), views(view_count, 0);
+    const auto mark = [](std::vector<long>& used, const Value& index) {
+        if (index.type != Value::Number || index.number < 0 || size_t(index.number) >= used.size()) throw std::runtime_error("an index outside the file");
+        used[size_t(index.number)] = 1;
+    };
+    try {
+        walk(doc["materials"], [&](const std::string& k, Value& v) {
+            if (texture_slot(k, v)) mark(textures, v.get("index"));
+        });
+        for (size_t t = 0; t < texture_count; ++t)
+            if (textures[t]) walk(doc["textures"].array[t], [&](const std::string& k, Value& v) {
+                    if (k == "source") mark(images, v);
+                });
+        for (size_t i = 0; i < image_count; ++i)
+            if (images[i] && doc["images"].array[i].get("bufferView").type != Value::Null) mark(views, doc["images"].array[i].get("bufferView"));
+        for (auto& a : doc["accessors"].array) {
+            if (a.get("bufferView").type != Value::Null) mark(views, a.get("bufferView"));
+            for (const char* part : {"indices", "values"})
+                if (a.get("sparse").get(part).type == Value::Object) mark(views, a.get("sparse").get(part).get("bufferView"));
+        }
+    } catch (const std::exception& e) {
+        return why = std::string("the file can't be read: ") + e.what(), false;
+    }
+    // views of a buffer other than the GLB's own (an external .bin) are kept as they are
+    for (size_t v = 0; v < view_count; ++v)
+        if (doc["bufferViews"].array[v].get("buffer").number != 0) views[v] = 1;
+    renumber(textures);
+    renumber(images);
+    renumber(views);
+    walk(doc["materials"], [&](const std::string& k, Value& v) {
+        if (texture_slot(k, v)) v["index"] = double(textures[size_t(v.get("index").number)]);
+    });
+    std::vector<Value> kept_textures, kept_images, kept_views;
+    for (size_t t = 0; t < texture_count; ++t)
+        if (textures[t] >= 0) {
+            Value x = doc["textures"].array[t];
+            walk(x, [&](const std::string& k, Value& v) {
+                if (k == "source") v = double(images[size_t(v.number)]);
+            });
+            kept_textures.push_back(std::move(x));
+        }
+    for (size_t i = 0; i < image_count; ++i)
+        if (images[i] >= 0) {
+            Value x = doc["images"].array[i];
+            if (x.get("bufferView").type == Value::Number) x["bufferView"] = double(views[size_t(x.get("bufferView").number)]);
+            kept_images.push_back(std::move(x));
+        }
+    for (auto& a : doc["accessors"].array) {
+        if (a.get("bufferView").type == Value::Number) a["bufferView"] = double(views[size_t(a.get("bufferView").number)]);
+        for (const char* part : {"indices", "values"})
+            if (a.get("sparse").get(part).type == Value::Object) a["sparse"][part]["bufferView"] = double(views[size_t(a["sparse"][part].get("bufferView").number)]);
+    }
+    // the GLB's own buffer again with only the views still used, each at a 4-byte boundary
+    std::vector<uint8_t> data;
+    for (size_t v = 0; v < view_count; ++v) {
+        if (views[v] < 0) continue;
+        Value x = doc["bufferViews"].array[v];
+        if (x.get("buffer").number == 0) {
+            const size_t offset = x.get("byteOffset").type == Value::Number ? size_t(x.get("byteOffset").number) : 0, length = size_t(x.get("byteLength").number);
+            if (offset > bin.size() || length > bin.size() - offset) return why = "a buffer view outside the file's data", false;
+            while (data.size() % 4) data.push_back(0);
+            x["byteOffset"] = double(data.size());
+            data.insert(data.end(), bin.begin() + long(offset), bin.begin() + long(offset + length));
+        }
+        kept_views.push_back(std::move(x));
+    }
+    while (data.size() % 4) data.push_back(0);
+    const auto set_list = [&](const char* key, std::vector<Value>& list) {
+        if (list.empty()) doc.object.erase(key);
+        else {
+            doc[key].type = Value::Array;
+            doc[key].array = std::move(list);
+        }
+    };
+    set_list("textures", kept_textures);
+    set_list("images", kept_images);
+    set_list("bufferViews", kept_views);
+    if (doc.get("samplers").type == Value::Array && !doc.object.count("textures")) doc.object.erase("samplers");
+    if (doc.get("buffers").type == Value::Array && !doc["buffers"].array.empty()) doc["buffers"].array[0]["byteLength"] = double(data.size());
+    std::string text = mods::json::dump(doc);
+    while (text.size() % 4) text += ' ';
+    std::vector<uint8_t> glb;
+    const auto word = [&](uint32_t n) {
+        for (unsigned k = 0; k < 4; ++k) glb.push_back(uint8_t(n >> (8 * k)));
+    };
+    const bool has_bin = !bin.empty() || !data.empty();
+    word(0x46546C67);
+    word(2);
+    word(uint32_t(12 + 8 + text.size() + (has_bin ? 8 + data.size() : 0)));
+    word(uint32_t(text.size()));
+    word(0x4E4F534A);
+    glb.insert(glb.end(), text.begin(), text.end());
+    if (has_bin) {
+        word(uint32_t(data.size()));
+        word(0x004E4942);
+        glb.insert(glb.end(), data.begin(), data.end());
+    }
+    out = std::move(glb);
+    return true;
+}
 }  // namespace editor::model_import

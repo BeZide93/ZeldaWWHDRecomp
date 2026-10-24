@@ -141,6 +141,9 @@ static std::mutex g_pool_mutex;
 static std::vector<id<MTLBuffer>> g_pool_free;
 static std::vector<id<MTLBuffer>> g_pool_used;
 static id<MTLBuffer> g_pool_cur = nil;
+// bumped whenever the current chunk changes: a recycled chunk can come back as the same object, so
+// "still the current chunk" is a generation, not a pointer comparison
+static uint64_t g_pool_gen = 0;
 static uint32_t g_pool_pos = 0;
 constexpr uint32_t kPoolChunk = 8 << 20;
 
@@ -158,6 +161,7 @@ static Upload upload(const void* data, uint32_t size) {
                 break;
             }
         if (!g_pool_cur) g_pool_cur = [R.device newBufferWithLength:want options:MTLResourceStorageModeShared];
+        ++g_pool_gen;
         g_pool_pos = 0;
     }
     Upload u{g_pool_cur, g_pool_pos};
@@ -174,20 +178,68 @@ static Upload submitted_upload(uint32_t addr, uint32_t size, const uint8_t* byte
     struct Item { uint32_t size; Upload u; };
     static std::unordered_map<uint32_t, Item> items;
     static uint64_t itemsFor = 0;
-    static id<MTLBuffer> itemsChunk = nil;
-    if (itemsFor != gx2::submitted_uniforms_id() || itemsChunk != g_pool_cur) {
+    static uint64_t itemsChunk = ~0ull;  // g_pool_gen of the chunk the items are in
+    if (itemsFor != gx2::submitted_uniforms_id() || itemsChunk != g_pool_gen) {
         items.clear();
         itemsFor = gx2::submitted_uniforms_id();
     }
     auto it = items.find(addr);
     if (it != items.end() && it->second.size == size) return it->second.u;
     Upload u = upload(bytes, size);
-    if (u.buf != itemsChunk) {  // the upload began a new chunk: the earlier items are in a retired one
+    if (itemsChunk != g_pool_gen) {  // the upload began a new chunk: the earlier items are in a retired one
         items.clear();
-        itemsChunk = u.buf;
+        itemsChunk = g_pool_gen;
     }
     items[addr] = {size, u};
     return u;
+}
+
+// Vertex buffers and uniform blocks the CPU rewrites. Metal binds them straight from guest memory,
+// and the GPU reads them when it runs, after the render thread recorded the draw; by then the game may
+// already have written the next frame's data into a dynamic buffer, so what a draw showed depended on
+// GPU timing (pictures differed from run to run). A range is bound from guest memory while the CPU
+// never writes it after its first use (static meshes: no copy); once a write to it is seen
+// (write_watch.h), it is copied at record time like Vulkan does, and that copy is reused by later
+// draws while the range is unchanged and its upload chunk is current. Without write tracking: as
+// before. (Uniform blocks of display lists use their submitted bytes, gx2/submitted_uniforms.h.)
+// WWHD_METAL_VB_COPY=0 / WWHD_METAL_UBO_COPY=0 bind those from guest memory again (comparisons).
+enum GuestRangeKind { kRangeVertex, kRangeUniform, kRangeKinds };
+struct GuestRange {
+    uint64_t stamp = 0;          // write stamp when armed (static) or when copied (dynamic)
+    uint64_t checkedFrame = ~0ull, seq = 0;
+    bool dynamic = false;
+    Upload copy{nil, 0};
+    uint64_t copyGen = ~0ull;    // g_pool_gen of the chunk holding the copy
+};
+static std::unordered_map<uint64_t, GuestRange> g_guest_ranges[kRangeKinds];
+static uint64_t g_range_copy_bytes[kRangeKinds], g_range_copies[kRangeKinds];
+static bool rewritten_copy(GuestRangeKind kind, uint32_t addr, uint32_t size, Upload& out) {
+    static const bool off[kRangeKinds] = {
+        getenv("WWHD_METAL_VB_COPY") && !atoi(getenv("WWHD_METAL_VB_COPY")),
+        getenv("WWHD_METAL_UBO_COPY") && !atoi(getenv("WWHD_METAL_UBO_COPY"))};
+    if (off[kind] || !wwatch::active() || !size) return false;
+    GuestRange& r = g_guest_ranges[kind][(uint64_t)addr << 32 | size];
+    if (!r.dynamic) {
+        if (r.checkedFrame == ~0ull) { r.stamp = wwatch::arm(addr, size); r.checkedFrame = R.frame; return false; }
+        if (r.checkedFrame == R.frame) return false;  // checked this frame
+        r.checkedFrame = R.frame;
+        if (!wwatch::written_since(addr, size, r.stamp)) return false;
+        r.dynamic = true;
+        r.copy = Upload{nil, 0};
+    }
+    const uint64_t seq = wwatch::write_seq();
+    if (r.copy.buf && r.copyGen == g_pool_gen && (r.seq == seq || !wwatch::written_since(addr, size, r.stamp))) {
+        r.seq = seq;
+        out = r.copy;
+        return true;
+    }
+    r.stamp = wwatch::arm(addr, size);  // arm before reading (write_watch.h)
+    r.seq = wwatch::write_seq();
+    out = r.copy = upload(mem::ptr(addr), size);
+    r.copyGen = g_pool_gen;
+    g_range_copy_bytes[kind] += size;
+    ++g_range_copies[kind];
+    return true;
 }
 
 // called before a command buffer commits: buffers used so far are recycled when it completes
@@ -198,6 +250,7 @@ void pool_retire(id<MTLCommandBuffer> cmd) {
         if (g_pool_cur) {
             g_pool_used.push_back(g_pool_cur);
             g_pool_cur = nil;
+            ++g_pool_gen;
         }
         used.swap(g_pool_used);
     }
@@ -1480,8 +1533,9 @@ static void bind_stage(id<MTLRenderCommandEncoder> enc, const uint32_t* regs, Sh
             else [enc setFragmentBuffer:u.buf offset:u.offset atIndex:binding];
             continue;
         }
-        if (g_snapshot) {
-            Upload u = upload(mem::ptr(addr), size);
+        Upload u;
+        if (g_snapshot || rewritten_copy(kRangeUniform, addr, size, u)) {
+            if (g_snapshot) u = upload(mem::ptr(addr), size);
             if (vertex) [enc setVertexBuffer:u.buf offset:u.offset atIndex:binding];
             else [enc setFragmentBuffer:u.buf offset:u.offset atIndex:binding];
         } else {
@@ -1903,6 +1957,14 @@ void report_skips() {
         (unsigned long long)g_stat_invalidates, (unsigned long long)g_stat_invalidated_surfaces, (unsigned long long)faults,
         (unsigned long long)protectedPages);
     g_stat_full_checks = g_stat_uploads = g_stat_invalidates = g_stat_invalidated_surfaces = g_stat_hashed_bytes = 0;
+    for (int k = 0; k < kRangeKinds; k++) {
+        size_t dynamicRanges = 0;
+        for (auto& [key, r] : g_guest_ranges[k]) dynamicRanges += r.dynamic;
+        LOG("[gfx] last 300 frames: %llu rewritten %s copies (%.1f MiB); %zu of %zu ranges rewritten by the CPU",
+            (unsigned long long)g_range_copies[k], k == kRangeVertex ? "vertex buffer" : "uniform block",
+            g_range_copy_bytes[k] / 1048576.0, dynamicRanges, g_guest_ranges[k].size());
+        g_range_copies[k] = g_range_copy_bytes[k] = 0;
+    }
 }
 
 
@@ -2144,8 +2206,11 @@ void draw(const uint32_t* regs, uint32_t prim, uint32_t count, uint32_t indexTyp
         uint32_t off = 0;
         id<MTLBuffer> b = guest_buffer(addr, &off);
         if (!b) continue;
+        Upload u;
         if (g_snapshot && size <= kSnapshotLimit) {
-            Upload u = upload(mem::ptr(addr), size);
+            u = upload(mem::ptr(addr), size);
+            [enc setVertexBuffer:u.buf offset:u.offset atIndex:GET_MTL_VERTEX_BUFFER_INDEX(g.attributeBufferIndex)];
+        } else if (rewritten_copy(kRangeVertex, addr, size, u)) {
             [enc setVertexBuffer:u.buf offset:u.offset atIndex:GET_MTL_VERTEX_BUFFER_INDEX(g.attributeBufferIndex)];
         } else {
             [enc setVertexBuffer:b offset:off atIndex:GET_MTL_VERTEX_BUFFER_INDEX(g.attributeBufferIndex)];

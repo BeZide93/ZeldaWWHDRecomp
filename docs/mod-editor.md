@@ -330,7 +330,8 @@ as a static world object standing on that collision: Link walks on it, its walls
 into it. Without a `_col` mesh it gets only a small solid cylinder at its origin. A world object keeps clear
 of the island's own things (villagers and their routes, start points, doors); if your part covers one, it
 says *can't stand here* with what is in the way, and the game leaves it out until it is moved or the model
-leaves that spot free.
+leaves that spot free. Moving it to a clear spot (or moving what was in the way) puts it into the game at
+once, also when it was left out when the game started.
 
 ### Using the game's own materials
 
@@ -347,9 +348,10 @@ they look brighter and flatter than the island's ground beside them.
    materials.
 2. The room's materials are listed with their textures' names. Name each surface's material in Blender
    exactly as one of them (**Copy names** puts the list on the clipboard; Blender's `.001` suffix is ignored)
-   and **delete its Image Texture node**: a game material never carries a picture, since a package never
-   contains the game's pictures. Materials with pictures of your own (a new sign) keep their Image Texture;
-   one model can mix both.
+   and delete its Image Texture node, or keep it for Blender's preview: the import removes the picture of a
+   game material by itself and says so ("Removed 2 preview textures from kit materials ..."), since a game
+   material draws the game's own texture and a package never contains the game's pictures. Materials with
+   pictures of your own (a new sign) keep their Image Texture; one model can mix both.
 3. **Your model's materials** then shows what each of your materials becomes: green, a game material; blue,
    its own texture; red, a material without a texture that the room doesn't have. Rename a red one in
    Blender, or keep your own name and pick the game material it stands for in the list next to it (the
@@ -366,7 +368,10 @@ colour attribute (vertex colours, exported as `COLOR_0`) to shade your model as 
 with their textures; `check_model {"file": "...", "kit": {"stage": "sea", "room": 11}}` says which of your
 model's materials are the room's (`kit_report`); `import_model {"file": "...", "kit": {"stage": "sea",
 "room": 11}}` imports it, with `"materials": {"my_grass": "<the game material>"}` to map your own names.
-A material without a texture that is none of the room's is refused with the room's names.
+A material without a texture that is none of the room's is refused with the room's names. Game materials (the
+room's names, the `materials` mapping, an `export_glb` material, or an image named after one of the room's
+textures) lose their textures at the import: `fixes` and the note say how many, `preview_textures_removed`
+names them (`check_model` says the same before). Replace from file, Watch file and `reload_model` do the same.
 
 The details, limits and the costs are in [Game materials](world-objects.md#game-materials) and [Game materials on
 your own sea models](world-objects.md#game-materials-on-your-own-sea-models).
