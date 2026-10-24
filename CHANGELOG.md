@@ -7,6 +7,10 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **The distant sea and grass at Outset's cliff no longer change colour from run to run** (#178). The game shares
+  one "current fog" between two CPU cores: while one core briefly switches it to the sea's fog, the other could copy it
+  into the scene settings, so some frames picked up the sea fog. The copy now always takes the scene's normal fog,
+  which is what the Wii U's timing gives. Sea and background fog are unchanged, and there is no speed cost.
 - **World editor: kit models are easier to work with** (#281, thanks @KelpyCode). Replace from file and Watch file
   no longer fail with "invalid model declaration" on a model that uses the game's own materials, and they no longer
   refuse a new file that has a collision mesh. An object the game left out at start-up because something was in
