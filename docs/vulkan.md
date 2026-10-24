@@ -367,8 +367,8 @@ refreshing. Player caches persist in `shader-prebuild/live` across preparation g
 lives under the host configuration directory's `shader-prebuild` folder; portable installations use their
 user directory. Cache overrides take precedence over this selection.
 
-**Preparing shaders: models (experimental)** is an optional setup step, off by default on every
-system: switch it on with "Also prepare model shaders (experimental)" in setup (the setup window, the
+**Preparing shaders: models** is an optional setup step, off by default on desktops (experimental there)
+and recommended on Android (see below): switch it on with "Also prepare model shaders (experimental)" in setup (the setup window, the
 question of the text setup, or `--model-sweep`); setup remembers the choice, so Repair (which also
 carries out Rebuild shader cache) runs it again. It runs for each prepared renderer (on macOS Metal and
 Vulkan at the same time, on one bar): the game starts hidden and muted from its title screen (no save is
@@ -390,6 +390,22 @@ only; `tools/installer/model_sweep_skip.txt` lists those known already). The act
 stay in that folder too (`actors.txt`). Particle effects, Link's own drawing while he moves and sailing are not
 part of it yet; they are prepared when first seen in play. `WWHD_SETUP_MODEL_SWEEP=1` (or `0`) overrides the
 choice; `WWHD_SETUP_MODEL_SWEEP_VISITS=0` leaves the stage visits out.
+
+On Android the step is the setup screen's "Prepare model shaders (recommended)" switch, ticked until the player
+unticks it (`ModelsStep.RECOMMENDED`; the choice is remembered). On a Xiaomi 14 the 25-place test route had about
+35 pipeline waits with the step and about 1000 without; the step took about 40 minutes there. It runs after the
+graphics are prepared (or at once on a ready game when ticked later), inside the app. The setup service drives the
+same sweep (`tools/android/android_models.py` around `model_sweep.py`); each attempt of the game runs in its own
+process (`ModelPrepareActivity`, `:modelprep`), which the setup screen starts, so a model that stops the game ends
+only that attempt. The player sees only setup's progress screen (the phase or stage, the bar, the time left and
+Cancel) in landscape: the game renders the sweep hidden (`WWHD_HIDDEN_WINDOWS`: into its own render targets, as in
+play, with nothing presented; `gfx/hidden_presentation.h`). The recorded pipelines do not depend on the screen: a
+pipeline key holds the shaders, the formats of the game's render targets and the fixed-function state, never the
+swapchain's. Cancel stops the attempt in order and keeps what was prepared (ticking the switch again continues
+it); setup's heat and battery pauses and Pause stop it the same way, and it goes on with Continue. Leaving the
+screen pauses the step until setup is shown again. `tools/installer/model_sweep_keys.py` compares the key logs
+(`WWHD_VK_KEY_LOG`) of a hidden and a presenting run of the same slice (`WWHD_TEST_PRESENT_HIDDEN=1` makes hidden
+windows present).
 
 The template covers recorded states rather than every possible scene. Uncovered shaders and pipelines
 can still cause a first-use hitch. Pending draws wait for their exact state; the renderer can repeat the

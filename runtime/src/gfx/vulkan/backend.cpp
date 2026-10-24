@@ -28,6 +28,7 @@
 #endif
 #include "backend.h"
 #include "../../dsweep.h"
+#include "../hidden_presentation.h"
 #include "pass.h"
 #include "rendering_path.h"
 #include "stereo.h"
@@ -1880,7 +1881,9 @@ static bool SDLCALL lifecycle_watch(void *, SDL_Event *event) {
       LOG("[vulkan] app in the background: presentation paused");
   } else if (event->type == SDL_EVENT_DID_ENTER_FOREGROUND) {
     LOG("[vulkan] app in the foreground: new presentation surface");
-    R.tv.visible = true;  // (the window may have reported itself minimized meanwhile)
+    // (the window may have reported itself minimized meanwhile); a hidden run (setup's models step under its
+    // progress screen) stays unpresented (gfx/hidden_presentation.h)
+    R.tv.visible = gfx::hidden::mode().presents();
     surfaceRecreate = true;
   }
   return true;
@@ -4739,7 +4742,7 @@ void init() {
     gfx::g_has_drc_window = true;
   }
 #endif
-  if (hidden_windows())
+  if (!gfx::hidden::mode().presents())
     R.tv.visible = R.drc.visible = false;  // no drawables: pictures only reach frame / present dumps
   set_window_icons();
   uint32_t n;
@@ -5197,7 +5200,7 @@ void run_main_loop() {
             s->visible = false;
           if (event.type == SDL_EVENT_WINDOW_RESTORED ||
               event.type == SDL_EVENT_WINDOW_SHOWN)
-            s->visible = true;
+            s->visible = gfx::hidden::mode().presents();  // Android shows its surface also in a hidden run
         }
     }
     input::update();

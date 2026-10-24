@@ -401,6 +401,18 @@ void run(Worker& w, std::vector<uint8_t> seed) {
         std::fprintf(stderr, "[vulkan warmup] %s ignored: %s\n", headstart ? "head start" : "local recipes", error.what());
       }
     }
+    // The worker's driver cache exists also without recipes to warm now: setup's warm (a fresh setup has no local
+    // recipes yet) compiles the head start's pipelines into it afterwards (warm_resolved_pipeline_recipes), and only
+    // this cache is merged into the persisted one. Without it they were compiled with no cache and lost on exit.
+    VkPipelineCacheCreateInfo ci{VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO};
+    ci.initialDataSize = seed.size(); ci.pInitialData = seed.data();
+    if (vkCreatePipelineCache(w.device, &ci, nullptr, &cache) != VK_SUCCESS) {
+      ci.initialDataSize = 0; ci.pInitialData = nullptr;
+      if (vkCreatePipelineCache(w.device, &ci, nullptr, &cache) != VK_SUCCESS)
+        throw std::runtime_error("worker pipeline cache creation failed");
+    }
+    { std::unique_lock lock(w.cacheMutex); w.cache = cache; }
+    std::vector<uint8_t>().swap(seed); // Vulkan copied initial cache data during creation.
     if (loaded.empty()) { w.result = {0, failed}; return; }
     const double readMs = msSince();
     std::deque<std::shared_ptr<PipelineRecipe>> startup;
@@ -424,15 +436,6 @@ void run(Worker& w, std::vector<uint8_t> seed) {
       w.result = {0, failed};
       return;
     }
-    VkPipelineCacheCreateInfo ci{VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO};
-    ci.initialDataSize = seed.size(); ci.pInitialData = seed.data();
-    if (vkCreatePipelineCache(w.device, &ci, nullptr, &cache) != VK_SUCCESS) {
-      ci.initialDataSize = 0; ci.pInitialData = nullptr;
-      if (vkCreatePipelineCache(w.device, &ci, nullptr, &cache) != VK_SUCCESS)
-        throw std::runtime_error("worker pipeline cache creation failed");
-    }
-    { std::unique_lock lock(w.cacheMutex); w.cache = cache; }
-    std::vector<uint8_t>().swap(seed); // Vulkan copied initial cache data during creation.
     std::fprintf(stderr, "[vulkan warmup] %zu exact pipeline recipes queued, %zu wait for their object archives "
                  "(pool %zu; process memory %.0f MB; read %.0f ms, ready to compile after %.0f ms)\n", startup.size(),
                  grouped, maxUnusedWarmPipelines, process_memory() / 1e6, readMs, msSince());
