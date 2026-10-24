@@ -491,8 +491,8 @@ int main(int argc,char** argv){
         story_actors::install(replaced,replace);
         Cpu c{};st8(kArena+0x7000+0x326,3);story_actors::native_room_loaded(&c,3);assert(created==0);  // left out at start-up
         // moved, still over the start point: not in the game, with what is in the way
-        auto near=ext;near.position={60,0,0};std::vector<std::string> pending;
-        assert(story_actors::editor_update("test",{near},{"ext"},why,&pending));
+        auto blocked=ext;blocked.position={60,0,0};std::vector<std::string> pending;
+        assert(story_actors::editor_update("test",{blocked},{"ext"},why,&pending));
         for(const auto& p:pending)std::printf("pending: %s\n",p.c_str());
         assert(pending.size()==1&&pending[0].rfind("ext: can't stand here (",0)==0&&pending[0].find("start")!=std::string::npos);
         story_actors::native_room_loaded(&c,3);assert(created==0);
