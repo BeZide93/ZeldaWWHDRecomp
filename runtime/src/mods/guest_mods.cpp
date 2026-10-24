@@ -1676,7 +1676,9 @@ bool editor_prepare_model(const std::string& mod,const std::string& package_dir,
     try {
         const auto bridge=BuildBridge::installed(std::string(),false);
         const auto tool=std::filesystem::path(bridge.builder).parent_path().parent_path()/"story_mods"/(model.kind=="skinned"?"skinned_actor_model.py":"actor_model.py");
-        archive=actor_model_cache::prepare(mod,model,package_dir,data_dir,bridge.tool_python(),tool.string(),config::game_dir,collision,shoreline,shoreline?shore.text:std::string());
+        // "generation" (the editor's replace_model): an archive of its own for a file replaced while the game runs
+        const unsigned generation=entry.get("generation").type==mods::json::Value::Number&&entry.get("generation").number>0&&entry.get("generation").number<1e6?unsigned(entry.get("generation").number):0u;
+        archive=actor_model_cache::prepare(mod,model,package_dir,data_dir,bridge.tool_python(),tool.string(),config::game_dir,collision,shoreline,shoreline?shore.text:std::string(),generation);
         return true;
     } catch(const std::exception& e) {return why=e.what(),false;}
 }

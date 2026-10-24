@@ -17,6 +17,8 @@
 #include <cstdint>
 #include <deque>
 #include <functional>
+#include <map>
+#include <set>
 #include <string>
 #include <utility>
 #include <vector>
@@ -199,7 +201,9 @@ public:
         return focus(target, why);
     }
     // A model of `mod` was added or changed (its manifest entry; the file is in the package `dir`):
-    // convert and prepare it for the game, so actors can use it without a restart where possible.
+    // convert and prepare it for the game, so actors can use it without a restart where possible. With
+    // "replace": true (replace_model, issue #287) the model's file changed under the same id: the actors drawing
+    // it take the new version, its collision included, as soon as it is ready.
     virtual bool prepare_model(const std::string& mod, const std::string& dir, const Value& model, std::string& note, std::string& why) {
         return why = "the game is not running", false;
     }
@@ -408,6 +412,12 @@ public:
     // The last warp's starting point ("back to last position").
     const Place& last_place() const { return last_place_; }
     static constexpr size_t kLogSize = 64, kUndoSize = 128;
+    // Watched model files (watch_model, issue #287): each {mod, model, file} whose file changed since it was last
+    // imported and has stayed the same for kWatchSettleMs, and is a whole GLB (its header's length is its size: a
+    // file still being written is not); once per change. The caller runs replace_model for them. `now_ms`: a
+    // steady clock in milliseconds.
+    std::vector<Value> watch_due(int64_t now_ms);
+    static constexpr int64_t kWatchSettleMs = 1000;
 
 private:
     struct Package {
@@ -429,6 +439,19 @@ private:
     std::vector<Step> undo_, redo_;
     Place last_place_;
     mutable std::vector<std::pair<std::string, std::vector<int>>> stage_rooms_;  // the game's files, read once
+    // own models' files (issue #287), by "mod/model": the file it was last imported or replaced from, the watched ones
+    struct Watch {
+        std::string file;
+        int64_t mtime = -1, seen_mtime = -1, since = 0;  // the imported version, the last one seen, when that was first seen
+        uint64_t size = 0, seen_size = 0;
+    };
+    std::map<std::string, std::string> model_sources_;
+    std::map<std::string, Watch> watches_;
+    std::set<std::string> removed_models_;  // removed in this session: a new import under the id is prepared afresh
+    std::set<std::string> set_aside_;       // "mod/source": files remove_model put into models/.removed
+    // remove_model's files (`removing`: the models `before` had and the manifest no longer has) into models/.removed
+    // (hidden, never exported); an undo or redo moves those files back and away again
+    void sync_model_files(const Package& p, const Value& before, bool removing = false);
 
     Package* package(const Value& params, std::string& why);
     const Package* find(const std::string& mod) const;
@@ -541,6 +564,12 @@ bool check_model_bytes(const std::vector<uint8_t>& bytes, Value& info, std::stri
 inline constexpr size_t kMaxImportBytes = 64 * 1024 * 1024;
 bool import_model_file(const std::string& path, std::vector<uint8_t>& bytes, Value& info, std::string& why);
 bool check_kit_model_file(const std::string& path, const Value& declaration, Value& info, std::string& why);
+// A kit model's visible materials against a kit room's (list_kit_materials' result) and the declaration's "materials" and
+// "material", as kit_model.py names them: {materials: [{name, kind: game|own|unknown, game?, default?}], game: [names],
+// own: [names], unknown: [names]}. "unknown": no texture and no material of the room (its build would refuse it).
+Value kit_material_report(const std::vector<uint8_t>& glb, const Value& listed, const Value& declaration);
+// The report in a sentence for the import's note ("Game materials of sea room 11: ... Own textures: ...").
+std::string kit_report_note(const Value& report, const Value& kit);
 // A model's place relative to its own origin (issue #280). Bounds are in game units, the GLB's metres x 100, as
 // check_model_file's "minimum" and "maximum" give them.
 // How far the geometry lies from the origin across the ground (x, z): 0 when the origin is under or inside it.

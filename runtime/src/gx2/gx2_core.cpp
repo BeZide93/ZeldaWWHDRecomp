@@ -28,6 +28,7 @@
 
 #include "gx2.h"
 #include "gx2_cmd.h"
+#include "submitted_uniforms.h"
 #include "../cloud_proto.h"
 #include "gx2_regs.h"
 #include "register_blocks.h"
@@ -310,6 +311,76 @@ static void record_overflow(Recording* rec, uint32 bytes) {
 }
 
 static void execute_one(Op op, const uint32* p, uint32 n);
+
+// ---------------------------------------------------------------- submitted uniform blocks
+// (submitted_uniforms.h) WWHD_GX2_SUBMITTED_UNIFORMS=0 turns it off: draws in display lists then read
+// uniform blocks from guest memory whenever the render thread executes them (the old behaviour).
+static bool submitted_uniforms_on() {
+    static const bool on = [] {
+        const char* e = getenv("WWHD_GX2_SUBMITTED_UNIFORMS");
+        const bool v = !e || atoi(e) != 0;
+        LOG("[gx2] display-list uniform blocks: %s", v ? "as submitted (default)" : "read when executed (WWHD_GX2_SUBMITTED_UNIFORMS=0)");
+        return v;
+    }();
+    return on;
+}
+static submitted::DisplayListIndex g_dl_index;
+// per recording slot: the blocks bound and lists called while recording
+static std::vector<submitted::Range> g_rec_blocks[kMaxRecorders];
+static std::vector<uint32> g_rec_calls[kMaxRecorders];
+static std::mutex g_snap_mutex;
+static std::vector<submitted::Snapshot*> g_snap_free;
+static uint64_t g_snap_ids = 0;  // submitting thread (the game's GX2 thread)
+static submitted::Snapshot* g_snap_active = nullptr;  // render thread
+
+void note_uniform_block(uint32 addr, uint32 size) {
+    if (!submitted_uniforms_on()) return;
+    if (Recording* rec = recording(); rec && rec->start) g_rec_blocks[rec - g_recs].push_back({addr, size});
+}
+const uint8_t* submitted_uniform_block(uint32 addr, uint32 size) {
+    return g_snap_active ? g_snap_active->find(addr, size) : nullptr;
+}
+uint64_t submitted_uniforms_id() { return g_snap_active ? g_snap_active->id() : 0; }
+static bool snapshot_readable(uint32 addr, uint32 size) {
+    const uint64_t end = uint64_t(addr) + size + submitted::Snapshot::kTail;
+    auto in = [&](uint64_t lo, uint64_t hi) { return addr >= lo && end <= hi; };
+    return in(mem::kMem2Start, mem::kMem2End) || in(mem::kRuntimeStart, mem::kRuntimeEnd) ||
+           in(mem::kMem1, uint64_t(mem::kMem1) + mem::kMem1Size) || in(mem::kFgBucket, uint64_t(mem::kFgBucket) + mem::kFgBucketSize);
+}
+// a display-list call from the command stream: its blocks as they are now go with it
+static submitted::Snapshot* submit_snapshot(uint32 list, uint32 size) {
+    if (!submitted_uniforms_on()) return nullptr;
+    static thread_local std::vector<submitted::Range> ranges;
+    ranges.clear();
+    if (!g_dl_index.blocks(list, size, ranges) || ranges.empty()) return nullptr;
+    submitted::Snapshot* s = nullptr;
+    {
+        std::lock_guard<std::mutex> lk(g_snap_mutex);
+        if (!g_snap_free.empty()) { s = g_snap_free.back(); g_snap_free.pop_back(); }
+    }
+    if (!s) s = new submitted::Snapshot;
+    const size_t bytes = s->build(++g_snap_ids, ranges, [](uint32 a) { return (const uint8_t*)mem::ptr(a); }, snapshot_readable);
+    // debug: WWHD_GX2_SUBMITTED_STATS=1 logs the copies made, every 1000 submissions
+    static const bool stats = getenv("WWHD_GX2_SUBMITTED_STATS") != nullptr;
+    if (stats) {
+        static uint64_t blocks = 0, total = 0;
+        blocks += s->blocks();
+        total += bytes;
+        if (g_snap_ids % 1000 == 0) {
+            LOG("[gx2] submitted uniforms: %llu submissions, last 1000: %.1f blocks and %.1f KB each; %zu lists indexed",
+                (unsigned long long)g_snap_ids, blocks / 1000.0, total / 1000.0 / 1024, g_dl_index.size());
+            blocks = total = 0;
+        }
+    }
+    return s;
+}
+static void set_active_snapshot(submitted::Snapshot* s) {  // render thread
+    if (g_snap_active) {
+        std::lock_guard<std::mutex> lk(g_snap_mutex);
+        g_snap_free.push_back(g_snap_active);
+    }
+    g_snap_active = s;
+}
 
 // ---------------------------------------------------------------- render thread
 // Like the real GPU, command execution runs asynchronously to the game: GX2 calls append to a
@@ -655,6 +726,9 @@ static void execute_one(Op op, const uint32* p, uint32 n) {
     rprof::Op kind;
     switch (op) {
     case OP_DEBUG_CONTEXT: g_draw_context.store(n ? p[0] : 0, std::memory_order_relaxed); return;
+    case OP_SUBMITTED_UNIFORMS:
+        set_active_snapshot(n >= 2 ? (submitted::Snapshot*)(uintptr_t(p[0]) | (uint64_t(p[1]) << 32)) : nullptr);
+        return;
     case OP_CALL: execute_op(op, p, n); return;
     case OP_SET_REGS: case OP_SET_PROJ_REGS: kind = rprof::kOpRegs; break;
     case OP_DRAW: case OP_DRAW_INDEXED: kind = rprof::kOpDraw; rprof::classify_draw(); break;
@@ -1110,6 +1184,8 @@ HLE(gx2, GX2BeginDisplayListEx) {
     if (Recording* rec = claim_rec()) {
         rec->start = rec->pos = arg(c, 0);
         rec->end = arg(c, 0) + arg(c, 1);
+        g_rec_blocks[rec - g_recs].clear();
+        g_rec_calls[rec - g_recs].clear();
         if (!rec->start) release_rec(rec);  // as before: a null list records nothing
     }
 }
@@ -1117,6 +1193,12 @@ HLE(gx2, GX2EndDisplayList) {
     uint32 size = 0;
     if (Recording* rec = recording()) {
         size = rec->pos - rec->start;
+        if (submitted_uniforms_on() && rec->start) {
+            const size_t slot = rec - g_recs;
+            g_dl_index.publish(rec->start, size, g_rec_blocks[slot], g_rec_calls[slot]);
+            g_rec_blocks[slot].clear();
+            g_rec_calls[slot].clear();
+        }
         if (rec->dropped) {
             static unsigned said = 0;
             if (said < 32 && ++said) LOG("[gx2] display list overflow at %08X (%u bytes): %u bytes of commands dropped%s", rec->start, rec->end - rec->start, rec->dropped,
@@ -1133,8 +1215,21 @@ HLE(gx2, GX2GetCurrentDisplayList) {
     if (arg(c, 1)) st32(arg(c, 1), start ? rec->end - rec->start : 0);
     ret(c, start != 0);
 }
-HLE(gx2, GX2CallDisplayList) { emit(OP_CALL, {arg(c, 0), arg(c, 1)}); }
-HLE(gx2, GX2DirectCallDisplayList) { emit(OP_CALL, {arg(c, 0), arg(c, 1)}); }
+// A list called while another is recorded runs with that one (its blocks are noted for it); a call
+// from the command stream takes the blocks of the list as they are now with it (submitted_uniforms.h).
+static void call_display_list(uint32 list, uint32 size) {
+    if (Recording* rec = recording(); rec && rec->start) {
+        if (submitted_uniforms_on()) g_rec_calls[rec - g_recs].push_back(list);
+        emit(OP_CALL, {list, size});
+        return;
+    }
+    submitted::Snapshot* s = submit_snapshot(list, size);
+    if (s) emit_host(OP_SUBMITTED_UNIFORMS, {uint32(uintptr_t(s)), uint32(uint64_t(uintptr_t(s)) >> 32)});
+    emit(OP_CALL, {list, size});
+    if (s) emit_host(OP_SUBMITTED_UNIFORMS, {});
+}
+HLE(gx2, GX2CallDisplayList) { call_display_list(arg(c, 0), arg(c, 1)); }
+HLE(gx2, GX2DirectCallDisplayList) { call_display_list(arg(c, 0), arg(c, 1)); }
 
 // ---------------------------------------------------------------- draws
 HLE(gx2, GX2DrawEx) { mod_actor_shadow_proof::draw_submitted(arg(c,1));emit(OP_DRAW, {arg(c, 0), arg(c, 1), arg(c, 2), arg(c, 3)}); }
@@ -1514,4 +1609,6 @@ void gx2_ss_load(ss::Reader& r) {
         g_count_offset = (int64_t)guest_swaps - (int64_t)g_swap_count;
     }
     render::ss_reset();  // the renderer forgets surface contents and shader memos (Vulkan)
+    g_dl_index.clear();  // lists recorded before the load say nothing about the loaded ones
+    set_active_snapshot(nullptr);
 }

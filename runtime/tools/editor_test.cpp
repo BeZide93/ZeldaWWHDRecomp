@@ -165,11 +165,18 @@ struct FakeHost : editor::Host {
         const auto it = model_failures.find(mod + ":" + model);
         return it == model_failures.end() ? std::string() : it->second;
     }
+    Value kit_list;  // list_kit_materials' result for sea room 11 (kit_materials); null: the room can't be read
+    Value kit_materials(const std::string& stage, unsigned room, std::string& why) override {
+        if (kit_list.type == Value::Null || stage != "sea" || room != 11) return why = "the game's rooms can't be read here", Value();
+        return kit_list;
+    }
     std::set<std::string> collision_pending;  // "mod:model" whose collision is being prepared
     bool collision_preparing(const std::string& mod, const std::string& model) override { return collision_pending.contains(mod + ":" + model); }
+    bool prepared_replace = false;
     bool prepare_model(const std::string& mod, const std::string&, const Value& model, std::string& note, std::string&) override {
         prepared = mod + ":" + model.get("id").string();
         prepared_collision = model.get("collision").boolean;
+        prepared_replace = model.get("replace").boolean;
         note = "prepared";
         return true;
     }
@@ -2039,6 +2046,224 @@ void own_models(const fs::path& examples) {
     fs::remove_all(dir, ec);
 }
 
+// A model with the game's materials (the import dialog's "Use the game's materials (kit)", issue #280): check_model with
+// kit says which of its materials are the room's, which have their own texture and which are neither; import_model
+// refuses one that is neither (its build would fail later), takes a mapping for it, and says the same in its note.
+void kit_import(const fs::path& examples) {
+    FakeHost host;
+    host.kit_list = json(R"({"materials": [{"material": "grass_v", "textures": ["a_kusa"], "triangles": 900},
+                                          {"material": "rock_v", "textures": ["m_ren16"], "triangles": 400}], "main": "grass_v"})");
+    const fs::path dir = temp_dir("kit-import");
+    fs::copy(examples / "sdk-v3-windfall", dir, fs::copy_options::recursive);
+    std::ifstream in(dir / "manifest.json");
+    std::stringstream text;
+    text << in.rdbuf();
+    in.close();
+    editor::Session w(&host);
+    w.add_package("sdk-v3-windfall", "Windfall", dir.string(), mods::json::parse(text.str()));
+    // one cube drawn in four parts: a game material (Blender's copy suffix), a texture of its own, a name the room
+    // doesn't have, and a collision mesh with a col_* material (not drawn, not reported)
+    auto doc = static_model_fixture::cube_document();
+    doc["materials"] = json(R"([{"name": "grass_v.001"}, {"name": "my_sign", "pbrMetallicRoughness": {"baseColorTexture": {"index": 0}}},
+                                {"name": "my_stone"}, {"name": "col_grass"}])");
+    Value prim = doc["meshes"].array[0]["primitives"].array[0];
+    doc["meshes"].array[0]["primitives"] = json("[]");
+    for (int m : {0, 1, 2}) {
+        prim["material"] = double(m);
+        doc["meshes"].array[0]["primitives"].array.push_back(prim);
+    }
+    Value col = doc["meshes"].array[0];
+    col["primitives"] = json("[]");
+    prim["material"] = 3.0;
+    col["primitives"].array.push_back(prim);
+    doc["meshes"].array.push_back(col);
+    doc["nodes"] = json(R"([{"name": "ext", "mesh": 0}, {"name": "ext_col", "mesh": 1}])");
+    doc["scenes"].array[0]["nodes"] = json("[0, 1]");
+    {
+        const auto bytes = static_model_fixture::glb(doc, static_model_fixture::cube_binary());
+        std::ofstream o(dir / "kit.glb", std::ios::binary);
+        o.write(reinterpret_cast<const char*>(bytes.data()), std::streamsize(bytes.size()));
+    }
+    Value p = json(R"({"kit": {"stage": "sea", "room": 11}})");
+    p["file"] = (dir / "kit.glb").string();
+    Value r = w.run("check_model", p);
+    const Value& report = r.get("result").get("kit_report");
+    CHECK(ok(r) && r.get("result").get("kind").string() == "kit" && report.get("materials").array.size() == 3);
+    CHECK(report.get("materials").array[0].get("kind").string() == "game" && report.get("materials").array[0].get("game").string() == "grass_v");
+    CHECK(report.get("own").array.size() == 1 && report.get("own").array[0].string() == "my_sign");
+    CHECK(report.get("unknown").array.size() == 1 && report.get("unknown").array[0].string() == "my_stone");
+    // imported as it is: refused, with the room's names; nothing is added
+    r = w.run("import_model", p);
+    CHECK(!ok(r) && r.get("error").string().find("\"my_stone\" has no texture and is not a material of sea room 11: name it as one of the room's (grass_v, rock_v)") != std::string::npos);
+    CHECK(w.manifest("sdk-v3-windfall")->get("models").array.empty() || !std::any_of(w.manifest("sdk-v3-windfall")->get("models").array.begin(),
+          w.manifest("sdk-v3-windfall")->get("models").array.end(), [](const Value& m) { return m.get("id").string() == "kit"; }));
+    // mapped (the dialog's "my material -> game material" table): checked and imported, the note says which is which
+    p["materials"] = json(R"({"my_stone": "rock_v"})");
+    r = w.run("check_model", p);
+    CHECK(ok(r) && r.get("result").get("kit_report").get("unknown").array.empty() &&
+          r.get("result").get("kit_report").get("materials").array[2].get("game").string() == "rock_v");
+    r = w.run("import_model", p);
+    CHECK(ok(r) && r.get("result").get("model").get("kind").string() == "kit" && r.get("result").get("model").get("materials").get("my_stone").string() == "rock_v");
+    CHECK(r.get("result").get("kit_report").get("game").array.size() == 2);
+    CHECK(r.get("result").get("note").string().rfind("Game materials of sea room 11: grass_v.001, my_stone. Own textures: my_sign.", 0) == 0);
+    CHECK(host.prepared == "sdk-v3-windfall:kit");
+    // the room can't be read (no game files): checked all the same, the report says why it is missing
+    host.kit_list = Value();
+    p.object.erase("materials");
+    r = w.run("check_model", p);
+    CHECK(ok(r) && r.get("result").get("kit_report").type == Value::Null && !r.get("result").get("kit_report_error").string().empty());
+    // without kit: the import's own check as before (no report)
+    p.object.erase("kit");
+    r = w.run("check_model", p);
+    CHECK(r.get("result").get("kit_report").type == Value::Null);
+    std::error_code ec;
+    fs::remove_all(dir, ec);
+}
+
+// An imported model replaced, watched and removed (issue #287): Replace keeps the id, so its placements keep their places
+// and the game prepares the new version for them (collision included); Watch replaces it by itself once a changed file
+// has settled and is whole; Remove is one undo step that takes the placements with it only when asked, and an undo
+// brings the model and its file back.
+void model_replace_remove(const fs::path& examples) {
+    FakeHost host;
+    const fs::path dir = temp_dir("model-replace");
+    fs::copy(examples / "sdk-v3-windfall", dir, fs::copy_options::recursive);
+    std::ifstream in(dir / "manifest.json");
+    std::stringstream text;
+    text << in.rdbuf();
+    in.close();
+    editor::Session w(&host);
+    w.add_package("sdk-v3-windfall", "Windfall", dir.string(), mods::json::parse(text.str()));
+    auto write = [&](const fs::path& file, const std::vector<uint8_t>& bytes) {
+        std::ofstream o(file, std::ios::binary);
+        o.write(reinterpret_cast<const char*>(bytes.data()), std::streamsize(bytes.size()));
+    };
+    auto read = [](const fs::path& file) {
+        std::ifstream f(file, std::ios::binary);
+        return std::vector<uint8_t>((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+    };
+    // a ground with collision of its own, as Blender exports it (a "<name>_col" mesh with a col_* material)
+    auto ground = [](float x) {
+        auto doc = static_model_fixture::cube_document();
+        doc["materials"].array.push_back(json(R"({"name": "col_grass"})"));
+        doc["meshes"].array.push_back(doc["meshes"].array[0]);
+        doc["meshes"].array[1]["primitives"].array[0]["material"] = double(doc["materials"].array.size() - 1);
+        doc["meshes"].array[1]["primitives"].array[0]["attributes"].object.erase("TEXCOORD_0");
+        doc["nodes"] = json(R"([{"name": "ground", "mesh": 0}, {"name": "ground_col", "mesh": 1}])");
+        doc["nodes"].array[0]["translation"].type = Value::Array;
+        for (float v : {x, 0.f, 0.f}) doc["nodes"].array[0]["translation"].array.push_back(Value(double(v)));
+        doc["scenes"].array[0]["nodes"] = json("[0, 1]");
+        return static_model_fixture::glb(doc, static_model_fixture::cube_binary());
+    };
+    const fs::path blend = dir / "blender";
+    fs::create_directories(blend);
+    write(blend / "ground.glb", ground(0));
+    Value p;
+    p["file"] = (blend / "ground.glb").string();
+    CHECK(ok(w.run("import_model", p)));
+    CHECK(ok(w.run("add_actor", json(R"({"type": "model", "model": "ground", "id": "g1"})"))));
+    CHECK(ok(w.run("add_actor", json(R"({"type": "model", "model": "ground", "id": "g2", "at": "position", "position": {"x": 500, "y": 0, "z": 300000}, "stage": "sea"})"))));
+    const Value g1 = *std::find_if(w.manifest("sdk-v3-windfall")->get("actors").array.begin(), w.manifest("sdk-v3-windfall")->get("actors").array.end(),
+                                   [](const Value& a) { return a.get("id").string() == "g1"; });
+    const size_t undo_before = w.undo_depth();
+    // list_model_files: the file it came from, not watched, its placements
+    Value r = w.run("list_model_files");
+    const Value* entry = nullptr;
+    for (const auto& m : r.get("result").get("models").array)
+        if (m.get("model").string() == "ground") entry = &m;
+    CHECK(ok(r) && entry && entry->get("file").string() == (blend / "ground.glb").string() && !entry->get("watching").boolean &&
+          entry->get("placements").array.size() == 2);
+
+    // Replace from file: the same id, the placements where they were, prepared again as a replacement with its collision
+    write(blend / "ground-v2.glb", ground(2));
+    host.prepared.clear();
+    r = w.run("replace_model", json(("{\"model\": \"ground\", \"file\": \"" + (blend / "ground-v2.glb").generic_string() + "\"}").c_str()));
+    CHECK(ok(r) && r.get("result").get("changed").boolean && r.get("result").get("placements").array.size() == 2);
+    CHECK(host.prepared == "sdk-v3-windfall:ground" && host.prepared_replace && host.prepared_collision);
+    CHECK(r.get("result").get("note").string().find("2 placements show the new version") != std::string::npos);
+    CHECK(read(dir / "models" / "ground.glb") == read(blend / "ground-v2.glb"));
+    CHECK(read(dir / "models" / ".previous" / "ground.glb") == read(blend / "ground.glb"));  // the version before, hidden
+    const Value g1_after = *std::find_if(w.manifest("sdk-v3-windfall")->get("actors").array.begin(), w.manifest("sdk-v3-windfall")->get("actors").array.end(),
+                                         [](const Value& a) { return a.get("id").string() == "g1"; });
+    CHECK(g1_after == g1 && w.undo_depth() == undo_before);  // nothing moved; not an undo step
+    // the same file again: nothing to do
+    host.prepared.clear();
+    r = w.run("replace_model", json(R"({"model": "ground"})"));  // the last file it came from
+    CHECK(ok(r) && !r.get("result").get("changed").boolean && host.prepared.empty());
+    // a file without the collision its placements stand on: refused, the model as it was
+    {
+        auto doc = static_model_fixture::cube_document();
+        write(blend / "no-col.glb", static_model_fixture::glb(doc, static_model_fixture::cube_binary()));
+        r = w.run("replace_model", json(("{\"model\": \"ground\", \"file\": \"" + (blend / "no-col.glb").generic_string() + "\"}").c_str()));
+        CHECK(!ok(r) && r.get("error").string().find("no collision mesh") != std::string::npos && r.get("error").string().find("g1, g2") != std::string::npos);
+        CHECK(read(dir / "models" / "ground.glb") == read(blend / "ground-v2.glb"));
+    }
+    CHECK(!ok(w.run("replace_model", json(R"({"model": "nothing", "file": "x.glb"})"))));
+
+    // Watch file: a change is taken once it has settled and is whole; a half-written file waits
+    r = w.run("watch_model", json(R"({"model": "ground", "on": true})"));
+    CHECK(ok(r) && r.get("result").get("watching").boolean && r.get("result").get("file").string() == (blend / "ground-v2.glb").generic_string());
+    int64_t now = 1000000;
+    CHECK(w.watch_due(now).empty());  // unchanged
+    {
+        auto half = ground(4);
+        half.resize(half.size() / 2);  // Blender still writing
+        write(blend / "ground-v2.glb", half);
+        fs::last_write_time(blend / "ground-v2.glb", fs::file_time_type::clock::now() + std::chrono::seconds(5));
+    }
+    CHECK(w.watch_due(now += 100).empty());   // just changed: waits
+    CHECK(w.watch_due(now += 2000).empty());  // settled but not a whole GLB: waits
+    write(blend / "ground-v2.glb", ground(4));
+    fs::last_write_time(blend / "ground-v2.glb", fs::file_time_type::clock::now() + std::chrono::seconds(10));
+    CHECK(w.watch_due(now += 100).empty());  // changed again: the debounce starts over
+    CHECK(w.watch_due(now += 500).empty());
+    auto due = w.watch_due(now += 600);
+    CHECK(due.size() == 1 && due[0].get("model").string() == "ground" && due[0].get("mod").string() == "sdk-v3-windfall");
+    CHECK(w.watch_due(now += 2000).empty());  // once per change
+    host.prepared.clear();
+    CHECK(ok(w.run("replace_model", due[0])) && host.prepared_replace && read(dir / "models" / "ground.glb") == read(blend / "ground-v2.glb"));
+    CHECK(ok(w.run("watch_model", json(R"({"model": "ground", "on": false})"))));
+    r = w.run("list_model_files");
+    CHECK(!r.get("result").get("models").array.empty());
+    for (const auto& m : r.get("result").get("models").array) CHECK(!m.get("watching").boolean);
+
+    // Remove: refused while placements use it (listed), without confirm, and while an item holds it
+    CHECK(!ok(w.run("remove_model", json(R"({"model": "ground"})"))));
+    r = w.run("remove_model", json(R"({"model": "ground", "confirm": true})"));
+    CHECK(!ok(r) && r.get("error").string().find("placements use model ground: g1, g2") != std::string::npos);
+    // "remove those too": the model and both placements in one undo step; the file is put aside
+    const size_t undo_at = w.undo_depth();
+    r = w.run("remove_model", json(R"({"model": "ground", "confirm": true, "actors": true})"));
+    CHECK(ok(r) && r.get("result").get("removed_actors").array.size() == 2 && w.undo_depth() == undo_at + 1);
+    const auto has = [&](const char* list, const char* id) {
+        const auto& a = w.manifest("sdk-v3-windfall")->get(list).array;
+        return std::any_of(a.begin(), a.end(), [&](const Value& v) { return v.get("id").string() == id; });
+    };
+    CHECK(!has("models", "ground") && !has("actors", "g1") && !has("actors", "g2"));
+    CHECK(!fs::exists(dir / "models" / "ground.glb") && fs::exists(dir / "models" / ".removed" / "ground.glb"));
+    // the package still checks out (nothing names the model), and an export leaves the hidden copies out
+    r = w.run("check_package");
+    bool names_ground = false;
+    for (const auto& pr : r.get("result").get("problems").array)
+        names_ground |= pr.get("id").string() == "ground" || pr.get("message").string().find("model ground") != std::string::npos;
+    CHECK(ok(r) && !names_ground);
+    // Undo: the model, its placements and its file are back; Redo takes them away again
+    CHECK(ok(w.run("undo")) && has("models", "ground") && has("actors", "g1") && has("actors", "g2") && fs::exists(dir / "models" / "ground.glb"));
+    CHECK(ok(w.run("redo")) && !has("models", "ground") && !fs::exists(dir / "models" / "ground.glb"));
+    CHECK(ok(w.run("undo")) && has("models", "ground"));
+    // a model no placement uses: removed at once
+    write(blend / "post.glb", static_model_fixture::glb(static_model_fixture::cube_document(), static_model_fixture::cube_binary()));
+    p["file"] = (blend / "post.glb").string();
+    CHECK(ok(w.run("import_model", p)));
+    r = w.run("remove_model", json(R"({"model": "post", "confirm": true})"));
+    CHECK(ok(r) && r.get("result").get("removed_actors").array.empty() && !has("models", "post"));
+    // imported again under the same id: prepared afresh (the game had the removed one)
+    host.prepared_replace = false;
+    CHECK(ok(w.run("import_model", p)) && host.prepared_replace);
+    std::error_code ec;
+    fs::remove_all(dir, ec);
+}
+
 int main(int argc, char** argv) {
     // editor_test --game <game dir> [stage room]: what the editor reads from a game folder (manual check)
     if (argc >= 3 && std::string(argv[1]) == "--game") {
@@ -2070,6 +2295,8 @@ int main(int argc, char** argv) {
     live_kinds_note();
     building(argv[1]);
     own_models(argv[1]);
+    kit_import(argv[1]);
+    model_replace_remove(argv[1]);
     game_objects();
     route_commands();
     path_commands();

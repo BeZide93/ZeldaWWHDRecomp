@@ -11,6 +11,7 @@ extern "C" uint64_t g_shader_state_gen;  // gx2_core.cpp: bumped by shader-relev
 #include "gfx/area_sample.h"
 #include "gfx/shader_linkage.h"
 #include "render_objects.h"
+#include "pipeline_groups.h"
 #include "gfx/shader_identity.h"
 #include "gfx/target_draw_history.h"
 #include "Cafe/HW/Latte/Core/LatteCachedFBO.h"
@@ -163,6 +164,29 @@ static Upload upload(const void* data, uint32_t size) {
     memcpy((uint8_t*)g_pool_cur.contents + g_pool_pos, data, size);
     rprof::add_upload(size);
     g_pool_pos += size;
+    return u;
+}
+
+// Submitted uniform blocks (gx2/submitted_uniforms.h): uploaded once per submission and reused by
+// the draws of the call while the upload chunk they are in is still the current one (a retired
+// chunk is recycled when its command buffer completes)
+static Upload submitted_upload(uint32_t addr, uint32_t size, const uint8_t* bytes) {
+    struct Item { uint32_t size; Upload u; };
+    static std::unordered_map<uint32_t, Item> items;
+    static uint64_t itemsFor = 0;
+    static id<MTLBuffer> itemsChunk = nil;
+    if (itemsFor != gx2::submitted_uniforms_id() || itemsChunk != g_pool_cur) {
+        items.clear();
+        itemsFor = gx2::submitted_uniforms_id();
+    }
+    auto it = items.find(addr);
+    if (it != items.end() && it->second.size == size) return it->second.u;
+    Upload u = upload(bytes, size);
+    if (u.buf != itemsChunk) {  // the upload began a new chunk: the earlier items are in a retired one
+        items.clear();
+        itemsChunk = u.buf;
+    }
+    items[addr] = {size, u};
     return u;
 }
 
@@ -962,6 +986,15 @@ static id<MTLRenderPipelineState> get_pipeline(const uint32_t* regs, Shader* vs,
         g_pipelines[h] = pl;
         render_objects::set_pipelines(g_pipelines.size());
         cache_record_pipeline(regs, vs, ps, fsKey, tf);
+        pipeline_groups::note_created();
+        // the setup's model sweep, record only (WWHD_DSWEEP_RECORD_ONLY=1): the recipe is appended, the pipeline never
+        // built; its draws are left out (nobody sees the hidden sweep)
+        static const bool recordOnly = [] { const char* e = getenv("WWHD_DSWEEP_RECORD_ONLY"); return e && *e == '1'; }();
+        if (recordOnly && !g_cache_replaying) {
+            pl->attempts = kCompileAttempts;
+            pl->status = CS_FAILED;
+            return nil;
+        }
     }
     const int attempt = ++pl->attempts;
     const bool injectFailure = attempt <= g_test_fail_compiles;
@@ -1376,7 +1409,13 @@ static void bind_stage(id<MTLRenderCommandEncoder> enc, const uint32_t* regs, Sh
             for (auto& g : dec->list_remappedUniformEntries_bufferGroups) {
                 uint32_t addr = regs[blockBase + g.kcacheBankIdOffset / 4];
                 if (!addr) continue;
-                for (auto& e : g.entries) memcpy(dst + e.mappedIndexOffset, mem::ptr(addr + e.indexOffset), 16);
+                // a block of a display list: its bytes as submitted (gx2/submitted_uniforms.h);
+                // entries past the block's end still read guest memory, as before
+                const uint32_t blockSize = std::min<uint32_t>(regs[blockBase + g.kcacheBankIdOffset / 4 + 1] + 1, 0x10000);
+                const uint8_t* submitted = gx2::submitted_uniform_block(addr, blockSize);
+                for (auto& e : g.entries)
+                    memcpy(dst + e.mappedIndexOffset,
+                           submitted && e.indexOffset + 16 <= blockSize ? submitted + e.indexOffset : mem::ptr(addr + e.indexOffset), 16);
             }
             // Apply once before the Gaussian/mip chain, preserving the game's threshold and haze.
             if (!vertex && (regs[mmSQ_PGM_START_PS] << 8) == 0x44F91200)
@@ -1433,6 +1472,14 @@ static void bind_stage(id<MTLRenderCommandEncoder> enc, const uint32_t* regs, Sh
         uint32_t off = 0;
         id<MTLBuffer> gb = addr ? guest_buffer(addr, &off) : nil;
         if (!gb) continue;
+        // a block of a display list: its bytes as submitted (gx2/submitted_uniforms.h), uploaded
+        // once per submission and upload pool chunk (guest memory is what the GPU reads later)
+        if (const uint8_t* submitted = gx2::submitted_uniform_block(addr, size)) {
+            Upload u = submitted_upload(addr, size, submitted);
+            if (vertex) [enc setVertexBuffer:u.buf offset:u.offset atIndex:binding];
+            else [enc setFragmentBuffer:u.buf offset:u.offset atIndex:binding];
+            continue;
+        }
         if (g_snapshot) {
             Upload u = upload(mem::ptr(addr), size);
             if (vertex) [enc setVertexBuffer:u.buf offset:u.offset atIndex:binding];
@@ -1708,7 +1755,9 @@ static void cache_load() {
             const uint8_t* end = p + raw.size();
             if (hdr[0] == kRecPipeline) {
                 PipelineRecipe r;
-                if (get(p, end, r) && g_known_pipelines.insert(hash_bytes(raw.data(), raw.size())).second) {
+                // (record only: known, so not appended again, but never built)
+                static const bool recordOnly = [] { const char* e = getenv("WWHD_DSWEEP_RECORD_ONLY"); return e && *e == '1'; }();
+                if (get(p, end, r) && g_known_pipelines.insert(hash_bytes(raw.data(), raw.size())).second && !recordOnly) {
                     g_pending_pipelines.push_back(r);
                     pipelines++;
                 }

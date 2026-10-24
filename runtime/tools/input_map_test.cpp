@@ -15,6 +15,7 @@
 #include "mouse_bindings.h"
 #include "camera_invert.h"
 #include "controller_selection.h"
+#include "file_select_quit.h"
 #include "platform/touch_face.h"
 #include "overlay/settings_shortcut.h"
 #include "overlay/binding_capture.h"
@@ -1151,6 +1152,37 @@ static void test_screen_layouts() {
 }
 
 int main() {
+    // Old controls files default to showing Quit; an explicit choice round-trips.
+    {
+        auto mapping = input_map::Mapping::defaults();
+        CHECK(mapping.file_select_quit);
+        mapping.file_select_quit = false;
+        input_map::Mapping loaded;
+        CHECK(input_map::from_json(input_map::to_json(mapping), loaded));
+        CHECK(!loaded.file_select_quit);
+    }
+    // Quit consumes the mapped Wii U X action. Its displayed host identity is
+    // resolved from the same face preset as the game's existing prompt glyphs.
+    for (auto layout : {FaceLayout::kPosition, FaceLayout::kLabels}) {
+        auto mapping = Mapping::defaults();
+        apply_face_layout(mapping, layout);
+        float physical[kPadCount]{};
+        const int button = mapping.pad[kX];
+        physical[button] = 1;
+        const auto delivered = controller_state(mapping, physical);
+        CHECK(delivered.buttons == input::kX);
+        for (bool shown : {false, true}) {
+            file_select_quit::Routing routing;
+            auto filtered = delivered;
+            CHECK(routing.filter(filtered, shown) == shown);
+            CHECK(filtered.buttons == (shown ? 0u : input::kX));
+        }
+        for (auto prompts : {Mapping::Prompts::kXbox, Mapping::Prompts::kPlayStation}) {
+            mapping.prompts = prompts;
+            const auto look = prompt_style(mapping, PadFamily::kUnknown);
+            CHECK(look.buttons[2] == button - kPadA);
+        }
+    }
     test_shortcuts();
     for (int mode : {touch_buttons::Automatic, touch_buttons::AlwaysShow, touch_buttons::Hide})
         for (bool controller : {false, true}) {
@@ -1208,6 +1240,19 @@ int main() {
     CHECK(!skip_controller_selection());
     set_current(Mapping::defaults(), false);
     CHECK(skip_controller_selection());
+    // issue #267: controller input in the background, off by default, saved only when on
+    Mapping background = Mapping::defaults();
+    CHECK(!background.background_controllers && !background_controllers());
+    CHECK(to_json(background).find("background_controllers") == std::string::npos);
+    CHECK(from_json("{\"options\":{}}", parsed) && !parsed.background_controllers);
+    background.background_controllers = true;
+    CHECK(to_json(background).find("\"background_controllers\": true") != std::string::npos);
+    CHECK(from_json(to_json(background), parsed));
+    CHECK(parsed == background);
+    set_current(background, false);
+    CHECK(background_controllers());
+    set_current(Mapping::defaults(), false);
+    CHECK(!background_controllers());
     test_files();
     printf("input_map_test: %d passed, %d failed\n", g_pass, g_fail);
     return g_fail ? 1 : 0;

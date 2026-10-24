@@ -2357,36 +2357,48 @@ namespace interp { bool exact_cull_on(); void edge_draw(const Cpu& call, Cpu* c,
 extern "C" void f_025D4654_orig(Cpu* c);
 static interp::OneShotNoDraw g_nodraw;
 extern "C" void hook_025D4654(Cpu* c) {
-    static const bool off = getenv("WWHD_INTERP_NODRAW") && !atoi(getenv("WWHD_INTERP_NODRAW"));
-    if (interp::enabled() && !off) {
-        const uint32_t actor = c->r[3];
-        const uint32_t status = ld32(actor + interp::OneShotNoDraw::kStatus);
-        const uint32_t want = g_nodraw.on_draw(actor, status, interp::g_hold, interp::g_logic_steps);
-        if (want != status) {
-            st32(actor + interp::OneShotNoDraw::kStatus, want);
-            static int trace = getenv("WWHD_INTERP_NODRAW_TRACE") ? atoi(getenv("WWHD_INTERP_NODRAW_TRACE")) : 0;
-            if (trace > 0) {
-                trace--;
-                LOG("[interp] step %llu phase %d: actor %08X kept hidden (requested by the step's logic)",
-                    (unsigned long long)interp::g_logic_steps, interp::g_phase, actor);
-            }
-        }
-    }
+    const uint32_t actor = c->r[3];
+    const uint32_t status_in = ld32(actor + interp::OneShotNoDraw::kStatus);
     // On passes without logic the draw's culling result does not reach the actor: actor_condition
     // (+0x2E4: fopAcCnd_NODRAW, which executes read) keeps what the step's logic pass set. Those passes
     // cull with the camera they draw with (blended), and the record pass with shadow cascades set up
     // after the blended logic pass: at the next step's logic an actor could count as drawn or not
     // drawn where at 30 fps it did not. debug: WWHD_INTERP_EXACT_CULL=0 (as before)
-    const uint32_t actor = c->r[3];
     const bool keep_condition = interp::enabled() && interp::g_hold && interp::exact_cull_on() && !true60::enabled();
     const uint32_t condition = keep_condition ? ld32(actor + 0x2E4) : 0;
     const Cpu saved = *c;
     const bool kept = keep_condition && (condition & 0x04);
-    if (kept) interp::actor_keep(actor);  // (not drawn by the step's logic pass)
+    // (saved before the step's one-shot no-draw request is made again, interp_nodraw.h before_draw;
+    // issue #283) debug: WWHD_INTERP_NODRAW=0 turns the requests off
+    static const bool off = getenv("WWHD_INTERP_NODRAW") && !atoi(getenv("WWHD_INTERP_NODRAW"));
+    const uint32_t want = g_nodraw.before_draw(actor, status_in, interp::g_hold, interp::g_logic_steps, interp::enabled() && !off, kept,
+                                               [actor] { interp::actor_keep(actor); });  // (not drawn by the step's logic pass)
+    if (want != status_in) {
+        st32(actor + interp::OneShotNoDraw::kStatus, want);
+        static int trace = getenv("WWHD_INTERP_NODRAW_TRACE") ? atoi(getenv("WWHD_INTERP_NODRAW_TRACE")) : 0;
+        if (trace > 0) {
+            trace--;
+            LOG("[interp] step %llu phase %d: actor %08X kept hidden (requested by the step's logic)",
+                (unsigned long long)interp::g_logic_steps, interp::g_phase, actor);
+        }
+    }
     const uint32_t keep_drawing = interp::g_keep_drawing;
     if (kept) interp::g_keep_drawing = actor;  // (its models' matrices too: model_calc_before)
+    const uint32_t status_seen = ld32(actor + interp::OneShotNoDraw::kStatus);
     if (!dsweep::hide_actor_draw(actor)) f_025D4654_orig(c);
     interp::g_keep_drawing = keep_drawing;
+    // debug: WWHD_INTERP_LINK_DRAW_TRACE=path logs every draw of Link: pass, logic step, interpolation on,
+    // hold pass, phase, the status the draw saw (fopAcStts_NODRAW_e 0x01000000), the condition it left
+    // (fopAcCnd_NODRAW 0x04: not drawn), drawn, the status before this hook and after the draw
+    static FILE* link_trace = getenv("WWHD_INTERP_LINK_DRAW_TRACE") ? fopen(getenv("WWHD_INTERP_LINK_DRAW_TRACE"), "w") : nullptr;
+    if (link_trace && actor == ld32(GD(0x1046F0B0) + 0x5B34)) {
+        const uint32_t cond_after = ld32(actor + 0x2E4);
+        fprintf(link_trace, "pass %llu step %llu interp %d hold %d phase %d status %08X cond %08X drawn %d in %08X after %08X link %08X\n",
+                (unsigned long long)interp::g_passes, (unsigned long long)interp::g_logic_steps, (int)interp::enabled(),
+                (int)interp::g_hold, interp::g_phase, status_seen, cond_after, !(cond_after & 0x04), status_in,
+                ld32(actor + interp::OneShotNoDraw::kStatus), actor);
+        fflush(link_trace);
+    }
     if (keep_condition) st32(actor + 0x2E4, condition);
     interp::edge_draw(saved, c, actor);
     dsweep::after_actor_draw(c, actor);  // debug D-sweep (WWHD_DSWEEP), off by default

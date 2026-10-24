@@ -61,8 +61,8 @@ set(GEN_DIR ${CMAKE_SOURCE_DIR}/build/gen CACHE PATH "recompiler output")
 # Decomp build (docs/decomp-build.md): the game functions of the decompilation (git submodule decomp) run
 # as compiled source in place of the recompiled code; libraries and everything not decompiled stay
 # recompiled. GEN_DIR must then come from recomp.py --decomp-hooks (cmake/Decomp.cmake checks it).
-# Local diagnostic (not for releases): count signalling-NaN float loads/stores of the game code that the
-# host conversion would quiet (runtime/src/snan_count.cpp); logs to captures/snan.log with WWHD_SNAN_COUNT=1.
+# Local diagnostic (not for releases): count signalling-NaN float loads/stores of the game code (moved
+# bit-exactly by ppc.h; runtime/src/snan_count.cpp); logs to captures/snan.log with WWHD_SNAN_COUNT=1.
 option(WWHD_SNAN_COUNT "count signalling-NaN float loads/stores (diagnostic; log with WWHD_SNAN_COUNT=1)" OFF)
 if(WWHD_SNAN_COUNT)
   add_compile_definitions(WWHD_SNAN_COUNT=1)
@@ -745,6 +745,15 @@ if(NOT WIN32)
   target_link_libraries(spin_wait_test PRIVATE Threads::Threads)
   add_test(NAME spin_wait COMMAND spin_wait_test)
 endif()
+# lfs / stfs / psq float loads and stores move bits like the PowerPC (ppc.h ppc_lfs_value /
+# ppc_stfs_bits): built at -O0 and -O3 with the game code's FP flags (tools/recomp/test_ppc_f32_exact.py
+# also runs it over all 2^32 single words)
+foreach(opt O0 O3)
+  add_executable(ppc_f32_exact_test_${opt} runtime/tools/ppc_f32_exact_test.c)
+  target_include_directories(ppc_f32_exact_test_${opt} PRIVATE runtime/include)
+  target_compile_options(ppc_f32_exact_test_${opt} PRIVATE -${opt} -ffp-contract=off -fno-strict-aliasing -fwrapv -fno-sanitize=undefined -w)
+  add_test(NAME ppc_f32_exact_${opt} COMMAND ppc_f32_exact_test_${opt})
+endforeach()
 add_executable(present_deadline_core_test runtime/tools/present_deadline_core_test.cpp)
 target_include_directories(present_deadline_core_test PRIVATE runtime/src)
 target_compile_options(present_deadline_core_test PRIVATE -UNDEBUG)
@@ -798,6 +807,9 @@ target_compile_options(program_hash_cache_test PRIVATE -UNDEBUG)
 add_executable(snapshot_cache_test runtime/tools/snapshot_cache_test.cpp)
 target_include_directories(snapshot_cache_test PRIVATE runtime/src)
 target_compile_options(snapshot_cache_test PRIVATE -UNDEBUG)
+add_executable(submitted_uniforms_test runtime/tools/submitted_uniforms_test.cpp)
+target_include_directories(submitted_uniforms_test PRIVATE runtime/src)
+target_compile_options(submitted_uniforms_test PRIVATE -UNDEBUG)
 add_executable(android_user_directory_test runtime/tools/android_user_directory_test.cpp)
 target_include_directories(android_user_directory_test PRIVATE runtime/src)
 target_compile_options(android_user_directory_test PRIVATE -UNDEBUG)
@@ -1110,6 +1122,17 @@ add_executable(editor_resident_ui_test runtime/tools/editor_resident_ui_test.cpp
 target_compile_options(editor_resident_ui_test PRIVATE -UNDEBUG)
 target_link_libraries(editor_resident_ui_test PRIVATE imgui)
 add_test(NAME editor_resident_ui COMMAND editor_resident_ui_test)
+# issue #280: the model import's "Use the game's materials (kit)" option (overlay/editor_kit_import.h): the room picker,
+# the room's materials with Copy names, the name mapping and the commands it builds
+add_executable(editor_kit_import_ui_test runtime/tools/editor_kit_import_ui_test.cpp runtime/src/overlay/editor_kit_import.cpp)
+target_compile_options(editor_kit_import_ui_test PRIVATE -UNDEBUG)
+target_link_libraries(editor_kit_import_ui_test PRIVATE imgui)
+add_test(NAME editor_kit_import_ui COMMAND editor_kit_import_ui_test)
+# issue #287: an imported model's Replace from file, Watch file and Remove in the Outliner (overlay/editor_model_actions.h)
+add_executable(editor_model_actions_ui_test runtime/tools/editor_model_actions_ui_test.cpp runtime/src/overlay/editor_model_actions.cpp)
+target_compile_options(editor_model_actions_ui_test PRIVATE -UNDEBUG)
+target_link_libraries(editor_model_actions_ui_test PRIVATE imgui)
+add_test(NAME editor_model_actions_ui COMMAND editor_model_actions_ui_test)
 if(APPLE)
   add_executable(pip_preview_ui_test runtime/tools/pip_preview_ui_test.cpp runtime/src/gfx/display_modes.cpp)
   target_include_directories(pip_preview_ui_test PRIVATE ${IMGUI_DIR} runtime/src runtime/include
@@ -1285,6 +1308,7 @@ add_test(NAME quit_prompt COMMAND quit_prompt_test)
 add_test(NAME write_watch COMMAND write_watch_test)
 add_test(NAME buffer_cache COMMAND buffer_cache_test)
 add_test(NAME snapshot_caches COMMAND snapshot_cache_test)
+add_test(NAME submitted_uniforms COMMAND submitted_uniforms_test)
 add_test(NAME program_hash_cache COMMAND program_hash_cache_test)
 add_test(NAME interval_index COMMAND interval_index_test)
 add_test(NAME pad_delivery COMMAND pad_delivery_test)
@@ -2289,6 +2313,7 @@ target_link_libraries(overlay_toggle_test PRIVATE imgui)
 add_test(NAME overlay_toggle COMMAND overlay_toggle_test)
 if(WWHD_SDL_HOST)
   add_test(NAME overlay_focus_matrix COMMAND input_sdl_test --menu-matrix)
+  add_test(NAME sdl_background_controllers COMMAND input_sdl_test --background)
 endif()
 
 # Link only the overlay input API and SDL boundary. Dead code elimination drops renderer/game
@@ -3710,3 +3735,30 @@ target_compile_definitions(story_scenes_editor_preview_test PRIVATE STORY_SCENES
 target_include_directories(story_scenes_editor_preview_test PRIVATE runtime/include runtime/src runtime/src/mods)
 target_compile_options(story_scenes_editor_preview_test PRIVATE -UNDEBUG)
 add_test(NAME story_scenes_editor_preview COMMAND story_scenes_editor_preview_test)
+
+if(WIN32)
+  add_executable(unc_console_fixture runtime/tools/unc_console_fixture.c)
+endif()
+
+# File-select Quit only takes X while the host button is visible.
+add_executable(file_select_quit_test runtime/tools/file_select_quit_test.cpp)
+target_include_directories(file_select_quit_test PRIVATE runtime/src)
+target_compile_options(file_select_quit_test PRIVATE -UNDEBUG)
+add_test(NAME file_select_quit_input COMMAND file_select_quit_test)
+foreach(fixture guest_hud_renderer_test input_sdl_test overlay_input_integration_test pip_preview_ui_test)
+  if(TARGET ${fixture})
+    target_sources(${fixture} PRIVATE runtime/tools/file_select_quit_stub.cpp)
+  endif()
+endforeach()
+
+# Exercise the exact game-side metadata reader against setup's real atomic writer.
+if(Python3_Interpreter_FOUND AND NOT ANDROID)
+  add_executable(code_mods_io_test runtime/tools/code_mods_io_test.cpp)
+  target_include_directories(code_mods_io_test PRIVATE runtime/src)
+  target_compile_options(code_mods_io_test PRIVATE -UNDEBUG)
+  add_test(NAME code_mods_atomic_io COMMAND ${Python3_EXECUTABLE}
+    ${CMAKE_SOURCE_DIR}/tools/installer/test_code_mods_io.py $<TARGET_FILE:code_mods_io_test>)
+  set_tests_properties(code_mods_atomic_io PROPERTIES TIMEOUT 60)
+  add_test(NAME setup_atomic_replace COMMAND ${Python3_EXECUTABLE}
+    ${CMAKE_SOURCE_DIR}/tools/installer/test_setup.py AtomicReplace)
+endif()

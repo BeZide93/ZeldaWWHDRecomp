@@ -61,6 +61,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 # directory to sys.path. Resolve shipped sibling modules explicitly.
 sys.path.insert(0, HERE)
 import code_mods  # noqa: E402
+from code_mods import atomic_replace  # noqa: E402
 import decomp_setup  # noqa: E402
 PKG = os.path.normpath(os.path.join(HERE, "..", ".."))
 # Portable release (portable.txt in the release folder): everything setup and the game create stays
@@ -900,7 +901,7 @@ def repair_guest_python(data_dir):
     config["python"] = [executable]
     with open(path + ".tmp", "w", encoding="utf-8") as f:
         json.dump(config, f)
-    os.replace(path + ".tmp", path)
+    atomic_replace(path + ".tmp", path)
     say("Local mod setup Python is ready (compression.zstd verified).")
 
 
@@ -1905,7 +1906,7 @@ def write_guest_build_config(data_dir, tc):
     path = os.path.join(data_dir, "guest-sdk.json")
     with open(path + ".tmp", "w", encoding="utf-8") as f:
         json.dump(config, f)
-    os.replace(path + ".tmp", path)
+    atomic_replace(path + ".tmp", path)
 
 
 def game_icon_png(data_dir):
@@ -2460,7 +2461,7 @@ def write_code_mods_setting(data_dir, hooks):
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(path.name + ".tmp")
     tmp.write_bytes(payload)
-    os.replace(tmp, path)
+    atomic_replace(tmp, path)
 
 
 def shader_progress_callback(progress):

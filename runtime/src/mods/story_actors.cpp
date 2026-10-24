@@ -655,14 +655,17 @@ bool register_model(const std::string& mod,const std::string& model,const std::s
     g_models.emplace(key,ModelResource{archive,index,minimum,maximum,skinned,std::move(clips),std::move(rig)});return true;
 }
 bool editor_register_model(const std::string& mod,const std::string& model,const std::string& archive,bool skinned,std::string& why){
-    if(g_models.contains({mod,model}))return true;
+    // the same archive again: nothing to do; another one (the editor's replace_model, issue #287): the model's new
+    // version, which its actors take when they are declared again
+    const auto known=g_models.find({mod,model});if(known!=g_models.end()&&known->second.archive==archive)return true;
+    const bool replaced=known!=g_models.end();
     story_notebook::WorldPoint minimum,maximum;
     if(!actor_model_cache::bounds_for(archive,minimum,maximum))return why="the prepared model has no bounds",false;
     for(const auto& entry:g_models)if(entry.second.archive==archive)return why="actor model archive identity collision",false;
     auto clips=actor_model_cache::clips_for(archive);auto rig=actor_model_cache::rig_for(archive);
     if(rig.joint_names.size()!=rig.joint_parents.size()||rig.joint_names.size()>32||clips.size()>8||(!skinned&&(!clips.empty()||!rig.joint_names.empty())))return why="invalid prepared model rig or clips",false;
-    g_models.emplace(std::make_pair(mod,model),ModelResource{archive,1,minimum,maximum,skinned,std::move(clips),std::move(rig)});
-    LOG("[actors] %s:%s model prepared for the editor (%s)",mod.c_str(),model.c_str(),archive.c_str());
+    g_models.insert_or_assign(std::make_pair(mod,model),ModelResource{archive,1,minimum,maximum,skinned,std::move(clips),std::move(rig)});
+    LOG("[actors] %s:%s model %s for the editor (%s)",mod.c_str(),model.c_str(),replaced?"replaced":"prepared",archive.c_str());
     return true;
 }
 bool has_model(const std::string& mod,const std::string& model){return g_models.contains({mod,model});}
@@ -1262,6 +1265,7 @@ bool editor_update(const std::string& mod,const std::vector<ManifestActor>& decl
         Actor* a=step.actor;
         const bool was_removed=a->removed;
         a->removed=false;
+        if(was_removed&&a->mod_token)mod_actor::set_removed(a->mod_token,false);
         if(was_removed&&!step.update){
             // a removal undone: a deleted enemy's next copy needs a new ownership epoch
             if(a->enemy_token&&a->process==0xFFFFFFFFu)enemy_epoch(*a);
@@ -1277,7 +1281,7 @@ bool editor_update(const std::string& mod,const std::vector<ManifestActor>& decl
         }
         LOG("[actors] %s:%s %s by the editor",mod.c_str(),a->spec.id.c_str(),was_removed?"restored":"changed");
     }
-    for(Actor* a:remove){a->removed=true;a->respawn=false;if(a->game_batch&&a->game_planted)later.push_back(a->spec.id+": grass, flowers and small trees go when the room loads again (Reload room)");LOG("[actors] %s:%s removed by the editor",mod.c_str(),a->spec.id.c_str());}
+    for(Actor* a:remove){a->removed=true;a->respawn=false;if(a->mod_token)mod_actor::set_removed(a->mod_token,true);if(a->game_batch&&a->game_planted)later.push_back(a->spec.id+": grass, flowers and small trees go when the room loads again (Reload room)");LOG("[actors] %s:%s removed by the editor",mod.c_str(),a->spec.id.c_str());}
     if(!sync_visuals(mod,effective,true,why))return false;story_world_arrival::state_loaded();
     if(pending)*pending=std::move(later);
     return true;

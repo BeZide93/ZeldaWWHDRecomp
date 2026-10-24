@@ -26,6 +26,7 @@
 #include "program_hash_cache.h"
 #include "write_watch.h"
 #include "render_prof.h"
+#include "gx2/gx2_cmd.h"
 #include "Cafe/HW/Latte/Core/FetchShader.h"
 #include "Cafe/HW/Latte/Core/LatteShader.h"
 #include "Cafe/HW/Latte/ISA/RegDefines.h"
@@ -1320,11 +1321,16 @@ void pack_uniforms_into(const uint32_t* regs, const Shader& shader,
             uint32_t address = regs[blockBase + group.kcacheBankIdOffset / 4];
             if (!address) continue;
             const size_t blockSize = std::min<uint32_t>(regs[blockBase+group.kcacheBankIdOffset/4+1]+1,0x10000);
+            // a block of a display list: its bytes as submitted (gx2/submitted_uniforms.h); entries
+            // past the block's end still read guest memory, as before
+            const uint8_t* submitted = gx2::submitted_uniform_block(address, uint32_t(blockSize));
             for (const auto& entry : group.entries) {
-                copy(offsets.offset_remapped + entry.mappedIndexOffset, ppc_ptr(address + entry.indexOffset), 16);
+                const void* src = submitted && entry.indexOffset + 16 <= blockSize
+                    ? static_cast<const void*>(submitted + entry.indexOffset) : ppc_ptr(address + entry.indexOffset);
+                copy(offsets.offset_remapped + entry.mappedIndexOffset, src, 16);
                 if (entry.indexOffset < blockSize)
                     projectionRow(offsets.offset_remapped+entry.mappedIndexOffset,
-                        ppc_ptr(address+entry.indexOffset),blockSize-entry.indexOffset);
+                        src,blockSize-entry.indexOffset);
             }
         }
     }

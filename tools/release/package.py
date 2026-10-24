@@ -48,6 +48,7 @@ TOOL_FILES = [
     "tools/recomp/builds.py",
     "tools/recomp/crlive.py",
     "tools/recomp/leaflocal.py",
+    "tools/recomp/rawstore.py",
     "tools/guestmod/build_guest_mod.py",
     "tools/guestmod/guestmod.py",
     "tools/story_mods/npc_catalogue.py",  # the NPC catalogue from the player's game files (story_npc_catalogue.h)
@@ -74,6 +75,7 @@ INSTALLER_FILES = [
     "tools/installer/decomp_setup.py",
     "tools/installer/shader_prebuild.py",
     "tools/installer/model_sweep.py",
+    "tools/installer/sweep_merge.py",
     "tools/installer/model_sweep_skip.txt",
     "tools/installer/toolchains.json",
     "tools/installer/README.md",

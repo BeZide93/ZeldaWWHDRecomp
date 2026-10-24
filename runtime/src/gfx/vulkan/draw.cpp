@@ -892,14 +892,16 @@ Pipeline &pipeline(const uint32_t *r, vk::Shader *vs, vk::Shader *ps,
   if(preparation_stats_enabled())++R.cpuPreparation.pipelineLookups;
   const PipelineKey key = pipeline_key(r, vs, ps, fs, topology, colors, depth);
   // the setup's model sweep: every pipeline a swept archive's models use is filed under that archive (once each)
-  if (const uint32_t group = pipeline_groups::sweeping(); group && !pipeline_groups::sweeping_new_only()) {
+  if (pipeline_groups::sweeping() && !pipeline_groups::sweeping_new_only()) {
     static std::unordered_set<uint64_t> noted;
-    const uint64_t id = PipelineKeyHash{}(key) * 1099511628211ull ^ group;
-    if (noted.insert(id).second) {
-      auto portable = key;
-      portable.vs = vs->pipelineId; portable.ps = ps->pipelineId;
-      const auto* bytes = reinterpret_cast<const uint8_t*>(&portable);
-      note_pipeline_group(std::vector<uint8_t>(bytes, bytes + sizeof portable), group);
+    for (const uint32_t group : pipeline_groups::sweeping_all()) {
+      const uint64_t id = PipelineKeyHash{}(key) * 1099511628211ull ^ group;
+      if (noted.insert(id).second) {
+        auto portable = key;
+        portable.vs = vs->pipelineId; portable.ps = ps->pipelineId;
+        const auto* bytes = reinterpret_cast<const uint8_t*>(&portable);
+        note_pipeline_group(std::vector<uint8_t>(bytes, bytes + sizeof portable), group);
+      }
     }
   }
   std::array<VkFormat, 8> formats{};
@@ -1356,6 +1358,26 @@ Pipeline &pipeline(const uint32_t *r, vk::Shader *vs, vk::Shader *ps,
     }
     return remember(pipelines.emplace(key, std::move(p)).first->second);
   }
+  pipeline_groups::note_created();
+  // the setup's model sweep, record only (WWHD_DSWEEP_RECORD_ONLY=1): the recipe is recorded as when the pipeline is
+  // made, but the driver never compiles it; its draws are left out (nobody sees the hidden sweep)
+  static const bool recordOnly = [] { const char* e = getenv("WWHD_DSWEEP_RECORD_ONLY"); return e && *e == '1'; }();
+  if (recordOnly) {
+    for (size_t i = 0; i < shaderBinaries.size(); ++i)
+      if (recipeSpirv[i].empty() && shaderBinaries[i]) recipeSpirv[i] = vk::shader_binary_words_exact(shaderBinaries[i], R.frame);
+    for (auto module : modules) if (module) vkDestroyShaderModule(R.device, module, nullptr);
+    if (!recipeSpirv[0].empty() && !recipeSpirv[1].empty()) {
+      auto recipe = std::make_shared<PipelineRecipe>();
+      recipe->key = std::move(recipeKey); recipe->spirv = std::move(recipeSpirv);
+      recipe->descriptors = std::move(descriptorBindings);
+      recipe->dynamicUniforms = p.dynamicUniforms;
+      recipe->state = std::make_unique<GraphicsPipelineState>(std::move(pipelineState));
+      for (const uint32_t group : pipeline_groups::sweeping_all()) recipe->add_group(group);
+      remember_pipeline_recipe(std::move(recipe));
+    }
+    p.pipeline = VK_NULL_HANDLE;
+    return remember(pipelines.emplace(key, std::move(p)).first->second);
+  }
   const auto pipelineStarted = std::chrono::steady_clock::now();
   VkResult result;
   uint64_t compileNs = 0;
@@ -1368,7 +1390,7 @@ Pipeline &pipeline(const uint32_t *r, vk::Shader *vs, vk::Shader *ps,
     recipe->descriptors = std::move(descriptorBindings);
     recipe->dynamicUniforms = p.dynamicUniforms;
     recipe->state = std::make_unique<GraphicsPipelineState>(std::move(pipelineState));
-    recipe->add_group(pipeline_groups::sweeping());
+    for (const uint32_t group : pipeline_groups::sweeping_all()) recipe->add_group(group);
     pending->recipe = std::move(recipe);
     // The owner waits for its ticket before destroying modules or itself.
     // Capturing a shared owner here would form an owner/ticket/job cycle.
@@ -1431,7 +1453,7 @@ Pipeline &pipeline(const uint32_t *r, vk::Shader *vs, vk::Shader *ps,
     recipe->descriptors = std::move(descriptorBindings);
     recipe->dynamicUniforms = p.dynamicUniforms;
     recipe->state = std::make_unique<GraphicsPipelineState>(std::move(pipelineState));
-    recipe->add_group(pipeline_groups::sweeping());
+    for (const uint32_t group : pipeline_groups::sweeping_all()) recipe->add_group(group);
     remember_pipeline_recipe(std::move(recipe));
   }
   R.pipelineCacheDirty = true;
@@ -2401,8 +2423,9 @@ StageResources bind_stage(const uint32_t *r, vk::Shader *sh,
     return write;
   };
   // guestAddr: a guest uniform block (bytes == mem::ptr(guestAddr)), served by the buffer cache if on
+  // known: an upload slice already holding these bytes (a submitted block uploaded by an earlier draw)
   auto uniform = [&](int binding, const void *bytes, size_t size, size_t logicalSlot,
-                     uint32_t guestAddr = 0) {
+                     uint32_t guestAddr = 0, const UploadSlice* known = nullptr) {
     if (binding < 0)
       return;
     if (size > R.properties.limits.maxUniformBufferRange)
@@ -2423,8 +2446,9 @@ StageResources bind_stage(const uint32_t *r, vk::Shader *sh,
       return snapshot(source, length, R.properties.limits.minUniformBufferOffsetAlignment);
     };
     UploadSlice cachedSlice;
-    const bool cached = guestAddr && buffer_cache_enabled() &&
-        cached_guest_range(guestAddr, uint32_t(size), rprof::kUpUbo, cachedSlice);
+    const bool cached = known || (guestAddr && buffer_cache_enabled() &&
+        cached_guest_range(guestAddr, uint32_t(size), rprof::kUpUbo, cachedSlice));
+    if (known) cachedSlice = *known;
     const auto b = cached ? cachedSlice
         : reuseUniforms
         ? uniformCache.get(R.device, R.submissionGeneration,
@@ -2469,6 +2493,38 @@ StageResources bind_stage(const uint32_t *r, vk::Shader *sh,
     const size_t capacity=preparation_stats_enabled()?supportUniforms.capacity():0;
     vk::pack_uniforms_into(r, *sh, supportUniforms, sx, sy, eyeOffset, stereo::frame.convergence,
                            replayOut ? &supportRows : nullptr);
+    // WWHD_VK_UNIFORM_VERIFY=1 (debug): packs again into a separate buffer and compares, byte for
+    // byte, with what this draw uploads; any change to how support uniforms are packed or reused
+    // must keep "0 mismatches"
+    static const bool verifyPack = [] {
+      const char* e = std::getenv("WWHD_VK_UNIFORM_VERIFY");
+      return e && std::strcmp(e, "1") == 0;
+    }();
+    if (verifyPack) {
+      static thread_local std::vector<uint8_t> fresh;
+      static uint64_t checks = 0, mismatches = 0;
+      vk::pack_uniforms_into(r, *sh, fresh, sx, sy, eyeOffset, stereo::frame.convergence);
+      ++checks;
+      if (fresh != supportUniforms && mismatches++ < 16) {
+        // where: the first differing byte, and the guest uniform-block entry it was copied from (if any)
+        size_t at = 0;
+        while (at < fresh.size() && at < supportUniforms.size() && fresh[at] == supportUniforms[at]) ++at;
+        uint32_t source = 0;
+        const int base = sh->uniforms.offset_remapped;
+        const uint32_t blockBase = sh->vertex ? mmSQ_VTX_UNIFORM_BLOCK_START : mmSQ_PS_UNIFORM_BLOCK_START;
+        if (sh->dec && base >= 0)
+          for (const auto& group : sh->dec->list_remappedUniformEntries_bufferGroups)
+            for (const auto& entry : group.entries)
+              if (at >= size_t(base + entry.mappedIndexOffset) && at < size_t(base + entry.mappedIndexOffset + 16))
+                source = r[blockBase + group.kcacheBankIdOffset / 4] + entry.indexOffset;
+        LOG("[vulkan uniform verify] MISMATCH: %s shader %016llx, %zu vs %zu bytes, first difference at +%zu%s%08X",
+            sh->vertex ? "vertex" : "pixel", (unsigned long long)sh->key, supportUniforms.size(), fresh.size(), at,
+            source ? ", read from guest memory at " : ", from registers ", source);
+      }
+      if ((checks & 0xFFFFF) == 0)
+        LOG("[vulkan uniform verify] %llu checks, %llu mismatches", (unsigned long long)checks,
+            (unsigned long long)mismatches);
+    }
     if(preparation_stats_enabled()) {
       ++R.cpuPreparation.packCalls;
       R.cpuPreparation.packBytes+=supportUniforms.size();
@@ -2509,17 +2565,40 @@ StageResources bind_stage(const uint32_t *r, vk::Shader *sh,
     if (m.uniformBuffersBindingPoint[i] >= 0) {
       uint32_t addr = r[block + i * 7];
       uint32_t size = std::min<uint32_t>(r[block + i * 7 + 1] + 1, 0x10000);
+      // a block of a display list: its bytes as submitted (gx2/submitted_uniforms.h), uploaded once
+      // per submission and upload generation, not through the buffer cache (which holds guest memory)
+      const uint8_t* submitted = addr ? gx2::submitted_uniform_block(addr, size) : nullptr;
+      const unsigned char* source = submitted ? submitted : static_cast<const unsigned char*>(addr ? mem::ptr(addr) : nullptr);
       // Only a block holding a camera projection gets an eye copy; the others keep their
       // buffer-cache upload by address.
       if (sh->vertex && eyeOffset != 0 && addr &&
-          stereo::has_camera_projection(static_cast<const unsigned char*>(mem::ptr(addr)), size)) {
+          stereo::has_camera_projection(source, size)) {
         static thread_local std::vector<uint8_t> eyeBlock;
-        eyeBlock.resize(size);memcpy(eyeBlock.data(),mem::ptr(addr),size);
+        eyeBlock.resize(size);memcpy(eyeBlock.data(),source,size);
         stereo::EyeRows blockRows;
         stereo::project_uniform_block(eyeBlock.data(),size,eyeOffset,stereo::frame.convergence,nullptr,
                                       replayOut ? &blockRows : nullptr);
         uniform(m.uniformBuffersBindingPoint[i],eyeBlock.data(),size,size_t(i));
         eyeUniform(m.uniformBuffersBindingPoint[i],eyeBlock.data(),size,blockRows);
+      } else if (submitted) {
+        struct Uploaded { uint32_t size; UploadSlice slice; };
+        static std::unordered_map<uint32_t, Uploaded> uploaded;
+        static uint64_t uploadedFor = 0, uploadedGeneration = 0;
+        static VkDevice uploadedDevice = VK_NULL_HANDLE;
+        if (uploadedFor != gx2::submitted_uniforms_id() || uploadedGeneration != R.submissionGeneration ||
+            uploadedDevice != R.device) {
+          uploaded.clear();
+          uploadedFor = gx2::submitted_uniforms_id();
+          uploadedGeneration = R.submissionGeneration;
+          uploadedDevice = R.device;
+        }
+        auto it = uploaded.find(addr);
+        if (it != uploaded.end() && it->second.size == size)
+          uniform(m.uniformBuffersBindingPoint[i], submitted, size, size_t(i), 0, &it->second.slice);
+        else {
+          uniform(m.uniformBuffersBindingPoint[i], submitted, size, size_t(i));
+          if (lastUpload.buffer) uploaded[addr] = {size, lastUpload};
+        }
       } else uniform(m.uniformBuffersBindingPoint[i], addr ? mem::ptr(addr) : nullptr,
               size, size_t(i), addr);
       if (addr) rprof::guest_read(rprof::kUpUbo, addr, size);

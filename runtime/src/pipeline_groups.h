@@ -5,6 +5,7 @@
 // archive ahead of its models' first draw. Only active once a recipe database with groups (the setup's model
 // sweep) is loaded: the worker turns the scan on with want().
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cstdint>
 #include <mutex>
@@ -23,7 +24,10 @@ struct Shared {
     std::atomic<uint64_t> generation{0};
     std::atomic<bool> wanted{false};
     std::atomic<uint32_t> sweeping{0};
+    // more groups at once (the actor sweep's groups of actors: every archive the group's actors loaded)
+    std::array<std::atomic<uint32_t>, 7> sweepingMore{};
     std::atomic<bool> sweepingNewOnly{false};
+    std::atomic<uint64_t> created{0};
     std::atomic<bool> playing{false};
 };
 inline Shared& shared() { static Shared value; return value; }
@@ -45,10 +49,34 @@ inline void publish(std::vector<uint32_t> groups) {
 // new_only (stage visits): only pipelines created meanwhile are filed under it, not the ones a visited stage merely
 // uses (those are shared by many places; filing them under every stage would have each stage load compile them again)
 inline void set_sweeping(uint32_t group, bool new_only = false) {
-    shared().sweepingNewOnly.store(new_only, std::memory_order_relaxed);
-    shared().sweeping.store(group, std::memory_order_relaxed);
+    auto& s = shared();
+    s.sweepingNewOnly.store(new_only, std::memory_order_relaxed);
+    for (auto& more : s.sweepingMore) more.store(0, std::memory_order_relaxed);
+    s.sweeping.store(group, std::memory_order_relaxed);
+}
+// several groups at once (up to 8; the first is sweeping())
+inline void set_sweeping(const std::vector<uint32_t>& groups) {
+    auto& s = shared();
+    s.sweepingNewOnly.store(false, std::memory_order_relaxed);
+    for (size_t i = 0; i < s.sweepingMore.size(); ++i)
+        s.sweepingMore[i].store(i + 1 < groups.size() ? groups[i + 1] : 0, std::memory_order_relaxed);
+    s.sweeping.store(groups.empty() ? 0 : groups[0], std::memory_order_relaxed);
 }
 inline uint32_t sweeping() { return shared().sweeping.load(std::memory_order_relaxed); }
+// every group being swept (sweeping() first; empty: none)
+inline std::vector<uint32_t> sweeping_all() {
+    auto& s = shared();
+    std::vector<uint32_t> out;
+    if (const uint32_t first = s.sweeping.load(std::memory_order_relaxed)) out.push_back(first);
+    else return out;
+    for (auto& more : s.sweepingMore)
+        if (const uint32_t g = more.load(std::memory_order_relaxed)) out.push_back(g);
+    return out;
+}
+// the renderer: a pipeline it has not recorded before (counted for the sweep's stage visits, which leave a place once
+// nothing new appears for a while)
+inline void note_created() { shared().created.fetch_add(1, std::memory_order_relaxed); }
+inline uint64_t created() { return shared().created.load(std::memory_order_relaxed); }
 inline bool sweeping_new_only() { return shared().sweepingNewOnly.load(std::memory_order_relaxed); }
 // the game is in a play stage (past the boot, the title and the file select, and their loading): the background
 // compile then uses all its threads (before that one, so the loads into the first stage keep their CPU)

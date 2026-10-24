@@ -123,6 +123,12 @@ def release_python(package_dir):
     lines = [entry for line in lines for entry in (stdlib + [dynload] if line == "python314.zip" else [line])]
     with open(executable + "._pth", "w") as f:
         f.write("\n".join(dict.fromkeys(lines)))
+    # Python reads the ._pth next to the path it resolves itself to; where that is the real interpreter (Linux follows
+    # the link), the copy is never read and the caller falls back to -I -S, which isolates the same way.
+    probe = subprocess.run([executable, "-c", "import sys; print(sys.flags.isolated, sys.flags.no_site)"],
+                           stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, timeout=60)
+    if probe.stdout.split() != ["1", "1"]:
+        return None
     return [executable]
 
 

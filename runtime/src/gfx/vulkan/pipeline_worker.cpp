@@ -428,6 +428,14 @@ void run(Worker& w, std::vector<uint8_t> seed) {
         else ++grouped;
       }
     }
+    // the setup's model sweep, record only (WWHD_DSWEEP_RECORD_ONLY=1): the recipes are kept (and saved with the new
+    // ones), but nothing is compiled ahead
+    static const bool recordOnly = [] { const char* e = std::getenv("WWHD_DSWEEP_RECORD_ONLY"); return e && *e == '1'; }();
+    if (recordOnly) {
+      std::fprintf(stderr, "[vulkan warmup] record only: %zu recipes kept, none compiled\n", loaded.size());
+      w.result = {0, failed};
+      return;
+    }
     std::fprintf(stderr, "[vulkan warmup] %zu exact pipeline recipes queued, %zu wait for their object archives "
                  "(pool %zu; process memory %.0f MB; read %.0f ms, ready to compile after %.0f ms)\n", startup.size(),
                  grouped, maxUnusedWarmPipelines, process_memory() / 1e6, readMs, msSince());

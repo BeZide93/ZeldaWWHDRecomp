@@ -1411,11 +1411,20 @@ public:
         }
         const bool collision = model.get("collision").boolean;
         const std::pair<std::string, std::string> key{mod, model.get("id").string()};
+        // replace_model (issue #287): the new file gets an archive of its own, so the actors drawing the model load it
+        Value request = model;
+        const bool replace = model.get("replace").boolean;
+        if (replace) {
+            static std::mutex generations_mutex;
+            static std::map<std::pair<std::string, std::string>, unsigned> generations;
+            std::lock_guard guard(generations_mutex);
+            request["generation"] = double(++generations[key]);
+        }
         if (collision) {
             std::lock_guard guard(g_collision_mutex);
             g_collision_preparing.insert(key);
         }
-        std::thread([mod, dir, model, collision, key] {
+        std::thread([mod, dir, model = request, collision, key, replace] {
             struct Done {  // no longer "being prepared" once this ends (registered on the game thread, or failed)
                 bool on;
                 std::pair<std::string, std::string> key;
@@ -1432,14 +1441,16 @@ public:
                 actor_model_cache::note_failure(mod, model.get("id").string(), w);
                 return set_status("Model " + model.get("id").string() + " could not be prepared, its actors are not in the game: " + w);
             }
-            post([mod, model, archive, done](Cpu*) {
+            post([mod, model, archive, done, replace](Cpu*) {
                 std::string w2;
                 if (model.get("collision").boolean && !mod_actor::register_collision(mod, model.get("id").string(), actor_model_cache::collision_for(archive)))
                     return set_status("Model " + model.get("id").string() + ": prepared collision could not be registered");
                 if (!story_actors::editor_register_model(mod, model.get("id").string(), archive, model.get("kind").string() == "skinned", w2))
                     return set_status("Model " + model.get("id").string() + ": " + w2 + " (it is prepared when the game starts)");
-                set_status("Model " + model.get("id").string() + " is ready: actors can use it now");
-                reapply_mod(mod);
+                set_status("Model " + model.get("id").string() + (replace ? " is replaced: its placements show the new version" : " is ready: actors can use it now"));
+                // a replaced model: the actors drawing it (or standing on its collision) are declared again with it
+                if (replace) reapply_mod(mod, model.get("id").string());
+                else reapply_mod(mod);
             });
         }).detach();
         note = "The model is being prepared for the game; actors using it appear when it is ready.";
@@ -2187,8 +2198,31 @@ void return_tick() {
 }
 }  // namespace
 
+// watched model files (watch_model, issue #287): looked at twice a second on a thread of its own; a file that changed
+// and settled replaces its model through the command queue, as a click on Replace from file would
+void start_model_watch() {
+    static std::once_flag started;
+    std::call_once(started, [] {
+        std::thread([] {
+            for (;;) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(500));
+                const int64_t now = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
+                std::vector<Value> due;
+                if (!try_with_session([&](Session& s) { due = s.watch_due(now); })) continue;
+                for (const auto& d : due) {
+                    LOG("[editor] watched file of model %s changed: %s", d.get("model").string().c_str(), d.get("file").string().c_str());
+                    run_async("replace_model", d, [model = d.get("model").string()](const Value& r) {
+                        set_status(r.get("ok").boolean ? r.get("result").get("note").string() : "Model " + model + " (watched file): " + r.get("error").string());
+                    }, "watch");
+                }
+            }
+        }).detach();
+    });
+}
+
 void logic_service(Cpu* c) {
     if (!enabled()) return;
+    start_model_watch();
     return_tick();
     t_game = c;
     records_tick();

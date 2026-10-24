@@ -340,21 +340,64 @@ its light through the day and its vertex-colour shading. A copy of the game's te
 doesn't: your own materials are lit as objects are (a barrel, a sign), at the texture's full brightness, so
 they look brighter and flatter than the island's ground beside them.
 
-1. Find the names. `export_glb {"stage": "sea", "room": 11}` writes the room (here Windfall) as a GLB whose
-   materials carry the game's names; `list_kit_materials {"stage": "sea", "room": 11}` lists them with their
-   textures. Import the export into Blender as a reference.
-2. In your model, name each surface's material exactly as the game's (append the material from the
-   reference, or type its name; Blender's `.001` suffix is ignored) and **delete its Image Texture node**: a
-   game material never carries a picture, since a package never contains the game's pictures. To keep your
-   own names, map them on import instead: `"materials": {"my_grass": "<the game material>"}`.
-3. Materials with pictures of your own (a new sign) keep their Image Texture; one model can mix both.
-4. Optionally add a colour attribute (vertex colours, exported as `COLOR_0`) to shade it as the game's
-   ground is (darker at the foot of cliffs); white draws at full brightness.
-5. Import it with the room it takes the materials from: `import_model {"file": "...", "kit": {"stage":
-   "sea", "room": 11}}`. It is built from your game files, and Link can stand on its `_col` mesh as above.
+**In the editor.** Outliner → **Models** → **Import a model (.glb)**:
+
+1. Choose your `.glb` and tick **Use the game's materials (kit)**. The **Room** is the one Link stands in
+   (for example *Windfall Island (sea 11)*); pick another from the list (type to filter) for another room's
+   materials.
+2. The room's materials are listed with their textures' names. Name each surface's material in Blender
+   exactly as one of them (**Copy names** puts the list on the clipboard; Blender's `.001` suffix is ignored)
+   and **delete its Image Texture node**: a game material never carries a picture, since a package never
+   contains the game's pictures. Materials with pictures of your own (a new sign) keep their Image Texture;
+   one model can mix both.
+3. **Your model's materials** then shows what each of your materials becomes: green, a game material; blue,
+   its own texture; red, a material without a texture that the room doesn't have. Rename a red one in
+   Blender, or keep your own name and pick the game material it stands for in the list next to it (the
+   import's name mapping). **Import into the package** waits until no material is red.
+4. After the import the dialog lists which materials draw with the game's textures and which keep their
+   own. The model is built from your game files, and Link can stand on its `_col` mesh as above.
+
+To see the room's materials in Blender, export the room as a reference: `export_glb {"stage": "sea",
+"room": 11}` writes it (here Windfall) as a GLB whose materials carry the game's names. Optionally add a
+colour attribute (vertex colours, exported as `COLOR_0`) to shade your model as the game's ground is
+(darker at the foot of cliffs); white draws at full brightness.
+
+**With a tool client (MCP).** `list_kit_materials {"stage": "sea", "room": 11}` lists the room's materials
+with their textures; `check_model {"file": "...", "kit": {"stage": "sea", "room": 11}}` says which of your
+model's materials are the room's (`kit_report`); `import_model {"file": "...", "kit": {"stage": "sea",
+"room": 11}}` imports it, with `"materials": {"my_grass": "<the game material>"}` to map your own names.
+A material without a texture that is none of the room's is refused with the room's names.
 
 The details, limits and the costs are in [Game materials](world-objects.md#game-materials) and [Game materials on
 your own sea models](world-objects.md#game-materials-on-your-own-sea-models).
+
+### Replacing, watching and removing a model
+
+Each model in Outliner → **Models** has three actions:
+
+- **Replace from file…** imports a new version of the model under the same name (for example after you
+  changed it in Blender). Every placement that uses it keeps its place and shows the new version as soon as
+  it is prepared (the status bar says so), its own `_col` collision included. The new file is fixed and
+  checked as an import is; a model with game materials keeps its room and its name mapping. When placements
+  stand on the model's collision, the new file needs its `_col` mesh too, and a model that placements use
+  stays static or animated as it was (import a new model to change that). The version before is kept as
+  `models/.previous/<file>` in the package (hidden, never exported); Replace isn't an undo step, so replace
+  again with the older file to go back.
+- **Watch file** (off by default): while it is on, saving the file again (for example exporting from
+  Blender over it) replaces the model by itself. The editor waits until the file has stayed the same for a
+  second and is a whole `.glb` (one still being written is left alone), then replaces it once per change.
+  It watches the file the model was imported or last replaced from in this editor session, and it is off
+  again after a restart.
+- **Remove** takes the model out of the mod. When placements use it, the confirmation lists them and offers
+  **Remove those too** (the model and those placements go together) or **Cancel**; a model that an item
+  holds (its held model) can't be removed until the item has another one. Removing is one undo step:
+  **Undo** brings the model, its placements and its file back. The file waits in `models/.removed`
+  (hidden, never exported).
+
+With a tool client: `replace_model {"model": "windfall_ext", "file": "..."}`, `watch_model {"model":
+"windfall_ext", "on": true}` and `remove_model {"model": "windfall_ext", "actors": true, "confirm": true}`;
+`list_model_files` says where each model came from, whether it is watched and what uses it. The game asks
+you before a tool client replaces a model or starts watching its file.
 
 ### When a model doesn't show
 
@@ -666,7 +709,7 @@ its lanes under the step bars, on the demo's own frames (30 a second; the ruler 
 
 Click a key to select it; drag it to another frame; **Delete** removes it. **Add key** on a lane adds a key
 at the cursor: for the camera from the fly camera's view, for an actor where the selected key's handle is
-or at Link. The inspector shows the selected key's value, the lane's curve (linear, smooth, bspline,
+or at Link (an actor's first position key goes to Link). The inspector shows the selected key's value, the lane's curve (linear, smooth, bspline,
 step) and the selected event's fields. Every change is one Undo step.
 
 **Actors** of the demo: under **Add an actor**, **What it is** picks the kind (the **(?)** says what each
@@ -702,7 +745,10 @@ the picture.
 
 What the game would refuse (a key past the end, rain above 1, an actor an attachment needs) is refused
 when you make the change, with the reason in the status line; a step that is wrong already (for example
-after editing its JSON) shows the reason in red above its lanes.
+after editing its JSON) shows the reason in red above its lanes. What the game plays but the demo camera
+would not show is named in yellow above the lanes, and in the status line when the scene plays: an actor
+whose position keys never come into the camera's view, or Link without a position key (he then stays
+where he stands).
 
 **Camera key** (at the top) is the quickest way to film a scene: fly to a view, press it, fly on, press it
 again. The first press adds a camera step; with that step selected, each further press adds a key to its
@@ -836,8 +882,8 @@ The editor's status bar shows **MCP: off**, **MCP: on, port N** or **MCP: connec
 ### Allow / Deny
 
 Some commands remove or replace things, or write outside the open mod: `new_mod`, `remove_actor`, `remove_letter`, `remove_chart`, `remove_item`,
-`revert_package`, `save_package`, `export_package`, `reset_quest`, `load_state`, and `import_model` when it
-replaces a file. The client
+`revert_package`, `save_package`, `export_package`, `reset_quest`, `load_state`, `remove_model`, and `import_model` when it
+replaces a file (`replace_model` and turning `watch_model` on ask without `"confirm"`). The client
 must ask for them with `"confirm": true`, and then the game asks **you**: a window "Claude wants to: …"
 with **Allow** and **Deny**. Nothing happens until you press **Allow**; without an answer within two
 minutes the request is refused. Undo works for these changes as in the editor.
@@ -911,9 +957,13 @@ separated by `;`, or `@file` with one such line per row. Results go to the log.
 | `pick` | `origin`, `direction`, `range`? | the first ground a ray meets |
 | `ground` | `position` | the ground height below a point |
 | `focus` | `id` or `position`, `distance`?, `yaw`?, `eye`?, `mod`? | fly the camera to an actor (a world object: its whole extent in view) or a place; `distance` back, looking along `yaw` degrees, or from `eye` (any height, below an island say) |
-| `check_model` | `file` | check a `.glb` file; `import_fixes` lists what the import would change ([What the import fixes](#what-the-import-fixes-for-you)) |
+| `check_model` | `file`, `kit`?, `materials`?, `material`? | check a `.glb` file; `import_fixes` lists what the import would change ([What the import fixes](#what-the-import-fixes-for-you)); with `kit`, checked as a model with game materials and `kit_report` says which of its materials are the room's, which have their own texture and which are neither |
 | `import_model` | `file`, `id`?, `confirm`?, `kit`?, `materials`?, `material`?, `mod`? | copy a `.glb` into the mod and add the model, fixed where it can be (`fixes`); with `kit`, a model with game materials ([Game materials](world-objects.md#game-materials)) |
 | `set_model_kit` | `model`, `kit`?, `materials`?, `material`?, `mod`? | change a kit model's kit room and material names; built again, live |
+| `replace_model` | `model`, `file`?, `mod`? | a model's new version under the same id: its placements keep their places and show it, collision included, when it is prepared; the file before is kept as `models/.previous/<file>`; not an undo step ([Replacing, watching and removing a model](#replacing-watching-and-removing-a-model)) |
+| `watch_model` | `model`, `on`, `file`?, `mod`? | watch the model's file for this session: a change that has settled replaces the model by itself |
+| `remove_model` | `model`, `confirm`, `actors`?, `mod`? | remove a model (one undo step); refused while placements use it unless `actors` is true (they go with it) and while an item holds it |
+| `list_model_files` | `mod`? | the open mod's models: the file each came from in this session, whether it is watched, its placements and the items that hold it |
 | `reload_model` | `model`, `mod`? | a model's changed file in the package: the import's fixes applied to it; a kit model is built again and its actors take it live, another model at the next start |
 | `place_world_object` | `id`, `model`, `collision`, `stage`, `room`, `position`, `behaviour`?, `buoyancy`?, `drift`?, `anchor`?, `grapple_points`?, `distant`?, `shoreline`?, `chart_marker`?, `arrival`?, `calm_water`?, `rotation`?, `scale`?, `mod`? | place a static, floating or drifting object of the mod with collision (one Undo step) |
 | `set_world_object` | `id`, `collision`?, `behaviour`?, `buoyancy`?, `drift`?, `anchor`?, `grapple_points`?, `distant`?, `shoreline`?, `chart_marker`?, `arrival`?, `calm_water`?, `mod`? | change a world object's collision, behaviour and motion together (`null` removes one) |

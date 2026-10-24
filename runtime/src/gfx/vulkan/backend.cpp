@@ -3402,7 +3402,7 @@ void swap() {
     gfx::display_input_plan(inputPlan);
   }
   // Menu and host toasts: built once at the selected window size, including present dumps
-  if(overlay::guesthud::active())overlay::guesthud::set_tv_region(inputPlan.tv.x,inputPlan.tv.y,inputPlan.tv.w,inputPlan.tv.h,!inputPlan.drc_only);
+  overlay::guesthud::set_tv_region(inputPlan.tv.x,inputPlan.tv.y,inputPlan.tv.w,inputPlan.tv.h,!inputPlan.drc_only);
   const float overlayWidth = (plan.dw > 0 ? plan.dw : layerW) /
       (stereo::frame.mode == stereo::FullSBS ? 2.0f : 1.0f);
   using overlay::window_target::Window;

@@ -1,5 +1,6 @@
 // game_layouts (runtime/src/mods/game_layouts.h): reading layout textures and panes back. The archives are
 // written by the port's own layout writer (lyt_build), so no game file is needed.
+#include <algorithm>
 #include <cassert>
 #include <cstdarg>
 #include <cmath>
@@ -112,6 +113,12 @@ static void layout_panes_and_material() {
       ]})";
     const auto files = lyt_build::build_files(json, ".");
     const game_layouts::Layout lay = game_layouts::parse_bflyt(files.at("blyt/T_00.bflyt"));
+    // Authored native window materials can have trailing padding spaces.
+    Bytes padded = files.at("blyt/T_00.bflyt");
+    const auto name = std::search(padded.begin(), padded.end(), "M_00", "M_00" + 4);
+    assert(name != padded.end());
+    *(name + 4) = ' ';
+    assert(game_layouts::parse_bflyt(padded).materials.count("M_00") == 1);
     const game_layouts::Pane* room = lay.find("P_Room_00");
     assert(room && room->kind == "pic1" && room->texture == "Tex_00^l" && room->material == "M_00");
     assert(std::fabs(room->x - (0.5f * (100 - 308))) < 1e-3f && std::fabs(room->y - (0.5f * (-40 - 295))) < 1e-3f);
@@ -127,6 +134,24 @@ static void layout_panes_and_material() {
     // linear material colours, shown as sRGB: 184 -> 221; 30 -> 96; 5 + (49 - 5) * 128 / 255 -> 92
     assert(std::abs(int(img.rgba[0]) - 221) <= 1 && std::abs(int(img.rgba[1]) - 96) <= 1 && std::abs(int(img.rgba[2]) - 92) <= 1);
     assert(img.rgba[3] == 255 && img.srgb);
+}
+
+static void text_style() {
+    const auto files = lyt_build::build_files(R"({"name":"Text", "size":[800,600], "panes":[
+      {"type":"null", "name":"Parent", "size":[400,300], "scale":[0.5,0.75], "children":[
+        {"type":"text", "name":"Label", "size":[200,80], "text":"Example", "font_size":[40,60],
+         "text_material":{"white":[20,30,40,255]},
+         "shadow":{"offset":[2,-4],"white":[100,200,50,128],"colors":[[255,128,255,200],[255,128,255,200]]}},
+        {"type":"text", "name":"Plain", "size":[200,80], "text":"Plain"}
+      ]}
+    ]})", ".");
+    const auto layout = game_layouts::parse_bflyt(files.at("blyt/Text.bflyt"));
+    const auto& t = layout.find("Label")->text;
+    assert(t.width == 20 && t.height == 45 && t.shadow);
+    assert(t.shadow_x == 1 && t.shadow_y == 3); // layout +Y is up; screen +Y is down
+    assert(t.ink.r == 20 && t.ink.g == 30 && t.ink.b == 40 && t.ink.a == 255);
+    assert(t.shade.r == 100 && t.shade.g == 100 && t.shade.b == 50 && t.shade.a == 100);
+    assert(!layout.find("Plain")->text.shadow);
 }
 
 static void enlarging() {
@@ -153,6 +178,7 @@ static void enlarging() {
 }
 
 int main() {
+    text_style();
     enlarging();
     exact_rgba8();
     bc_flat_blocks();

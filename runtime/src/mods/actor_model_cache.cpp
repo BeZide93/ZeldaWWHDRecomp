@@ -24,7 +24,8 @@ std::map<std::pair<std::string,std::string>,unsigned> running;      // (mod, mod
 void check(bool ok,const char* reason){if(!ok)exception_report::raise(reason);}
 std::string prepare_once(const std::string& mod,const story_notebook::ManifestModel& model,
                          const std::string& package_dir,const std::string& data_dir,
-                         const std::vector<std::string>& python,const std::string& tool,const std::string& game_dir,bool collision,bool shoreline,const std::string& material_in);
+                         const std::vector<std::string>& python,const std::string& tool,const std::string& game_dir,bool collision,bool shoreline,const std::string& material_in,
+                         unsigned generation);
 }
 std::string plain_reason(std::string text){
     std::string out;
@@ -49,12 +50,13 @@ void clear_failure(const std::string& mod,const std::string& model){std::lock_gu
 bool preparing(const std::string& mod,const std::string& model){std::lock_guard guard(mutex);return running.contains({mod,model});}
 std::string prepare(const std::string& mod,const story_notebook::ManifestModel& model,
                     const std::string& package_dir,const std::string& data_dir,
-                    const std::vector<std::string>& python,const std::string& tool,const std::string& game_dir,bool collision,bool shoreline,const std::string& material_in){
+                    const std::vector<std::string>& python,const std::string& tool,const std::string& game_dir,bool collision,bool shoreline,const std::string& material_in,
+                    unsigned generation){
     const std::pair<std::string,std::string> key{mod,model.id};
     {std::lock_guard guard(mutex);++running[key];}
     struct Done {const std::pair<std::string,std::string>& key;~Done(){std::lock_guard guard(mutex);if(!--running[key])running.erase(key);}} done{key};
     try {
-        auto identity=prepare_once(mod,model,package_dir,data_dir,python,tool,game_dir,collision,shoreline,material_in);
+        auto identity=prepare_once(mod,model,package_dir,data_dir,python,tool,game_dir,collision,shoreline,material_in,generation);
         clear_failure(mod,model.id);
         return identity;
     } catch(const std::exception& e) {note_failure(mod,model.id,e.what());throw;}
@@ -62,7 +64,8 @@ std::string prepare(const std::string& mod,const story_notebook::ManifestModel& 
 namespace {
 std::string prepare_once(const std::string& mod,const story_notebook::ManifestModel& model,
                          const std::string& package_dir,const std::string& data_dir,
-                         const std::vector<std::string>& python,const std::string& tool,const std::string& game_dir,bool collision,bool shoreline,const std::string& material_in){
+                         const std::vector<std::string>& python,const std::string& tool,const std::string& game_dir,bool collision,bool shoreline,const std::string& material_in,
+                         unsigned generation){
     std::lock_guard preparing(prepare_mutex);namespace fs=std::filesystem;
     const bool owner_ok=!mod.empty()&&mod.size()<=64&&mod.front()!='.'&&std::all_of(mod.begin(),mod.end(),[](unsigned char c){return (c>='a'&&c<='z')||(c>='0'&&c<='9')||c=='_'||c=='-'||c=='.';});
     check(owner_ok&&story_mail::valid_id(model.id),"Invalid model owner or id");
@@ -71,7 +74,7 @@ std::string prepare_once(const std::string& mod,const story_notebook::ManifestMo
     check(!package_dir.empty()&&!data_dir.empty()&&!game_dir.empty()&&!python.empty()&&!tool.empty(),"Static model conversion tools are unavailable");
     auto input=fs::path(package_dir);for(const auto& part:fs::path(model.source)){input/=part;check(!fs::is_symlink(input),"Model source paths may not use symlinks");}
     check(fs::is_regular_file(input)&&fs::file_size(input)<=8*1024*1024,"Missing or oversized static model source");
-    const auto identity="mod"+mods::hash::sha256_text(mod+std::string(1,'\0')+model.id).substr(0,28);
+    const auto identity="mod"+mods::hash::sha256_text(mod+std::string(1,'\0')+model.id+(generation?std::string(1,'\0')+std::to_string(generation):std::string())).substr(0,28);
     const auto destination=fs::path(data_dir)/"models"/(identity+".szs");
     {
         std::lock_guard guard(mutex);auto old=entries.find(identity);

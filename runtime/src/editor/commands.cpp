@@ -251,7 +251,11 @@ const std::vector<CommandInfo> kCommands = {
     {"set_drops", "Sets what an enemy or prop drops: up to eight of the mod's items.", {{"id", "string", "", true}, {"drops", "array", "[{item: item:<id>, quantity}]", true}, {"mod", "string", ""}}, true},
     {"preview_dialogue", "Shows an actor's dialogue (or given lines) in the game's own message box; close hides it.",
      {{"id", "string", "the actor"}, {"lines", "any", "lines instead of the actor's"}, {"close", "boolean", "hide the box"}, {"mod", "string", ""}}},
-    {"check_model", "Checks a .glb file for the game: size, triangles, texture, bones, clips and material; import_fixes lists what the import changes to make it fit (several objects merged, strips and loose edges, vertex colours, blended materials, texture sizes).", {{"file", "string", "the .glb file", true}}},
+    {"check_model", "Checks a .glb file for the game: size, triangles, texture, bones, clips and material; import_fixes lists what the import changes to make it fit (several objects merged, strips and loose edges, vertex colours, blended materials, texture sizes). With kit, it is checked as import_model with kit checks it and kit_report says which of its materials are the room's (game), have their own texture (own) or are neither (unknown: import_model refuses those).",
+     {{"file", "string", "the .glb file", true},
+      {"kit", "object", "{stage, room}: check it as a model with that room's materials"},
+      {"materials", "object", "a kit model's material names -> the kit room's materials"},
+      {"material", "string", "the kit room's material for a texture-free material that names none"}}},
     {"import_model", "Copies a .glb file into the open mod's models folder (fixed where it breaks a rule the editor can repair; fixes says what changed), adds it to the package and prepares it for the game. A model made away from its origin (on an island export) is placed at the room's origin by add_actor. With kit, its texture-free materials are game materials of that room (docs/world-objects.md#game-materials), built from your game files.",
      {{"file", "string", "the .glb file", true}, {"id", "string", "the model's id (default: the file name)"}, {"confirm", "boolean", "replace a different file of the same name"},
       {"kit", "object", "{stage, room}: the room of the game whose materials the model's texture-free materials name (a kit model)"},
@@ -264,6 +268,13 @@ const std::vector<CommandInfo> kCommands = {
      true},
     {"reload_model", "Takes a model's changed file in the package (after you exported it again from Blender): the import's fixes are applied to it; a kit model is built again from your game files and the actors drawing it take it while the game runs, another model at the next start.",
      {{"model", "string", "the model's id", true}, {"mod", "string", ""}}},
+    {"replace_model", "Replaces an imported model's file with a new .glb under the same id (fixed as import_model fixes it; a kit model keeps its room and names): every placement using it keeps its place and shows the new version, its collision included, as soon as it is prepared. The file before is kept as models/.previous/<file>. Not an undo step (replace it again to go back). Without file: the file it was last imported or replaced from.",
+     {{"model", "string", "the model's id", true}, {"file", "string", "the new .glb file"}, {"mod", "string", ""}}},
+    {"remove_model", "Removes an imported model from the mod (an undo step). Refused while placements use it (the error lists them) unless actors is true, which removes those placements in the same step; refused while an item holds it. Its file goes to models/.removed and an undo brings it back.",
+     {{"model", "string", "the model's id", true}, {"actors", "boolean", "also remove the placements that use it"}, {"confirm", "boolean", "must be true", true}, {"mod", "string", ""}}, true, true},
+    {"watch_model", "Watches an imported model's file (for this editor session; off by default): when the file changes on disk and has stayed the same for a second, replace_model runs by itself. Without file: the file it was last imported or replaced from.",
+     {{"model", "string", "the model's id", true}, {"on", "boolean", "true watches, false stops", true}, {"file", "string", "the .glb file to watch"}, {"mod", "string", ""}}},
+    {"list_model_files", "The open mod's models: the file each was imported or replaced from in this session, whether it is watched, the placements that use it and the items that hold it.", {{"mod", "string", ""}}},
     {"model_clips", "A model's animation clips (for a route's walk and idle clips).", {{"model", "string", "the model's id", true}, {"mod", "string", ""}}},
     {"check_package", "Every problem of the open mod's package, each with the actor, model, scene or quest it is about.", {{"mod", "string", ""}}},
     {"export_package", "Checks the open mod and writes its package (manifest and its own files) into a new or empty folder.",
@@ -379,7 +390,7 @@ const std::vector<CommandInfo> kCommands = {
      {{"scene", "string", "", true}, {"step", "any", "number or id", true}, {"frame", "number", "frames from the demo's start", true}, {"move", "boolean", "move the fly camera (default true)"}, {"mod", "string", ""}}},
     {"set_demo_key", "Sets a key of a demo lane (added when the lane has none at that frame): lanes camera.eye, camera.target, camera.fovy, camera.roll, <actor>.position, <actor>.rotation, <actor>.scale.",
      {{"scene", "string", "", true}, {"step", "any", "number or id", true}, {"lane", "string", "", true}, {"frame", "integer", "0..the demo's frames", true},
-      {"value", "any", "{x, y, z} in the demo's own coordinates, or a number (fovy, roll)"}, {"from", "string", "camera (the fly camera's eye for camera.eye, its target for camera.target) or link (Link's position): instead of value"},
+      {"value", "any", "{x, y, z} in the demo's own coordinates, or a number (fovy, roll)"}, {"from", "string", "camera (the fly camera's eye for camera.eye, its target for camera.target) or link (Link's position): instead of value (given both, value is used when that isn't available)"},
       {"curve", "string", "linear, smooth, bspline or step"}, {"mod", "string", ""}},
      true},
     {"move_demo_key", "Moves a demo key to another frame.", {{"scene", "string", "", true}, {"step", "any", "", true}, {"lane", "string", "", true}, {"frame", "integer", "", true}, {"to", "integer", "", true}, {"mod", "string", ""}}, true},
@@ -1307,6 +1318,7 @@ bool Session::restore(const std::string& mod, const Value& manifest, Value& resu
     const bool story_changed = story_reload::story_changed(p->manifest, manifest);
     const Value before = p->manifest;
     p->manifest = manifest;
+    sync_model_files(*p, before);  // a removed model's file back (undo), or aside again (redo)
     result["mod"] = mod;
     if (paths_changed) apply_paths(*p, result);
     if (actors_changed) apply_live(*p, before, result);

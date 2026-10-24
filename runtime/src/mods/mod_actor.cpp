@@ -42,7 +42,7 @@
 namespace mod_actor { namespace {
 // The extension is guest memory: model, resource phase and collision survive full states.
 constexpr uint32_t Phase=0x3AC,Model=0x3B4,Stts=0x3B8,Cyl=0x3F4,Name=0x524,Safe=0x564,Matrix=0x56C,Source=0x59C,Talk=0x5E0,TalkStatus=0x5E4,HeapBaseline=0x630,HeapStarted=0x650,Morf=0x654,LookObject=0x658,LookVtable=0x660,LookAngles=0x670,Motion=0x67C,SavedMotion=0x74C,SceneLease=0x81C,SavedClip=0x820,SavedFrame=0x824,SavedLoop=0x828,ClipIndex=0x82C,ClipLoop=0x830,Radius=0x834,Height=0x838,CollisionFlags=0x83C,BehaviorHandle=0x840,Userdata=0x850,HitSequence=0x950,Ground=0x954,GroundReady=0x9A8,BehaviorCreated=0x9AC,HitPacket=0x9B0,PostObject=0x9F0,PostVtable=0x9F8,HeadAnchor=0xA08,UpperAnchor=0xA14,Combat=0xA20,AttackStts=0xA48,AttackCyl=0xA84,AttackSource=0xBB4,Heart=0xBF8,Knockback=0xC18,KnockbackLeft=0xC24,Quarantined=0xC28,CombatIdentity=0xC40,Acch=0xC80,AcchCircles=0xE44,AcchOld=0xF04,AcchSpeed=0xF10,AcchReady=0xF1C,Carry=0xF40,PieceSecond=0xF60,PieceAnimation=0xF64,CarryMotion=0xF70,Size=kInstanceBytes; // PieceSecond: a game piece's second model, PieceAnimation: its texture animation (pieces never carry)
-struct Decl {std::string mod,archive;story_notebook::ManifestActor spec;int index;std::function<void()> talked;story_notebook::WorldPoint minimum,maximum;bool skinned=false;std::vector<std::string> clips;ModelRig rig;int head=-1,upper=-1;bool hits=false;CombatRewardSink reward;story_actors::identity::Fingerprint fingerprint{};std::function<bool()> carry_break;TalkProvider talk_provider;std::shared_ptr<const story_world_collision::mesh::Mesh> collision;unsigned visual_role=0;std::vector<story_actors::identity::Fingerprint> visual_fingerprints;story_actors::identity::Fingerprint first_layout_fingerprint{};bool has_first_layout=false;};
+struct Decl {std::string mod,archive;story_notebook::ManifestActor spec;int index;std::function<void()> talked;story_notebook::WorldPoint minimum,maximum;bool skinned=false;std::vector<std::string> clips;ModelRig rig;int head=-1,upper=-1;bool hits=false;CombatRewardSink reward;story_actors::identity::Fingerprint fingerprint{};std::function<bool()> carry_break;TalkProvider talk_provider;std::shared_ptr<const story_world_collision::mesh::Mesh> collision;unsigned visual_role=0;std::vector<story_actors::identity::Fingerprint> visual_fingerprints;story_actors::identity::Fingerprint first_layout_fingerprint{};bool has_first_layout=false;bool removed=false;};
 std::recursive_mutex world_mutex;std::string world_game_directory;PlacementProvider placement_provider;
 std::map<std::pair<std::string,int>,story_world_placement::Index> placement_indexes;
 std::vector<Decl> declarations;
@@ -814,12 +814,14 @@ bool open_water(uint16_t s){return s==story_world_collision::mesh::SurfaceWater|
 // surface: he burns in it, and things placed on it would sink)
 bool standing_ground(uint16_t s){return s!=story_world_collision::mesh::SurfaceWater&&s!=story_world_collision::mesh::SurfaceVoid&&s!=story_world_collision::mesh::SurfaceLava;}
 }
+// an actor the editor removed keeps its declaration (an undo brings it back) but is no ground for the editor's checks
+void set_removed(uint32_t token,bool removed){std::lock_guard guard(world_mutex);if(token&&token<=declarations.size())declarations[token-1].removed=removed;}
 bool object_grounds(const std::string&stage,const std::vector<story_notebook::WorldPoint>&above,std::vector<float>&heights,std::vector<bool>&found){
     std::lock_guard guard(world_mutex);heights.assign(above.size(),0);found.assign(above.size(),false);bool any=false;
     for(const auto&d:declarations){
         // a static object's own collision (an island ground, a terrace, a pier, a house); a body of water is no
         // ground of its own (its banks lie on another's), a floating or drifting object moves
-        if(!d.collision||d.spec.stage!=stage||d.spec.behaviour!="static"||d.spec.water_body())continue;
+        if(d.removed||!d.collision||d.spec.stage!=stage||d.spec.behaviour!="static"||d.spec.water_body())continue;
         // only an object under one of the points is placed (a ray's many steps ask one or two places at a time)
         story_world_placement::Bounds b;if(!world_bounds(d,d.spec.position,b))continue;
         if(std::none_of(above.begin(),above.end(),[&](const story_notebook::WorldPoint&p){return p.x>=b.minimum.x&&p.x<=b.maximum.x&&p.z>=b.minimum.z&&p.z<=b.maximum.z&&p.y>=b.minimum.y;}))continue;

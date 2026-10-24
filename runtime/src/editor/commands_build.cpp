@@ -1,6 +1,7 @@
 // World editor command layer: building new content (commands.h). No game dependencies: the game's side
 // (ground checks, model preparation, the message box, Play) is reached through Host.
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <filesystem>
@@ -459,6 +460,195 @@ bool check_kit_model_file(const std::string& path, const Value& p, Value& info, 
     info["own_texture_bytes"] = double(k.own_texture_bytes);
     info["clips"] = array();
     return true;
+}
+
+Value kit_material_report(const std::vector<uint8_t>& glb, const Value& listed, const Value& declaration) {
+    Value out;
+    out["materials"] = array();
+    for (const char* k : {"game", "own", "unknown"}) out[k] = array();
+    if (glb.size() < 20 || std::memcmp(glb.data(), "glTF", 4)) return out;
+    const uint32_t json_length = uint32_t(glb[12]) | uint32_t(glb[13]) << 8 | uint32_t(glb[14]) << 16 | uint32_t(glb[15]) << 24;
+    if (json_length > glb.size() - 20) return out;
+    Value doc;
+    try {
+        doc = mods::json::parse(std::string(reinterpret_cast<const char*>(glb.data() + 20), json_length));
+    } catch (...) {
+        return out;
+    }
+    // the room's names, the mapping and the default, as kit_model.py's Names resolves them (a Blender ".001" ignored)
+    std::set<std::string> game;
+    for (const auto& m : listed.get("materials").array) game.insert(m.get("material").string());
+    const auto plain = [](std::string n) {
+        const auto dot = n.rfind('.');
+        if (dot != std::string::npos && n.size() - dot == 4 && std::all_of(n.begin() + long(dot) + 1, n.end(), [](unsigned char c) { return c >= '0' && c <= '9'; }))
+            n.resize(dot);
+        return n;
+    };
+    const std::string fallback = declaration.get("material").type == Value::String ? declaration.get("material").text : std::string();
+    const auto resolve = [&](const std::string& name) -> std::string {
+        for (const auto& n : {name, plain(name)})
+            if (declaration.get("materials").get(n).type == Value::String) return declaration.get("materials").get(n).text;
+        for (const auto& n : {name, plain(name)})
+            if (game.count(n)) return n;
+        return {};
+    };
+    // the visible primitives' materials, in the file's order (a node or mesh named *_col is collision only)
+    const auto& materials = doc.get("materials").array;
+    std::vector<int> used;
+    for (const auto& node : doc.get("nodes").array) {
+        if (node.get("mesh").type != Value::Number) continue;
+        const size_t mi = size_t(node.get("mesh").number);
+        if (mi >= doc.get("meshes").array.size()) continue;
+        const auto& mesh = doc.get("meshes").array[mi];
+        if (node.get("name").string().ends_with("_col") || mesh.get("name").string().ends_with("_col")) continue;
+        for (const auto& p : mesh.get("primitives").array) {
+            const int m = p.get("material").type == Value::Number ? int(p.get("material").number) : -1;
+            if (std::find(used.begin(), used.end(), m) == used.end()) used.push_back(m);
+        }
+    }
+    std::sort(used.begin(), used.end());
+    for (const int m : used) {
+        const Value* mat = m >= 0 && size_t(m) < materials.size() ? &materials[size_t(m)] : nullptr;
+        const std::string name = mat ? mat->get("name").string() : std::string();
+        Value e;
+        e["name"] = name;
+        if (mat && mat->get("pbrMetallicRoughness").get("baseColorTexture").type != Value::Null) {
+            e["kind"] = "own";
+        } else if (const std::string named = resolve(name); !named.empty()) {
+            e["kind"] = "game", e["game"] = named;
+        } else if (name.empty() || name.starts_with("col_") || !fallback.empty()) {
+            e["kind"] = "game", e["game"] = fallback.empty() ? listed.get("main").string() : fallback, e["default"] = true;
+        } else {
+            e["kind"] = "unknown";
+        }
+        out[e.get("kind").string()].array.push_back(Value(name));
+        out["materials"].array.push_back(e);
+    }
+    return out;
+}
+
+std::string kit_report_note(const Value& report, const Value& kit) {
+    const auto names = [](const Value& list) {
+        std::string s;
+        for (const auto& n : list.array) s += (s.empty() ? "" : ", ") + (n.string().empty() ? std::string("(unnamed)") : n.string());
+        return s;
+    };
+    const std::string room = kit.get("stage").string() + " room " + std::to_string(int(kit.get("room").number));
+    std::string s;
+    if (!report.get("game").array.empty()) s += "Game materials of " + room + ": " + names(report.get("game")) + ".";
+    if (!report.get("own").array.empty()) s += std::string(s.empty() ? "" : " ") + "Own textures: " + names(report.get("own")) + ".";
+    if (!report.get("unknown").array.empty())
+        s += std::string(s.empty() ? "" : " ") + "Not materials of " + room + " and without a texture: " + names(report.get("unknown")) + ".";
+    return s;
+}
+
+namespace {
+// A kit model's file against its room (Host::kit_materials): `report` (kit_material_report; null when the room can't be
+// read here) and false with `why` when a material without a texture is none of the room's (its build would fail).
+bool kit_materials_known(Host* host, const fs::path& file, const Value& declaration, Value& report, std::string& why) {
+    report = Value();
+    if (!host) return true;
+    std::string w;
+    const Value& kit = declaration.get("kit");
+    const Value listed = host->kit_materials(kit.get("stage").string(), unsigned(std::max(0.0, kit.get("room").number)), w);
+    if (!w.empty()) return true;
+    std::ifstream f(file, std::ios::binary);
+    const std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+    report = kit_material_report(bytes, listed, declaration);
+    const auto& unknown = report.get("unknown").array;
+    if (unknown.empty()) return true;
+    std::string names, room_names;
+    for (const auto& n : unknown) names += (names.empty() ? "\"" : ", \"") + n.string() + "\"";
+    for (const auto& m : listed.get("materials").array) room_names += (room_names.empty() ? "" : ", ") + m.get("material").string();
+    const bool many = unknown.size() > 1;
+    why = "the material" + std::string(many ? "s " : " ") + names + " ha" + (many ? "ve" : "s") + " no texture and " + (many ? "are" : "is") +
+          " not a material of " + kit.get("stage").string() + " room " + std::to_string(int(kit.get("room").number)) + ": name it as one of the room's (" +
+          room_names + "), map it with \"materials\" or give it a texture of its own";
+    return false;
+}
+
+// The actors that draw or stand on a model of the manifest (model, distant or shoreline model, collision mesh) and the
+// items that hold it: what removing it touches (issue #287).
+std::vector<std::string> model_actors(const Value& manifest, const std::string& id) {
+    std::vector<std::string> out;
+    for (const auto& a : manifest.get("actors").array)
+        if (a.get("model").string() == id || a.get("distant").get("model").string() == id || a.get("shoreline").get("model").string() == id ||
+            a.get("collision").get("mesh").string() == id)
+            out.push_back(a.get("id").string());
+    return out;
+}
+std::vector<std::string> model_items(const Value& manifest, const std::string& id) {
+    std::vector<std::string> out;
+    for (const auto& i : manifest.get("items").array)
+        if (i.get("held_model").string() == id) out.push_back(i.get("id").string());
+    return out;
+}
+
+// the last part of a path given as UTF-8 text (no conversion through the system's code page)
+std::string file_name(const std::string& path) {
+    const auto slash = path.find_last_of("/\\");
+    return slash == std::string::npos ? path : path.substr(slash + 1);
+}
+
+// A whole GLB on disk: its header's length is the file's size (a file still being written is shorter).
+bool whole_glb(const fs::path& file, uint64_t size) {
+    std::ifstream f(file, std::ios::binary);
+    uint8_t h[12] = {};
+    if (!f.read(reinterpret_cast<char*>(h), 12)) return false;
+    return std::memcmp(h, "glTF", 4) == 0 && static_models::le32(h + 8) == size;
+}
+}  // namespace
+
+void Session::sync_model_files(const Package& p, const Value& before, bool removing) {
+    if (p.dir.empty()) return;
+    const fs::path root = utf8_path(p.dir);
+    const auto in_models = [](const std::string& source) { return source.rfind("models/", 0) == 0 && source.find("..") == std::string::npos; };
+    const auto aside = [&](const std::string& source) { return root / "models" / ".removed" / utf8_path(source.substr(7)); };
+    std::set<std::string> now;
+    std::error_code ec;
+    for (const auto& m : p.manifest.get("models").array) {
+        const std::string source = m.get("source").string();
+        now.insert(source);
+        // back: a model the manifest has again (an undo of its removal) whose file was put aside
+        if (in_models(source) && set_aside_.count(p.mod + "/" + source) && !fs::exists(root / utf8_path(source), ec) && fs::is_regular_file(aside(source), ec))
+            fs::rename(aside(source), root / utf8_path(source), ec);
+    }
+    for (const auto& m : before.get("models").array) {
+        const std::string source = m.get("source").string();
+        if (!in_models(source) || now.count(source) || !fs::is_regular_file(root / utf8_path(source), ec)) continue;
+        if (!removing && !set_aside_.count(p.mod + "/" + source)) continue;  // only remove_model's files (an undone import keeps its file)
+        set_aside_.insert(p.mod + "/" + source);
+        // aside: a model the change dropped; models/.removed is hidden, so an export never takes it along
+        fs::create_directories(aside(source).parent_path(), ec);
+        fs::remove(aside(source), ec);
+        fs::rename(root / utf8_path(source), aside(source), ec);
+    }
+}
+
+std::vector<Value> Session::watch_due(int64_t now_ms) {
+    std::vector<Value> due;
+    for (auto& [key, w] : watches_) {
+        std::error_code ec;
+        const fs::path file = utf8_path(w.file);
+        const auto size = fs::file_size(file, ec);
+        if (ec) continue;  // gone for now (Blender writes a new file in its place): looked at again next time
+        const auto time = fs::last_write_time(file, ec);
+        if (ec) continue;
+        const int64_t mtime = int64_t(std::chrono::duration_cast<std::chrono::milliseconds>(time.time_since_epoch()).count());
+        if (mtime != w.seen_mtime || size != w.seen_size) {  // still changing: wait until it has been the same for a while
+            w.seen_mtime = mtime, w.seen_size = size, w.since = now_ms;
+            continue;
+        }
+        if ((mtime == w.mtime && size == w.size) || now_ms - w.since < kWatchSettleMs || !whole_glb(file, size)) continue;
+        w.mtime = mtime, w.size = size;  // once per change, whether the replace works or not
+        const auto slash = key.find('/');
+        Value v;
+        v["mod"] = key.substr(0, slash);
+        v["model"] = key.substr(slash + 1);
+        v["file"] = w.file;
+        due.push_back(v);
+    }
+    return due;
 }
 
 // ---------------------------------------------------------------- problems and export
@@ -1117,6 +1307,24 @@ Value Session::dispatch_build(const std::string& command, const Value& p, std::s
         return r;
     }
     if (command == "check_model") {
+        if (p.get("kit").type != Value::Null) {
+            // with a kit room (the import dialog's "Use the game's materials"): checked as import_model with kit checks it,
+            // and which of its materials are the room's ("kit_report"; "kit_report_error" when the room can't be read)
+            if (!check_kit_model_file(text(p, "file"), p, r, why)) return r;
+            if (host_) {
+                std::string w;
+                const Value listed = host_->kit_materials(p.get("kit").get("stage").string(), unsigned(std::max(0.0, p.get("kit").get("room").number)), w);
+                if (w.empty()) {
+                    std::ifstream f(utf8_path(text(p, "file")), std::ios::binary);
+                    const std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+                    r["kit_report"] = kit_material_report(bytes, listed, p);
+                } else {
+                    r["kit_report_error"] = w;
+                }
+            }
+            ok = true;
+            return r;
+        }
         std::vector<uint8_t> bytes;  // what import_model would put into the package ("import_fixes": what it changes)
         if (!import_model_file(text(p, "file"), bytes, r, why)) return r;
         ok = true;
@@ -1146,6 +1354,10 @@ Value Session::dispatch_build(const std::string& command, const Value& p, std::s
         std::vector<uint8_t> fixed;  // a static or skinned model as the package keeps it (model_import.h)
         if (kit ? !check_kit_model_file(text(p, "file"), p, info, why) : !import_model_file(text(p, "file"), fixed, info, why)) return r;
         const fs::path from = utf8_path(text(p, "file"));
+        // a kit model: which of its materials are the room's (said after the import); one with no texture that the room
+        // doesn't have would make the build fail later, so it is refused now with the names to choose from
+        Value kit_report;
+        if (kit && !kit_materials_known(host_, from, p, kit_report, why)) return r;
         const std::string id = p.get("id").type == Value::String ? p.get("id").text : slug(from.stem().string());
         if (!id_ok(id)) return why = "a model id is 1 to 32 lower-case letters, digits, '-', '_' or '.'", r;
         if (by_id(pkg->manifest.get("models"), id)) return why = "the mod has a model \"" + id + "\" already", r;
@@ -1192,6 +1404,8 @@ Value Session::dispatch_build(const std::string& command, const Value& p, std::s
         }
         r["model"] = entry;
         r["info"] = info;
+        model_sources_[pkg->mod + "/" + id] = text(p, "file");  // Replace from file and Watch file start here
+        if (kit_report.type == Value::Object) r["kit_report"] = kit_report;
         // what the import changed to make the file fit (model_import.h): said first, the file in the package is the fixed one
         std::string fixes;
         for (const auto& n : info.get("import_fixes").array) fixes += (fixes.empty() ? "" : " ") + n.string();
@@ -1201,9 +1415,11 @@ Value Session::dispatch_build(const std::string& command, const Value& p, std::s
             // a model with collision of its own is prepared with it, so "Your model" can stand on it (issue #280)
             Value request = entry;
             if (!kit && info.get("kind").string() == "static" && model_has_collision_mesh(pkg->dir, pkg->manifest, id)) request["collision"] = true;
+            if (removed_models_.count(pkg->mod + "/" + id)) request["replace"] = true;  // the id had another model in this session
             if (host_->prepare_model(pkg->mod, pkg->dir, request, note, w)) r["note"] = note;
             else r["note"] = "the model is in the package; it is prepared when the game starts (" + w + ")";
         }
+        if (kit_report.type == Value::Object) r["note"] = kit_report_note(kit_report, p.get("kit")) + (r.get("note").string().empty() ? std::string() : " " + r.get("note").string());
         if (!fixes.empty()) r["note"] = "Imported with changes: " + fixes + (r.get("note").string().empty() ? std::string() : " " + r.get("note").string());
         if (info.get("import_warnings").type == Value::Array) {
             r["warnings"] = info.get("import_warnings");
@@ -1261,6 +1477,218 @@ Value Session::dispatch_build(const std::string& command, const Value& p, std::s
         std::string note;
         ok = host_->prepare_model(pkg->mod, pkg->dir, entry, note, why);
         if (ok) r["note"] = note;
+        return r;
+    }
+    if (command == "replace_model") {
+        // a model's file again under the same id (issue #287): its placements keep their places and show the new
+        // version, collision included, when it is prepared. The file in the package is replaced; the one before is
+        // kept as models/.previous/<file> (hidden, never exported). Not an undo step: replace it again to go back.
+        Package* pkg = package(p, why);
+        if (!pkg) return r;
+        if (pkg->dir.empty()) return why = "the mod has no package folder", r;
+        const std::string id = text(p, "model");
+        const Value* md = by_id(pkg->manifest.get("models"), id);
+        if (!md) return why = "no model \"" + id + "\"", r;
+        const std::string key = pkg->mod + "/" + id;
+        std::string file = text(p, "file");
+        if (file.empty()) file = model_sources_.count(key) ? model_sources_[key] : std::string();
+        if (file.empty()) return why = "say which file replaces the model (\"file\")", r;
+        const bool kit = md->get("kind").string() == "kit";
+        Value info;
+        std::vector<uint8_t> fixed;
+        if (kit ? !check_kit_model_file(file, *md, info, why) : !import_model_file(file, fixed, info, why)) return r;
+        Value kit_report;
+        if (kit && !kit_materials_known(host_, utf8_path(file), *md, kit_report, why)) return r;
+        if (kit) {
+            std::ifstream f(utf8_path(file), std::ios::binary);
+            fixed.assign(std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>());
+        }
+        const std::string kind = info.get("kind").string();
+        const auto users = model_actors(pkg->manifest, id);
+        const std::string old_kind = md->get("kind").string("static");
+        if (!kit && kind != old_kind && !users.empty())
+            return why = "the model was " + old_kind + " and the new file is " + kind + "; placements use it (" + [&] {
+                std::string s;
+                for (const auto& u : users) s += (s.empty() ? "" : ", ") + u;
+                return s;
+            }() + "): import it as a new model instead", r;
+        // placements standing on the model's own collision need it in the new file too
+        const fs::path target = utf8_path(pkg->dir) / utf8_path(md->get("source").string());
+        const bool had_collision = !kit && model_has_collision_mesh(pkg->dir, pkg->manifest, id);
+        std::vector<std::string> standing;
+        for (const auto& a : pkg->manifest.get("actors").array)
+            if (a.get("collision").get("mesh").string() == id) standing.push_back(a.get("id").string());
+        std::error_code ec;
+        const fs::path previous = utf8_path(pkg->dir) / "models" / ".previous" / target.filename();
+        std::ifstream old_in(target, std::ios::binary);
+        const std::vector<uint8_t> old_bytes((std::istreambuf_iterator<char>(old_in)), std::istreambuf_iterator<char>());
+        old_in.close();
+        auto write = [&](const fs::path& where, const std::vector<uint8_t>& bytes) {
+            const fs::path tmp = where.string() + ".editor-tmp";
+            fs::create_directories(where.parent_path(), ec);
+            {
+                std::ofstream o(tmp, std::ios::binary | std::ios::trunc);
+                o.write(reinterpret_cast<const char*>(bytes.data()), std::streamsize(bytes.size()));
+                if (!o) return false;
+            }
+            fs::rename(tmp, where, ec);
+            return !ec;
+        };
+        if (!write(target, fixed)) return why = "cannot write " + md->get("source").string() + " in the package", r;
+        const bool has_collision = !kit && kind == "static" && model_has_collision_mesh(pkg->dir, pkg->manifest, id);
+        if (!standing.empty() && !has_collision) {
+            write(target, old_bytes);  // put back: the placements would lose their ground
+            std::string s;
+            for (const auto& u : standing) s += (s.empty() ? "" : ", ") + u;
+            return why = "the new file has no collision mesh (\"<name>_col\"), which " + s + (standing.size() > 1 ? " stand" : " stands") +
+                         " on: add it in Blender, or remove those placements first", r;
+        }
+        if (!old_bytes.empty() && old_bytes != fixed) write(previous, old_bytes);
+        if (kind != old_kind) {
+            // a model no placement uses yet may change between static and skinned
+            ok = change(*pkg, "Model " + id + " is " + kind, [&](Value& m, std::string&) {
+                for (auto& x : m["models"].array)
+                    if (x.get("id").string() == id) x["kind"] = kind;
+                return true;
+            }, r, why);
+            if (!ok) {
+                write(target, old_bytes);
+                return r;
+            }
+        }
+        model_sources_[key] = file;
+        if (auto w = watches_.find(key); w != watches_.end() && w->second.file == file) {  // the watch's own version now
+            const auto size = fs::file_size(utf8_path(file), ec);
+            const auto time = fs::last_write_time(utf8_path(file), ec);
+            if (!ec) w->second.size = size, w->second.mtime = int64_t(std::chrono::duration_cast<std::chrono::milliseconds>(time.time_since_epoch()).count());
+        }
+        Value entry = *by_id(pkg->manifest.get("models"), id);
+        r["model"] = entry;
+        r["info"] = info;
+        r["placements"] = array();
+        for (const auto& u : users) r["placements"].array.push_back(Value(u));
+        if (kit_report.type == Value::Object) r["kit_report"] = kit_report;
+        if (info.get("import_fixes").type == Value::Array) r["fixes"] = info.get("import_fixes");
+        std::string note = old_bytes == fixed ? "The file is the same as the model's: nothing changed." : "Replaced " + id + " from " + file_name(file) + ".";
+        if (old_bytes != fixed) {
+            if (users.empty()) note += " No placement uses it yet.";
+            else note += " " + std::to_string(users.size()) + (users.size() > 1 ? " placements show" : " placement shows") + " the new version when it is ready.";
+            if (had_collision != has_collision && has_collision) note += " It has collision of its own now: placements made from now on stand on it.";
+            if (host_) {
+                std::string w, prepared;
+                Value request = entry;
+                request["replace"] = true;
+                if (has_collision) request["collision"] = true;
+                if (!host_->prepare_model(pkg->mod, pkg->dir, request, prepared, w)) note += " It is prepared when the game starts (" + w + ").";
+                else if (!prepared.empty()) note += " " + prepared;
+            }
+        }
+        if (kit_report.type == Value::Object) note = kit_report_note(kit_report, md->get("kit")) + " " + note;
+        r["note"] = note;
+        r["changed"] = old_bytes != fixed;
+        ok = true;
+        return r;
+    }
+    if (command == "remove_model") {
+        // a model out of the mod (issue #287), one undo step: refused while placements use it unless "actors": true
+        // removes them with it; an item holding it is always said (change its held model first). The file goes to
+        // models/.removed (hidden, never exported) and comes back with an undo.
+        Package* pkg = package(p, why);
+        if (!pkg) return r;
+        const std::string id = text(p, "model");
+        if (!by_id(pkg->manifest.get("models"), id)) return why = "no model \"" + id + "\"", r;
+        const auto join = [](const std::vector<std::string>& v) {
+            std::string s;
+            for (const auto& x : v) s += (s.empty() ? "" : ", ") + x;
+            return s;
+        };
+        const auto items = model_items(pkg->manifest, id);
+        if (!items.empty()) return why = "the item" + std::string(items.size() > 1 ? "s " : " ") + join(items) + " hold" + (items.size() > 1 ? "" : "s") +
+                                         " model " + id + " (held_model): give " + (items.size() > 1 ? "them" : "it") + " another model first", r;
+        const auto users = model_actors(pkg->manifest, id);
+        const bool with_actors = p.get("actors").boolean;
+        if (!users.empty() && !with_actors)
+            return why = "placements use model " + id + ": " + join(users) + ". \"actors\": true removes them too", r;
+        const Value before = pkg->manifest;
+        ok = change(*pkg, "Remove model " + id + (users.empty() ? std::string() : " and " + std::to_string(users.size()) + (users.size() > 1 ? " placements" : " placement")),
+                    [&](Value& m, std::string&) {
+                        auto& models = m["models"].array;
+                        models.erase(std::remove_if(models.begin(), models.end(), [&](const Value& x) { return x.get("id").string() == id; }), models.end());
+                        if (models.empty()) m.object.erase("models");
+                        if (!users.empty()) {
+                            auto& actors = m["actors"].array;
+                            actors.erase(std::remove_if(actors.begin(), actors.end(),
+                                                        [&](const Value& a) { return std::find(users.begin(), users.end(), a.get("id").string()) != users.end(); }),
+                                         actors.end());
+                            if (actors.empty()) m.object.erase("actors");
+                        }
+                        return true;
+                    },
+                    r, why);
+        if (!ok) return r;
+        sync_model_files(*pkg, before, true);
+        watches_.erase(pkg->mod + "/" + id);
+        removed_models_.insert(pkg->mod + "/" + id);
+        r["model"] = id;
+        r["removed_actors"] = array();
+        for (const auto& u : users) r["removed_actors"].array.push_back(Value(u));
+        r["note"] = (r.get("note").string().empty() ? std::string() : r.get("note").string() + " ") + "Removed model " + id +
+                    (users.empty() ? std::string() : " and its placements " + join(users)) + ". Undo brings it back.";
+        return r;
+    }
+    if (command == "watch_model") {
+        // a model's file watched (issue #287): when it changes on disk (and has settled), it replaces the model by
+        // itself. For this editor session only; off by default.
+        Package* pkg = package(p, why);
+        if (!pkg) return r;
+        const std::string id = text(p, "model");
+        if (!by_id(pkg->manifest.get("models"), id)) return why = "no model \"" + id + "\"", r;
+        const std::string key = pkg->mod + "/" + id;
+        if (!p.get("on").boolean) {
+            watches_.erase(key);
+            r["watching"] = false;
+            r["note"] = "Model " + id + ": its file is no longer watched.";
+            ok = true;
+            return r;
+        }
+        std::string file = text(p, "file");
+        if (file.empty()) file = model_sources_.count(key) ? model_sources_[key] : std::string();
+        if (file.empty()) return why = "say which file to watch (\"file\"): the editor doesn't know where model " + id + " came from", r;
+        std::error_code ec;
+        if (!fs::is_regular_file(utf8_path(file), ec)) return why = "no file " + file, r;
+        Watch w;
+        w.file = file;
+        // the version on disk now counts as imported unless it differs from the package's (then the first change brings it)
+        w.size = fs::file_size(utf8_path(file), ec);
+        const auto time = fs::last_write_time(utf8_path(file), ec);
+        w.mtime = int64_t(std::chrono::duration_cast<std::chrono::milliseconds>(time.time_since_epoch()).count());
+        w.seen_mtime = w.mtime, w.seen_size = w.size;
+        watches_[key] = w;
+        model_sources_[key] = file;
+        r["watching"] = true;
+        r["file"] = file;
+        r["note"] = "Model " + id + ": " + file_name(file) + " is watched; saving it again (from Blender) replaces the model.";
+        ok = true;
+        return r;
+    }
+    if (command == "list_model_files") {
+        // the open mod's models with the file each came from in this session and whether it is watched (the panel)
+        Package* pkg = package(p, why);
+        if (!pkg) return r;
+        r["models"] = array();
+        for (const auto& m : pkg->manifest.get("models").array) {
+            const std::string key = pkg->mod + "/" + m.get("id").string();
+            Value v;
+            v["model"] = m.get("id");
+            v["file"] = model_sources_.count(key) ? model_sources_[key] : std::string();
+            v["watching"] = watches_.count(key) > 0;
+            v["placements"] = array();
+            for (const auto& u : model_actors(pkg->manifest, m.get("id").string())) v["placements"].array.push_back(Value(u));
+            v["items"] = array();
+            for (const auto& u : model_items(pkg->manifest, m.get("id").string())) v["items"].array.push_back(Value(u));
+            r["models"].array.push_back(v);
+        }
+        ok = true;
         return r;
     }
     if (command == "check_package") {

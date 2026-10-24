@@ -7,6 +7,63 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Scenes look the same every run, like on the Wii U.** The game rewrites some per-frame scene settings while the
+  renderer is still drawing the previous frame's display lists, so a few draws could pick up the next frame's values
+  and some pixels (the distant sea at Outset's cliff, the Forbidden Woods canopy) changed from run to run. Display
+  lists now draw with the settings as they were when the game submitted them, as the console's GPU does (Vulkan and
+  Metal). Cost on an Android phone: about 2% render time in the heaviest scene tested, none measurable elsewhere.
+- **Floating-point values are now loaded and stored exactly like on the Wii U.** The game's float loads and stores
+  now move the bits the way the console's CPU does: special values (signalling NaNs) are no longer changed on the way,
+  and a value that doesn't fit single precision is stored the way the console stores it. In our test runs the game
+  plays exactly the same as before, with no measurable speed cost (measured on an Android phone). The decompiled
+  game code is now checked against the same exact behaviour.
+- **Fixed: building code mods could fail on Windows with "Access Denied"** (#282, thanks @Eggtooth). While setup
+  builds code mods, the game reads the build's progress file for the progress bar. Windows refused to replace that
+  file while the game had it open, so the build stopped at a random point. Setup now replaces it the way Windows 10
+  and later allow for open files, and a progress update that still can't get through is skipped instead of failing
+  the build.
+- **Quit button on the file select screen** (#278, thanks @Tamryell and @CaptainLibrary). The save-slot screen has a
+  **Quit** button at the bottom in the game's own style: press **X** (or click it) and confirm with Yes (No is
+  selected first). Handy with a controller, on the couch or with remote play. Settings → Controls can hide it.
+  The button and its Yes/No question use the game's own lettering, button plates and selection highlight, read from
+  your game files, so they look like the game's Return/Erase/Copy/Start buttons.
+- **Shader preparation's models step is steadier.** Four crashes in the step are fixed (a title-screen button
+  pressed twice, an area requested before the previous one was released, and two cases where it released files the
+  game was still using). Four characters that always stopped the step are now skipped from the start instead of after
+  a restart. The step records the same shaders as before.
+- **Controllers can keep playing while the game isn't focused** (#267, thanks @Linken17). Settings → Controls →
+  **Controller input when the game isn't focused** (off by default): for a second screen, streaming or remote play.
+  Only controllers: keyboard and mouse still work only while the game window is active, and a controller press in
+  the background never opens Settings. Not on Android. On macOS it needs macOS 11.3 or later.
+- **Fixed: Android said "Not available for this version of the game" for every code mod in Mods > Community**
+  (ZeldaWWHDMods#6, thanks @alexander-beepx). An old rule from before Android supported code mods still blocked them in
+  the Community list. They can now be installed on Android like on desktop (Code-mod support must be on).
+
+- **Fixed: Link stayed invisible after some conversations with frame interpolation on** (#283, thanks @aaronlink127
+  and @Omaley360 for the report, save state and confirmation). Some conversation shots hide Link for a moment; with
+  interpolation at 60 fps and above he could stay hidden for a long while afterwards (the cabana door on Private
+  Oasis, residents on Windfall). He now reappears exactly when he does at 30 fps.
+- **Fixed: shader preparation failed when the game is on a network share (NAS)** (#290). Setup created its shader
+  folder with "only this user" permissions that many network shares can't apply, so even setup itself couldn't write
+  into it. The folder now gets the same permissions as the rest of the game folder. Also, "Setup in a console window"
+  no longer warns that network paths are not supported.
+- **Less shader stutter on Windows, Linux and Mac (Vulkan)**: after setup's models step, the game now builds every
+  recorded shader pipeline in the background while you play, on low-priority threads, starting once the game is in
+  play so the boot isn't slowed. In our tests over 19 places, pipelines built mid-play dropped from about 2,100 to 9.
+  The models step now also visits every room with a player start, every sea island and each particle effect once,
+  and a stage whose name matched a skip entry is no longer left out (the whole sea was skipped before).
+- **World editor: use the game's materials without MCP** (#280, for mod makers). The model import has a new option
+  **Use the game's materials (kit)**: pick the room (Link's by default), copy its material names for Blender, and the
+  dialog shows which of your materials draw with the game's own textures, with a picker to map your own names onto
+  the room's materials.
+- **World editor: replace, watch and remove imported models** (#287). **Replace from file…** re-imports a model under
+  the same name, and everything placed with it updates, collision included. **Watch file** re-imports it whenever
+  you save it from Blender. **Remove** lists anything still placed with the model and asks first; Undo brings it all
+  back. Also fixed: a removed object no longer counts as ground for the editor's own checks.
+- **Fixed: characters didn't show up in a scene's Demo step** (#285, for mod makers). Link now starts at his first
+  position key instead of walking there from wherever he stood, and game characters created for a demo (a pig, for
+  example) follow their keys instead of their own routes. The editor warns in yellow when an actor's keys never come
+  into the demo camera's view, and a first position key is placed at Link instead of far out at sea.
 - **Fixed: Fast Forward's 3x and 4x ran only as fast as 2x** (#268). On a 60 Hz display the game waited for the screen
   after every step, which capped it at twice the normal speed. While Fast Forward is held, the game no longer waits
   for the screen, so 3x and 4x really run three and four times as fast, with or without frame interpolation and
@@ -121,7 +178,7 @@ what is on `devel` and not released yet (also in the
   own, and a model entered twice is drawn once instead of looping.
 - **Fixed: the world editor crashed when jumping into a mod's own stage** (e.g. to a quest step there). Every editor
   jump now uses the stage's game name and checks the room, and the game refuses a jump to a place it can't load.
-- **Meta Quest: a floating theater** (#259, thanks to the contributor). On a Quest the game shows on a flat or
+- **Meta Quest: a floating theater** (#259, thanks @pancreations). On a Quest the game shows on a flat or
   curved screen in your room, with controls for 2D/3D, size, distance, passthrough and recentering; the controllers
   work the toolbar and the name keyboard, a gamepad plays the game. If the VR display stops during play, a "VR display
   stopped" panel says so instead of a black view. Other Android devices are unchanged.
@@ -169,7 +226,7 @@ what is on `devel` and not released yet (also in the
 - **Mod SDK: mod dungeon maps for HUD mods** (for mod makers). A guest mod can read the current room's map of a mod
   dungeon (rooms, visited rooms, Link's position, and with the compass the chests), so minimap mods can show mod
   dungeons too.
-- **Vulkan stereo (3D) improvements** (#257, thanks to the contributor). Formats that can't be scaled fall back to
+- **Vulkan stereo (3D) improvements** (#257, thanks @pancreations). Formats that can't be scaled fall back to
   full-size eyes instead of drawing into a cleared image, and stereo modes reuse their image memory between frames.
   Nothing changes with stereo off.
 
@@ -370,10 +427,13 @@ what is on `devel` and not released yet (also in the
   cards, and double-sided faces lit correctly on both sides. New example `world-objects-w5`.
 - **Fixed: island buildings in released builds.** The release packages lacked the converter the island buildings
   need.
-- **Quick-use locked items** (Mods > Built-in, off by default; #196, thanks mhbxyz): while locked onto an enemy, one
+- **Quick-use locked items** (Mods > Built-in, off by default; #196, thanks @mhbxyz): while locked onto an enemy, one
   item-button press equips and uses the bow (including fire, ice and light arrows), boomerang, hookshot or grappling
   rope; bombs are readied and thrown, and equipping the hammer completes one strike. A **Quick-use animation speed**
   of 1x, 1.25x or 1.5x speeds up the supported equip animations.
+- **Camera-directed items** (Mods > Built-in, off by default; #203, thanks @mhbxyz): Link turns once to face where
+  the camera looks when you use the bow, boomerang, hookshot, grappling hook, bombs, hammer or an empty bottle, and
+  Leaf gusts blow in the camera's direction. Aiming and lock-on work as before.
 
 - **Keep game speed now holds the game's speed at 60 fps when the graphics can't keep up** (#178, e.g. Steam Deck):
   in-between frames that don't fit are skipped instead of slowing the game to 21–25 logic steps a second. The
@@ -627,12 +687,14 @@ what is on `devel` and not released yet (also in the
   prompt. The model is converted on your own machine using a material from your own game, so packages never contain
   game files. The Windfall example gained an original carved post (preview, for mod makers).
 
-- **Android handhelds** (thanks to almost-drowned-rat):
+- **Android handhelds** (thanks @almost-drowned-rat):
   - **Full screen** now hides the system bars on Android 11 and newer too, so they no longer cover the top and bottom
     of the picture (based on GreenNaugahyde's Android fork; #212, #225).
   - The app's **files folder** (saves, settings, mods) appears in the system Files app and file picker; the prepared
     game and shader caches are read-only there and console keys are never shown (#213, #226).
   - The system **Back** button or gesture opens and closes Settings, like F1 on desktop (#215, #227).
+- **Meta Quest: "Add the game icon" works** (#249, thanks @rhemfur): on Quest the button now pins a shortcut in the
+  Library, and it says so when no icon can be added.
 
 - **Render-thread fast path** (Vulkan): a draw reuses the previous draw's prepared state when only pointers or
   arithmetic values change, about 6–9% less render-thread CPU in tests (most on devices where the render thread limits

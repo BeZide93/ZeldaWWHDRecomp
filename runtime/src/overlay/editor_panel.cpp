@@ -17,7 +17,10 @@
 #include <vector>
 
 #include "../editor/editor_game.h"
+namespace render { uint64_t frame_count(); }  // gfx/renderer.h: the game's frame (test aids)
 #include "../editor/mcp_game.h"
+#include "editor_kit_import.h"
+#include "editor_model_actions.h"
 #include "editor_live_kinds.h"
 #include "editor_resident.h"
 #include "../mods/story_enemy_variants.h"
@@ -51,6 +54,9 @@ struct UiState {
     char export_path[512] = {};
     Value import_info;       // check_model's result for import_path
     std::string import_checked;
+    editor_kit_import::State kit;  // "Use the game's materials (kit)"
+    Value import_done;       // the last import_model's result (its kit report)
+    editor_model_actions::State model_actions;  // Replace, Watch, Remove (issue #287)
 } U;
 
 Snapshot g_snap;
@@ -486,6 +492,8 @@ void refresh() {
             g_snap.stages = m && m->get("stages").type == Value::Array ? s.run("list_stages", Value(), false).get("result") : Value();
         }
         if (frame - villagers_at >= 30) {
+            // where each own model came from and which are watched (issue #287)
+            g_snap.model_files = m && m->get("models").type == Value::Array ? s.run("list_model_files", Value(), false).get("result") : Value();
             g_snap.villagers = s.run("list_villagers", Value(), false).get("result");
             villagers_at = frame;
         }
@@ -825,11 +833,31 @@ void models_area(const Value& m) {
         ImGui::TextColored(kHead, "%s", md.get("id").string().c_str());
         ImGui::SameLine();
         muted(md.get("kind").string("static") + ", " + md.get("source").string());
+        // the placements and items from the open mod as it is now (the confirmation lists them)
+        Value files;
+        for (const auto& f : snapshot().model_files.get("models").array)
+            if (f.get("model") == md.get("id")) files = f;
+        files["placements"] = list();
+        files["items"] = list();
         std::string users;
         for (const auto& a : m.get("actors").array)
-            if (a.get("model") == md.get("id")) users += (users.empty() ? "" : ", ") + a.get("id").string();
+            if (a.get("model") == md.get("id") || a.get("distant").get("model") == md.get("id") || a.get("shoreline").get("model") == md.get("id") ||
+                a.get("collision").get("mesh") == md.get("id")) {
+                users += (users.empty() ? "" : ", ") + a.get("id").string();
+                files["placements"].array.push_back(a.get("id"));
+            }
+        for (const auto& i : m.get("items").array)
+            if (i.get("held_model") == md.get("id")) files["items"].array.push_back(i.get("id"));
         ImGui::Indent();
         muted(users.empty() ? "not used by an actor yet" : "used by " + users);
+        editor_model_actions::draw(
+            U.model_actions, md, files, [](const std::string& name, const Value& p, std::function<void(const Value&)> then) { command(name, p, std::move(then)); },
+            [](std::function<void(std::string)> picked) {
+                hostui::choose_file("Choose the model's new version (.glb)", "glb", false, [picked](std::string path) {
+                    editor_mcp::user_picked(path);  // tool clients may read what the player picked
+                    picked(path);
+                });
+            });
         ImGui::Unindent();
     }
     if (m.get("models").array.empty()) muted("This mod has no models of its own yet.");
@@ -838,7 +866,26 @@ void models_area(const Value& m) {
 }
 
 void import_area() {
+    // test aids (screenshots, scripted runs): WWHD_TEST_EDITOR_IMPORT=<.glb> fills in the file, WWHD_TEST_EDITOR_KIT=1
+    // ticks "Use the game's materials (kit)", WWHD_TEST_EDITOR_IMPORT_AT (below) presses Import
+    static const bool test_aids = [] {
+        if (const char* f = std::getenv("WWHD_TEST_EDITOR_IMPORT")) std::snprintf(U.import_path, sizeof U.import_path, "%s", f);
+        if (const char* k = std::getenv("WWHD_TEST_EDITOR_KIT")) U.kit.on = *k == '1';
+        return true;
+    }();
+    (void)test_aids;
     ImGui::TextColored(kHead, "Import a model (.glb)");
+    // after a kit import, first: which materials draw with the game's textures and which keep their own
+    const Value& done = U.import_done;
+    if (done.get("ok").boolean && done.get("result").get("kit_report").type == Value::Object) {
+        ImGui::TextColored(kGood, "Imported %s with the game's materials of %s room %d:", done.get("result").get("model").get("id").string().c_str(),
+                           done.get("result").get("model").get("kit").get("stage").string().c_str(), int(num(done.get("result").get("model").get("kit"), "room")));
+        ImGui::Indent();
+        editor_kit_import::draw_report(done.get("result").get("kit_report"));
+        ImGui::Unindent();
+        if (ImGui::SmallButton("OK##import_done")) U.import_done = Value();
+        ImGui::Separator();
+    }
     ImGui::SetNextItemWidth(-90);
     text_entry::field("##import_path", U.import_path, sizeof U.import_path, 0, "a .glb file");
     ImGui::SameLine();
@@ -849,30 +896,51 @@ void import_area() {
             g_picked = path;
             g_picked_for = 1;
         });
-    if (U.import_path[0] && U.import_checked != U.import_path) {
-        U.import_checked = U.import_path;
+    // the game's materials (issue #280): the room, its materials and the model's names mapped onto them
+    const Value& r = U.import_info;
+    const Value& checked = r.type == Value::Object && r.get("ok").boolean ? r.get("result") : Value();
+    editor_kit_import::draw(U.kit, snapshot().locations, snapshot().state.get("link"), U.import_path[0] ? checked : Value(),
+                            [](const std::string& name, const Value& p, std::function<void(const Value&)> then) { command(name, p, std::move(then)); });
+    // checked again when the file or the kit choice changes (with kit: as import_model with kit checks it)
+    const std::string check_key = std::string(U.import_path) + "#" + editor_kit_import::key(U.kit);
+    if (U.import_path[0] && U.import_checked != check_key) {
+        U.import_checked = check_key;
         Value p;
         p["file"] = std::string(U.import_path);
-        command("check_model", p, [](const Value& r) { U.import_info = r; });
+        command("check_model", editor_kit_import::with_kit(p, U.kit), [check_key](const Value& r) {
+            if (U.import_checked == check_key) U.import_info = r;
+        });
     }
-    const Value& r = U.import_info;
     if (U.import_path[0] && r.type == Value::Object) {
         if (!r.get("ok").boolean) wrapped(kBad, r.get("error").string());
         else {
             const Value& i = r.get("result");
             std::string clips;
             for (const auto& c : i.get("clips").array) clips += (clips.empty() ? "" : ", ") + c.string();
-            ImGui::TextColored(kGood, "%s model: %.0f KB, %d vertices, %d triangles, texture %s, %d bones", i.get("kind").string().c_str(),
-                               num(i, "size") / 1024, int(num(i, "vertices")), int(num(i, "triangles")), i.get("texture").string().c_str(),
-                               int(num(i, "bones")));
+            if (i.get("kind").string() == "kit")
+                ImGui::TextColored(kGood, "model with game materials: %.0f KB, %d triangles, %d materials (%d with their own texture)", num(i, "size") / 1024,
+                                   int(num(i, "triangles")), int(num(i, "materials")), int(num(i, "own_materials")));
+            else
+                ImGui::TextColored(kGood, "%s model: %.0f KB, %d vertices, %d triangles, texture %s, %d bones", i.get("kind").string().c_str(),
+                                   num(i, "size") / 1024, int(num(i, "vertices")), int(num(i, "triangles")), i.get("texture").string().c_str(),
+                                   int(num(i, "bones")));
             if (!clips.empty()) muted("clips: " + clips);
             // what the import changes to make the file fit (model_import.h): the copy in the package gets it, the file stays
             for (const auto& fix : i.get("import_fixes").array) wrapped(kWarn, fix.string());
-            if (ImGui::Button("Import into the package")) {
+            const bool ready = editor_kit_import::ready(U.kit, i);
+            ImGui::BeginDisabled(!ready);
+            // test aid: WWHD_TEST_EDITOR_IMPORT_AT=<frame> presses Import once at that frame (when it may be pressed)
+            static const long press_at = std::getenv("WWHD_TEST_EDITOR_IMPORT_AT") ? std::atol(std::getenv("WWHD_TEST_EDITOR_IMPORT_AT")) : -1;
+            static bool pressed = false;
+            const bool test_press = press_at >= 0 && ready && !pressed && long(render::frame_count()) >= press_at;
+            if (ImGui::Button("Import into the package") || (test_press && (pressed = true))) {
                 Value p;
                 p["file"] = std::string(U.import_path);
-                command("import_model", p);
+                U.import_done = Value();
+                command("import_model", editor_kit_import::with_kit(p, U.kit), [](const Value& done) { U.import_done = done; });
             }
+            ImGui::EndDisabled();
+            if (!ready) muted("Every material without a texture must be one of the room's first (above).");
             muted("The file is copied into the mod's models folder; the model is prepared for the game while you work.");
         }
     }
