@@ -194,27 +194,31 @@ static Upload submitted_upload(uint32_t addr, uint32_t size, const uint8_t* byte
     return u;
 }
 
-// Vertex buffers the CPU rewrites. Metal binds vertex buffers straight from guest memory, and the GPU
-// reads them when it runs, after the render thread recorded the draw; by then the game may already
-// have written the next frame's data into a dynamic buffer, so what a draw showed depended on GPU
-// timing (pictures differed from run to run). A range is bound from guest memory while the CPU never
-// writes it after its first use (static meshes: no copy); once a write to it is seen (write_watch.h),
-// it is copied at record time like Vulkan does, and that copy is reused by later draws while the
-// range is unchanged and its upload chunk is current. Without write tracking: as before.
-// WWHD_METAL_VB_COPY=0 binds every vertex buffer from guest memory again (comparisons).
-struct VertexRange {
+// Vertex buffers and uniform blocks the CPU rewrites. Metal binds them straight from guest memory,
+// and the GPU reads them when it runs, after the render thread recorded the draw; by then the game may
+// already have written the next frame's data into a dynamic buffer, so what a draw showed depended on
+// GPU timing (pictures differed from run to run). A range is bound from guest memory while the CPU
+// never writes it after its first use (static meshes: no copy); once a write to it is seen
+// (write_watch.h), it is copied at record time like Vulkan does, and that copy is reused by later
+// draws while the range is unchanged and its upload chunk is current. Without write tracking: as
+// before. (Uniform blocks of display lists use their submitted bytes, gx2/submitted_uniforms.h.)
+// WWHD_METAL_VB_COPY=0 / WWHD_METAL_UBO_COPY=0 bind those from guest memory again (comparisons).
+enum GuestRangeKind { kRangeVertex, kRangeUniform, kRangeKinds };
+struct GuestRange {
     uint64_t stamp = 0;          // write stamp when armed (static) or when copied (dynamic)
     uint64_t checkedFrame = ~0ull, seq = 0;
     bool dynamic = false;
     Upload copy{nil, 0};
     uint64_t copyGen = ~0ull;    // g_pool_gen of the chunk holding the copy
 };
-static std::unordered_map<uint64_t, VertexRange> g_vertex_ranges;
-static uint64_t g_vertex_copy_bytes = 0, g_vertex_copies = 0;
-static bool rewritten_vertex_copy(uint32_t addr, uint32_t size, Upload& out) {
-    static const bool off = getenv("WWHD_METAL_VB_COPY") && !atoi(getenv("WWHD_METAL_VB_COPY"));  // comparisons
-    if (off || !wwatch::active() || !size) return false;
-    VertexRange& r = g_vertex_ranges[(uint64_t)addr << 32 | size];
+static std::unordered_map<uint64_t, GuestRange> g_guest_ranges[kRangeKinds];
+static uint64_t g_range_copy_bytes[kRangeKinds], g_range_copies[kRangeKinds];
+static bool rewritten_copy(GuestRangeKind kind, uint32_t addr, uint32_t size, Upload& out) {
+    static const bool off[kRangeKinds] = {
+        getenv("WWHD_METAL_VB_COPY") && !atoi(getenv("WWHD_METAL_VB_COPY")),
+        getenv("WWHD_METAL_UBO_COPY") && !atoi(getenv("WWHD_METAL_UBO_COPY"))};
+    if (off[kind] || !wwatch::active() || !size) return false;
+    GuestRange& r = g_guest_ranges[kind][(uint64_t)addr << 32 | size];
     if (!r.dynamic) {
         if (r.checkedFrame == ~0ull) { r.stamp = wwatch::arm(addr, size); r.checkedFrame = R.frame; return false; }
         if (r.checkedFrame == R.frame) return false;  // checked this frame
@@ -233,8 +237,8 @@ static bool rewritten_vertex_copy(uint32_t addr, uint32_t size, Upload& out) {
     r.seq = wwatch::write_seq();
     out = r.copy = upload(mem::ptr(addr), size);
     r.copyGen = g_pool_gen;
-    g_vertex_copy_bytes += size;
-    ++g_vertex_copies;
+    g_range_copy_bytes[kind] += size;
+    ++g_range_copies[kind];
     return true;
 }
 
@@ -1529,8 +1533,9 @@ static void bind_stage(id<MTLRenderCommandEncoder> enc, const uint32_t* regs, Sh
             else [enc setFragmentBuffer:u.buf offset:u.offset atIndex:binding];
             continue;
         }
-        if (g_snapshot) {
-            Upload u = upload(mem::ptr(addr), size);
+        Upload u;
+        if (g_snapshot || rewritten_copy(kRangeUniform, addr, size, u)) {
+            if (g_snapshot) u = upload(mem::ptr(addr), size);
             if (vertex) [enc setVertexBuffer:u.buf offset:u.offset atIndex:binding];
             else [enc setFragmentBuffer:u.buf offset:u.offset atIndex:binding];
         } else {
@@ -1952,11 +1957,14 @@ void report_skips() {
         (unsigned long long)g_stat_invalidates, (unsigned long long)g_stat_invalidated_surfaces, (unsigned long long)faults,
         (unsigned long long)protectedPages);
     g_stat_full_checks = g_stat_uploads = g_stat_invalidates = g_stat_invalidated_surfaces = g_stat_hashed_bytes = 0;
-    size_t dynamicRanges = 0;
-    for (auto& [k, r] : g_vertex_ranges) dynamicRanges += r.dynamic;
-    LOG("[gfx] last 300 frames: %llu rewritten vertex buffer copies (%.1f MiB); %zu of %zu vertex ranges rewritten by the CPU",
-        (unsigned long long)g_vertex_copies, g_vertex_copy_bytes / 1048576.0, dynamicRanges, g_vertex_ranges.size());
-    g_vertex_copies = g_vertex_copy_bytes = 0;
+    for (int k = 0; k < kRangeKinds; k++) {
+        size_t dynamicRanges = 0;
+        for (auto& [key, r] : g_guest_ranges[k]) dynamicRanges += r.dynamic;
+        LOG("[gfx] last 300 frames: %llu rewritten %s copies (%.1f MiB); %zu of %zu ranges rewritten by the CPU",
+            (unsigned long long)g_range_copies[k], k == kRangeVertex ? "vertex buffer" : "uniform block",
+            g_range_copy_bytes[k] / 1048576.0, dynamicRanges, g_guest_ranges[k].size());
+        g_range_copies[k] = g_range_copy_bytes[k] = 0;
+    }
 }
 
 
@@ -2202,7 +2210,7 @@ void draw(const uint32_t* regs, uint32_t prim, uint32_t count, uint32_t indexTyp
         if (g_snapshot && size <= kSnapshotLimit) {
             u = upload(mem::ptr(addr), size);
             [enc setVertexBuffer:u.buf offset:u.offset atIndex:GET_MTL_VERTEX_BUFFER_INDEX(g.attributeBufferIndex)];
-        } else if (rewritten_vertex_copy(addr, size, u)) {
+        } else if (rewritten_copy(kRangeVertex, addr, size, u)) {
             [enc setVertexBuffer:u.buf offset:u.offset atIndex:GET_MTL_VERTEX_BUFFER_INDEX(g.attributeBufferIndex)];
         } else {
             [enc setVertexBuffer:b offset:off atIndex:GET_MTL_VERTEX_BUFFER_INDEX(g.attributeBufferIndex)];
