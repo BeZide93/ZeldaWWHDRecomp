@@ -7,6 +7,10 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Fixed: choosing Continue after a Game Over froze the game with frame interpolation on** (#295, thanks
+  @aaronlink127). The Game Over screen's logic runs from a drawing step, so the extra in-between frames moved it
+  forward before the save question was open, and the game picked "To Title" by itself. That logic now advances once
+  per game step, as at 30 fps. Continue, Quit to Title and Save/Cancel work at 30, 40, 60, 120 and 240 fps.
 - **Scenes look the same every run, like on the Wii U.** The game rewrites some per-frame scene settings while the
   renderer is still drawing the previous frame's display lists, so a few draws could pick up the next frame's values
   and some pixels (the distant sea at Outset's cliff, the Forbidden Woods canopy) changed from run to run. Display
