@@ -14,6 +14,10 @@
  * operation can produce (any non-signalling-NaN single) the host conversion gives the stfs bits
  * (tools/recomp/rawstore.py relies on both). Build it at -O0 and -O2
  * (tools/recomp/test_ppc_f32_exact.py does both); the host conversions it replaced fail here. */
+/* -std=c11 hides mmap's MAP_ANONYMOUS on glibc unless a POSIX/default source level is asked for. */
+#if !defined(_WIN32) && !defined(_DEFAULT_SOURCE)
+#define _DEFAULT_SOURCE 1
+#endif
 #include "ppc.h"
 
 #include <inttypes.h>
@@ -24,6 +28,9 @@
 #include <windows.h>
 #else
 #include <sys/mman.h>
+#ifndef MAP_ANONYMOUS
+#define MAP_ANONYMOUS MAP_ANON
+#endif
 #endif
 
 static int fails;
@@ -120,7 +127,7 @@ int main(int argc, char** argv) {
         return 1;
     }
 #else
-    if (mmap(page, 0x10000, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON | MAP_FIXED, -1, 0) != page) {
+    if (mmap(page, 0x10000, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED, -1, 0) != page) {
         perror("ppc_f32_exact_test: mmap guest page");
         return 1;
     }
