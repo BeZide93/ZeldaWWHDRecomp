@@ -11,7 +11,10 @@ what is on `devel` and not released yet (also in the
   no longer fail with "invalid model declaration" on a model that uses the game's own materials, and they no longer
   refuse a new file that has a collision mesh. An object the game left out at start-up because something was in
   its way now appears as soon as you move it to a clear spot. You can keep a preview picture on a game material in
-  Blender: the import removes it from the package by itself and says so.
+  Blender: the import removes it from the package by itself and says so. Placement now checks an object by its own
+  shape instead of a box around it, so a large L-shaped piece no longer "hits" villagers, start points or routes
+  that sit in the open space of its corner; anything its shape really reaches still blocks it. The route around
+  Windfall at sea level is now named as the boat route it is.
 - **Fixed: choosing Continue after a Game Over froze the game with frame interpolation on** (#295, thanks
   @aaronlink127). The Game Over screen's logic runs from a drawing step, so the extra in-between frames moved it
   forward before the save question was open, and the game picked "To Title" by itself. That logic now advances once
