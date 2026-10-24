@@ -53,8 +53,11 @@ public final class AndroidGame {
     }
 
     public static synchronized boolean modelsChosen(Context context) {
-        try { return read(modelsChoice(context)).optBoolean("enabled", false); }
-        catch (Exception missing) { return false; }
+        // no choice yet: the step is recommended (ModelsStep.RECOMMENDED)
+        try {
+            JSONObject choice = read(modelsChoice(context));
+            return ModelsStep.chosen(choice.has("enabled") ? choice.getBoolean("enabled") : null);
+        } catch (Exception missing) { return ModelsStep.chosen(null); }
     }
 
     public static synchronized void chooseModels(Context context, boolean enabled) throws Exception {

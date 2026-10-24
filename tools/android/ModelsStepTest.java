@@ -18,6 +18,12 @@ public final class ModelsStepTest {
         expect(ModelsStep.Outcome.PAUSED, ModelsStep.outcome("paused", "pause"));            // heat, battery, Pause
         expect(ModelsStep.Outcome.PAUSED, ModelsStep.outcome("paused", ""));
 
+        // on a phone the step is recommended: ticked until the player unticks it (the choice is remembered)
+        expect(true, ModelsStep.RECOMMENDED);
+        expect(true, ModelsStep.chosen(null));
+        expect(false, ModelsStep.chosen(false));
+        expect(true, ModelsStep.chosen(true));
+
         // the setup screen starts each requested attempt once
         String id = "0123456789abcdef0123456789abcdef";
         expect(true, ModelsStep.launch(id, null));

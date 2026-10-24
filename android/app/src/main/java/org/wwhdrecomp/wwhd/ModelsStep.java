@@ -35,6 +35,13 @@ public final class ModelsStep {
     /** host.json / pause.json reason while the step waits for the setup screen. */
     public static final String SCREEN_REASON = "screen";
 
+    /** On a phone the step is recommended: ticked unless the player unticked it (the choice is remembered).
+     *  Measured on a Xiaomi 14: about 33 pipeline waits on a 25-place route with the step, about 1000 without. */
+    public static final boolean RECOMMENDED = true;
+
+    /** The player's remembered choice (models-choice.json "enabled"), or the recommendation when there is none. */
+    public static boolean chosen(Boolean remembered) { return remembered == null ? RECOMMENDED : remembered; }
+
     public enum Outcome { DONE, FAILED, CANCELLED, WAIT_FOR_SCREEN, PAUSED }
 
     /** What the service does with models-result.json. */
