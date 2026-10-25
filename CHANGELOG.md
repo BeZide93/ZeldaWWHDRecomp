@@ -7,6 +7,8 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Performance report: the "uniforms" time is split into its parts** (#178): stage setup, packing, the game's
+  own blocks and the support upload, so a report shows where that time goes on your device.
 - **The camera is smooth again in the Boating Course minigame with frame interpolation** (#299, thanks
   @aaronlink127). The Boating Course draws two cameras at once, and after a few stage changes the two took each
   other's history slot on every frame, so the camera moved at the game's 30 steps per second while Link and the boat
