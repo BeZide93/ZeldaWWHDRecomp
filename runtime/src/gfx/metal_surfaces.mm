@@ -13,6 +13,7 @@
 #include "Cafe/HW/Latte/LatteAddrLib/LatteAddrLib.h"
 #include "gx2/gx2.h"
 #include "render_prof.h"
+#include "gfx/artistic_mips.h"
 #include "gx2_texture_regs.h"
 #include "metal.h"
 #include "runtime.h"
@@ -850,12 +851,16 @@ void upload_surface(Surface* s) {
 
     std::vector<uint8_t> data;
     id<MTLBuffer> staging = nil;
+    // hand-drawn mip levels (artistic_mips.h): the levels are kept for the check after the upload
+    const bool checkMips = gfx::artistic_mips::enabled() && s->mips > 1 && gfx::artistic_mips::supported(s->format);
+    std::vector<std::vector<uint8_t>> levelsForCheck;
     end_encoder();
     id<MTLBlitCommandEncoder> blit = [command_buffer() blitCommandEncoder];
     for (uint32_t level = 0; level < ranges.size(); level++) {
         uint32_t base = ranges[level].first;
         uint32_t w, h, slices;
         decode_level(s, level, base, data, w, h, slices);
+        if (checkMips) levelsForCheck.push_back(data);
         uint32_t bw = f.compressed ? (w + 3) / 4 : w, bh = f.compressed ? (h + 3) / 4 : h;
         NSUInteger stagingOffset = 0;
         if (!texture_staging(data.data(), data.size(), &staging, &stagingOffset)) {
@@ -878,6 +883,21 @@ void upload_surface(Surface* s) {
         }
     }
     [blit endEncoding];
+    if (checkMips) {
+        const auto v = gfx::artistic_mips::check(s->format, s->width, s->height, (uint32_t)levelsForCheck.size(),
+            [&](uint32_t n, const uint8_t*& p, size_t& size) {
+                if (n >= levelsForCheck.size()) return false;
+                p = levelsForCheck[n].data(); size = levelsForCheck[n].size(); return true; });
+        static const bool logAll = getenv("WWHD_ARTISTIC_MIPS_LOG") && !strcmp(getenv("WWHD_ARTISTIC_MIPS_LOG"), "2");
+        if (gfx::artistic_mips::log_enabled() && v.compared && (logAll || v.artistic || v.artistic != s->artisticMips)) {
+            char diffs[160]; int n = 0;
+            for (uint32_t l = v.firstLevel + 1; l < v.firstLevel + 1 + v.compared && n < (int)sizeof diffs - 8; ++l)
+                n += snprintf(diffs + n, sizeof diffs - n, " %.1f", v.diff[l]);
+            LOG("[artistic mips] %08X %ux%u fmt %X mips %u: %s (levels from %u, diff%s)", s->addr, s->width, s->height,
+                s->format, s->mips, v.artistic ? "hand-drawn" : "downscaled", v.firstLevel, diffs);
+        }
+        s->artisticMips = v.artistic;
+    }
 }
 
 // ---------------------------------------------------------------- GX2CopySurface

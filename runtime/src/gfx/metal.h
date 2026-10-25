@@ -50,6 +50,7 @@ struct Surface {
     // dynamic resolution (dynres.h): the factor of the internal resolution the texture was made at (1: off),
     // and textures of other recent scales kept for the next change (metal_surfaces.mm rescale)
     float dyn = 1.0f;
+    bool artisticMips = false;  // hand-drawn mip levels (artistic_mips.h): resolution-aware bias, no forced anisotropy
     struct Kept { id<MTLTexture> tex; float scale, dyn, ax, ay, sx, sy; };
     std::vector<Kept> spares;
 };

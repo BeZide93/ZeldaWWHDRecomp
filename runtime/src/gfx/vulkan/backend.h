@@ -49,6 +49,7 @@ struct Surface {
  // texture budget (surfaces.cpp texture_budget_step): the frame the texture was last looked up, and whether its image
  // was released to stay within the budget (made again, and uploaded from guest memory, at its next lookup)
  uint64_t lastUsedFrame=0; bool evicted=false;
+ bool artisticMips=false; // hand-drawn mip levels (gfx/artistic_mips.h): resolution-aware bias, no forced anisotropy
  uint32_t dataSize=0; FormatInfo fmt;
  mutable std::shared_ptr<CachedGuestLayout> guestLayout;
  float scale=1,sx=1,sy=1;

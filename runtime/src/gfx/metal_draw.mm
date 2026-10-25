@@ -28,6 +28,7 @@ extern "C" uint64_t g_shader_state_gen;  // gx2_core.cpp: bumped by shader-relev
 #include "metal.h"
 #include "metal_cache_file.h"
 #include "metal_recipe_keys.h"
+#include "gfx/artistic_mips.h"
 #include "cloud_proto.h"
 #include "runtime.h"
 #include "util/helpers/StringBuf.h"
@@ -1392,6 +1393,12 @@ static void bind_stage(id<MTLRenderCommandEncoder> enc, const uint32_t* regs, Sh
     LatteDecompilerShader* dec = sh->dec;
     float texScale[18][2];
     for (auto& t : texScale) t[0] = t[1] = 1.0f;
+    // hand-drawn mip levels (artistic_mips.h): the units sampling such a texture, and what their bias gets at the
+    // target's internal resolution
+    bool artistic[18] = {};
+    float artisticBias = 0.0f;
+    for (int i = 0; i < 8; i++)
+        if (colors && colors[i]) { artisticBias = gfx::artistic_mips::resolution_bias(colors[i]->sx, colors[i]->sy); break; }
     auto& rm = dec->resourceMapping;
     uint32_t texBase = vertex ? REGADDR::SQ_TEX_RESOURCE_WORD0_N_VS : REGADDR::SQ_TEX_RESOURCE_WORD0_N_PS;
     uint32_t samplerBase = vertex ? SAMPLER_BASE_INDEX_VERTEX : SAMPLER_BASE_INDEX_PIXEL;
@@ -1427,7 +1434,9 @@ static void bind_stage(id<MTLRenderCommandEncoder> enc, const uint32_t* regs, Sh
             patched[0] = (patched[0] & ~0x7E00u) | (1u << 9) | (1u << 12);  // XY mag/min filter: bilinear
             sw = patched;
         }
-        id<MTLSamplerState> smp = get_sampler(sw, s && !s->gpuWritten && s->mips > 1);
+        // (hand-drawn mip levels: no forced anisotropy, artistic_mips.h)
+        id<MTLSamplerState> smp = get_sampler(sw, s && !s->gpuWritten && s->mips > 1 && !s->artisticMips);
+        if (unit < 18) artistic[unit] = s && s->artisticMips;
         // WWHD_LOD_BIAS_LOG=1: each distinct texture/sampler pair with a LOD bias, once (gfx/sampler_lod_bias.h)
         static const bool logBias = getenv("WWHD_LOD_BIAS_LOG") != nullptr;
         if (logBias && gfx::sampler_lod_bias::raw(sw[1]) != 0) {
@@ -1518,7 +1527,8 @@ static void bind_stage(id<MTLRenderCommandEncoder> enc, const uint32_t* regs, Sh
             const uint32_t samplerIdx = dec->textureUnitSamplerAssignment[t];
             const bool add = gfx::sampler_lod_bias::mode() == gfx::sampler_lod_bias::Mode::Shader && samplerIdx < 18;
             *at(dec->uniform.loc_texLodBias[t]) =
-                add ? gfx::sampler_lod_bias::host(regs[REGADDR::SQ_TEX_SAMPLER_WORD0_0 + (samplerIdx + samplerBase) * 3 + 1]) : 0.0f;
+                (add ? gfx::sampler_lod_bias::host(regs[REGADDR::SQ_TEX_SAMPLER_WORD0_0 + (samplerIdx + samplerBase) * 3 + 1]) : 0.0f) +
+                (artistic[t] ? artisticBias : 0.0f);
         }
         for (int t = 0; t < 18; t++) {
             if (dec->uniform.loc_framebufferFetchSize[t] < 0) continue;

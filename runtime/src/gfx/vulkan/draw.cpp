@@ -17,6 +17,7 @@
 #include "stereo.h"
 #include "../stereo_projection.h"
 #include "../sampler_lod_bias.h"
+#include "../artistic_mips.h"
 #include "sampler_filtering.h"
 #include "deferred_dispatch.h"
 #include "buffer_cache.h"
@@ -1518,7 +1519,11 @@ struct SamplerMemo {
   }
 };
 SamplerMemo samplerMemo;
-VkSampler sampler(const uint32_t *words, bool compare, bool integer, bool allowAniso, bool linearSupported) {
+// what samplers of hand-drawn mip textures add to their LOD bias in the draw being prepared: log2 of its targets'
+// internal resolution scale (gfx/artistic_mips.h; set by draw() before its stages are bound)
+float g_artisticBias = 0;
+VkSampler sampler(const uint32_t *words, bool compare, bool integer, bool allowAniso, bool linearSupported,
+                  float extraBias = 0) {
   const bool nearestOnly = sampler_nearest_only(integer, compare, linearSupported);
   static const bool memo = [] {
     const char* e = std::getenv("WWHD_VK_SAMPLER_MEMO");
@@ -1527,13 +1532,13 @@ VkSampler sampler(const uint32_t *words, bool compare, bool integer, bool allowA
   const bool forceAniso = allowAniso && aniso_enabled();
   const bool stats = preparation_stats_enabled();
   if (stats) ++R.cpuPreparation.samplerRequests;
-  if (memo && samplerMemo.matches(R.device, words, compare, integer, forceAniso, nearestOnly)) {
+  if (memo && extraBias == 0 && samplerMemo.matches(R.device, words, compare, integer, forceAniso, nearestOnly)) {
     if (stats) ++R.cpuPreparation.samplerMemoHits;
     return samplerMemo.value;
   }
   if (stats) ++R.cpuPreparation.samplerMapLookups;
   auto remember = [&](VkSampler value) {
-    if (memo) samplerMemo.remember(R.device, words, compare, integer, forceAniso, nearestOnly, value);
+    if (memo && extraBias == 0) samplerMemo.remember(R.device, words, compare, integer, forceAniso, nearestOnly, value);
     return value;
   };
   std::string key(reinterpret_cast<const char *>(words), 12);
@@ -1541,6 +1546,7 @@ VkSampler sampler(const uint32_t *words, bool compare, bool integer, bool allowA
   key.push_back(integer);
   key.push_back(forceAniso);
   key.push_back(nearestOnly);
+  if (extraBias != 0) key.append(reinterpret_cast<const char*>(&extraBias), sizeof extraBias);
   static std::unordered_map<std::string, VkSampler> cache;
   if (auto it = cache.find(key); it != cache.end())
     return remember(it->second);
@@ -1582,7 +1588,7 @@ VkSampler sampler(const uint32_t *words, bool compare, bool integer, bool allowA
   ci.addressModeU = addr(static_cast<uint32_t>(w.get_CLAMP_X()));
   ci.addressModeV = addr(static_cast<uint32_t>(w.get_CLAMP_Y()));
   ci.addressModeW = addr(static_cast<uint32_t>(w.get_CLAMP_Z()));
-  ci.mipLodBias = std::clamp(::gfx::sampler_lod_bias::levels(words[1]),
+  ci.mipLodBias = std::clamp(::gfx::sampler_lod_bias::levels(words[1]) + extraBias,
                              -R.properties.limits.maxSamplerLodBias,
                              R.properties.limits.maxSamplerLodBias);
   if (!R.samplerMipLodBias && ci.mipLodBias != 0) {
@@ -2394,9 +2400,12 @@ VkSampler resolve_sampler(const uint32_t* r, vk::Shader* sh, uint32_t unit, cons
     patchedSampler[0] = (patchedSampler[0] & ~0x7E00u) | (1u << 9) | (1u << 12);
     samplerWords = patchedSampler;
   }
+  // hand-drawn mip levels (gfx/artistic_mips.h): no forced anisotropy; the resolution-aware bias in the sampler where
+  // the device applies sampler biases (else in the shader's uniform, bind_stage)
   return sampler(samplerWords, sh->dec->textureUsesDepthCompare[unit],
                  s->fmt.kind != FormatInfo::FLOAT,
-                 !s->gpuWritten && s->mips > 1, s->linearFiltering);
+                 !s->gpuWritten && s->mips > 1 && !s->artisticMips, s->linearFiltering,
+                 s->artisticMips && R.samplerMipLodBias ? g_artisticBias : 0.0f);
 }
 StageResources bind_stage(const uint32_t *r, vk::Shader *sh,
                           VkDescriptorSetLayout layout, bool dynamicUniforms, float sx, float sy,
@@ -2655,6 +2664,14 @@ StageResources bind_stage(const uint32_t *r, vk::Shader *sh,
     if (scaleOffset >= 0 && size_t(scaleOffset) + 8 <= supportUniforms.size()) {
       const float scale[] = {s->sx, s->sy};
       memcpy(supportUniforms.data() + scaleOffset, scale, sizeof scale);
+    }
+    // hand-drawn mip levels where the shader applies the bias (MoltenVK): the resolution-aware part on top
+    const int biasOffset = sh->uniforms.offset_texLodBias[unit];
+    if (s->artisticMips && !R.samplerMipLodBias && biasOffset >= 0 && size_t(biasOffset) + 4 <= supportUniforms.size()) {
+      float bias;
+      memcpy(&bias, supportUniforms.data() + biasOffset, 4);
+      bias += g_artisticBias;
+      memcpy(supportUniforms.data() + biasOffset, &bias, 4);
     }
     if (imageCount >= imageInfos.size())
       exception_report::raise("stage image descriptor capacity exceeded");
@@ -3338,6 +3355,7 @@ void draw(const uint32_t *r, uint32_t prim, uint32_t count, uint32_t indexType,
   // eye 1 replays a stage of eye 0's draw at the same scale through the same pipeline
   const bool replayStages = replay && &p == replay->pipeline && replay->sx == sx && replay->sy == sy;
   StageResources vres, pres;
+  g_artisticBias = ::gfx::artistic_mips::resolution_bias(sx, sy);
   if (!replayStages || !replay->stages[0].valid ||
       !replay_stage(replay->stages[0], r, vs, cameraEye, colors, depth, vres))
     vres = bind_stage(r, vs, p.sets[0], p.dynamicUniforms, sx, sy, colors, depth, probe, cameraEye, sunShadow,

@@ -4,6 +4,7 @@
 #include "../../exception_report.h"
 #include "gfx/render_mips.h"
 #include "gfx/texture_levels.h"
+#include "gfx/artistic_mips.h"
 #include "texture_budget.h"
 #include "bc_decode.h"
 #include "mods/cemu_pack.h"
@@ -1611,6 +1612,9 @@ void upload_surface(Surface* s) {
         target=&guestSized;
     }
     end_encoder();transition_image(target,VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,VK_PIPELINE_STAGE_TRANSFER_BIT,VK_ACCESS_TRANSFER_WRITE_BIT);
+    // hand-drawn mip levels (gfx/artistic_mips.h): the levels are kept for the check after the upload
+    const bool checkMips=::gfx::artistic_mips::enabled()&&s->mips>1&&::gfx::artistic_mips::supported(s->format);
+    std::vector<std::vector<uint8_t>> levelsForCheck;
     for(uint32_t level=0;level<s->mips;++level) {
         std::vector<uint8_t> data;uint32_t w,h,slices;decode_level(s,level,mip_base(s,level),data,w,h,slices);
         if (s->bcDecoded) { bc_decode_upload(target,level,data,w,h,slices); continue; }
@@ -1648,6 +1652,16 @@ void upload_surface(Surface* s) {
         destroy_surface_image(target);
     }
     transition_image(s,VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    if(checkMips) {
+        const auto v=::gfx::artistic_mips::check(s->format,s->width,s->height,uint32_t(levelsForCheck.size()),
+            [&](uint32_t n,const uint8_t*& p,size_t& size){
+                if(n>=levelsForCheck.size())return false;
+                p=levelsForCheck[n].data();size=levelsForCheck[n].size();return true;});
+        if(::gfx::artistic_mips::log_enabled()&&v.artistic!=s->artisticMips)
+            LOG("[artistic mips] %08X %ux%u fmt %X mips %u: %s",s->addr,s->width,s->height,s->format,s->mips,
+                v.artistic?"hand-drawn":"downscaled");
+        s->artisticMips=v.artistic;
+    }
     s->contentHash=hash;s->writeSeq=next_write_seq();s->dirty=false;++g_stat_uploads;++g_surface_epoch;
 }
 void clear_color(const uint32_t*,uint32_t cb,const float rgba[4]) {
