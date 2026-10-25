@@ -7,6 +7,23 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **World editor: island extensions can join an island's ground** (#281, thanks @KelpyCode). New ground that meets an
+  island's ground at the same height (up to the 30-unit step Link and villagers walk over) counts as joined instead of
+  overlapping, and an extension's sides may go into the cliff under its top; walls, raised parts and roofs still count.
+  Villagers, start points and routes only count what rises into the space they need, and Windfall's kids, Tott and the
+  pirates are recognised as villagers. The boat route around Windfall keeps the shop ship's real size clear.
+- **World editor: placing a large model of your own live no longer crashes the game** (#281). With `add_actor`, a big
+  model could be left out (its archive was being prepared again at that moment) and removing the failed actor then
+  crashed the game. The model now appears as it does from the manifest, and an actor whose model can't be loaded is
+  reported in the editor instead of crashing.
+- **Mac: textures are as sharp as on the Wii U.** The game gives most textures a level-of-detail bias (usually one
+  level sharper); Apple's samplers can't apply it, so on the Mac (Metal and Vulkan) textures were drawn one level
+  blurrier. The bias is now applied in the shaders, so ground, walls and effects such as the glow under the Triforce
+  chests look as intended. Windows, Linux and Android were already correct.
+- **One mod that can't start no longer stops all the others.** A mod whose requirement can't be met (for example a
+  GameCube game for mods that was moved or deleted) is now skipped on its own, along with any mods that need it, with
+  a message in the log, in Settings → Mods and over the game saying what's missing and how to fix it. Before, it
+  stopped every code mod from starting, including the Story Notebook and the sky island.
 - **The glow under Triforce Shard and Chart chests no longer shows a blocky checkerboard** (#297, thanks
   @aaronlink127). The glow's texture has mipmap levels, and the second level was read from slightly the wrong address,
   so it showed scrambled blocks once the game sampled it (at high resolutions, where the game sharpens it by one
