@@ -7,6 +7,11 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **The camera is smooth again in the Boating Course minigame with frame interpolation** (#299, thanks
+  @aaronlink127). The Boating Course draws two cameras at once, and after a few stage changes the two took each
+  other's history slot on every frame, so the camera moved at the game's 30 steps per second while Link and the boat
+  were smoothed, which made them seem to vibrate. Each camera now keeps its own history. This affected 40, 60 and
+  120 fps and true 60; game logic and 30 fps are unchanged.
 - **Android: setup now prepares model shaders by default, for far fewer stutters.** "Prepare model shaders
   (recommended)" is ticked on Android. After setup, the game draws every model, room and placed character once and
   visits every stage, hidden behind the setup's progress screen, so the shaders are ready before you play. On a
