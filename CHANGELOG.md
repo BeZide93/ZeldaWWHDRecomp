@@ -7,6 +7,11 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Bloom is smooth again at higher internal resolutions** (#307). At 2x and 3x the glow around lit windows,
+  doors and torches broke up into blocks and streaks, and small bright things such as rupees glowed only at some
+  angles. The game makes its bloom from small copies of the picture with taps one console pixel apart; on the larger
+  copies of a higher resolution those taps skipped the pixels between them. They now cover the same area as on the
+  Wii U, so the glow looks as it does at 1x. 1x is unchanged.
 - **World editor: island extensions can join an island's ground** (#281, thanks @KelpyCode). New ground that meets an
   island's ground at the same height (up to the 30-unit step Link and villagers walk over) counts as joined instead of
   overlapping, and an extension's sides may go into the cliff under its top; walls, raised parts and roofs still count.

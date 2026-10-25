@@ -1,6 +1,6 @@
 #pragma once
 // Pixel-shader fixes for upscaled render targets, shared by the Metal and the Vulkan renderer:
-// area-sampled blur taps (issues #66, #67) and the shadow mask's gather spacing (issue #135).
+// area-sampled blur taps (issues #66, #67, #307) and the shadow mask's gather spacing (issue #135).
 //
 // Area-sampled blur taps.
 //
@@ -19,6 +19,13 @@
 // sampling a guest-sized copy of the buffer would read, while silhouettes keep the higher
 // resolution. At scale 1 (or for buffers that are not scaled) the helper takes the one sample the
 // game asked for, so the native picture is unchanged.
+//
+// The bloom passes have the same problem (issue #307): the extract (PS 44F91200) reads the scene with
+// four taps one guest texel apart and the chain's separable blur (PS 44FD6E00 horizontal, 44FD7600
+// vertical) has seven taps in guest texels. On an upscaled chain the taps skip the pixels between
+// them: small bright things (rupees, eyes) glow only where a tap lands, and the halos around lights
+// break up into blocks and streaks. The blur reads one level of the chain (the sampler's LOD range
+// pins it), so the helper measures the guest texel at the level it reads, not at level 0.
 //
 // The decompiler declares uf_texNScale (texture pixels per guest pixel, filled from the surface's
 // sx/sy by both renderers) for the units named in LatteDecompilerOptions::areaSampledTextures; the
@@ -76,6 +83,17 @@ inline Program pixel_program(const void* bytes, uint32_t size) {
             return {};
         }
     }
+    if (size == 656 && program_hash(bytes, size) == 0x3a8d0f3808f1501bull)  // PS 44F91200, bloom extract
+        return {3u, Fix::AreaTaps};
+    if (size == 768) {
+        switch (program_hash(bytes, size)) {
+        case 0x4657565560d951b7ull:  // PS 44FD6E00, bloom blur (horizontal)
+        case 0x4102408f288aaa94ull:  // PS 44FD7600, bloom blur (vertical)
+            return {1u, Fix::AreaTaps};
+        default:
+            return {};
+        }
+    }
     if (size == 2112 && program_hash(bytes, size) == 0x62ae9ab4cb625546ull)  // sun shadow mask
         return {1u, Fix::GatherRays};
     return {};
@@ -109,11 +127,16 @@ inline int rewrite_area_taps(std::string& src, uint32_t units, bool msl) {
     }
     if (!count) return 0;
     static const char* const kMsl =
+        "// the mip level a tap reads: the bloom chain's passes pin one level with the sampler's LOD range\n"
+        "static uint wwhd_area_level(texture2d<float> t, sampler s, float2 uv) {\n"
+        "    return min(uint(t.calculate_clamped_lod(s, uv) + 0.5), t.get_num_mip_levels() - 1);\n"
+        "}\n"
         "// area-sampled tap for upscaled render targets (runtime/src/gfx/area_sample.h)\n"
         "static float4 wwhd_area_sample(texture2d<float> t, sampler s, float2 scale, float2 uv) {\n"
         "    float2 k = ceil(scale - 0.001);\n"
         "    if (k.x <= 1.0 && k.y <= 1.0) return t.sample(s, uv);\n"
-        "    float2 step = scale / (float2(t.get_width(), t.get_height()) * k);\n"
+        "    const uint level = wwhd_area_level(t, s, uv);\n"
+        "    float2 step = scale / (float2(t.get_width(level), t.get_height(level)) * k);\n"
         "    float4 sum = float4(0.0);\n"
         "    for (float j = 0.5; j < k.y; j += 1.0)\n"
         "        for (float i = 0.5; i < k.x; i += 1.0) sum += t.sample(s, uv + (float2(i, j) - 0.5 * k) * step);\n"
@@ -123,18 +146,23 @@ inline int rewrite_area_taps(std::string& src, uint32_t units, bool msl) {
         "static float4 wwhd_area_sample(texture2d<float> t, sampler s, float2 scale, float2 uv, bias lodBias) {\n"
         "    float2 k = ceil(scale - 0.001);\n"
         "    if (k.x <= 1.0 && k.y <= 1.0) return t.sample(s, uv, lodBias);\n"
-        "    float2 step = scale / (float2(t.get_width(), t.get_height()) * k);\n"
+        "    const uint level = wwhd_area_level(t, s, uv);\n"
+        "    float2 step = scale / (float2(t.get_width(level), t.get_height(level)) * k);\n"
         "    float4 sum = float4(0.0);\n"
         "    for (float j = 0.5; j < k.y; j += 1.0)\n"
         "        for (float i = 0.5; i < k.x; i += 1.0) sum += t.sample(s, uv + (float2(i, j) - 0.5 * k) * step, lodBias);\n"
         "    return sum / (k.x * k.y);\n"
         "}\n";
     static const char* const kGlsl =
+        "// the mip level a tap reads: the bloom chain's passes pin one level with the sampler's LOD range\n"
+        "int wwhdAreaLevel(sampler2D t, vec2 uv) {\n"
+        "    return clamp(int(textureQueryLod(t, uv).x + 0.5), 0, textureQueryLevels(t) - 1);\n"
+        "}\n"
         "// area-sampled tap for upscaled render targets (runtime/src/gfx/area_sample.h)\n"
         "vec4 wwhdAreaSample(sampler2D t, vec2 scale, vec2 uv) {\n"
         "    vec2 k = ceil(scale - 0.001);\n"
         "    if (k.x <= 1.0 && k.y <= 1.0) return texture(t, uv);\n"
-        "    vec2 step = scale / (vec2(textureSize(t, 0)) * k);\n"
+        "    vec2 step = scale / (vec2(textureSize(t, wwhdAreaLevel(t, uv))) * k);\n"
         "    vec4 sum = vec4(0.0);\n"
         "    for (float j = 0.5; j < k.y; j += 1.0)\n"
         "        for (float i = 0.5; i < k.x; i += 1.0) sum += texture(t, uv + (vec2(i, j) - 0.5 * k) * step);\n"
@@ -144,7 +172,7 @@ inline int rewrite_area_taps(std::string& src, uint32_t units, bool msl) {
         "vec4 wwhdAreaSample(sampler2D t, vec2 scale, vec2 uv, float lodBias) {\n"
         "    vec2 k = ceil(scale - 0.001);\n"
         "    if (k.x <= 1.0 && k.y <= 1.0) return texture(t, uv, lodBias);\n"
-        "    vec2 step = scale / (vec2(textureSize(t, 0)) * k);\n"
+        "    vec2 step = scale / (vec2(textureSize(t, wwhdAreaLevel(t, uv))) * k);\n"
         "    vec4 sum = vec4(0.0);\n"
         "    for (float j = 0.5; j < k.y; j += 1.0)\n"
         "        for (float i = 0.5; i < k.x; i += 1.0) sum += texture(t, uv + (vec2(i, j) - 0.5 * k) * step, lodBias);\n"

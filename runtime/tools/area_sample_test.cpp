@@ -138,10 +138,30 @@ void test_area_taps_still_rewritten() {
     assert(glsl.find("vec2 uv, float lodBias)") < glsl.find("void main("));
 }
 
+// The bloom blur reads one level of the chain (issue #307): the taps' step is a guest texel at the
+// level the sampler reads, so the helper sizes it from that level, not from level 0.
+void test_area_taps_at_sampled_level() {
+    std::string glsl = "void main() {\nR1f = (texture(textureUnitPS0, vec2(R0f.w,R0f.x)));\n}\n";
+    assert(rewrite(glsl, Program{1u, Fix::AreaTaps}, false) == 1);
+    assert(glsl.find("int wwhdAreaLevel(sampler2D t, vec2 uv)") < glsl.find("vec4 wwhdAreaSample("));
+    assert(glsl.find("textureQueryLod(t, uv).x") != std::string::npos);
+    assert(glsl.find("textureSize(t, 0)") == std::string::npos);
+    assert(glsl.find("textureSize(t, wwhdAreaLevel(t, uv))") != std::string::npos);
+    std::string msl = "fragment FragmentOut main0(FragmentIn in [[stage_in]]) {\n"
+                      "R1f = (tex0.sample(samplr0, float2(R0f.w,R0f.x)));\n}\n";
+    assert(rewrite(msl, Program{1u, Fix::AreaTaps}, true) == 1);
+    assert(msl.find("static uint wwhd_area_level(") < msl.find("static float4 wwhd_area_sample("));
+    assert(msl.find("t.calculate_clamped_lod(s, uv)") != std::string::npos);
+    assert(msl.find("t.get_width(), t.get_height()") == std::string::npos);
+    assert(msl.find("t.get_width(level), t.get_height(level)") != std::string::npos);
+}
+
 void test_classification() {
     unsigned char zeros[2112] = {};
     assert(pixel_program(zeros, sizeof zeros).fix == Fix::None);
     assert(pixel_program(zeros, 448).fix == Fix::None);
+    assert(pixel_program(zeros, 656).fix == Fix::None);  // the bloom shaders' sizes, other programs
+    assert(pixel_program(zeros, 768).fix == Fix::None);
     assert(pixel_program(nullptr, 2112).units == 0);
 }
 }  // namespace
@@ -150,6 +170,7 @@ int main() {
     test_gather_ray_math();
     test_rewrite_gather_rays();
     test_area_taps_still_rewritten();
+    test_area_taps_at_sampled_level();
     test_classification();
     std::puts("area_sample: ok");
     return 0;
