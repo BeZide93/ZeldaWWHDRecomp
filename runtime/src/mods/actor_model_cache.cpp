@@ -79,8 +79,14 @@ std::string prepare_once(const std::string& mod,const story_notebook::ManifestMo
     {
         std::lock_guard guard(mutex);auto old=entries.find(identity);
         check(old==entries.end()||(old->second.mod==mod&&old->second.model==model.id),"Static model archive identity collision");
-        if(old!=entries.end())entries.erase(old); // a failed rebuild must never expose stale output
     }
+    // An archive prepared under this identity before stays served while it is prepared again (the editor's add_actor
+    // asks once more for the collision of a model that the import prepared with it). The converter replaces its
+    // files atomically, so a read meanwhile gets the old or the new archive whole. Taking the mapping away for the
+    // whole conversion sent the game's read for an actor created meanwhile to a file that is not there: the load
+    // "completed" without the archive, its model was missing, and large models (a longer conversion) lost that race
+    // (#281). A failed rebuild still never exposes stale output: the mapping goes when the rebuild fails.
+    struct Unpublish {const std::string& identity;bool committed=false;~Unpublish(){if(committed)return;std::lock_guard guard(mutex);entries.erase(identity);}} unpublish{identity};
     std::ifstream source_file(input,std::ios::binary);std::vector<uint8_t> bytes(8*1024*1024+1);source_file.read(reinterpret_cast<char*>(bytes.data()),std::streamsize(bytes.size()));bytes.resize(size_t(source_file.gcount()));check(bytes.size()<=8*1024*1024&&!source_file.bad(),"Oversized or unreadable static model source");
     static_models::ModelInfo info;std::vector<std::string> clips;mod_actor::ModelRig rig;
     if(model.kind=="skinned"){
@@ -127,7 +133,8 @@ std::string prepare_once(const std::string& mod,const story_notebook::ManifestMo
         check(result.get("collision_sha256").string()==mods::hash::sha256_text(std::string(bytes.begin(),bytes.end())),"Collision sidecar digest mismatch");
         collision_data=std::move(decoded);
     }
-    {std::lock_guard guard(mutex);entries.emplace(identity,Entry{mod,model.id,destination.string(),info.triangle_count,minimum,maximum,std::move(clips),std::move(rig),std::move(collision_data),shoreline,material});}
+    {std::lock_guard guard(mutex);entries.insert_or_assign(identity,Entry{mod,model.id,destination.string(),info.triangle_count,minimum,maximum,std::move(clips),std::move(rig),std::move(collision_data),shoreline,material});}
+    unpublish.committed=true;
     return identity;
 }
 }
