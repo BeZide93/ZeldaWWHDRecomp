@@ -2173,6 +2173,11 @@ add_executable(restart_notice_test runtime/tools/restart_notice_test.cpp)
 target_include_directories(restart_notice_test PRIVATE runtime/src)
 target_compile_options(restart_notice_test PRIVATE -UNDEBUG)
 add_test(NAME restart_notice COMMAND restart_notice_test)
+# mods/startup_plan.h: a mod whose requirement can't be met is skipped alone (with its dependents)
+add_executable(startup_plan_test runtime/tools/startup_plan_test.cpp)
+target_include_directories(startup_plan_test PRIVATE runtime/src)
+target_compile_options(startup_plan_test PRIVATE -UNDEBUG)
+add_test(NAME mod_startup_plan COMMAND startup_plan_test)
 
 # Mods tab: row / page states, install flow, progress, catalogue cache and background check (no UI).
 add_executable(mods_model_test runtime/tools/mods_model_test.cpp runtime/src/mods/mod_archive.cpp)
