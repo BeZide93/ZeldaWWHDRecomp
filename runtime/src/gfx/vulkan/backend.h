@@ -291,6 +291,8 @@ void reset_ao_private_cache();
 void destroy_surface_image(Surface*);
 // once per frame (swap): the texture budget's sweep (WWHD_VK_TEXTURE_BUDGET)
 void texture_budget_step();
+// releases one texture's image as the budget does (smoke test); its next lookup makes it again
+void release_texture_image(Surface* s);
 VkImageView layer_view(Surface*,uint32_t slice);
 VkImageView make_sampled_view(Surface*,uint32_t key); // a sampled view by its key (surfaces.cpp sampled_texture_view)
 void touch_image(Surface*); // dynamic resolution: clear an image made ahead once (surfaces.cpp)

@@ -4,6 +4,7 @@
 #include "../../exception_report.h"
 #include "gfx/render_mips.h"
 #include "gfx/texture_levels.h"
+#include "texture_budget.h"
 #include "bc_decode.h"
 #include "mods/cemu_pack.h"
 // Guest surfaces backed by Vulkan images. LatteAddrLib supplies guest tiling geometry.
@@ -1489,8 +1490,8 @@ static UploadSlice texture_staging_slice(const Surface* s,size_t size) {
     return slice;
 }
 // ---------------------------------------------------------------- texture budget
-// WWHD_VK_TEXTURE_BUDGET=1: the images of textures the CPU wrote (never of surfaces the GPU wrote: their only copy
-// is the image) are released, least recently looked up first, while their bytes exceed the budget
+// WWHD_VK_TEXTURE_BUDGET=1: the images of textures the CPU wrote at the guest size (never of surfaces the GPU wrote:
+// their only copy is the image) are released, least recently looked up first, while their bytes exceed the budget
 // (WWHD_VK_TEXTURE_BUDGET_MB, default a quarter of the device's memory budget, VK_EXT_memory_budget), and with
 // WWHD_VK_TEXTURE_IDLE_FRAMES=n also once unused for n frames. Textures looked up in the last WWHD_VK_TEXTURE_PIN_FRAMES
 // (default 3) frames are pinned. A released texture keeps its Surface (every pointer to it stays valid); its next
@@ -1498,9 +1499,17 @@ static UploadSlice texture_staging_slice(const Surface* s,size_t size) {
 // image is freed when the submissions using it have finished). Idea after aurora's byte-budget LRU with pinning and
 // idle sweep (MIT; lib/gfx/lru_cache.hpp, lib/gx/texture.cpp); no code taken.
 uint64_t g_stat_tex_evictions, g_stat_tex_evicted_bytes, g_stat_tex_restores, g_stat_tex_resident_bytes;
+// CPU-written textures at the guest size (a surface the GPU drew into, or one made at an internal resolution for
+// rendering, is never released: the image is its only copy or not the guest's shape)
 static bool evictable(const Surface* s) {
-    return s->image && !s->gpuWritten && !s->evicted &&
-           !(s->usage & (VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT));
+    return s->image && !s->gpuWritten && !s->evicted && !s->isDepth && s->sx == 1 && s->sy == 1 &&
+           s->extent.width == s->width && (s->imageType == VK_IMAGE_TYPE_1D || s->extent.height == s->height);
+}
+void release_texture_image(Surface* s) {
+    if (!evictable(s)) return;
+    ++g_stat_tex_evictions; g_stat_tex_evicted_bytes += s->allocationBytes;
+    destroy_surface_image(s);
+    s->evicted = true;
 }
 static void restore_evicted(Surface* s) {
     if (!s->evicted) return;
@@ -1521,26 +1530,19 @@ void texture_budget_step() {
     }();
     static const uint64_t idle = [] { const char* e = getenv("WWHD_VK_TEXTURE_IDLE_FRAMES"); return e && *e ? uint64_t(std::max(0, atoi(e))) : 0; }();
     static const uint64_t pin = [] { const char* e = getenv("WWHD_VK_TEXTURE_PIN_FRAMES"); return e && *e ? uint64_t(std::max(1, atoi(e))) : 3; }();
-    std::vector<Surface*> candidates;
+    std::vector<Surface*> surfaces;
+    std::vector<texture_budget::Candidate> candidates;
     uint64_t total = 0;
     for (auto& [addr, owned] : R.surfaces) {
         Surface* s = owned.get();
         if (!evictable(s)) continue;
         total += s->allocationBytes;
-        if (s->lastUsedFrame + pin <= R.frame) candidates.push_back(s);
+        candidates.push_back({s->lastUsedFrame, s->allocationBytes, surfaces.size()});
+        surfaces.push_back(s);
     }
-    g_stat_tex_resident_bytes = total;
-    std::sort(candidates.begin(), candidates.end(), [](const Surface* a, const Surface* b) { return a->lastUsedFrame < b->lastUsedFrame; });
-    const uint64_t target = budget - budget / 10;  // released down to 90 %: no release every sweep at the edge
-    for (Surface* s : candidates) {
-        const bool idleOut = idle && s->lastUsedFrame + idle <= R.frame;
-        if (!idleOut && (!budget || total <= budget)) break;  // (sorted: the rest are newer)
-        if (!idleOut && total <= target) break;
-        const uint64_t bytes = s->allocationBytes;
-        destroy_surface_image(s);
-        s->evicted = true;
-        total -= std::min(total, bytes);
-        ++g_stat_tex_evictions; g_stat_tex_evicted_bytes += bytes;
+    for (size_t i : texture_budget::select(std::move(candidates), total, R.frame, budget, idle, pin)) {
+        total -= std::min<uint64_t>(total, surfaces[i]->allocationBytes);
+        release_texture_image(surfaces[i]);
     }
     g_stat_tex_resident_bytes = total;
 }
