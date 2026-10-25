@@ -854,13 +854,17 @@ void upload_surface(Surface* s) {
         uint32_t w, h, slices;
         decode_level(s, level, base, data, w, h, slices);
         uint32_t bw = f.compressed ? (w + 3) / 4 : w, bh = f.compressed ? (h + 3) / 4 : h;
-        staging = [R.device newBufferWithBytes:data.data() length:data.size() options:MTLResourceStorageModeShared];
+        NSUInteger stagingOffset = 0;
+        if (!texture_staging(data.data(), data.size(), &staging, &stagingOffset)) {
+            staging = [R.device newBufferWithBytes:data.data() length:data.size() options:MTLResourceStorageModeShared];
+            rprof::add_upload(rprof::kUpTexture, data.size());
+        }
         bool is3D = s->tex.textureType == MTLTextureType3D;
         uint32_t layers = is3D ? 1 : (s->tex.textureType == MTLTextureTypeCube ? 6 : (uint32_t)s->tex.arrayLength);
         uint32_t perSlice = bw * bh * f.hostBytesPerBlock;
         for (uint32_t z = 0; z < (is3D ? 1 : std::min(slices, layers)); z++) {
             [blit copyFromBuffer:staging
-                     sourceOffset:(NSUInteger)z * perSlice
+                     sourceOffset:stagingOffset + (NSUInteger)z * perSlice
                 sourceBytesPerRow:bw * f.hostBytesPerBlock
               sourceBytesPerImage:perSlice
                        sourceSize:MTLSizeMake(f.compressed ? bw * 4 : w, f.compressed ? bh * 4 : h, is3D ? slices : 1)

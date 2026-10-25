@@ -124,6 +124,8 @@ Surface* surface_from_color_buffer(uint32_t gx2ColorBuffer, uint32_t* firstSlice
 Surface* surface_from_depth_buffer(uint32_t gx2DepthBuffer, uint32_t* firstSlice = nullptr, uint32_t* numSlices = nullptr);
 Surface* sampled_texture(const uint32_t* texWords, bool isDepthSampler);  // from SQ_TEX_RESOURCE words
 void upload_surface(Surface* s);
+// texture staging through the upload pool (metal_draw.mm; WWHD_MTL_TEXTURE_STAGING=pool): false = use an own buffer
+bool texture_staging(const void* data, size_t size, id<MTLBuffer>* buf, NSUInteger* offset);
 
 // internal resolution (Graphics menu / R / WWHD_RES_SCALE): render targets are allocated at this
 // multiple of their guest size; a change takes effect at the next frame (targets are resized on next use)

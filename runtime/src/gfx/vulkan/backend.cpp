@@ -738,7 +738,10 @@ void note_upload_block(const Buffer& buffer) {
   R.uploadReadsDirect = direct;
 }
 }  // namespace
-UploadSlice allocate_upload(VkDeviceSize size, VkDeviceSize alignment) {
+static UploadSlice upload_slice(VkDeviceSize& size, VkDeviceSize& alignment, bool grow);
+UploadSlice allocate_upload(VkDeviceSize size, VkDeviceSize alignment) { return upload_slice(size,alignment,true); }
+UploadSlice allocate_upload_no_grow(VkDeviceSize size, VkDeviceSize alignment) { return upload_slice(size,alignment,false); }
+static UploadSlice upload_slice(VkDeviceSize& size, VkDeviceSize& alignment, bool grow) {
   size = std::max<VkDeviceSize>(size,16);
   alignment = std::max<VkDeviceSize>(alignment,4);
   auto slice = [&](Renderer::UploadBlock& block) {
@@ -1323,6 +1326,7 @@ static void activate_submission(size_t index) {
   R.commandPool=slot.commandPool;R.cmd=slot.cmd;R.fence=slot.fence;
   R.descriptorPool=slot.descriptorPool;
   R.uploadBlocks=std::move(slot.uploadBlocks);
+  R.textureStagingBytes=0;
   R.garbageBuffers=std::move(slot.garbageBuffers);
   R.garbageImages=std::move(slot.garbageImages);
   R.garbageFramebuffers=std::move(slot.garbageFramebuffers);
@@ -3659,13 +3663,18 @@ void swap() {
       {
         // texture change detection (surfaces.cpp upload_surface, write_watch.h)
         extern uint64_t g_stat_full_checks, g_stat_uploads;
+        extern uint64_t g_stat_staging_ring, g_stat_staging_ring_bytes, g_stat_staging_buffers, g_stat_staging_buffer_bytes;
         static uint64_t checks=0, uploads=0;
         uint64_t faults, protectedPages;
         wwatch::take_stats(faults, protectedPages);
-        LOG("[vulkan textures] %llu full checks, %llu uploads, %llu page write faults, %llu pages protected",
+        LOG("[vulkan textures] %llu full checks, %llu uploads, %llu page write faults, %llu pages protected; staging: "
+            "%llu levels from the upload arena (%.1f MiB), %llu own buffers (%.1f MiB)",
             (unsigned long long)(g_stat_full_checks-checks),(unsigned long long)(g_stat_uploads-uploads),
-            (unsigned long long)faults,(unsigned long long)protectedPages);
+            (unsigned long long)faults,(unsigned long long)protectedPages,
+            (unsigned long long)g_stat_staging_ring,g_stat_staging_ring_bytes/1048576.0,
+            (unsigned long long)g_stat_staging_buffers,g_stat_staging_buffer_bytes/1048576.0);
         checks=g_stat_full_checks;uploads=g_stat_uploads;
+        g_stat_staging_ring=g_stat_staging_ring_bytes=g_stat_staging_buffers=g_stat_staging_buffer_bytes=0;
       }
       buffer_cache_report(double(R.frame-frame));
       // CPU-only reports leave per-draw counters/comparison clocks disabled.

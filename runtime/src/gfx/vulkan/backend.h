@@ -179,6 +179,8 @@ struct Renderer {
  struct UploadBlock { Buffer buffer; VkDeviceSize used=0; };
  std::vector<UploadBlock> uploadBlocks;
  uint64_t uploadAllocations=0,uploadBytes=0;
+ // texture staging taken from the arena in the recording submission (reset when a submission is activated)
+ VkDeviceSize textureStagingBytes=0;
  // Upload arena memory is HOST_CACHED|HOST_COHERENT (every block so far): CPU reads of it are as fast as
  // heap reads (Apple silicon/MoltenVK, many UMA drivers). uploadReadsDirect: the snapshot reuse caches
  // and the native index scan may read mapped upload slices instead of keeping CPU copies (auto: when
@@ -252,6 +254,9 @@ Buffer create_buffer(VkDeviceSize size,VkBufferUsageFlags usage,VkMemoryProperty
 // host-visible TRANSFER_DST buffer the CPU reads back, host-cached where available
 Buffer create_readback_buffer(VkDeviceSize size);
 UploadSlice allocate_upload(VkDeviceSize size,VkDeviceSize alignment);
+// A slice of the current submission's upload arena only if it fits in a block it already has (no new block);
+// an empty slice otherwise. Texture staging (surfaces.cpp upload_surface, WWHD_VK_TEXTURE_STAGING).
+UploadSlice allocate_upload_no_grow(VkDeviceSize size,VkDeviceSize alignment);
 // Renderer smoke tests exercise the production snapshot helper with host data.
 UploadSlice vertex_window_smoke_snapshot(uint32_t binding,uint32_t address,
     uint32_t reservation,uint32_t windowOffset,uint32_t windowLength,

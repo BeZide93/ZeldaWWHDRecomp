@@ -149,8 +149,8 @@ static uint64_t g_pool_gen = 0;
 static uint32_t g_pool_pos = 0;
 constexpr uint32_t kPoolChunk = 8 << 20;
 
-static Upload upload(const void* data, uint32_t size) {
-    size = (size + 255) & ~255u;
+// room for size bytes (a multiple of 256) in the current chunk, starting a new one when it is full
+static Upload reserve(uint32_t size) {
     if (!g_pool_cur || g_pool_pos + size > g_pool_cur.length) {
         std::lock_guard<std::mutex> lk(g_pool_mutex);
         if (g_pool_cur) g_pool_used.push_back(g_pool_cur);
@@ -167,10 +167,49 @@ static Upload upload(const void* data, uint32_t size) {
         g_pool_pos = 0;
     }
     Upload u{g_pool_cur, g_pool_pos};
-    memcpy((uint8_t*)g_pool_cur.contents + g_pool_pos, data, size);
-    rprof::add_upload(size);
     g_pool_pos += size;
     return u;
+}
+
+static Upload upload(const void* data, uint32_t size) {
+    size = (size + 255) & ~255u;
+    Upload u = reserve(size);
+    memcpy((uint8_t*)u.buf.contents + u.offset, data, size);
+    rprof::add_upload(size);
+    return u;
+}
+
+// Texture staging (WWHD_MTL_TEXTURE_STAGING): "pool" copies each level through the upload pool (recycled
+// when the command buffer completes) while the command buffer's texture staging stays within
+// WWHD_MTL_TEXTURE_STAGING_MB (default 16) and the level fits a pool chunk; anything else, and "buffer" (the
+// default), gets its own buffer (newBufferWithBytes). Idea after aurora's per-frame staging (MIT;
+// lib/gfx/texture.cpp); no code taken.
+static size_t g_texture_staging_bytes;  // in the recording command buffer (pool_retire resets it)
+uint64_t g_stat_staging_pool, g_stat_staging_pool_bytes, g_stat_staging_buffers, g_stat_staging_buffer_bytes;
+bool texture_staging(const void* data, size_t size, id<MTLBuffer>* buf, NSUInteger* offset) {
+    static const bool pool = [] {
+        const char* e = getenv("WWHD_MTL_TEXTURE_STAGING");
+        if (e && *e) LOG("[gfx] texture staging: %s (WWHD_MTL_TEXTURE_STAGING=%s)", strcmp(e, "pool") ? "own buffers" : "upload pool", e);
+        return e && !strcmp(e, "pool");
+    }();
+    static const size_t budget = [] {
+        const char* e = getenv("WWHD_MTL_TEXTURE_STAGING_MB");
+        return size_t(e && *e ? std::max(0, atoi(e)) : 16) << 20;
+    }();
+    if (!pool || !size || size > kPoolChunk || g_texture_staging_bytes + size > budget) {
+        ++g_stat_staging_buffers;
+        g_stat_staging_buffer_bytes += size;
+        return false;
+    }
+    Upload u = reserve(uint32_t((size + 255) & ~size_t(255)));
+    memcpy((uint8_t*)u.buf.contents + u.offset, data, size);
+    rprof::add_upload(rprof::kUpTexture, size);
+    g_texture_staging_bytes += size;
+    ++g_stat_staging_pool;
+    g_stat_staging_pool_bytes += size;
+    *buf = u.buf;
+    *offset = u.offset;
+    return true;
 }
 
 // Submitted uniform blocks (gx2/submitted_uniforms.h): uploaded once per submission and reused by
@@ -246,6 +285,7 @@ static bool rewritten_copy(GuestRangeKind kind, uint32_t addr, uint32_t size, Up
 
 // called before a command buffer commits: buffers used so far are recycled when it completes
 void pool_retire(id<MTLCommandBuffer> cmd) {
+    g_texture_staging_bytes = 0;
     std::vector<id<MTLBuffer>> used;
     {
         std::lock_guard<std::mutex> lk(g_pool_mutex);
@@ -2110,10 +2150,13 @@ void report_skips() {
     uint64_t faults, protectedPages;
     wwatch::take_stats(faults, protectedPages);
     LOG("[gfx] last 300 frames: %llu full texture checks (%.1f MiB hashed), %llu uploads, %llu invalidates marking %llu surfaces, "
-        "%llu texture page write faults, %llu pages protected",
+        "%llu texture page write faults, %llu pages protected; staging: %llu levels from the upload pool (%.1f MiB), "
+        "%llu own buffers (%.1f MiB)",
         (unsigned long long)g_stat_full_checks, g_stat_hashed_bytes / 1048576.0, (unsigned long long)g_stat_uploads,
         (unsigned long long)g_stat_invalidates, (unsigned long long)g_stat_invalidated_surfaces, (unsigned long long)faults,
-        (unsigned long long)protectedPages);
+        (unsigned long long)protectedPages, (unsigned long long)g_stat_staging_pool, g_stat_staging_pool_bytes / 1048576.0,
+        (unsigned long long)g_stat_staging_buffers, g_stat_staging_buffer_bytes / 1048576.0);
+    g_stat_staging_pool = g_stat_staging_pool_bytes = g_stat_staging_buffers = g_stat_staging_buffer_bytes = 0;
     g_stat_full_checks = g_stat_uploads = g_stat_invalidates = g_stat_invalidated_surfaces = g_stat_hashed_bytes = 0;
     for (int k = 0; k < kRangeKinds; k++) {
         size_t dynamicRanges = 0;

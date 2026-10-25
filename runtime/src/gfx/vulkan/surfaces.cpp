@@ -28,6 +28,7 @@
 #include "runtime.h"
 #include "dynres.h"
 #include <algorithm>
+#include <numeric>
 #include <array>
 #include <atomic>
 #include <chrono>
@@ -1464,6 +1465,27 @@ static const CachedGuestLevel& level_in_guest(Surface* s,uint32_t level) {
     return cached;
 }
 static uint32_t mip_base(Surface* s,uint32_t level) { return level_in_guest(s,level).address; }
+// Texture staging (WWHD_VK_TEXTURE_STAGING): "ring" copies each level through the recording submission's
+// upload arena (backend.cpp allocate_upload; reused once that submission's fence completes) when it fits in
+// a block the arena already has and the submission's texture staging stays within
+// WWHD_VK_TEXTURE_STAGING_MB (default 16); anything else, and "buffer" (the default), gets its own staging
+// buffer, freed after the submission. Idea after aurora's per-frame staging (MIT; lib/gfx/texture.cpp,
+// recording.cpp); no code taken.
+uint64_t g_stat_staging_ring, g_stat_staging_ring_bytes, g_stat_staging_buffers, g_stat_staging_buffer_bytes;
+static UploadSlice texture_staging_slice(const Surface* s,size_t size) {
+    static const bool ring=[]{const char* e=getenv("WWHD_VK_TEXTURE_STAGING");
+        if(e&&*e)LOG("[vulkan] texture staging: %s (WWHD_VK_TEXTURE_STAGING=%s)",strcmp(e,"ring")?"own buffers":"upload arena",e);
+        return e&&!strcmp(e,"ring");}();
+    static const VkDeviceSize budget=[]{const char* e=getenv("WWHD_VK_TEXTURE_STAGING_MB");
+        return VkDeviceSize(e&&*e?std::max(0,atoi(e)):16)<<20;}();
+    if(!ring||R.textureStagingBytes+size>budget)return UploadSlice{};
+    // copy offsets: a multiple of the texel block size and of 4 (Vulkan's bufferOffset rules)
+    const VkDeviceSize alignment=std::lcm<VkDeviceSize>(16,std::max<VkDeviceSize>(1,s->fmt.hostBytesPerBlock));
+    rprof::UploadKind kind(rprof::kUpTexture);
+    UploadSlice slice=allocate_upload_no_grow(size,alignment);
+    if(slice.buffer){R.textureStagingBytes+=size;++g_stat_staging_ring;g_stat_staging_ring_bytes+=size;}
+    return slice;
+}
 void upload_surface(Surface* s) {
     if(!s||!s->image||s->gpuWritten)return;
     // All callers, including render attachments, share the once-per-frame
@@ -1538,10 +1560,18 @@ void upload_surface(Surface* s) {
             packed=std::move(data);
             VkBufferImageCopy copy{};copy.imageSubresource={s->aspect,level,0,layers};copy.imageExtent={w,h,threeD?slices:1};copies.push_back(copy);
         }
+        const UploadSlice ring=texture_staging_slice(s,packed.size());
+        if(ring.buffer) {
+            memcpy(ring.mapped,packed.data(),packed.size());
+            for(auto& copy:copies)copy.bufferOffset+=ring.offset;
+            record::vkCmdCopyBufferToImage(command_buffer(),ring.buffer,target->image,VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,uint32_t(copies.size()),copies.data());
+            continue;
+        }
         Buffer staging=create_buffer(packed.size(),VK_BUFFER_USAGE_TRANSFER_SRC_BIT,VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT|VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
         if(!staging.mapped){defer_buffer(staging);exception_report::raise("Vulkan texture staging allocation is not mapped");}
         memcpy(staging.mapped,packed.data(),packed.size());
         rprof::add_upload(rprof::kUpTexture,packed.size());
+        ++g_stat_staging_buffers;g_stat_staging_buffer_bytes+=packed.size();
         record::vkCmdCopyBufferToImage(command_buffer(),staging.buffer,target->image,VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,uint32_t(copies.size()),copies.data());
         defer_buffer(staging);
     }
