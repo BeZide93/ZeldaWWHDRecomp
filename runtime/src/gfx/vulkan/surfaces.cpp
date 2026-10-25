@@ -1404,6 +1404,7 @@ static Surface* adopt_newer_alias(Surface* s) {
     mark_gpu_written(s);
     return s;
 }
+static void restore_evicted(Surface* s);  // (texture budget, below)
 Surface* find_or_create_surface(const SurfaceDesc& d,bool forRendering) {
     if(!d.addr)return nullptr;
     auto& cache=stereo_surface_cache(d);
@@ -1419,6 +1420,7 @@ Surface* find_or_create_surface(const SurfaceDesc& d,bool forRendering) {
         if(!rendered||score(s)>score(rendered))rendered=s;};
     for(auto it=range.first;it!=range.second;++it) {
         auto* s=it->second.get();
+        if(s->evicted)restore_evicted(s);  // (texture budget)
         if(!forRendering&&s->isDepth&&!d.isDepth&&s->gpuWritten&&s->width==d.width&&s->height==d.height)consider(s);
         if(s->isDepth!=d.isDepth)continue;
         // a render target is one level: don't adopt a texture made first by sampling the address
@@ -1486,8 +1488,67 @@ static UploadSlice texture_staging_slice(const Surface* s,size_t size) {
     if(slice.buffer){R.textureStagingBytes+=size;++g_stat_staging_ring;g_stat_staging_ring_bytes+=size;}
     return slice;
 }
+// ---------------------------------------------------------------- texture budget
+// WWHD_VK_TEXTURE_BUDGET=1: the images of textures the CPU wrote (never of surfaces the GPU wrote: their only copy
+// is the image) are released, least recently looked up first, while their bytes exceed the budget
+// (WWHD_VK_TEXTURE_BUDGET_MB, default a quarter of the device's memory budget, VK_EXT_memory_budget), and with
+// WWHD_VK_TEXTURE_IDLE_FRAMES=n also once unused for n frames. Textures looked up in the last WWHD_VK_TEXTURE_PIN_FRAMES
+// (default 3) frames are pinned. A released texture keeps its Surface (every pointer to it stays valid); its next
+// lookup makes the image again and uploads it from guest memory. Release goes through destroy_surface_image (the
+// image is freed when the submissions using it have finished). Idea after aurora's byte-budget LRU with pinning and
+// idle sweep (MIT; lib/gfx/lru_cache.hpp, lib/gx/texture.cpp); no code taken.
+uint64_t g_stat_tex_evictions, g_stat_tex_evicted_bytes, g_stat_tex_restores, g_stat_tex_resident_bytes;
+static bool evictable(const Surface* s) {
+    return s->image && !s->gpuWritten && !s->evicted &&
+           !(s->usage & (VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT));
+}
+static void restore_evicted(Surface* s) {
+    if (!s->evicted) return;
+    s->evicted = false;
+    create_surface_image(s, false);
+    s->dirty = true; s->contentHash = 0; s->watched = false; s->lastCheckedFrame = ~0ull;
+    ++g_surface_epoch; ++g_stat_tex_restores;
+}
+void texture_budget_step() {
+    static const bool on = [] { const char* e = getenv("WWHD_VK_TEXTURE_BUDGET"); return e && !strcmp(e, "1"); }();
+    if (!on || R.frame % 30) return;
+    extern uint64_t vulkan_device_memory_budget();
+    static const uint64_t budget = [] {
+        const char* e = getenv("WWHD_VK_TEXTURE_BUDGET_MB");
+        const uint64_t bytes = e && *e ? uint64_t(std::max(0, atoi(e))) << 20 : vulkan_device_memory_budget() / 4;
+        LOG("[vulkan] texture budget: %.0f MiB (WWHD_VK_TEXTURE_BUDGET_MB=%s)", bytes / 1048576.0, e && *e ? e : "a quarter of the device budget");
+        return bytes;
+    }();
+    static const uint64_t idle = [] { const char* e = getenv("WWHD_VK_TEXTURE_IDLE_FRAMES"); return e && *e ? uint64_t(std::max(0, atoi(e))) : 0; }();
+    static const uint64_t pin = [] { const char* e = getenv("WWHD_VK_TEXTURE_PIN_FRAMES"); return e && *e ? uint64_t(std::max(1, atoi(e))) : 3; }();
+    std::vector<Surface*> candidates;
+    uint64_t total = 0;
+    for (auto& [addr, owned] : R.surfaces) {
+        Surface* s = owned.get();
+        if (!evictable(s)) continue;
+        total += s->allocationBytes;
+        if (s->lastUsedFrame + pin <= R.frame) candidates.push_back(s);
+    }
+    g_stat_tex_resident_bytes = total;
+    std::sort(candidates.begin(), candidates.end(), [](const Surface* a, const Surface* b) { return a->lastUsedFrame < b->lastUsedFrame; });
+    const uint64_t target = budget - budget / 10;  // released down to 90 %: no release every sweep at the edge
+    for (Surface* s : candidates) {
+        const bool idleOut = idle && s->lastUsedFrame + idle <= R.frame;
+        if (!idleOut && (!budget || total <= budget)) break;  // (sorted: the rest are newer)
+        if (!idleOut && total <= target) break;
+        const uint64_t bytes = s->allocationBytes;
+        destroy_surface_image(s);
+        s->evicted = true;
+        total -= std::min(total, bytes);
+        ++g_stat_tex_evictions; g_stat_tex_evicted_bytes += bytes;
+    }
+    g_stat_tex_resident_bytes = total;
+}
 void upload_surface(Surface* s) {
-    if(!s||!s->image||s->gpuWritten)return;
+    if(!s)return;
+    s->lastUsedFrame=R.frame;
+    if(s->evicted)restore_evicted(s);
+    if(!s->image||s->gpuWritten)return;
     // All callers, including render attachments, share the once-per-frame
     // check. Invalidation resets lastCheckedFrame for writes within a frame.
     if (s->lastCheckedFrame == R.frame) return;

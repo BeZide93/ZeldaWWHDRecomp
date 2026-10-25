@@ -328,6 +328,13 @@ bool unpack_pipeline_cache(std::vector<uint8_t>& file) {
 // The device's memory budget for the warm pipeline pool (pipeline_worker.cpp): VK_EXT_memory_budget's budget of the
 // largest device-local heap when the device has the extension, else that heap's size (MoltenVK: Metal's
 // recommendedMaxWorkingSetSize); 0 when unknown.
+static uint64_t device_memory_budget();
+}  // namespace
+uint64_t vulkan_device_memory_budget() {  // (surfaces.cpp texture budget)
+  static const uint64_t value = device_memory_budget();
+  return value;
+}
+namespace {
 static uint64_t device_memory_budget() {
   VkPhysicalDeviceMemoryProperties p{};
   vkGetPhysicalDeviceMemoryProperties(R.physicalDevice, &p);
@@ -3317,6 +3324,7 @@ static void attach_gamepad_window() {
 }
 #endif
 void swap() {
+  texture_budget_step();
   fallback_stats::begin_frame(R.frame);
   if (handoff_trace::enabled()) handoff_trace::set_producer_frame(R.frame);
   if(active_deferred_commands) {
@@ -3689,6 +3697,11 @@ void swap() {
         // texture change detection (surfaces.cpp upload_surface, write_watch.h)
         extern uint64_t g_stat_full_checks, g_stat_uploads;
         extern uint64_t g_stat_staging_ring, g_stat_staging_ring_bytes, g_stat_staging_buffers, g_stat_staging_buffer_bytes;
+        extern uint64_t g_stat_tex_evictions, g_stat_tex_evicted_bytes, g_stat_tex_restores, g_stat_tex_resident_bytes;
+        LOG("[vulkan textures] budget: %.1f MiB of CPU textures resident; %llu released (%.1f MiB), %llu made again",
+            g_stat_tex_resident_bytes/1048576.0,(unsigned long long)g_stat_tex_evictions,g_stat_tex_evicted_bytes/1048576.0,
+            (unsigned long long)g_stat_tex_restores);
+        g_stat_tex_evictions=g_stat_tex_evicted_bytes=g_stat_tex_restores=0;
         static uint64_t checks=0, uploads=0;
         uint64_t faults, protectedPages;
         wwatch::take_stats(faults, protectedPages);

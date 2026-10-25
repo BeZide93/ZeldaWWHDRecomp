@@ -46,6 +46,9 @@ struct Surface {
  uint64_t watchStamp=0; bool watched=false;
  // stereo: eye 1's held commands of this flush generation sample this eye 0 texture (stereo.h)
  uint64_t eyeHeld=0;
+ // texture budget (surfaces.cpp texture_budget_step): the frame the texture was last looked up, and whether its image
+ // was released to stay within the budget (made again, and uploaded from guest memory, at its next lookup)
+ uint64_t lastUsedFrame=0; bool evicted=false;
  uint32_t dataSize=0; FormatInfo fmt;
  mutable std::shared_ptr<CachedGuestLayout> guestLayout;
  float scale=1,sx=1,sy=1;
@@ -286,6 +289,8 @@ void create_surface_image(Surface*,bool forRendering,VkExtent3D explicitExtent =
                           uint32_t sharedQueueFamily = VK_QUEUE_FAMILY_IGNORED);
 void reset_ao_private_cache();
 void destroy_surface_image(Surface*);
+// once per frame (swap): the texture budget's sweep (WWHD_VK_TEXTURE_BUDGET)
+void texture_budget_step();
 VkImageView layer_view(Surface*,uint32_t slice);
 VkImageView make_sampled_view(Surface*,uint32_t key); // a sampled view by its key (surfaces.cpp sampled_texture_view)
 void touch_image(Surface*); // dynamic resolution: clear an image made ahead once (surfaces.cpp)
