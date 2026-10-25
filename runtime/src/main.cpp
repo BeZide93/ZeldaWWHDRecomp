@@ -681,6 +681,8 @@ int main(int argc, char** argv) {
     // into an editor session; set_launch_mode ran in the argument loop above, before any package loads
     if (editor::enabled()) guestmods::set_package_observer(editor::register_package);
     guestmods::init();  // trusted manager packages, before guest threads start
+    // mods skipped because a requirement can't be met (the GameCube game for mods is gone, ...): the rest started
+    for (const auto& line : mods::packages::startup_problems()) LOG("[mods] skipped: %s", line.c_str());
     // the island arrival notice (story_world_arrival.h): an overlay layer only when a loaded package
     // declares an arrival, or with --editor (a live edit can add one); the overlay seals at its first
     // frame, after this point
