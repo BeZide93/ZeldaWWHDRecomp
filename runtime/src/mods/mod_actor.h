@@ -62,6 +62,10 @@ bool set_combat_reward(const std::string& mod,const std::string& id,CombatReward
 bool set_carry_break(const std::string& mod,const std::string& id,std::function<bool()>);
 using BehaviorSink=std::function<void(Cpu*,uint32_t,BehaviorEvent,const Hit*)>;
 void set_behavior_sink(BehaviorSink);
+// Why an actor could not be created (its archive did not load, the game heap or the mod budget refused its model): the
+// world editor says it, so a placement that is not in the game is never silent. Game thread.
+using CreateFailureSink=std::function<void(const std::string& mod,const std::string& id,const std::string& why)>;
+void set_create_failure_sink(CreateFailureSink);
 uint32_t declaration_token(const std::string& mod,const std::string& id);
 bool identify(Cpu*,uint32_t actor,Identity&);
 uint32_t resolve(Cpu*,const Identity&);

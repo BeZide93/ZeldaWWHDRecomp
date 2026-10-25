@@ -2223,6 +2223,11 @@ void start_model_watch() {
 void logic_service(Cpu* c) {
     if (!enabled()) return;
     start_model_watch();
+    // a placement the game could not create says why (its archive did not load, the heap or the mod budget refused it)
+    static const bool failures_said = (mod_actor::set_create_failure_sink([](const std::string& mod, const std::string& id, const std::string& why) {
+        set_status("Actor " + id + " (" + mod + ") is not in the game: " + why);
+    }), true);
+    (void)failures_said;
     return_tick();
     t_game = c;
     records_tick();
