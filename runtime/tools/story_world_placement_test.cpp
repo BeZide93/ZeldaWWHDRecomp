@@ -197,6 +197,81 @@ int main(){
   // the boat's route is said as a boat route; a villager's as before
   {Index x=base;x.routes[0].user.clear();x.routes[0].points={{-100,0,1000},{900,0,1000}};assert(only(x)=="villager route");}
  }
+ { // issue #281: new ground joined flush to an island's hill. The island: a plateau (two floor triangles) at y 1000 over
+  // x -2000..0, z -1000..1000, its cliff (two wall triangles, facing +x) at x 0 from the sea floor at -1000 up to it.
+  // The extension: blocks (outward faces) from the sea floor up, reaching 200 into the plateau.
+  Index isle;isle.coverage.push_back({"sea",11,true,true,true,{}});
+  auto tri=[&](Point a,Point b,Point c){Bounds wb{{std::min({a.x,b.x,c.x}),std::min({a.y,b.y,c.y}),std::min({a.z,b.z,c.z})},{std::max({a.x,b.x,c.x}),std::max({a.y,b.y,c.y}),std::max({a.z,b.z,c.z})}};
+   isle.bounds.push_back({"sea",11,"collision","t"+std::to_string(isle.bounds.size()),wb,true,{a,b,c}});};
+  // the plateau, sloping by `slope` per unit toward -x (0: flat)
+  auto island=[&](float slope){isle.bounds.clear();const float w=1000+2000*slope;
+   tri({-2000,w,-1000},{-2000,w,1000},{0,1000,-1000});tri({0,1000,-1000},{-2000,w,1000},{0,1000,1000});
+   tri({0,-1000,-1000},{0,1000,-1000},{0,-1000,1000});tri({0,1000,-1000},{0,1000,1000},{0,-1000,1000});};
+  island(0);
+  struct Mesh {std::vector<Point> v;std::vector<std::array<uint16_t,3>> t;
+   // a block with outward faces; its top may slope (top + slope * -x) and lie `lift` higher
+   void block(Point lo,Point hi,float slope=0){const uint16_t o=uint16_t(v.size());
+    for(unsigned k=0;k<8;++k){const float x=k&1?hi.x:lo.x,z=k&4?hi.z:lo.z;v.push_back({x,k&2?hi.y-slope*x:lo.y,z});}
+    for(auto f:{std::array<uint16_t,4>{0,1,5,4},{2,6,7,3},{0,2,3,1},{4,5,7,6},{0,4,6,2},{1,3,7,5}}){t.push_back({uint16_t(o+f[0]),uint16_t(o+f[1]),uint16_t(o+f[2])});t.push_back({uint16_t(o+f[0]),uint16_t(o+f[2]),uint16_t(o+f[3])});}}
+   Solid solid()const{return place_solid(v,t,{0,0,0},{0,0,0},{1,1,1});}};
+  auto run=[&](const Mesh&m,const Index&x){const Solid s=m.solid();return check("sea",11,s.bounds,x,kClearance,&s);};
+  auto kinds=[](const std::vector<Conflict>&c){std::string k;for(const auto&x:c)k+=(k.empty()?"":",")+x.kind;return k;};
+  // the block's top faces up (the own floor the wall rule looks for)
+  {Mesh m;m.block({-200,-1000,-300},{2000,1000,300});const Solid s=m.solid();float h=0;assert(ground_under(s,{500,5000,0},h)&&h==1000);}
+  // 1. flush ground: its top at the plateau's height (and up to kFlushStep above it) is not in the way; its sides go into
+  //    the cliff under that floor
+  {Mesh m;m.block({-200,-1000,-300},{2000,1000,300});assert(run(m,isle).empty());}
+  {Mesh m;m.block({-200,-1000,-300},{2000,1000+kFlushStep-1,300});assert(run(m,isle).empty());}
+  // 2. standing out of it is: 100 above the plateau (a step at the join), a parapet on the join, a block against the
+  //    cliff whose top is lower than the plateau's (its sides cut the cliff where no floor of its own meets the island's)
+  {Mesh m;m.block({-200,-1000,-300},{2000,1100,300});const auto c=run(m,isle);assert(kinds(c)=="collision");
+   assert(c[0].message.find("the model rises out of the ground or goes through a wall there")!=std::string::npos&&c[0].message.find("up to 30 units above it, is fine")!=std::string::npos);}
+  {Mesh m;m.block({-200,-1000,-300},{2000,1000,300});m.block({-100,1000,-300},{-50,1300,300});assert(kinds(run(m,isle))=="collision");}
+  {Mesh m;m.block({-100,-1000,-300},{2000,500,300});assert(kinds(run(m,isle))=="collision");}
+  // 3. a villager on the plateau 100 from where the new ground joins: flush ground beside him is fine; a step of 100, or
+  //    the parapet, within his reach is in his way (and says how high it rises)
+  Index with=isle;{LayoutEntry e;e.stage="sea";e.room=11;e.tag="ACT0";e.name="Ko1";e.position={-300,1000,0};with.layout.push_back(e);}
+  {Mesh m;m.block({-200,-1000,-300},{2000,1000,300});assert(run(m,with).empty());}
+  {Mesh m;m.block({-200,-1000,-300},{2000,1100,300});const auto c=run(m,with);assert(kinds(c)=="villager,collision");
+   assert(c[0].message=="a villager of the island (the model rises 100 units above its floor within 150 of it; ground flush with its floor, up to 30 above, is fine)");}
+  {Mesh m;m.block({-200,-1000,-300},{2000,1000,300});m.block({-190,1000,-300},{-170,1300,300});assert(kinds(run(m,with))=="villager,collision");}
+  // a raised block beside him, out of his reach (200 away from the join, past 100 + the clearance)
+  {Index far=with;far.layout[0].position={-400,1000,0};Mesh m;m.block({-200,-1000,-300},{2000,1000,300});m.block({-190,1000,-300},{-170,1300,300});assert(kinds(run(m,far))=="collision");}
+  // he would be inside it: the block's top over his head
+  {Index under=with;under.layout[0].position={-100,1000,0};Mesh m;m.block({-200,-1000,-300},{2000,1100,300});assert(kinds(run(m,under))=="villager,collision");}
+  // the same for Link's start point
+  {Index start=isle;LayoutEntry e;e.stage="sea";e.room=11;e.tag="PLYR";e.name="Link";e.position={-300,1000,0};start.layout.push_back(e);
+   Mesh m;m.block({-200,-1000,-300},{2000,1000,300});assert(run(m,start).empty());m.block({-190,1000,-300},{-170,1300,300});assert(kinds(run(m,start))=="start point,collision");}
+  // 4. on a slope: the plateau rises 0.3 per unit toward -x; a villager 50 from the cliff stands at 1015, the new ground
+  //    continues the slope (up to 1060 where it reaches into the hill, 45 above his feet but buried in the hill): fine;
+  //    the same 50 higher is in his way
+  island(.3f);
+  {Index slope=isle;LayoutEntry e;e.stage="sea";e.room=11;e.tag="ACT0";e.name="Ko1";e.position={-50,1015,0};slope.layout.push_back(e);
+   Mesh m;m.block({-200,-1000,-300},{2000,1000,300},.3f);assert(run(m,slope).empty());
+   Mesh up;up.block({-200,-1000,-300},{2000,1050,300},.3f);assert(kinds(run(up,slope))=="villager,collision");}
+  island(0);
+  // 5. route points the same: a villager route along the plateau 100 from the join, one walking across the join onto the
+  //    new ground
+  for(const auto&points:{std::vector<Point>{{-300,1000,-500},{-300,1000,500}},std::vector<Point>{{-800,1000,0},{800,1000,0}}}){
+   Index walk=isle;walk.routes.push_back({"sea",11,"RPAT:7",points,kRouteHalfWidth,false});
+   Mesh m;m.block({-200,-1000,-300},{2000,1000,300});assert(run(m,walk).empty());
+   Mesh up;up.block({-200,-1000,-300},{2000,1100,300});const auto c=run(up,walk);assert(kinds(c)=="villager route,collision");
+   assert(c[0].message=="a villager route of the island (the model rises 100 units above the route within 110 of it; ground flush with it, up to 30 above, is fine)");
+   Mesh wall;wall.block({-200,-1000,-300},{2000,1000,300});wall.block({-190,1000,-300},{-170,1300,300});assert(kinds(run(wall,walk))=="villager route,collision");}
+  // 6. a boat's route at sea, 1000 out: an extension standing in the water across it is in the boat's way; an arch over it
+  //    is not when its underside clears the boat's height (kBoatHeight plus the clearance), the boat's width to either side
+  {Index sea=isle;sea.routes.push_back({"sea",11,"RPAT:40",{{1000,0,-3000},{1000,0,3000}},kBoatHalfWidth,true,"boat"});
+   Mesh m;m.block({-200,-1000,-300},{2000,1000,300});const auto c=run(m,sea);assert(kinds(c)=="boat route");
+   assert(c[0].message=="a boat route of the island (the model reaches into the boat's way: 350 to either side of its route, from 350 under the water line to 950 above it; the boat sails through whatever stands there)");
+   // the arch: its deck from 960 up over x 500..1500, its feet in the water outside 1000 +- 350
+   Mesh arch;arch.block({-200,-1000,-300},{500,1000,300});arch.block({500,960,-300},{1500,1000,300});arch.block({1500,-1000,-300},{2000,1000,300});assert(run(arch,sea).empty());
+   Mesh low;low.block({-200,-1000,-300},{500,1000,300});low.block({500,900,-300},{1500,1000,300});low.block({1500,-1000,-300},{2000,1000,300});assert(kinds(run(low,sea))=="boat route");
+   Mesh narrow;narrow.block({-200,-1000,-300},{700,1000,300});narrow.block({700,960,-300},{1300,1000,300});narrow.block({1300,-1000,-300},{2000,1000,300});assert(kinds(run(narrow,sea))=="boat route");
+   // a walker's route at sea level keeps only its own height clear (a deck at 400 over the swimming fish's route)
+   Index fish=isle;fish.routes.push_back({"sea",11,"RPAT:18",{{1000,-35,-3000},{1000,-35,3000}},kRouteHalfWidth,false});
+   Mesh deck;deck.block({-200,-1000,-300},{800,1000,300});deck.block({800,400,-300},{1200,1000,300});deck.block({1200,-1000,-300},{2000,1000,300});assert(run(deck,fish).empty());
+   Mesh deep;deep.block({-200,-1000,-300},{800,1000,300});deep.block({800,250,-300},{1200,1000,300});deep.block({1200,-1000,-300},{2000,1000,300});assert(kinds(run(deep,fish))=="villager route");}
+ }
  { // a boat of the layout (ikada, d_a_obj_ikada: its path in the home angle's high byte) names its route a boat route
   Bytes b=layout();tag(b,40,"ikad");tag(b,44,"a_h\0");u32(b,48,0x00080031);u16(b,64,0x0001);xyz(b,88,{-100,0,0});xyz(b,104,{100,0,0});
   Index x;std::string why;assert(add_native_layout(x,"test",0,b,&why)&&x.routes.size()==1&&x.routes[0].user=="boat");x.coverage[0].collision=true;
