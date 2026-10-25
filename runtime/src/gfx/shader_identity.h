@@ -4,7 +4,9 @@
 #include "area_sample.h"
 
 namespace gfx {
-enum class ProgramKind { Other, DepthDownsample, OcclusionPixel, OcclusionVertex, SunShadowMask };
+// BloomChain: the bloom extract (PS 44F91200) and the chain's blur (PS 44FD6E00, 44FD7600); the
+// targets they draw keep the console's size at any internal resolution (issue #307)
+enum class ProgramKind { Other, DepthDownsample, OcclusionPixel, OcclusionVertex, SunShadowMask, BloomChain };
 inline ProgramKind program_kind(const void* bytes, uint32_t size, bool vertex) {
     if (!bytes) return ProgramKind::Other;
     if (vertex && size == 384 && area_sample::program_hash(bytes, size) == 0xd279c909832a6f45ull)
@@ -15,6 +17,12 @@ inline ProgramKind program_kind(const void* bytes, uint32_t size, bool vertex) {
         return ProgramKind::OcclusionPixel;
     if (!vertex && size == 2112 && area_sample::program_hash(bytes, size) == 0x62ae9ab4cb625546ull)
         return ProgramKind::SunShadowMask;
+    if (!vertex && size == 656 && area_sample::program_hash(bytes, size) == 0x3a8d0f3808f1501bull)
+        return ProgramKind::BloomChain;
+    if (!vertex && size == 768) {
+        const uint64_t hash = area_sample::program_hash(bytes, size);
+        if (hash == 0x4657565560d951b7ull || hash == 0x4102408f288aaa94ull) return ProgramKind::BloomChain;
+    }
     return ProgramKind::Other;
 }
 } // namespace gfx

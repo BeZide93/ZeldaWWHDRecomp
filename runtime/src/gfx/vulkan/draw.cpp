@@ -2218,9 +2218,10 @@ bool resolve_targets(const uint32_t* r, vk::Shader* ps, DrawTargets& t) {
   const uint32_t eyeSize = stereo_eye_size_generation();
   const auto &lcr = *reinterpret_cast<const LatteContextRegister *>(r);
   auto mask = LatteMRT::GetActiveColorBufferMask(ps->dec, lcr);
+  const bool guestSized = ps->kind == gfx::ProgramKind::BloomChain;
   for (int i = 0; i < 8; i++)
     if (mask & (1 << i))
-      t.colors[i] = color_target(r, i, &t.slices[i]);
+      t.colors[i] = color_target(r, i, &t.slices[i], guestSized);
   t.depth = LatteMRT::GetActiveDepthBufferMask(lcr) ? depth_target(r, &t.depthSlice) : nullptr;
   // a lookup switched stereo eyes to full size (an unscalable format, surfaces.cpp): the targets
   // looked up before it still have the eye size; looked up again, they are rescaled

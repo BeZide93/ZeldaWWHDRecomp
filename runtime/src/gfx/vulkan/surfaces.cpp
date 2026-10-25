@@ -219,6 +219,9 @@ void stereo_target_halves(const Surface* s, bool& halfWidth, bool& halfHeight) {
 // shadow-mask softening samples (restored in v0.2.9); since then both sizes give practically the
 // same soft edges, the larger maps only a hair crisper.
 static float target_scale(const Surface* s) {
+    // the bloom chain: at the console's size its blur and the final bilinear upscale blend the glow
+    // smoothly; at the internal resolution the lumps of the blur's sparse taps showed as blocks (#307)
+    if (s->guestSized) return 1.0f;
     uint32_t width,height;
     if(!s->fmt.compressed&&s->mips==1&&mods::cemu::texture_extent(s->width,s->height,s->format,s->slices,s->tileMode,width,height))return 1.0f;
     if (s->fmt.compressed || s->mips > 1) return 1.0f;
@@ -236,7 +239,7 @@ static float target_scale(const Surface* s) {
 }
 // the dynamic resolution factor in target_scale's result (1 where it does not apply)
 static float target_dyn(const Surface* s) {
-    if (g_dyn_frame == 1.0f || s->fmt.compressed || s->mips > 1 || s->slices > 1) return 1.0f;
+    if (g_dyn_frame == 1.0f || s->guestSized || s->fmt.compressed || s->mips > 1 || s->slices > 1) return 1.0f;
     uint32_t width,height;
     if(mods::cemu::texture_extent(s->width,s->height,s->format,s->slices,s->tileMode,width,height))return 1.0f;
     return g_dyn_frame;
@@ -249,7 +252,7 @@ float nominal_height(const Surface* s) { return s ? float(s->extent.height) / s-
 // CB_COLORn_BASE holds the full guest address; CB_COLORn_TILE/FRAG hold width/height (our convention).
 constexpr uint32_t kDim2D = 1, kDim3D = 2, kDim2DArray = 5;
 
-Surface* color_target(const uint32_t* regs, int i, uint32_t* slice) {
+Surface* color_target(const uint32_t* regs, int i, uint32_t* slice, bool guestSized) {
     uint32_t base = regs[mmCB_COLOR0_BASE + i];
     if (!base) return nullptr;
     uint32_t size = regs[mmCB_COLOR0_SIZE + i], info = regs[mmCB_COLOR0_INFO + i];
@@ -279,6 +282,7 @@ Surface* color_target(const uint32_t* regs, int i, uint32_t* slice) {
         volume = false;
     }
     d.dim = volume ? kDim3D : slices > 1 ? kDim2DArray : kDim2D;
+    d.guestSized = guestSized;
     return find_or_create_surface(d, true);
 }
 
@@ -1238,7 +1242,7 @@ static void keep_spare(Surface* s,Surface& old) {
 }
 // a render target that dynamic resolution scales (as target_dyn with a factor below 1)
 static bool dyn_target(const Surface* s) {
-    if(!s->image||s->imageType!=VK_IMAGE_TYPE_2D||s->viewType!=VK_IMAGE_VIEW_TYPE_2D||s->fmt.compressed||s->mips>1||s->slices>1)return false;
+    if(!s->image||s->guestSized||s->imageType!=VK_IMAGE_TYPE_2D||s->viewType!=VK_IMAGE_VIEW_TYPE_2D||s->fmt.compressed||s->mips>1||s->slices>1)return false;
     if(!(s->usage&(s->fmt.depth?VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT:VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT)))return false;
     uint32_t width,height;
     return !mods::cemu::texture_extent(s->width,s->height,s->format,s->slices,s->tileMode,width,height);
@@ -1343,6 +1347,7 @@ static Surface* rescale(Surface* s) {
     Surface replacement;
     replacement.width=s->width;replacement.height=s->height;replacement.slices=s->slices;replacement.mips=s->mips;
     replacement.dim=s->dim;replacement.format=s->format;replacement.isDepth=s->isDepth;replacement.fmt=s->fmt;
+    replacement.guestSized=s->guestSized;
     using clock=std::chrono::steady_clock;
     const auto t0=clock::now();
     const bool reused=keep&&take_spare(s,replacement,wanted,ax,ay);
@@ -1427,7 +1432,7 @@ Surface* find_or_create_surface(const SurfaceDesc& d,bool forRendering) {
         bool sameVolume=(s->imageType==VK_IMAGE_TYPE_3D)==(dimType(d.dim)==VK_IMAGE_TYPE_3D);
         if(s->width==d.width&&s->height==d.height&&s->format==d.format&&s->slices==d.slices&&sameVolume&&
            (forRendering||s->mips>=d.mips||s->gpuWritten)) {
-            if(forRendering)return adopt_newer_alias(rescale(s));
+            if(forRendering) { s->guestSized|=d.guestSized; return adopt_newer_alias(rescale(s)); }
             if(!exact||s->writeSeq>exact->writeSeq)exact=s;
         } else if(!forRendering&&s->gpuWritten&&(s->format&0x3f)==(d.format&0x3f))consider(s);
     }
@@ -1438,6 +1443,7 @@ Surface* find_or_create_surface(const SurfaceDesc& d,bool forRendering) {
     s->slices=std::max(d.slices,1u);s->pitch=d.pitch;s->mips=forRendering?1:std::max(d.mips,1u);
     s->format=d.format;s->dim=d.dim;s->tileMode=d.tileMode;s->swizzle=d.swizzle;s->isDepth=d.isDepth;
     s->fmt=d.isDepth&&!forRendering?comparison_format_info(d.format):format_info(d.format,d.isDepth);
+    s->guestSized=forRendering&&d.guestSized;
     create_surface_image(s.get(),forRendering);
     auto* raw=s.get();cache.emplace(d.addr,std::move(s));++g_surface_epoch;++g_surface_set_gen;
     // format views of one guest surface (adopt_newer_alias): flag them once, so lookups stay cheap
