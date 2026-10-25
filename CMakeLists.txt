@@ -556,6 +556,13 @@ target_include_directories(area_sample_test PRIVATE runtime/src)
 target_compile_options(area_sample_test PRIVATE -UNDEBUG)
 add_test(NAME area_sample COMMAND area_sample_test)
 
+# guest addresses and swizzles of sampled texture levels (runtime/src/gfx/texture_levels.h, issue #297)
+add_executable(texture_levels_test runtime/tools/texture_levels_test.cpp)
+target_include_directories(texture_levels_test PRIVATE runtime/src)
+target_link_libraries(texture_levels_test PRIVATE cemu_latte)
+target_compile_options(texture_levels_test PRIVATE -UNDEBUG "SHELL:-include \"${CEMU_DIR}/cemu_shim.h\"")
+add_test(NAME texture_levels COMMAND texture_levels_test)
+
 add_executable(depth_peek_test runtime/tools/depth_peek_test.cpp)
 target_include_directories(depth_peek_test PRIVATE runtime/src)
 target_link_libraries(depth_peek_test PRIVATE Threads::Threads)

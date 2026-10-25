@@ -3,6 +3,7 @@
 #include "deferred_dispatch.h"
 #include "../../exception_report.h"
 #include "gfx/render_mips.h"
+#include "gfx/texture_levels.h"
 #include "bc_decode.h"
 #include "mods/cemu_pack.h"
 // Guest surfaces backed by Vulkan images. LatteAddrLib supplies guest tiling geometry.
@@ -46,7 +47,7 @@ namespace gfxvk {
 // sparse checks and uploads share this metadata; image scale/layout are unrelated.
 struct CachedGuestLevel {
     LatteAddrLib::AddrSurfaceInfo_OUT info{};
-    uint32_t address = 0;
+    uint32_t address = 0, swizzle = 0;  // address and swizzle valid with addressValid
     bool infoValid = false, addressValid = false;
     uint64_t rangeBegin = 0, rangeEnd = 0;
     bool rangeValid = false;
@@ -559,6 +560,8 @@ Surface* sampled_texture(const uint32_t* w, bool isDepthSampler, uint32_t maxLev
 }
 
 
+static const CachedGuestLevel& level_in_guest(Surface* s, uint32_t level);
+static uint32_t mip_base(Surface* s, uint32_t level);
 static void decode_level(Surface* s, uint32_t level, uint32_t base, std::vector<uint8_t>& out, uint32_t& outW,
                          uint32_t& outH, uint32_t& outSlices) {
     const FormatInfo& f = s->fmt;
@@ -575,8 +578,9 @@ static void decode_level(Surface* s, uint32_t level, uint32_t base, std::vector<
     auto tm = (Latte::E_HWTILEMODE)info.hwTileMode;
     uint32_t bpp = f.bytesPerBlock * 8;
     bool depthData = (s->isDepth && f.convert != Convert::RGBA8_DEPTH) || f.convert == Convert::D24_R32F;
-    uint32_t pipeSwizzle = (s->swizzle >> 8) & 1, bankSwizzle = (s->swizzle >> 9) & 3;
-    // small mips of macro-tiled surfaces drop the swizzle
+    // level 0 is tiled with the base pointer's swizzle, the mip chain with the mip pointer's
+    const uint32_t swizzle = level_in_guest(s, level).swizzle;
+    uint32_t pipeSwizzle = (swizzle >> 8) & 1, bankSwizzle = (swizzle >> 9) & 3;
     out.assign((size_t)bw * bh * slices * f.hostBytesPerBlock, 0);
     std::vector<uint8_t> row(bw * f.bytesPerBlock);
     const uint8_t* src = mem::ptr(base);
@@ -603,7 +607,6 @@ static void decode_level(Surface* s, uint32_t level, uint32_t base, std::vector<
     }
 }
 
-static uint32_t mip_base(Surface* s, uint32_t level);
 
 // Fallback change check when write tracking (write_watch.h) is unavailable.
 // Sample every mip so CPU changes confined to the mip chain get the same
@@ -1450,18 +1453,17 @@ Surface* find_or_create_surface(const SurfaceDesc& d,bool forRendering) {
     if(!raw->isDepth&&static_cast<Latte::E_HWTILEMODE>(raw->tileMode)==Latte::E_HWTILEMODE::TM_LINEAR_ALIGNED)R.linearTargets.push_back(raw);
     return forRendering?adopt_newer_alias(raw):raw;
 }
-static uint32_t mip_base(Surface* s,uint32_t level) {
-    if(!level)return s->addr;
-    if(!s->mipAddr)exception_report::raise("GX2 texture mip chain address is missing");
-    if(level==1)return s->mipAddr;
+// level 1 and up start at the mip pointer without its swizzle bits and are tiled with that swizzle
+// (texture_levels.h, issue #297)
+static const CachedGuestLevel& level_in_guest(Surface* s,uint32_t level) {
     auto& cached = guest_level(s, level);
-    if (cached.addressValid) return cached.address;
-    uint32_t address=0,size=0;sint32 sub=0;
-    LatteAddrLib::CalculateMipAndSliceAddr(s->addr,s->mipAddr,static_cast<Latte::E_GX2SURFFMT>(s->format),s->width,s->height,s->slices,
-        static_cast<Latte::E_DIM>(s->dim),static_cast<Latte::E_HWTILEMODE>(s->tileMode),s->swizzle,0,level,0,&address,&size,&sub);
-    cached.address=address;cached.addressValid=true;
-    return cached.address;
+    if (cached.addressValid) return cached;
+    if(level&&!s->mipAddr)exception_report::raise("GX2 texture mip chain address is missing");
+    auto l=::gfx::texture_levels::level(s->addr,s->mipAddr,s->format,s->width,s->height,s->slices,s->dim,s->tileMode,s->swizzle,level);
+    cached.address=l.address;cached.swizzle=l.swizzle;cached.addressValid=true;
+    return cached;
 }
+static uint32_t mip_base(Surface* s,uint32_t level) { return level_in_guest(s,level).address; }
 void upload_surface(Surface* s) {
     if(!s||!s->image||s->gpuWritten)return;
     // All callers, including render attachments, share the once-per-frame

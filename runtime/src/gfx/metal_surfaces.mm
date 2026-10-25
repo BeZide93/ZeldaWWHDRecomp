@@ -1,5 +1,6 @@
 #include "background_shaders.h"
 #include "gfx/render_mips.h"
+#include "gfx/texture_levels.h"
 #include "mods/cemu_pack.h"
 #include <tuple>
 #include <atomic>
@@ -697,24 +698,19 @@ Surface* sampled_texture(const uint32_t* w, bool isDepthSampler) {
     return s && s->gpuWritten && d.mips > 1 && !isDepthSampler ? with_mip_chain(s, d) : s;
 }
 
+static gfx::texture_levels::Level level_in_guest(const Surface* s, uint32_t level) {
+    return gfx::texture_levels::level(s->addr, s->mipAddr, s->format, s->width, s->height, s->slices, s->dim, s->tileMode,
+                                      s->swizzle, level);
+}
+
 // Guest ranges of every level the upload reads (base first), computed once: a Surface's geometry
 // never changes after creation.
 static const std::vector<std::pair<uint32_t, uint32_t>>& level_ranges(Surface* s) {
     if (!s->levelRanges.empty()) return s->levelRanges;
     for (uint32_t level = 0; level < s->mips; level++) {
-        uint32_t base;
-        if (level == 0) base = s->addr;
-        else if (!s->mipAddr) break;
-        else if (level == 1) base = s->mipAddr;
-        else {
-            // mip offsets relative to the mip chain start
-            uint32_t sliceOffset = 0, sliceSize = 0;
-            sint32 sub = 0;
-            LatteAddrLib::CalculateMipAndSliceAddr(s->addr, s->mipAddr, (Latte::E_GX2SURFFMT)s->format, s->width, s->height,
-                                                   s->slices, (Latte::E_DIM)s->dim, (Latte::E_HWTILEMODE)s->tileMode,
-                                                   s->swizzle, 0, level, 0, &sliceOffset, &sliceSize, &sub);
-            base = sliceOffset;
-        }
+        if (level && !s->mipAddr) break;
+        // level 1 and up from the mip pointer without its swizzle bits (texture_levels.h, issue #297)
+        uint32_t base = level_in_guest(s, level).address;
         LatteAddrLib::AddrSurfaceInfo_OUT info{};
         LatteAddrLib::GX2CalculateSurfaceInfo((Latte::E_GX2SURFFMT)s->format, s->width, s->height, s->slices, (Latte::E_DIM)s->dim,
                                               Latte::MakeGX2TileMode((Latte::E_HWTILEMODE)s->tileMode), 0, level, &info);
@@ -785,8 +781,9 @@ static void decode_level(Surface* s, uint32_t level, uint32_t base, std::vector<
     uint32_t pitch = info.pitch, height = info.height;
     auto tm = (Latte::E_HWTILEMODE)info.hwTileMode;
     uint32_t bpp = f.bytesPerBlock * 8;
-    uint32_t pipeSwizzle = (s->swizzle >> 8) & 1, bankSwizzle = (s->swizzle >> 9) & 3;
-    // small mips of macro-tiled surfaces drop the swizzle
+    // level 0 is tiled with the base pointer's swizzle, the mip chain with the mip pointer's
+    uint32_t swizzle = level_in_guest(s, level).swizzle;
+    uint32_t pipeSwizzle = (swizzle >> 8) & 1, bankSwizzle = (swizzle >> 9) & 3;
     out.assign((size_t)bw * bh * slices * f.hostBytesPerBlock, 0);
     std::vector<uint8_t> row(bw * f.bytesPerBlock);
     const uint8_t* src = mem::ptr(base);
