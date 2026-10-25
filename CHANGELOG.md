@@ -7,6 +7,10 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **The glow under Triforce Shard and Chart chests no longer shows a blocky checkerboard** (#297, thanks
+  @aaronlink127). The glow's texture has mipmap levels, and the second level was read from slightly the wrong address,
+  so it showed scrambled blocks once the game sampled it (at high resolutions, where the game sharpens it by one
+  level). Both renderers now find every level the way the Wii U does.
 - **Performance report: the "uniforms" time is split into its parts** (#178): stage setup, packing, the game's
   own blocks and the support upload, so a report shows where that time goes on your device.
 - **The camera is smooth again in the Boating Course minigame with frame interpolation** (#299, thanks
