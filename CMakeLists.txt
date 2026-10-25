@@ -1291,6 +1291,11 @@ add_test(NAME render_prof_env_on COMMAND render_prof_test env-on)
 add_test(NAME render_prof_env_off COMMAND render_prof_test env-off)
 # Settings > Graphics > Shader compile (off / fast): which draws may be left out, default, switch,
 # WWHD_BG_SHADERS, the wait budget and the report line
+# hand-drawn mip level detection and the texture budget's choice (gfx/artistic_mips.h, gfx/vulkan/texture_budget.h)
+add_executable(artistic_mips_test runtime/tools/artistic_mips_test.cpp)
+target_include_directories(artistic_mips_test PRIVATE runtime/src)
+target_compile_options(artistic_mips_test PRIVATE -UNDEBUG)
+add_test(NAME artistic_mips COMMAND artistic_mips_test)
 # the Metal recipe file's version header, load policy and rewrite (gfx/metal_cache_file.h)
 add_executable(metal_cache_file_test runtime/tools/metal_cache_file_test.cpp)
 target_include_directories(metal_cache_file_test PRIVATE runtime/src)
@@ -1356,6 +1361,13 @@ target_compile_options(exception_report_test PRIVATE -UNDEBUG)
 target_link_libraries(exception_report_test PRIVATE Threads::Threads)
 add_test(NAME exception_report COMMAND exception_report_test)
 if(NOT ANDROID)
+  if(WWHD_HAS_VULKAN)
+    # the Vulkan renderer's GPU self-test (wwhd --renderer-smoke: format, upload, readback and cache checks against
+    # their CPU references); skipped where no Vulkan device starts
+    add_test(NAME renderer_smoke COMMAND wwhd --renderer-smoke)
+    set_tests_properties(renderer_smoke PROPERTIES PASS_REGULAR_EXPRESSION "\\[renderer smoke\\] PASS:"
+                         SKIP_REGULAR_EXPRESSION "Vulkan could not start" TIMEOUT 600)
+  endif()
   add_test(NAME runtime_error_log COMMAND ${CMAKE_COMMAND} -DWWHD=$<TARGET_FILE:wwhd>
            -DWORK=${CMAKE_BINARY_DIR}/runtime_error_test_work -P ${CMAKE_SOURCE_DIR}/runtime/tools/runtime_error_test.cmake)
   # crash logs name the module of a host crash address (main.cpp, crash_addr.cpp)

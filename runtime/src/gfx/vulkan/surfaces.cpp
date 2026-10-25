@@ -1475,6 +1475,7 @@ static uint32_t mip_base(Surface* s,uint32_t level) { return level_in_guest(s,le
 // WWHD_VK_TEXTURE_STAGING_MB (default 16); anything else, and "buffer" (the default), gets its own staging
 // buffer, freed after the submission. Idea after aurora's per-frame staging (MIT; lib/gfx/texture.cpp,
 // recording.cpp); no code taken.
+int g_texture_staging_override=-1;
 uint64_t g_stat_staging_ring, g_stat_staging_ring_bytes, g_stat_staging_buffers, g_stat_staging_buffer_bytes;
 static UploadSlice texture_staging_slice(const Surface* s,size_t size) {
     static const bool ring=[]{const char* e=getenv("WWHD_VK_TEXTURE_STAGING");
@@ -1482,7 +1483,7 @@ static UploadSlice texture_staging_slice(const Surface* s,size_t size) {
         return e&&!strcmp(e,"ring");}();
     static const VkDeviceSize budget=[]{const char* e=getenv("WWHD_VK_TEXTURE_STAGING_MB");
         return VkDeviceSize(e&&*e?std::max(0,atoi(e)):16)<<20;}();
-    if(!ring||R.textureStagingBytes+size>budget)return UploadSlice{};
+    if(!(g_texture_staging_override<0?ring:g_texture_staging_override==1)||R.textureStagingBytes+size>budget)return UploadSlice{};
     // copy offsets: a multiple of the texel block size and of 4 (Vulkan's bufferOffset rules)
     const VkDeviceSize alignment=std::lcm<VkDeviceSize>(16,std::max<VkDeviceSize>(1,s->fmt.hostBytesPerBlock));
     rprof::UploadKind kind(rprof::kUpTexture);
@@ -1617,6 +1618,7 @@ void upload_surface(Surface* s) {
     std::vector<std::vector<uint8_t>> levelsForCheck;
     for(uint32_t level=0;level<s->mips;++level) {
         std::vector<uint8_t> data;uint32_t w,h,slices;decode_level(s,level,mip_base(s,level),data,w,h,slices);
+        if(checkMips)levelsForCheck.push_back(data);
         if (s->bcDecoded) { bc_decode_upload(target,level,data,w,h,slices); continue; }
         std::vector<VkBufferImageCopy> copies;std::vector<uint8_t> packed;
         bool threeD=s->imageType==VK_IMAGE_TYPE_3D;

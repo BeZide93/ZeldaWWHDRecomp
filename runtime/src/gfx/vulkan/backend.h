@@ -294,6 +294,8 @@ void destroy_surface_image(Surface*);
 void texture_budget_step();
 // releases one texture's image as the budget does (smoke test); its next lookup makes it again
 void release_texture_image(Surface* s);
+// texture staging (surfaces.cpp): -1 as WWHD_VK_TEXTURE_STAGING says, 0 own buffers, 1 the upload arena (smoke test)
+extern int g_texture_staging_override;
 VkImageView layer_view(Surface*,uint32_t slice);
 VkImageView make_sampled_view(Surface*,uint32_t key); // a sampled view by its key (surfaces.cpp sampled_texture_view)
 void touch_image(Surface*); // dynamic resolution: clear an image made ahead once (surfaces.cpp)
