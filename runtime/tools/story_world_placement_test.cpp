@@ -168,7 +168,7 @@ int main(){
   auto entry=[](const char*tag,const char*name,Point at){LayoutEntry e;e.stage="sea";e.room=11;e.tag=tag;e.name=name;e.position=at;return e;};
   idx.layout.push_back(entry("ACTR","Uo1",{1400,0,1400}));   // a villager
   idx.layout.push_back(entry("PLYR","Link",{1100,0,1700}));  // a start point
-  idx.layout.push_back(entry("ACTR","Tt",{1700,0,1000}));    // an object of the island (Tott's name isn't a villager's)
+  idx.layout.push_back(entry("ACTR","Hbox",{1700,0,1000}));  // an object of the island (a name of no villager)
   idx.routes.push_back({"sea",11,"RPAT:40",{{900,0,2100},{2100,0,900}},kRouteHalfWidth,true,"boat"});  // across the corner
   idx.bounds.push_back({"sea",11,"event","area",{{1200,0,1200},{1300,100,1300}}});
   // a wall of the room standing in the corner (two triangles up to 600)
@@ -271,6 +271,10 @@ int main(){
    Index fish=isle;fish.routes.push_back({"sea",11,"RPAT:18",{{1000,-35,-3000},{1000,-35,3000}},kRouteHalfWidth,false});
    Mesh deck;deck.block({-200,-1000,-300},{800,1000,300});deck.block({800,400,-300},{1200,1000,300});deck.block({1200,-1000,-300},{2000,1000,300});assert(run(deck,fish).empty());
    Mesh deep;deep.block({-200,-1000,-300},{800,1000,300});deep.block({800,250,-300},{1200,1000,300});deep.block({1200,-1000,-300},{2000,1000,300});assert(kinds(run(deep,fish))=="villager route");}
+ }
+ { // characters whose names are not a capital, a small letter and a digit: Windfall's kids and Tott are villagers too
+  for(const char*n:{"UkD","UkB2","Mk","Tt","P1a"}){LayoutEntry e;e.tag="ACT0";e.name=n;assert(building_extent(e).keep==Keep::Villager);}
+  LayoutEntry e;e.tag="ACT0";e.name="Ttx";assert(building_extent(e).keep==Keep::Object);
  }
  { // a boat of the layout (ikada, d_a_obj_ikada: its path in the home angle's high byte) names its route a boat route
   Bytes b=layout();tag(b,40,"ikad");tag(b,44,"a_h\0");u32(b,48,0x00080031);u16(b,64,0x0001);xyz(b,88,{-100,0,0});xyz(b,104,{100,0,0});

@@ -305,6 +305,9 @@ Extent building_extent(const LayoutEntry&e){
  if(starts(n,{"swhit","kbota","osw","hsw","swtact"}))return {Keep::Switch,150,50,250};
  // the game's villagers and other characters: a capital, a small letter and a digit ("Uo1", "Ko1", "Ls1")
  if(e.name.size()==3&&std::isupper((unsigned char)e.name[0])&&std::islower((unsigned char)e.name[1])&&std::isdigit((unsigned char)e.name[2]))return {Keep::Villager,100,50,300};
+ // characters of the game's actor table (dStage's names of NPC processes) whose names have another form: Windfall's kids
+ // (UkB, UkC, UkD and their second forms, Mk), Tott (Tt), the pirates (P1a..P2c), Hr, Ho, Mt, Mn, Ah, Po, Os, Tc
+ for(const char*c:{"UkB","UkC","UkD","UkB2","UkC2","UkD2","Mk","Tt","P1a","P1b","P1c","P2a","P2b","P2c","Hr","Ho","Mt","Mn","Ah","Po","Os","Tc"})if(e.name==c)return {Keep::Villager,100,50,300};
  // small props a building would swallow (pots, barrels, signs, stakes, posts, lanterns, buckets, flags, enemies)
  if(starts(n,{"kui","tpost","bonbori","lamp","okioke","piwa","puti","ksaku","mtflag","trflag","c_green","c_red","c_blue","bbaba","keeth","p_hat","fdai"}))return {Keep::Object,60,50,250};
  // anything else: an object of unknown size (a default; a scaled one by its scale, up to 600)
