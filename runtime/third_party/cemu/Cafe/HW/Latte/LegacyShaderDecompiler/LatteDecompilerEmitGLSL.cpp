@@ -2287,6 +2287,16 @@ void _emitTEXSampleTextureCode(LatteDecompilerShaderContext* shaderContext, Latt
 	bool hasOffset = false;
 	if( texInstruction->textureFetch.offsetX != 0 || texInstruction->textureFetch.offsetY != 0 || texInstruction->textureFetch.offsetZ != 0 )
 		hasOffset = true;
+	// WWHD: the sampler's LOD bias when the host can't apply it (gfx/sampler_lod_bias.h); empty: none.
+	// Unnormalized SAMPLE is a texelFetch. Outside the pixel stage texture() has no bias argument and
+	// a level of 0: SAMPLE becomes textureLod at the bias.
+	std::string samplerLodBias;
+	const bool texelCoordinateSample = texOpcode == GPU7_TEX_INST_SAMPLE && texInstruction->textureFetch.unnormalized[0] && texInstruction->textureFetch.unnormalized[1] && texInstruction->textureFetch.unnormalized[2] && texInstruction->textureFetch.unnormalized[3];
+	if (shaderContext->analyzer.texUnitUsesLodBias.test(texInstruction->textureFetch.textureIndex) && !texelCoordinateSample &&
+		(texOpcode == GPU7_TEX_INST_SAMPLE || texOpcode == GPU7_TEX_INST_SAMPLE_L || texOpcode == GPU7_TEX_INST_SAMPLE_LB ||
+		 texOpcode == GPU7_TEX_INST_SAMPLE_LZ || texOpcode == GPU7_TEX_INST_SAMPLE_G))
+		samplerLodBias = fmt::format("uf_tex{}LodBias", texInstruction->textureFetch.textureIndex);
+	const bool sampleAtBiasLevel = !samplerLodBias.empty() && texOpcode == GPU7_TEX_INST_SAMPLE && shaderContext->shaderType != LatteConst::ShaderType::Pixel;
 	// emit sample code
 	if (shaderContext->shader->textureIsIntegerFormat[texInstruction->textureFetch.textureIndex])
 	{
@@ -2379,9 +2389,9 @@ void _emitTEXSampleTextureCode(LatteDecompilerShaderContext* shaderContext, Latt
 	else if (texOpcode == GPU7_TEX_INST_SAMPLE)
 	{
 		if (hasOffset)
-			src->add("textureOffset(");
+			src->add(sampleAtBiasLevel ? "textureLodOffset(" : "textureOffset(");
 		else
-			src->add("texture(");
+			src->add(sampleAtBiasLevel ? "textureLod(" : "texture(");
 	}
 	else if (texOpcode == GPU7_TEX_INST_SAMPLE_C_L)
 	{
@@ -2576,11 +2586,22 @@ void _emitTEXSampleTextureCode(LatteDecompilerShaderContext* shaderContext, Latt
 		if( texOpcode == GPU7_TEX_INST_SAMPLE_L || texOpcode == GPU7_TEX_INST_SAMPLE_LB || texOpcode == GPU7_TEX_INST_SAMPLE_C_L)
 		{
 			src->add(",");
+			if (!samplerLodBias.empty())
+				src->add("(");
 			_emitTEXSampleCoordInputComponent(shaderContext, texInstruction, 3, LATTE_DECOMPILER_DTYPE_FLOAT);
+			if (!samplerLodBias.empty())
+				src->addFmt("+{})", samplerLodBias);
 		}
 		else if( texOpcode == GPU7_TEX_INST_SAMPLE_LZ || texOpcode == GPU7_TEX_INST_SAMPLE_C_LZ )
 		{
-			src->add(",0.0");
+			if (!samplerLodBias.empty())
+				src->addFmt(",{}", samplerLodBias);
+			else
+				src->add(",0.0");
+		}
+		else if (sampleAtBiasLevel)
+		{
+			src->addFmt(",{}", samplerLodBias);
 		}
 	}
 	// gradient parameters
@@ -2589,7 +2610,11 @@ void _emitTEXSampleTextureCode(LatteDecompilerShaderContext* shaderContext, Latt
 		if (texDim == Latte::E_DIM::DIM_2D ||
 			texDim == Latte::E_DIM::DIM_1D )
 		{
-			src->add(",gradH.xy,gradV.xy");
+			// WWHD: textureGrad takes no bias; scaling the gradients by 2^bias adds it to log2 of the footprint
+			if (!samplerLodBias.empty())
+				src->addFmt(",gradH.xy*exp2({0}),gradV.xy*exp2({0})", samplerLodBias);
+			else
+				src->add(",gradH.xy,gradV.xy");
 		}
 		else	
 		{
@@ -2629,6 +2654,9 @@ void _emitTEXSampleTextureCode(LatteDecompilerShaderContext* shaderContext, Latt
 		}
 	}
 	// lod bias
+	// WWHD: texture()/textureOffset() take the bias last (after the offset)
+	if (texOpcode == GPU7_TEX_INST_SAMPLE && !samplerLodBias.empty() && !sampleAtBiasLevel)
+		src->addFmt(",{}", samplerLodBias);
 	if( texOpcode == GPU7_TEX_INST_SAMPLE_C || texOpcode == GPU7_TEX_INST_SAMPLE_C_LZ )
 	{
 		src->add(")");

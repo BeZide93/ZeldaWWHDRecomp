@@ -16,6 +16,7 @@
 #include "dynres.h"
 #include "stereo.h"
 #include "../stereo_projection.h"
+#include "../sampler_lod_bias.h"
 #include "sampler_filtering.h"
 #include "deferred_dispatch.h"
 #include "buffer_cache.h"
@@ -1544,15 +1545,15 @@ VkSampler sampler(const uint32_t *words, bool compare, bool integer, bool allowA
   ci.addressModeU = addr(static_cast<uint32_t>(w.get_CLAMP_X()));
   ci.addressModeV = addr(static_cast<uint32_t>(w.get_CLAMP_Y()));
   ci.addressModeW = addr(static_cast<uint32_t>(w.get_CLAMP_Z()));
-  ci.mipLodBias = std::clamp(float(w1.get_LOD_BIAS()) / 64.f,
+  ci.mipLodBias = std::clamp(::gfx::sampler_lod_bias::levels(words[1]),
                              -R.properties.limits.maxSamplerLodBias,
                              R.properties.limits.maxSamplerLodBias);
   if (!R.samplerMipLodBias && ci.mipLodBias != 0) {
-    // MoltenVK cannot apply sampler LOD bias. Match the existing Metal renderer
-    // there; native Vulkan devices retain the requested bias.
+    // MoltenVK cannot apply sampler LOD bias: the translated shaders add it
+    // (gfx/sampler_lod_bias.h, uf_texNLodBias); native Vulkan devices keep it here.
     static bool reported = false;
     if (!reported) {
-      LOG("[vulkan] device lacks sampler LOD bias; using zero bias (Metal-compatible fallback)");
+      LOG("[vulkan] device lacks sampler LOD bias; the shaders add it");
       reported = true;
     }
     ci.mipLodBias = 0;

@@ -230,6 +230,7 @@ struct LatteDecompilerShaderContext
 		bool hasSSBOWrite; // shader has instructions that write to SSBO
 		// textures
 		std::bitset<LATTE_NUM_MAX_TEX_UNITS> texUnitUsesTexelCoordinates;
+		std::bitset<LATTE_NUM_MAX_TEX_UNITS> texUnitUsesLodBias; // WWHD: declares texNLodBias (options->emulateSamplerLodBias)
 		bool hasCubeMapTexture; // set to true if a cubemap texture is used
 		bool hasGradientLookup; // set to true if texture lookup with custom gradients is used
 		// misc

@@ -9,6 +9,7 @@ extern "C" uint64_t g_shader_state_gen;  // gx2_core.cpp: bumped by shader-relev
 // MSL the decompiler emits (as used by Cemu's Metal renderer).
 #include "Cafe/HW/Latte/Core/FetchShader.h"
 #include "gfx/area_sample.h"
+#include "gfx/sampler_lod_bias.h"
 #include "gfx/shader_linkage.h"
 #include "render_objects.h"
 #include "pipeline_groups.h"
@@ -714,6 +715,7 @@ static LatteDecompilerShader* translate_msl(const uint32_t* regs, bool vertex, L
     LatteDecompilerOptions opt;
     const auto fixes = vertex ? gfx::area_sample::Program{} : gfx::area_sample::pixel_program(mem::ptr(addr), size);
     opt.areaSampledTextures = fixes.units;
+    opt.emulateSamplerLodBias = true;  // Metal samplers have no LOD bias (gfx/sampler_lod_bias.h)
     // the GPU's MUL/MULADD give 0*anything=0 (rsqrt(0)*0 is NaN otherwise: black letter in the Rito
     // mail sorting game); Cemu's default too. WWHD_STRICT_MUL=0 turns it off for comparisons
     static const bool strictMul = !getenv("WWHD_STRICT_MUL") || strcmp(getenv("WWHD_STRICT_MUL"), "0");
@@ -1234,6 +1236,7 @@ static id<MTLSamplerState> get_sampler(const uint32_t* w, bool allowAniso = fals
         d.maxAnisotropy = 16;
     d.lodMinClamp = w1.get_MIN_LOD() / 64.0f;
     d.lodMaxClamp = w1.get_MAX_LOD() / 64.0f;
+    // no LOD bias here: Metal samplers can't apply it, the shader adds it (gfx/sampler_lod_bias.h)
     uint32_t border = (uint32_t)w0.get_BORDER_COLOR_TYPE();
     d.borderColor = border == 1 ? MTLSamplerBorderColorOpaqueBlack : border == 2 ? MTLSamplerBorderColorOpaqueWhite
                                                                                   : MTLSamplerBorderColorTransparentBlack;
@@ -1426,6 +1429,18 @@ static void bind_stage(id<MTLRenderCommandEncoder> enc, const uint32_t* regs, Sh
             sw = patched;
         }
         id<MTLSamplerState> smp = get_sampler(sw, s && !s->gpuWritten && s->mips > 1);
+        // WWHD_LOD_BIAS_LOG=1: each distinct texture/sampler pair with a LOD bias, once (gfx/sampler_lod_bias.h)
+        static const bool logBias = getenv("WWHD_LOD_BIAS_LOG") != nullptr;
+        if (logBias && gfx::sampler_lod_bias::raw(sw[1]) != 0) {
+            static std::unordered_set<uint64_t> seen;
+            const uint32_t pgm = regs[vertex ? mmSQ_PGM_START_VS : mmSQ_PGM_START_PS] << 8;
+            const uint32_t seenKey[5] = {pgm, (uint32_t)unit, sw[0], sw[1], tw[2]};
+            if (seen.insert(hash_bytes(seenKey, sizeof seenKey)).second)
+                LOG("[lod bias] %s %08X tex%u %08X %ux%u fmt %X mips %u smp %08X %08X bias %+.4f%s", vertex ? "VS" : "PS", pgm, unit,
+                    tw[2] << 8, s ? s->width : 0, s ? s->height : 0, s ? s->format : 0, s ? s->mips : 0, sw[0], sw[1],
+                    gfx::sampler_lod_bias::levels(sw[1]),
+                    dec->uniform.loc_texLodBias[unit] >= 0 ? "" : " (not applied: no filtered sample with a level of detail)");
+        }
         if (vertex) {
             [enc setVertexTexture:tex atIndex:binding];
             [enc setVertexSamplerState:smp atIndex:binding];
@@ -1497,6 +1512,14 @@ static void bind_stage(id<MTLRenderCommandEncoder> enc, const uint32_t* regs, Sh
             bool ok = e.texUnit < 18;
             at(e.uniformLocation)[0] = ok ? texScale[e.texUnit][0] : 1.0f;
             at(e.uniformLocation)[1] = ok ? texScale[e.texUnit][1] : 1.0f;
+        }
+        // the sampler's LOD bias, which Metal samplers can't apply (gfx/sampler_lod_bias.h)
+        for (int t = 0; t < 18; t++) {
+            if (dec->uniform.loc_texLodBias[t] < 0) continue;
+            const uint32_t samplerIdx = dec->textureUnitSamplerAssignment[t];
+            const bool add = gfx::sampler_lod_bias::mode() == gfx::sampler_lod_bias::Mode::Shader && samplerIdx < 18;
+            *at(dec->uniform.loc_texLodBias[t]) =
+                add ? gfx::sampler_lod_bias::host(regs[REGADDR::SQ_TEX_SAMPLER_WORD0_0 + (samplerIdx + samplerBase) * 3 + 1]) : 0.0f;
         }
         for (int t = 0; t < 18; t++) {
             if (dec->uniform.loc_framebufferFetchSize[t] < 0) continue;

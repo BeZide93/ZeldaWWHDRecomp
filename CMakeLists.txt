@@ -563,6 +563,13 @@ target_link_libraries(texture_levels_test PRIVATE cemu_latte)
 target_compile_options(texture_levels_test PRIVATE -UNDEBUG "SHELL:-include \"${CEMU_DIR}/cemu_shim.h\"")
 add_test(NAME texture_levels COMMAND texture_levels_test)
 
+# GX2 sampler LOD bias decode (runtime/src/gfx/sampler_lod_bias.h)
+add_executable(sampler_lod_bias_test runtime/tools/sampler_lod_bias_test.cpp)
+target_include_directories(sampler_lod_bias_test PRIVATE runtime/src)
+target_link_libraries(sampler_lod_bias_test PRIVATE cemu_latte)
+target_compile_options(sampler_lod_bias_test PRIVATE -UNDEBUG "SHELL:-include \"${CEMU_DIR}/cemu_shim.h\"")
+add_test(NAME sampler_lod_bias COMMAND sampler_lod_bias_test)
+
 add_executable(depth_peek_test runtime/tools/depth_peek_test.cpp)
 target_include_directories(depth_peek_test PRIVATE runtime/src)
 target_link_libraries(depth_peek_test PRIVATE Threads::Threads)

@@ -125,6 +125,17 @@ void test_area_taps_still_rewritten() {
                       "R1f = (tex0.sample(samplr0, float2(R0f.w,R0f.x)));\nR2f = (tex0.sample(samplr0, float2(R0f.y,R0f.x)));\n}\n";
     assert(rewrite(msl, Program{1u, Fix::AreaTaps}, true) == 2);
     assert(msl.find("wwhd_area_sample(tex0, samplr0, supportBuffer.tex0Scale, float2(R0f.w,R0f.x))") != std::string::npos);
+    // taps that add the sampler's LOD bias (gfx/sampler_lod_bias.h) go through the overload taking it
+    std::string biased = "fragment FragmentOut main0(FragmentIn in [[stage_in]]) {\n"
+                         "R1f = (tex0.sample(samplr0, float2(R0f.w,R0f.x), bias(supportBuffer.tex0LodBias)));\n}\n";
+    assert(rewrite(biased, Program{1u, Fix::AreaTaps}, true) == 1);
+    assert(biased.find("wwhd_area_sample(tex0, samplr0, supportBuffer.tex0Scale, float2(R0f.w,R0f.x), bias(supportBuffer.tex0LodBias))") !=
+           std::string::npos);
+    assert(biased.find("float2 uv, bias lodBias)") < biased.find("fragment FragmentOut main0"));
+    std::string glsl = "void main() {\nR1f = (texture(textureUnitPS0, vec2(R0f.w,R0f.x),uf_tex0LodBias));\n}\n";
+    assert(rewrite(glsl, Program{1u, Fix::AreaTaps}, false) == 1);
+    assert(glsl.find("wwhdAreaSample(textureUnitPS0, uf_tex0Scale, vec2(R0f.w,R0f.x),uf_tex0LodBias)") != std::string::npos);
+    assert(glsl.find("vec2 uv, float lodBias)") < glsl.find("void main("));
 }
 
 void test_classification() {
