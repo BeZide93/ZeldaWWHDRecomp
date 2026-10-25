@@ -168,6 +168,8 @@ struct Renderer {
   std::array<uint64_t,2> descriptorStageMatches{};
  } cpuPreparation;
  uint64_t pipelineCreates=0,pipelineCreateNs=0;
+ // pipelines the game asked for that were not made yet this run, and how many of them the recipe database knew
+ uint64_t pipelineKeysNew=0,pipelineKeysKnown=0;
  std::array<Surface*,8> passColors{};
  std::array<uint32_t,8> passSlices{};
  uint32_t mainDepthAddr=0;
@@ -254,6 +256,8 @@ Buffer create_buffer(VkDeviceSize size,VkBufferUsageFlags usage,VkMemoryProperty
 // host-visible TRANSFER_DST buffer the CPU reads back, host-cached where available
 Buffer create_readback_buffer(VkDeviceSize size);
 UploadSlice allocate_upload(VkDeviceSize size,VkDeviceSize alignment);
+// WWHD_VK_WARM_PRUNE=1 during the setup's preparation (--warm-shaders): the driver cache is rebuilt from the recipes
+bool warm_prune_enabled();
 // A slice of the current submission's upload arena only if it fits in a block it already has (no new block);
 // an empty slice otherwise. Texture staging (surfaces.cpp upload_surface, WWHD_VK_TEXTURE_STAGING).
 UploadSlice allocate_upload_no_grow(VkDeviceSize size,VkDeviceSize alignment);

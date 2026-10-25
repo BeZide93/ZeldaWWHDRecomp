@@ -237,6 +237,14 @@ const VkFormatProperties& format_properties(VkFormat format) {
   if (inserted) vkGetPhysicalDeviceFormatProperties(R.physicalDevice,format,&entry->second);
   return entry->second;
 }
+bool warm_prune_enabled() {
+  static const bool on = [] {
+    const char* prune = std::getenv("WWHD_VK_WARM_PRUNE");
+    const char* warming = std::getenv("WWHD_WARMING_SHADERS");
+    return prune && !std::strcmp(prune, "1") && warming && !std::strcmp(warming, "1");
+  }();
+  return on;
+}
 namespace {
 bool perf_enabled() {
   static const bool enabled = std::getenv("WWHD_VK_STATS") != nullptr;
@@ -415,6 +423,15 @@ void init_pipeline_cache() try {
         if (!unpack_pipeline_cache(bytes)) bytes.clear();
       } else bytes.clear();
     }
+  }
+  // Pruning (WWHD_VK_WARM_PRUNE=1, setup's preparation only): the driver cache starts empty and the preparation
+  // compiles every recipe of the database into it (headstart.cpp), so entries no recipe uses any more (older builds,
+  // pipelines dropped from the database) are not carried over. Idea after aurora's driver cache pruning (MIT;
+  // lib/webgpu/gpu_cache.cpp); no code taken.
+  if (!bytes.empty() && warm_prune_enabled()) {
+    LOG("[vulkan cache] pruning: %zu bytes of the old driver cache left out; the preparation rebuilds it from the recipes",
+        bytes.size());
+    bytes.clear();
   }
   VkPipelineCacheCreateInfo ci{VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO};
   ci.initialDataSize=bytes.size();ci.pInitialData=bytes.empty()?nullptr:bytes.data();
@@ -758,6 +775,7 @@ static UploadSlice upload_slice(VkDeviceSize& size, VkDeviceSize& alignment, boo
     auto result = slice(block);
     if (result.buffer) return result;
   }
+  if (!grow) return UploadSlice{};
   if (handoff_trace::enabled()) handoff_trace::emit(handoff_trace::Lane::Producer, handoff_trace::Kind::UploadGrowBegin, 0, R.frame, size, R.uploadBlocks.size());
   auto buffer = create_buffer(std::max<VkDeviceSize>(32ull<<20,size),
       VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT |
@@ -3658,8 +3676,15 @@ void swap() {
           (unsigned long long)ss.diskHits,(unsigned long long)ss.spirvReuseHits,(unsigned long long)ss.spirvCompiles,ss.spirvCompileNs/1e6,
           ss.decompileNs/1e6,(unsigned long long)ss.diskLoads,ss.diskLoadNs/1e6,
           (unsigned long long)ss.diskSaves,ss.diskSaveNs/1e6,ss.diskSavedBytes/double(1<<20),ss.diskSnapshotNs/1e6);
-      LOG("[vulkan pipelines] creates %llu total %.1f ms",
-          (unsigned long long)R.pipelineCreates,R.pipelineCreateNs/1e6);
+      {
+        uint64_t promotions=0,promotedHits=0; double promotedMs=0;
+        pipeline_promotion_stats(promotions,promotedHits,promotedMs);
+        LOG("[vulkan pipelines] creates %llu total %.1f ms; new keys %llu, %llu of them in the recipe database; "
+            "%llu demands waited for the running warm-up compile (%llu got it, %.1f ms)",
+            (unsigned long long)R.pipelineCreates,R.pipelineCreateNs/1e6,
+            (unsigned long long)R.pipelineKeysNew,(unsigned long long)R.pipelineKeysKnown,
+            (unsigned long long)promotions,(unsigned long long)promotedHits,promotedMs);
+      }
       {
         // texture change detection (surfaces.cpp upload_surface, write_watch.h)
         extern uint64_t g_stat_full_checks, g_stat_uploads;

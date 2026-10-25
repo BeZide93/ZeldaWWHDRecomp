@@ -284,6 +284,21 @@ its cost is recorded as `bc_decode_compute_pipeline` when tracing is enabled.
 `WWHD_VK_ASYNC_PIPELINES=0` selects diagnostic synchronous graphics creation.
 Recipe files contain game-derived shader code and must stay local.
 
+The head start's Metal pipeline recipes (the shaders by the Metal renderer's keys, target formats, blend, write
+mask and vertex strides) are guest-level too. With `WWHD_VK_METAL_RECIPES=1` the setup's Vulkan preparation
+(`--warm-shaders`) rebuilds each one's draw state from its two shaders' recorded registers (the pixel shader's state
+with the vertex stage's programs, fetch shader, resources and primitive type) and makes the Vulkan pipeline through
+the same code a draw uses (`draw.cpp derive_guest_pipeline_recipe`), in the head start's order; the recipes join
+the local database. With the full template: 38,094 Metal recipes give 1,160 distinct Vulkan pipelines beyond the
+template's own Vulkan ones, and in four test scenes the share of pipelines the game asks for that the database
+already has rose from 54–84 % to 66–95 % (`[vulkan pipelines] ... new keys N, K of them in the recipe database`,
+with `WWHD_VK_STATS` or `WWHD_VK_CPU_ONLY_STATS=1`), the same pipelines the Metal head start lacks in those scenes.
+`WWHD_VK_WARM_PRUNE=1` (preparation only) starts the driver pipeline cache empty and compiles every recipe of the
+database into it, so entries no recipe uses any more are not carried over. `WWHD_VK_DEMAND_PROMOTE=1`: a pipeline
+the game needs while the warm-up worker's driver compile of it is running waits for that compile (at most
+`WWHD_VK_DEMAND_PROMOTE_MS`, default 1000) instead of compiling it a second time. `WWHD_VK_RECIPE_KEY_DUMP=file`
+(debug) lists derived keys, missed keys and the head start's shader identities.
+
 Every demanded draw remains Exact. While a pipeline is pending, owned native
 commands can be prepared ahead of it. Ordered emission waits for the exact
 pipeline and emits every command. Boundaries such as readback, presentation and

@@ -27,6 +27,7 @@ extern "C" uint64_t g_shader_state_gen;  // gx2_core.cpp: bumped by shader-relev
 #include "write_watch.h"
 #include "metal.h"
 #include "metal_cache_file.h"
+#include "metal_recipe_keys.h"
 #include "cloud_proto.h"
 #include "runtime.h"
 #include "util/helpers/StringBuf.h"
@@ -98,18 +99,9 @@ const char* capture_begin_frame() {
     return g_capture_dir.c_str();
 }
 
-// fast 64-bit hash over 8-byte words (tail handled bytewise)
+// fast 64-bit hash over 8-byte words (shared with the Vulkan setup preparation: metal_recipe_keys.h)
 static uint64_t hash_bytes(const void* data, size_t n, uint64_t h = 0x9E3779B97F4A7C15ull) {
-    const uint8_t* p = (const uint8_t*)data;
-    size_t i = 0;
-    for (; i + 8 <= n; i += 8) {
-        uint64_t v;
-        memcpy(&v, p + i, 8);
-        h = (h ^ v) * 0xFF51AFD7ED558CCDull;
-        h ^= h >> 32;
-    }
-    for (; i < n; i++) h = (h ^ p[i]) * 0x100000001B3ull;
-    return h ^ (h >> 29);
+    return gfx::mtlkey::hash_bytes(data, n, h);
 }
 
 // shader programs rarely change in place: cache their hash per address, revalidated once per frame
@@ -319,9 +311,7 @@ static LatteFetchShader* get_fetch_shader(const uint32_t* regs, uint64_t* keyOut
             uint32_t(q[2]) << 16 | uint32_t(q[3]) << 24; };
         const uint32_t count = word(p + 16);
         if (count > 64) return nullptr;
-        uint64_t h = uint64_t(word(p + 24)) | uint64_t(word(p + 28)) << 32;
-        for (uint32_t b = 0; b < 16; ++b)
-            h = (h ^ ((regs[mmSQ_VTX_ATTRIBUTE_BLOCK_START + b * 7 + 2] >> 11) & 0xFFFF)) * 1099511628211ull;
+        const uint64_t h = gfx::mtlkey::mix_strides(regs, uint64_t(word(p + 24)) | uint64_t(word(p + 28)) << 32);
         *keyOut = h;
         if (auto it = g_fetch.find(h); it != g_fetch.end()) return it->second;
         auto* fs = gx2::decode_fetch_attributes(prog, 32 + count * 52, nullptr);
@@ -335,9 +325,8 @@ static LatteFetchShader* get_fetch_shader(const uint32_t* regs, uint64_t* keyOut
     bool ours = ld32(prog) == 0x57574653;
     uint32_t size = ours ? 16 + ld32(prog + 4) * 16 : regs[mmSQ_PGM_START_FS + 1] << 3;
     if (size > 0x1000) return nullptr;
-    uint64_t h = hash_bytes(mem::ptr(prog), size);
     // strides decide between vertex-descriptor fetch and manual fetch in the shader
-    for (uint32_t b = 0; b < 16; b++) h = (h ^ ((regs[mmSQ_VTX_ATTRIBUTE_BLOCK_START + b * 7 + 2] >> 11) & 0xFFFF)) * 1099511628211ull;
+    const uint64_t h = gfx::mtlkey::mix_strides(regs, hash_bytes(mem::ptr(prog), size));
     *keyOut = h;
     auto it = g_fetch.find(h);
     if (it != g_fetch.end()) return it->second;
@@ -540,48 +529,11 @@ static uint64_t stage_state_hash(const uint32_t* regs, uint64_t h, uint32_t texB
     // most lookups gather the same words as the previous one for this stage (the state generation
     // also moves for registers that don't end up here): gather into the spare buffer and compare
     // instead of rehashing. Render thread only.
-    struct Last { uint64_t in = 0, out = 0; uint32_t n = 0, cur = 0; uint32_t buf[2][400]; };
+    struct Last { uint64_t in = 0, out = 0; uint32_t n = 0, cur = 0; uint32_t buf[2][gfx::mtlkey::kStageWords]; };
     static Last last[2];
     Last& L = last[texBase == REGADDR::SQ_TEX_RESOURCE_WORD0_N_VS ? 0 : 1];
     uint32_t* buf = L.buf[L.cur ^ 1];
-    uint32_t n = 0;
-    auto put = [&](uint32_t first, uint32_t count) { memcpy(&buf[n], &regs[first], count * 4); n += count; };
-    put(mmSQ_VTX_SEMANTIC_0, 32);
-    put(mmSPI_VS_OUT_ID_0, 10);
-    put(mmSPI_VS_OUT_CONFIG, 1);
-    put(mmPA_CL_VS_OUT_CNTL, 1);
-    put(mmSPI_PS_IN_CONTROL_0, 2);
-    put(mmSPI_PS_INPUT_CNTL_0, 32);
-    put(REGADDR::SQ_CONFIG, 1);
-    put(mmCB_SHADER_MASK, 1);
-    put(mmCB_SHADER_CONTROL, 1);
-    put(mmDB_SHADER_CONTROL, 1);
-    put(mmSPI_INPUT_Z, 1);
-    put(REGADDR::SX_ALPHA_TEST_CONTROL, 1);
-    put(REGADDR::PA_CL_VTE_CNTL, 1);
-    put(REGADDR::PA_CL_CLIP_CNTL, 1);
-    put(REGADDR::CB_COLOR_CONTROL, 1);
-    put(REGADDR::CB_TARGET_MASK, 1);
-    put(mmCB_COLOR0_INFO, 8);
-    uint32_t cbBase[8];
-    for (int i = 0; i < 8; i++) {
-        cbBase[i] = regs[mmCB_COLOR0_BASE + i] & ~0xFFu;
-        buf[n++] = cbBase[i] != 0;
-    }
-    buf[n++] = regs[REGADDR::DB_DEPTH_CONTROL] & 0x83;
-    // texture types and formats; sampling a bound render target switches to framebuffer fetch
-    for (int t = 0; t < 18; t++) {
-        const uint32_t* w = &regs[texBase + t * 7];
-        buf[n++] = (w[0] & 7) | (w[4] & 0x300);
-        buf[n++] = w[1] & 0x3F00000;
-        uint32_t fb = 0, base = w[2] << 8;
-        if (base)
-            for (int i = 0; i < 8; i++)
-                if (base == cbBase[i]) fb = 1 + i;
-        buf[n++] = fb;
-    }
-    // depth-compare samplers
-    for (int i = 0; i < 18 * 3; i++) buf[n++] = regs[REGADDR::SQ_TEX_SAMPLER_WORD0_0 + i * 3] & 0xF8000000;
+    const uint32_t n = gfx::mtlkey::stage_words(regs, texBase, buf);  // (metal_recipe_keys.h)
     if (L.n == n && L.in == h && !memcmp(L.buf[L.cur], buf, n * 4)) return L.out;
     L.cur ^= 1;
     L.in = h;
