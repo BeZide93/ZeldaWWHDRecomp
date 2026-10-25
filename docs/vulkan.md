@@ -1023,6 +1023,10 @@ contains:
 - uploads per frame by kind (vertex, index, uniform blocks, packed uniforms, texture staging; logic
   and interpolation hold frames apart) and, on one frame in 16, the unique guest bytes those
   copies read;
+- the texture cache: full checks of CPU textures per frame and the guest bytes they hash, how many were
+  served from the cache and how many uploaded again, and the texture budget's releases and remakes;
+- the GPU timeline: GPU busy time per frame and the idle gaps between command buffers (Metal: each
+  command buffer's GPU start/end; Vulkan: the submission timestamps, when GPU timestamps are on);
 - draw classes: draws with no register change since the previous draw, draws where only ALU
   constants, uniform-block or vertex-buffer words changed (continued-draw candidates), and the most
   written other registers;

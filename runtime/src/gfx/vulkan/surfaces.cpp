@@ -1508,6 +1508,7 @@ static bool evictable(const Surface* s) {
 void release_texture_image(Surface* s) {
     if (!evictable(s)) return;
     ++g_stat_tex_evictions; g_stat_tex_evicted_bytes += s->allocationBytes;
+    rprof::add_texture_release(s->allocationBytes);
     destroy_surface_image(s);
     s->evicted = true;
 }
@@ -1517,6 +1518,7 @@ static void restore_evicted(Surface* s) {
     create_surface_image(s, false);
     s->dirty = true; s->contentHash = 0; s->watched = false; s->lastCheckedFrame = ~0ull;
     ++g_surface_epoch; ++g_stat_tex_restores;
+    rprof::add_texture_remake();
 }
 void texture_budget_step() {
     static const bool on = [] { const char* e = getenv("WWHD_VK_TEXTURE_BUDGET"); return e && !strcmp(e, "1"); }();
@@ -1585,10 +1587,13 @@ void upload_surface(Surface* s) {
     }
     s->watched = true;
     ++g_stat_full_checks;
-    uint64_t hash=1469598103934665603ull;
-    for(uint32_t level=0;level<levels;++level)
+    uint64_t hash=1469598103934665603ull,hashedBytes=0;
+    for(uint32_t level=0;level<levels;++level) {
         hash=(hash^content_hash(mem::ptr(ranges[level].first),size_t(ranges[level].second)))*1099511628211ull;
-    if(!s->dirty&&hash==s->contentHash)return;
+        hashedBytes+=ranges[level].second;
+    }
+    if(!s->dirty&&hash==s->contentHash){rprof::add_texture_check(hashedBytes,false);return;}
+    rprof::add_texture_check(hashedBytes,true);
     // A render target at another size than the guest's (stereo renders each eye narrower, stereo.h):
     // upload at the guest size, then scale into it.
     Surface guestSized;

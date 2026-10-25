@@ -278,6 +278,12 @@ static bool rewritten_copy(GuestRangeKind kind, uint32_t addr, uint32_t size, Up
 // called before a command buffer commits: buffers used so far are recycled when it completes
 void pool_retire(id<MTLCommandBuffer> cmd) {
     g_texture_staging_bytes = 0;
+    // the GPU timeline of the performance report (render_prof.h add_gpu_span): this command buffer's GPU interval
+    if (rprof::enabled())
+        [cmd addCompletedHandler:^(id<MTLCommandBuffer> done) {
+            if (done.GPUEndTime > done.GPUStartTime && done.GPUStartTime > 0)
+                rprof::add_gpu_span(done.GPUStartTime * 1e9, done.GPUEndTime * 1e9);
+        }];
     std::vector<id<MTLBuffer>> used;
     {
         std::lock_guard<std::mutex> lk(g_pool_mutex);

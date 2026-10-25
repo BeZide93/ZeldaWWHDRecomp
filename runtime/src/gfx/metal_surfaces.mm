@@ -839,8 +839,11 @@ void upload_surface(Surface* s) {
     if (!s->tex || s->gpuWritten) return;
     const FormatInfo& f = s->fmt;
     const auto& ranges = level_ranges(s);
+    const uint64_t hashedBefore = g_stat_hashed_bytes;
     uint64_t hash = content_hash(s);
-    if (hash == s->contentHash && s->writeSeq) return;
+    const bool changed = !(hash == s->contentHash && s->writeSeq);
+    rprof::add_texture_check(g_stat_hashed_bytes - hashedBefore, changed);
+    if (!changed) return;
     s->contentHash = hash;
     s->writeSeq = next_write_seq();  // fresh CPU data is now the newest version of this memory
     g_stat_uploads++;

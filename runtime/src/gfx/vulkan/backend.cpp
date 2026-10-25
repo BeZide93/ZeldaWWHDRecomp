@@ -978,6 +978,11 @@ static void collect_gpu_timestamp_queries(Renderer::Submission& slot) {
   }
   const double ns = double(timestamp_elapsed_ticks(values[0].ticks, values[1].ticks,
       R.gpuTimestampValidBits)) * double(R.properties.limits.timestampPeriod);
+  if (rprof::enabled()) {  // the performance report's GPU timeline (busy, idle between submissions)
+    const uint64_t mask = R.gpuTimestampValidBits >= 64 ? ~0ull : (1ull << R.gpuTimestampValidBits) - 1;
+    const double start = double(values[0].ticks & mask) * double(R.properties.limits.timestampPeriod);
+    rprof::add_gpu_span(start, start + ns);
+  }
   if (dynresTiming) {
     const uint64_t mask = R.gpuTimestampValidBits >= 64 ? ~0ull : (1ull << R.gpuTimestampValidBits) - 1;
     const double start = double(values[0].ticks & mask) * double(R.properties.limits.timestampPeriod);
