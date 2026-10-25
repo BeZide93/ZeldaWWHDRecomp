@@ -26,6 +26,7 @@ extern "C" uint64_t g_shader_state_gen;  // gx2_core.cpp: bumped by shader-relev
 #include "gx2/gx2_cmd.h"
 #include "write_watch.h"
 #include "metal.h"
+#include "metal_cache_file.h"
 #include "cloud_proto.h"
 #include "runtime.h"
 #include "util/helpers/StringBuf.h"
@@ -1723,6 +1724,15 @@ std::vector<PipelineRecipe> g_pending_pipelines;
 // hashes of the pipeline recipes already in the cache file or head start, so a pipeline the game asks
 // for before its queued recipe is built isn't appended again
 std::unordered_set<uint64_t> g_known_pipelines;
+// versioned file (metal_cache_file.h; WWHD_SHADER_CACHE_VERSIONING=0: the unversioned file as before)
+bool cache_versioning() {
+    static const bool on = [] { const char* e = getenv("WWHD_SHADER_CACHE_VERSIONING"); return !e || strcmp(e, "0"); }();
+    return on;
+}
+// recipes of the user's own file, and those of them the background build found unresolvable (their
+// shaders or fetch shader are not in the cache): tombstoned when the build is done
+std::unordered_set<uint64_t> g_user_pipelines;
+std::vector<uint64_t> g_stale_pipelines;
 
 std::string cache_path() {
     if (const char* e = getenv("WWHD_SHADER_CACHE")) return e;
@@ -1803,15 +1813,68 @@ static void cache_record_pipeline(const uint32_t* regs, Shader* vs, Shader* ps, 
     cache_write(kRecPipeline, v);
 }
 
+// the system the cache was written on: compiled Metal code (the OS's own cache) is per macOS and GPU
+static std::string cache_fingerprint() {
+    @autoreleasepool {
+        NSString* os = [[NSProcessInfo processInfo] operatingSystemVersionString];
+        NSString* gpu = R.device ? R.device.name : @"?";
+        return std::string("macOS ") + (os ? os.UTF8String : "?") + " | " + (gpu ? gpu.UTF8String : "?");
+    }
+}
+
+// The versioned file: what its header says, and the tombstones (recipe hash -> index of the last tombstone
+// naming it; a recipe recorded again after its tombstone is kept). Reads record headers only, plus the
+// header and tombstone records.
+struct CacheScan {
+    bool hasHeader = false;
+    mtlcache::Header header;
+    std::unordered_map<uint64_t, size_t> tombstones;
+};
+static CacheScan cache_scan(const std::string& path) {
+    CacheScan scan;
+    FILE* f = fopen(path.c_str(), "rb");
+    if (!f) return scan;
+    mtlcache::Record r;
+    std::vector<uint8_t> raw;
+    for (size_t index = 0; mtlcache::read_record(f, r); index++) {
+        if (r.type == mtlcache::kRecHeader && index == 0 && mtlcache::inflate(r, raw))
+            scan.hasHeader = mtlcache::decode_header(raw.data(), raw.size(), scan.header);
+        else if (r.type == mtlcache::kRecTombstone && mtlcache::inflate(r, raw))
+            for (uint64_t h : mtlcache::decode_tombstone(raw)) scan.tombstones[h] = index;
+    }
+    fclose(f);
+    return scan;
+}
+
 // load and replay the recipes; runs once on the render thread before the first draw
 static void cache_load() {
     std::string path = cache_path();
     if (path == "0") { g_cache_disabled = true; return; }
     double t0 = now_ms();
     size_t shaders = 0, pipelines = 0;
+    // the setup's model sweep, record only (WWHD_DSWEEP_RECORD_ONLY=1): known, so not appended again, but never
+    // built. Its processes start from copies of one file and are merged by appended length
+    // (tools/installer/sweep_merge.py), so they never rewrite it.
+    static const bool recordOnly = [] { const char* e = getenv("WWHD_DSWEEP_RECORD_ONLY"); return e && *e == '1'; }();
+    const bool versioned = cache_versioning();
+    const mtlcache::Header ours = mtlcache::current(sizeof(PipelineRecipe), versioned ? cache_fingerprint() : std::string());
+    CacheScan scan;
+    mtlcache::Policy policy;
+    if (versioned) {
+        scan = cache_scan(path);
+        policy = mtlcache::policy(scan.hasHeader, scan.header, ours);
+    }
+    // rows the rewrite leaves out besides the policy's: damaged, torn, of the wrong size, tombstoned, repeated
+    size_t staleRows = 0, repeatedRows = 0;
+    bool damaged = false;
+    auto stalePipeline = [&](uint64_t h, size_t index) {
+        auto t = scan.tombstones.find(h);
+        return t != scan.tombstones.end() && t->second > index;
+    };
     if (FILE* f = fopen(path.c_str(), "rb")) {
         static std::vector<uint32_t> regs(0x10000);
         std::unordered_map<std::string, uint32_t> copies;
+        std::unordered_set<uint64_t> rows;
         auto guest_copy = [&](const uint8_t* src, uint32_t size) {
             uint32_t& addr = copies[std::string((const char*)src, size)];
             if (!addr) {
@@ -1823,24 +1886,37 @@ static void cache_load() {
         g_cache_replaying = true;
         g_defer_compiles = true;
         uint32_t hdr[3];
-        while (fread(hdr, sizeof hdr, 1, f) == 1) {
+        for (size_t index = 0;; index++) {
+            if (fread(hdr, sizeof hdr, 1, f) != 1) break;
             std::vector<uint8_t> comp(hdr[2]), raw(hdr[1]);
-            if (fread(comp.data(), 1, hdr[2], f) != hdr[2]) break;
+            if (fread(comp.data(), 1, hdr[2], f) != hdr[2]) { damaged = true; break; }
+            if (versioned && (hdr[0] == mtlcache::kRecHeader || hdr[0] == mtlcache::kRecTombstone)) continue;
             uLongf rsize = hdr[1];
-            if (uncompress(raw.data(), &rsize, comp.data(), hdr[2]) != Z_OK || rsize != hdr[1]) break;
+            if (uncompress(raw.data(), &rsize, comp.data(), hdr[2]) != Z_OK || rsize != hdr[1]) { damaged = true; break; }
+            // a repeated row (after the stale checks: a recipe recorded again after its tombstone is kept)
+            auto repeated = [&] {
+                if (!versioned || rows.insert(mtlcache::fnv(comp.data(), comp.size(), mtlcache::fnv(&hdr[0], 4))).second)
+                    return false;
+                repeatedRows++;
+                return true;
+            };
             const uint8_t* p = raw.data();
             const uint8_t* end = p + raw.size();
             if (hdr[0] == kRecPipeline) {
+                if (!policy.pipelines) continue;
+                if (versioned && raw.size() != sizeof(PipelineRecipe)) { staleRows++; continue; }
+                const uint64_t h = hash_bytes(raw.data(), raw.size());
+                if (versioned && stalePipeline(h, index)) { staleRows++; continue; }
+                if (repeated()) continue;
                 PipelineRecipe r;
-                // (record only: known, so not appended again, but never built)
-                static const bool recordOnly = [] { const char* e = getenv("WWHD_DSWEEP_RECORD_ONLY"); return e && *e == '1'; }();
-                if (get(p, end, r) && g_known_pipelines.insert(hash_bytes(raw.data(), raw.size())).second && !recordOnly) {
+                g_user_pipelines.insert(h);
+                if (get(p, end, r) && g_known_pipelines.insert(h).second && !recordOnly) {
                     g_pending_pipelines.push_back(r);
                     pipelines++;
                 }
                 continue;
             }
-            if (hdr[0] != kRecShader) continue;
+            if (hdr[0] != kRecShader || !policy.shaders || repeated()) continue;
             uint32_t vertex, size, fsSize, n;
             if (!get(p, end, vertex) || !get(p, end, size) || !get(p, end, fsSize) || !get(p, end, n)) break;
             if (p + size + fsSize + n * 8 > end) break;
@@ -1869,16 +1945,69 @@ static void cache_load() {
             get_shader_uncached(regs.data(), vertex, fs, fsKey);
             shaders++;
         }
+        if (!damaged && fgetc(f) != EOF) damaged = true;  // a torn record header at the end
         fclose(f);
         g_cache_replaying = false;
         g_defer_compiles = false;
     }
     void headstart_load();  // shader_headstart.mm
     headstart_load();
-    g_cache_out = fopen(path.c_str(), "ab");
+    if (versioned && policy.writable && !recordOnly) {
+        struct stat st {};
+        const bool exists = stat(path.c_str(), &st) == 0 && st.st_size > 0;
+        if (exists && (policy.rewrite || staleRows || repeatedRows || damaged || !scan.tombstones.empty())) {
+            // the same decisions as the replay above, applied to the file
+            mtlcache::RewriteStats rs;
+            const double tw = now_ms();
+            std::vector<uint8_t> raw;
+            const bool ok = mtlcache::rewrite(path, ours, [&](const mtlcache::Record& r, size_t index) {
+                if (r.type == kRecShader) return policy.shaders;
+                if (r.type != kRecPipeline) return true;  // other types: kept as they are
+                if (!policy.pipelines || r.raw != sizeof(PipelineRecipe) || !mtlcache::inflate(r, raw)) return false;
+                return !stalePipeline(hash_bytes(raw.data(), raw.size()), index);
+            }, rs);
+            LOG("[gfx] shader cache %s: %s; %zu rows kept, %zu stale and %zu repeated left out%s (%.0f ms)",
+                ok ? "rewritten" : "NOT rewritten (write failed)", policy.reason ? policy.reason : "stale rows",
+                rs.kept, rs.dropped, rs.duplicates, rs.damaged ? ", damaged end cut" : "",
+                now_ms() - tw);
+        } else if (policy.reason) {
+            LOG("[gfx] shader cache: %s", policy.reason);
+        }
+        g_cache_out = fopen(path.c_str(), "ab");
+        if (g_cache_out && !exists) {
+            mtlcache::Record hr;
+            if (mtlcache::make_record(mtlcache::kRecHeader, mtlcache::encode_header(ours), hr)) {
+                mtlcache::write_compressed(g_cache_out, hr);
+                fflush(g_cache_out);
+            }
+        }
+    } else if (!versioned || policy.writable) {
+        g_cache_out = fopen(path.c_str(), "ab");
+    } else {
+        LOG("[gfx] shader cache: %s", policy.reason);
+    }
     if (shaders || pipelines)
         LOG("[gfx] shader cache: replayed %zu shaders, %zu pipelines queued (%.0f ms) from %s", shaders, pipelines,
             now_ms() - t0, path.c_str());
+}
+
+// the background build is done: recipes of the user's file it couldn't resolve get a tombstone, so the next
+// start leaves them out of the file. Not while the head start is switched off (WWHD_HEADSTART=0): the
+// user's recipes may name head-start shaders.
+static void cache_tombstone_stale() {
+    if (g_stale_pipelines.empty()) return;
+    std::vector<uint64_t> stale;
+    stale.swap(g_stale_pipelines);
+    const char* hs = getenv("WWHD_HEADSTART");
+    static const bool recordOnly = [] { const char* e = getenv("WWHD_DSWEEP_RECORD_ONLY"); return e && *e == '1'; }();
+    if (!cache_versioning() || !g_cache_out || recordOnly || (hs && !strcmp(hs, "0"))) return;
+    mtlcache::Record r;
+    if (!mtlcache::make_record(mtlcache::kRecTombstone, mtlcache::encode_tombstone(stale), r)) return;
+    mtlcache::write_compressed(g_cache_out, r);
+    fflush(g_cache_out);
+    // a live use of one of them records it again (after the tombstone, so it is kept)
+    for (uint64_t h : stale) g_known_pipelines.erase(h);
+    LOG("[gfx] shader cache: %zu unresolvable pipeline recipes marked stale", stale.size());
 }
 
 // build queued pipelines whose shaders have finished compiling, at most `budget` of them and only
@@ -1899,8 +2028,13 @@ static void build_pending_pipelines(int budget, int maxInFlight) {
         auto vi = g_shaders.find(r.vsKey), pi = g_shaders.find(r.psKey);
         auto fi = g_fetch.find(r.fsKey);
         auto finallyFailed = [](Shader* sh) { return sh->state == CS_FAILED && (!sh->dec || sh->attempts >= kCompileAttempts); };
-        if (vi == g_shaders.end() || pi == g_shaders.end() || fi == g_fetch.end() || !fi->second ||
-            finallyFailed(vi->second) || finallyFailed(pi->second)) {
+        const bool missing = vi == g_shaders.end() || pi == g_shaders.end() || fi == g_fetch.end() || !fi->second;
+        if (missing || finallyFailed(vi->second) || finallyFailed(pi->second)) {
+            // stale only when something it names is gone: a failed compile may work on another macOS
+            if (missing && cache_versioning()) {
+                const uint64_t h = hash_bytes(&r, sizeof r);
+                if (g_user_pipelines.count(h)) g_stale_pipelines.push_back(h);
+            }
             g_pending_pipelines[i] = g_pending_pipelines.back();  // unusable recipe
             g_pending_pipelines.pop_back();
             g_recipes_dropped++;
@@ -1941,6 +2075,7 @@ void cache_warm_step() {
         queued = false;
         LOG("[gfx] background pipelines done by frame %llu: %zu built, %zu unresolved", (unsigned long long)R.frame,
             g_recipes_built, g_recipes_dropped);
+        cache_tombstone_stale();
     }
 }
 

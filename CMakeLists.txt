@@ -1291,6 +1291,12 @@ add_test(NAME render_prof_env_on COMMAND render_prof_test env-on)
 add_test(NAME render_prof_env_off COMMAND render_prof_test env-off)
 # Settings > Graphics > Shader compile (off / fast): which draws may be left out, default, switch,
 # WWHD_BG_SHADERS, the wait budget and the report line
+# the Metal recipe file's version header, load policy and rewrite (gfx/metal_cache_file.h)
+add_executable(metal_cache_file_test runtime/tools/metal_cache_file_test.cpp)
+target_include_directories(metal_cache_file_test PRIVATE runtime/src)
+target_link_libraries(metal_cache_file_test PRIVATE ZLIB::ZLIB)
+target_compile_options(metal_cache_file_test PRIVATE -UNDEBUG)
+add_test(NAME metal_cache_file COMMAND metal_cache_file_test)
 add_executable(background_shaders_test runtime/tools/background_shaders_test.cpp runtime/src/background_shaders.cpp)
 target_include_directories(background_shaders_test PRIVATE runtime/src)
 target_compile_options(background_shaders_test PRIVATE -UNDEBUG)
