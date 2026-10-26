@@ -2680,6 +2680,12 @@ StageResources bind_stage(const uint32_t *r, vk::Shader *sh,
       bias += g_artisticBias;
       memcpy(supportUniforms.data() + biasOffset, &bias, 4);
     }
+    // the half-size light buffer's grid on an upscaled buffer (gfx/area_sample.h)
+    if ((sh->gatherUnits >> unit & 1) && sh->uniforms.offset_remapped >= 0 &&
+        size_t(sh->uniforms.offset_remapped) < supportUniforms.size())
+      ::gfx::area_sample::scale_gather_grid(reinterpret_cast<float*>(supportUniforms.data() + sh->uniforms.offset_remapped),
+                                            (supportUniforms.size() - sh->uniforms.offset_remapped) / 16, s->width, s->height,
+                                            s->sx, s->sy);
     if (imageCount >= imageInfos.size())
       exception_report::raise("stage image descriptor capacity exceeded");
     auto &info = imageInfos[imageCount++];
