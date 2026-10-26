@@ -29,6 +29,7 @@ struct Surface {
     bool isDepth = false;
     bool gpuWritten = false;   // contents produced by the GPU; never reload from guest memory
     uint64_t writeSeq = 0;     // when the GPU last wrote it (several surfaces can alias one address)
+    bool lightGrid = false;       // the half-size point-light buffer or its depth copy: screen-sized with Full-size torchlight (target_scale)
     bool formatViews = false;     // another surface at this address has the same texel bits in another format (adopt_newer_alias)
     uint64_t writtenBackSeq = 0;  // writeSeq when last written back to guest memory (linear surfaces)
     uint64_t contentHash = 0;  // hash of all guest bytes (every level) at the last check
@@ -115,10 +116,13 @@ struct SurfaceDesc {
     uint32_t addr = 0, mipAddr = 0, width = 0, height = 0, slices = 1, pitch = 0, mips = 1;
     uint32_t format = 0, dim = 1, tileMode = 0, swizzle = 0;
     bool isDepth = false;
+    bool lightGrid = false;   // the point-light buffer (Surface::lightGrid)
 };
 Surface* find_or_create_surface(const SurfaceDesc& d, bool forRendering);
 // render targets; `slice` receives the array slice the view renders to
-Surface* color_target(const uint32_t* regs, int index, uint32_t* slice = nullptr);  // from CB_COLOR* registers
+// (lightGrid: the draw belongs to the point lights, gfx::ProgramKind::PointLight)
+Surface* color_target(const uint32_t* regs, int index, uint32_t* slice = nullptr,  // from CB_COLOR* registers
+                      bool lightGrid = false);
 Surface* depth_target(const uint32_t* regs, uint32_t* slice = nullptr);             // from DB_DEPTH_* registers
 // from GX2ColorBuffer / GX2DepthBuffer structs; optional: the view's slice range
 Surface* surface_from_color_buffer(uint32_t gx2ColorBuffer, uint32_t* firstSlice = nullptr, uint32_t* numSlices = nullptr);

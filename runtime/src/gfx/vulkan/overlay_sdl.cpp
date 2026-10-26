@@ -221,6 +221,7 @@ void graphics_changed() {
     put("bloomStrength", {"WWHD_BLOOM_STRENGTH"}, std::to_string(render::bloom_strength()));
     put("horizonHaze", {"WWHD_HORIZON_HAZE", "WWHD_SKY_HAZE"}, std::to_string(render::horizon_haze()));
     put("cloudShadows", {"WWHD_CLOUD_SHADOWS"}, render::cloud_shadows() ? "1" : "0");
+    put("fullLight", {"WWHD_FULL_LIGHT"}, render::full_light() ? "1" : "0");
     put("cloudStyle", {"WWHD_CLOUD_STYLE"}, std::to_string(render::cloud_style()));
     put("fxaa", {"WWHD_FXAA"}, gfxvk::fxaa_enabled() ? "1" : "0");
 #ifdef __ANDROID__
@@ -293,6 +294,7 @@ void load_saved_options() {
     if (saved("bloomStrength", {"WWHD_BLOOM_STRENGTH"})) render::set_bloom_strength((float)num("bloomStrength"));
     if (saved("horizonHaze", {"WWHD_HORIZON_HAZE", "WWHD_SKY_HAZE"})) render::set_horizon_haze((float)num("horizonHaze"));
     if (saved("cloudShadows", {"WWHD_CLOUD_SHADOWS"})) render::set_cloud_shadows(num("cloudShadows") != 0);
+    if (saved("fullLight", {"WWHD_FULL_LIGHT"})) render::set_full_light(num("fullLight") != 0);
     if (saved("cloudStyle", {"WWHD_CLOUD_STYLE"})) render::set_cloud_style((int)num("cloudStyle"));
     if (saved("fxaa", {"WWHD_FXAA"})) gfxvk::set_fxaa(num("fxaa") != 0);
     if (saved("interpFps", {"WWHD_INTERP_FPS"})) interp::set_fps((int)num("interpFps"));

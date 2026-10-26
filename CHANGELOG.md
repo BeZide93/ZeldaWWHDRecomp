@@ -7,6 +7,13 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Full-size torchlight** (Graphics, on by default). Torches and other point lights light the scene through a
+  half-size light buffer that every lit object reads back with a depth-aware upsample. A pixel on an object's edge
+  often has no half-size sample of its own and takes the light meant for the wall behind it, which the flame's
+  flicker turns into a blocky, flickering outline around torches at every resolution. Full-size torchlight gives the
+  buffer as many pixels as the screen, so every pixel gets its own light. Off keeps the original game's half size
+  (`WWHD_FULL_LIGHT=0`). On Android it starts off, like full-size occlusion depth, since the phone's GPU is the limit
+  in heavy views (`WWHD_FULL_LIGHT=1` or the Graphics tab turns it on).
 - **macOS: move and resize the GamePad picture with the mouse** (#305, thanks @shaneoreilly). In the TV window, drag the
   picture-in-picture GamePad with the right mouse button (or with Option held) to move it, drag from its bottom-right
   corner or use the scroll wheel over it to resize it (5–100%). The placement becomes Custom and is saved. A plain left

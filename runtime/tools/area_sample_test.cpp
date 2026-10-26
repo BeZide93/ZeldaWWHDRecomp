@@ -1,6 +1,7 @@
 // Tests for gfx/area_sample.h: the shadow mask's gather spacing on upscaled depth (issue #135) and
 // the source rewrites both renderers apply.
 #include "gfx/area_sample.h"
+#include "gfx/shader_identity.h"
 
 #include <cassert>
 #include <cmath>
@@ -165,6 +166,8 @@ void test_classification() {
     assert(pixel_program(zeros, sizeof zeros).fix == Fix::None);
     assert(pixel_program(zeros, 448).fix == Fix::None);
     assert(pixel_program(nullptr, 2112).units == 0);
+    assert(gfx::program_kind(zeros, 560, false) == gfx::ProgramKind::Other);  // the point-light passes' sizes
+    assert(gfx::program_kind(zeros, 688, false) == gfx::ProgramKind::Other);
 }
 }  // namespace
 

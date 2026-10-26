@@ -1041,6 +1041,10 @@ void tab_graphics() {
     }
     if (check("Full-size occlusion depth", render::ao_hires(), &v, render::feature_available(render::kFeatureAOHires)))
         post_changed([v] { render::set_ao_hires(v); });
+    flow::next(flow::check("Full-size torchlight"), 30);
+    if (check("Full-size torchlight", render::full_light(), &v)) post_changed([v] { render::set_full_light(v); });
+    help("Torches and other point lights at the screen's resolution. Off lights them at half size, as the original "
+         "game does, which gives lit objects such as torches blocky, flickering outlines.");
     flow::next(flow::check("16x anisotropic filtering"), 30);
     if (check("16x anisotropic filtering", render::aniso(), &v, render::feature_available(render::kFeatureAniso)))
         post_changed([v] { render::set_aniso(v); });

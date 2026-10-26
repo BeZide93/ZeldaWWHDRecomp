@@ -1,5 +1,6 @@
 #include "background_shaders.h"
 #include "gfx/render_mips.h"
+#include "gfx/renderer.h"
 #include "gfx/texture_levels.h"
 #include "mods/cemu_pack.h"
 #include <tuple>
@@ -127,6 +128,9 @@ static float target_scale(const Surface* s) {
     uint32_t width,height;
     if(!s->fmt.compressed&&s->mips==1&&mods::cemu::texture_extent(s->width,s->height,s->format,s->slices,s->tileMode,width,height))return 1.0f;
     if (s->fmt.compressed || s->mips > 1) return 1.0f;
+    // the half-size point-light buffer and its depth copy with Full-size torchlight: as many pixels as the
+    // screen, so every pixel gets its own light instead of a neighbour's along silhouettes (gfx/area_sample.h)
+    const float light = s->lightGrid && render::full_light() ? 2.0f : 1.0f;
     static const float shadow = getenv("WWHD_SHADOW_SCALE") ? parse_scale(getenv("WWHD_SHADOW_SCALE")) : 0.0f;
     static const bool shadow_logged = [] {  // issue #67: show that the switch was picked up
         if (shadow) LOG("[gfx] WWHD_SHADOW_SCALE=%g: shadow maps at %gx the console's 1024x1024", shadow, shadow);
@@ -136,8 +140,8 @@ static float target_scale(const Surface* s) {
     if (shadow && s->isDepth && s->slices > 1) return shadow;
     // dynamic resolution: single-layer targets (the screen's buffers and the GamePad's); the shadow
     // cascades (arrays) keep the internal resolution
-    if (s->slices > 1) return res_scale();
-    return res_scale() * g_dyn_frame;
+    if (s->slices > 1) return res_scale() * light;
+    return res_scale() * g_dyn_frame * light;
 }
 // the dynamic resolution factor in target_scale's result (1 where it does not apply)
 static float target_dyn(const Surface* s) {
@@ -426,7 +430,10 @@ static Surface* find_surface(const SurfaceDesc& d, bool forRendering) {
         // a volume and a 2D array of the same size are different textures
         if (s->width == d.width && s->height == d.height && s->format == d.format && s->slices == d.slices &&
             volume(s->dim) == volume(d.dim) && (forRendering || s->mips >= d.mips || s->gpuWritten)) {
-            if (forRendering) return adopt_newer_alias(rescale(s));
+            if (forRendering) {
+                s->lightGrid |= d.lightGrid;
+                return adopt_newer_alias(rescale(s));
+            }
             if (!exact || s->writeSeq > exact->writeSeq) exact = s;
             continue;
         }
@@ -454,6 +461,7 @@ Surface* find_or_create_surface(const SurfaceDesc& d, bool forRendering) {
     s->swizzle = d.swizzle;
     s->isDepth = d.isDepth;
     s->fmt = format_info(d.format, d.isDepth);
+    s->lightGrid = forRendering && d.lightGrid;
     float ax = 1.0f, ay = 1.0f;
     if (forRendering) target_aspect(s.get(), ax, ay);
     s->tex = make_texture(s.get(), texture_type(d.dim, s->slices), forRendering, forRendering ? target_scale(s.get()) : 1.0f, ax, ay);
@@ -485,7 +493,7 @@ Surface* find_or_create_surface(const SurfaceDesc& d, bool forRendering) {
 // CB_COLORn_BASE holds the full guest address; CB_COLORn_TILE/FRAG hold width/height (our convention).
 constexpr uint32_t kDim2D = 1, kDim3D = 2, kDim2DArray = 5;
 
-Surface* color_target(const uint32_t* regs, int i, uint32_t* slice) {
+Surface* color_target(const uint32_t* regs, int i, uint32_t* slice, bool lightGrid) {
     uint32_t base = regs[mmCB_COLOR0_BASE + i];
     if (!base) return nullptr;
     uint32_t size = regs[mmCB_COLOR0_SIZE + i], info = regs[mmCB_COLOR0_INFO + i];
@@ -507,6 +515,7 @@ Surface* color_target(const uint32_t* regs, int i, uint32_t* slice) {
     d.tileMode = (info >> 8) & 0xF;
     d.slices = slices;
     d.dim = volume ? kDim3D : slices > 1 ? kDim2DArray : kDim2D;
+    d.lightGrid = lightGrid;
     return find_or_create_surface(d, true);
 }
 
