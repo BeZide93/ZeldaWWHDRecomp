@@ -586,7 +586,9 @@ void kept_token_and_session() {
         a["file"] = (root / "elsewhere" / "b.glb").string();
         call(h, "check_model", a);
         call(h, "check_model", a);
-        CHECK(be.asked == 4 && !be.offered[2] && !be.offered[3]);
+        // (both questions went through ask_choice, without the session choice; check the size before indexing)
+        CHECK(be.asked == 4 && be.offered.size() == 4);
+        if (be.offered.size() == 4) CHECK(!be.offered[2] && !be.offered[3]);
         // a new token (a new handler of the same game run) keeps the session's answers
         Handler renewed(be, new_token(), 47615, "1", allows);
         be.answer = Answer::Deny;

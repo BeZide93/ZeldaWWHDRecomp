@@ -437,6 +437,9 @@ add_executable(editor_mcp_test runtime/tools/editor_mcp_test.cpp runtime/src/edi
                runtime/src/editor/commands_quest.cpp runtime/src/editor/commands_story.cpp runtime/src/editor/quests.cpp runtime/src/editor/commands_scene.cpp runtime/src/editor/demo_names.cpp runtime/src/editor/commands_route.cpp runtime/src/editor/commands_paths.cpp runtime/src/editor/commands_water.cpp runtime/src/editor/water.cpp runtime/src/editor/scenes.cpp runtime/src/editor/demo_tracks.cpp runtime/src/mods/story_native_scene_coverage.cpp ${WWHD_NPC_CATALOGUE})
 target_include_directories(editor_mcp_test PRIVATE runtime/src)
 target_compile_options(editor_mcp_test PRIVATE -UNDEBUG)
+# bounds-checked standard containers in this test (libc++ and libstdc++): an index past the end fails on every
+# platform instead of reading whatever is there (#296: a check passed on macOS and failed on Linux that way)
+target_compile_definitions(editor_mcp_test PRIVATE _LIBCPP_HARDENING_MODE=_LIBCPP_HARDENING_MODE_DEBUG _GLIBCXX_ASSERTIONS)
 if(WIN32)
   target_link_libraries(editor_mcp_test PRIVATE ws2_32 bcrypt)
 endif()

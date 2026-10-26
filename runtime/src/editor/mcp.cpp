@@ -609,7 +609,8 @@ bool Handler::check_paths(const std::string& command, Value& args, std::string& 
         } else {
             bool ok = inside(full, backend_.package_dir());
             for (const auto& p : backend_.picked()) ok = ok || inside(full, p);
-            if (!ok && !backend_.ask("Claude wants to read a file outside the open package:\n" + full))
+            // asked every time, per path: Allow / Deny only (no "Allow for this session")
+            if (!ok && backend_.ask_choice("Claude wants to read a file outside the open package:\n" + full, false) == Answer::Deny)
                 return why = "the player did not allow reading " + full, false;
         }
         args[pp.param] = full;  // the command uses the path that was checked
