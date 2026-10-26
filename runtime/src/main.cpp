@@ -537,7 +537,13 @@ int main(int argc, char** argv) {
     if (const char* e = getenv("WWHD_TEST_STDERR"); e && *e && freopen(e, "a", stderr)) setvbuf(stderr, nullptr, _IOLBF, 0);
     if (const char* e = getenv("WWHD_TEST_WARM_SHADERS"); e && !strcmp(e, "1")) warm_shaders = true;
     // (the Vulkan backend's pipeline cache: WWHD_VK_WARM_PRUNE rebuilds it only in this mode)
-    if (warm_shaders) setenv("WWHD_WARMING_SHADERS", "1", 1);
+    if (warm_shaders) {
+#ifdef _WIN32
+        _putenv_s("WWHD_WARMING_SHADERS", "1");
+#else
+        setenv("WWHD_WARMING_SHADERS", "1", 1);
+#endif
+    }
     crash_context::initialize();
     editor_ui::register_tab();  // the world editor's Editor tab (only with --editor)
     index_game_functions();
