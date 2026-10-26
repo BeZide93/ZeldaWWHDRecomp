@@ -21,6 +21,7 @@ extern "C" {
 void f_0286E9F0_orig(Cpu* c);  // CharWriter::Print(writer, character)
 void f_028F7C7C_orig(Cpu* c);  // build vertices from a TextBox's cached glyph list
 void f_02874D54_orig(Cpu* c);  // lyt::Picture::DrawSelf
+void f_026F8CD0_orig(Cpu* c);  // hdParts_c::calcLayout
 void imp_gx2_GX2InitTextureRegs(Cpu* c);
 }
 
@@ -30,9 +31,9 @@ using input_map::FaceStyle;
 using input_map::PromptStyle;
 using input_map::ShoulderStyle;
 
-// Session gate: until a restyled look (by label, or a fixed shoulder name choice) has been on
-// once, the hooks must not write game memory at all (no glyph markers, no composed texture).
-// Players who never use it then run exactly the stock path. The first activation latches this
+// Glyph gate: until a restyled look (by label, or a fixed shoulder name choice) has been on
+// once, text and picture hooks leave game memory untouched (no markers or composed texture).
+// Single-prompt placement is independent of this gate. The first activation latches this
 // flag; marking then works as in any restyled session, so later changes still reach text cached
 // in either mode.
 std::atomic<bool> labels_used{false};
@@ -44,7 +45,8 @@ std::atomic<uint32_t> last_signature{0};
 uint32_t signature(const PromptStyle& s) {
     uint32_t buttons = 0;
     for (int i = 0; i < 4; ++i) buttons |= uint32_t(s.buttons[i]) << (10 + 2*i) | uint32_t(s.spots[i]) << (18 + 2*i);
-    return buttons | 0x100u | (uint32_t)s.face | (s.colours ? 4u : 0u) | (uint32_t)s.shoulders << 3 | (s.positions ? 0x20u : 0u);
+    return buttons | 0x100u | (uint32_t)s.face | (s.colours ? 4u : 0u) | (uint32_t)s.shoulders << 3 |
+           (s.positions ? 0x20u : 0u) | (s.text_colours ? 0x40u : 0u);
 }
 
 PromptStyle style() {
@@ -281,7 +283,35 @@ Point button_centre(uint32_t group, uint32_t picture) {
     return p;
 }
 
+struct GuideLayout {
+    bool known = false;
+    bool menu_pair = false;
+    int single_face = -1;
+};
+thread_local GuideLayout guide_layout;
+
 }  // namespace
+
+void button_glyphs::calculate_parts(Cpu* c, PpcFunc calculate) {
+    const auto previous = guide_layout;
+    const uint32_t parts = c->r[3];
+    const uint32_t vtable = ld32(parts + 4);
+    guide_layout = {};
+    guide_layout.known = vtable == GD(0x100EE5F8) || vtable == GD(0x100EE378);
+    if (guide_layout.known) {
+        // Retained buttons describe the outgoing layout until its animation finishes.
+        const uint8_t buttons = ld8(parts + 0xDD);
+        guide_layout.menu_pair = vtable == GD(0x100EE5F8) && (buttons & 0x1F) == 3;
+        for (int i = 0; i < 4; ++i)
+            if (buttons == (1u << i)) guide_layout.single_face = i;
+    }
+    calculate(c);
+    guide_layout = previous;
+}
+
+extern "C" void hook_026F8CD0(Cpu* c) {
+    button_glyphs::calculate_parts(c, f_026F8CD0_orig);
+}
 
 void button_glyphs::calculate_pane(Cpu* c, PpcFunc calculate) {
     const uint32_t pane = c->r[3];
@@ -301,13 +331,25 @@ void button_glyphs::calculate_pane(Cpu* c, PpcFunc calculate) {
     // prompt or the item screen's linear row. Move the group root: labels, item art and effects
     // inherit the same transform. Force its tree's matrices in both modes so switching back or
     // restoring a state cannot leave the previous layout's cached global positions behind.
-    // Only once a restyled look has been used: until then the stock path stays untouched.
-    // Each group takes the drawn spot of the pad button bound to it (input_map::hud_spots).
-    if (marking()) c->r[5] = 1;
-    const int spot = style().spots[face];
-    if (spot == face) return calculate(c);
+    // Known guides also refresh when switching between a lone prompt and the full cluster.
+    if (marking() || guide_layout.known) c->r[5] = 1;
+    const auto look = style();
+    // A lone face prompt always uses the authored Confirm anchor, regardless of its binding.
+    const int spot = guide_layout.single_face == face ? 0 : look.spots[face];
+    const bool menu_pair = face < 2 && look.face != FaceStyle::kOriginal && guide_layout.menu_pair;
+    if (spot == face && !menu_pair) return calculate(c);
     const Point from = button_centre(groups[face], pictures[face]);
-    const Point to = button_centre(groups[spot], pictures[spot]);
+    Point to = button_centre(groups[spot], pictures[spot]);
+    if (menu_pair) {
+        const int first = look.spots[0], second = look.spots[1];
+        const Point right = button_centre(groups[0], pictures[0]);
+        const Point bottom = button_centre(groups[1], pictures[1]);
+        // Fit OK/Back into the original menu area: right-align, then remove empty rows.
+        if (first != 0 && second != 0) to.x += right.x - bottom.x;
+        if (first != 1 && second != 1) to.y = spot == 2 ? right.y : bottom.y;
+        // The top/bottom pair keeps one-third of the empty row for label clearance.
+        else if ((first == 2 || second == 2) && spot == 2) to.y = right.y + (to.y - right.y) / 3.0f;
+    }
     const float dx = to.x - from.x, dy = to.y - from.y;
     if (!std::isfinite(dx) || !std::isfinite(dy)) return calculate(c);
     const float x = (float)ldf32(pane + 0x1C), y = (float)ldf32(pane + 0x20);
@@ -500,9 +542,10 @@ extern "C" void hook_028F7C7C(Cpu* c) {
         const uint32_t quad = list + 0xA4 + i * 0x30;
         const int face = button_glyphs::marked_face(ld8(quad + 0x2F));
         const int shoulder = button_glyphs::marked_shoulder(ld8(quad + 0x2F));
-        // Action words belong to the same physical button as their neighbouring icon.
-        // Keep By label's authored words byte-identical; new position/custom styles tint ink.
-        if (hud_action >= 0 && !look.positions && look.face != FaceStyle::kOriginal && look.colours) {
+        // Action words follow the mapped prompt palette, independently of icon colours.
+        if (hud_action >= 0 && !look.text_colours) {
+            for (uint32_t offset : {0x10u, 0x14u}) patch(saved, quad + offset, ld32(quad + offset) | 0xFFFFFF00u);
+        } else if (hud_action >= 0 && look.face != FaceStyle::kOriginal) {
             const int button = look.buttons[hud_action];
             const uint32_t rgb = look.face == FaceStyle::kPlayStation ? button_glyphs::kShapeColours[button]
                                                                     : button_glyphs::colour(button);

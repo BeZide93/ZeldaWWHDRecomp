@@ -50,6 +50,7 @@ extern "C" void f_0282D9C0_orig(Cpu*) {}
 extern "C" void f_02874038_orig(Cpu*) {}
 extern "C" void f_02877100_orig(Cpu*) {}
 extern "C" void f_028F8250_orig(Cpu*) {}
+extern "C" void f_026F8CD0_orig(Cpu*) {}
 
 namespace {
 constexpr uint32_t base = 0x15000000, writer = base, list = base + 0x100, picture = base + 0x1000, text_box = base + 0x2000;
@@ -70,6 +71,7 @@ std::array<int, 4> expected_spots = {0, 1, 2, 3};  // where each face's HUD grou
 std::array<float, 4> drawn_quad{};  // the first quad's size and position as vertex generation saw it
 uint32_t drawn_sheet = 0;
 uint8_t drawn_flags = 0;  // the first quad's +0x2F as vertex generation saw it (bit 0: coverage glyph)
+uint32_t drawn_ink = 0;
 // Mirror the production style from the live mapping (input_map::prompt_style, tested on its own
 // in input_map_test); the hooks must draw exactly that.
 void expect_current() {
@@ -233,6 +235,101 @@ void positions_test() {
         for (uint32_t i = 0; i < nodes.size(); i++)
             for (uint32_t j = 0; j < 8; j++) assert(ld32(nodes[i] + 0x1C + 4*j) == authored_positions[i][j]);
     }
+
+    // Every OK/Back pair, in either order, stays in the menu's original two-row area.
+    const uint32_t scene = base + 0x6000, state = base + 0x6300;
+    const uint32_t guide = base + 0x6400;
+    st32(0x101F8344, scene); st32(scene + 0x18, state);
+    st32(guide + 4, 0x100EE5F8); st8(guide + 0xDD, 3);
+    auto calculate_guide = [&] {
+        Cpu c{}; c.r[3] = guide;
+        button_glyphs::calculate_parts(&c, [](Cpu*) { calculate(false); });
+    };
+    const Point right = original[0], bottom = original[1], top = original[2], left = original[3];
+    const float right_shift = right.x - bottom.x;
+    struct Pair { int a, b; Point first, second; };
+    const Pair pairs[] = {
+        {0, 1, bottom, right},
+        {0, 2, {right.x, bottom.y}, {left.x + right_shift, left.y}},
+        {0, 3, {right.x, bottom.y}, {top.x + right_shift, right.y + (top.y - right.y) / 3.0f}},
+        {1, 2, {right.x, bottom.y}, {left.x, bottom.y}},
+        {1, 3, {right.x, bottom.y}, {top.x, right.y}},
+        {2, 3, {left.x + right_shift, bottom.y}, {top.x + right_shift, right.y}},
+    };
+    for (const auto& pair : pairs) for (bool reverse : {false, true}) {
+        auto mapping = input_map::Mapping::defaults();
+        mapping.prompts = input_map::Mapping::Prompts::kXbox;
+        mapping.pad[input_map::kA] = input_map::kPadA + (reverse ? pair.b : pair.a);
+        mapping.pad[input_map::kB] = input_map::kPadA + (reverse ? pair.a : pair.b);
+        int item = input_map::kX;
+        for (int i = 0; i < 4; i++) if (i != pair.a && i != pair.b) mapping.pad[item++] = input_map::kPadA + i;
+        input_map::set_current(mapping, false); expect_current();
+        for (uint32_t descriptor : {0x1049EC84u, 0x1049ECB0u, 0x1049ECDCu}) {
+            st32(state + 8, descriptor);
+            calculate_guide();
+            same_point(position(face_panes[0]), reverse ? pair.second : pair.first);
+            same_point(position(face_panes[1]), reverse ? pair.first : pair.second);
+            for (int i = 2; i < 4; i++) same_point(position(face_panes[i]), original[expected_spots[i]]);
+            for (uint32_t i = 0; i < nodes.size(); i++)
+                for (uint32_t j = 0; j < 8; j++) assert(ld32(nodes[i] + 0x1C + 4*j) == authored_positions[i][j]);
+        }
+        // The displayed guide retains the pair after the scene returns to gameplay.
+        for (uint32_t descriptor : {0x1049EBD4u, 0x1049EC2Cu, 0x1049EC00u, 0x1049EC58u}) {
+            st32(state + 8, descriptor);
+            for (int frame = 0; frame < 60; ++frame) {
+                calculate_guide();
+                same_point(position(face_panes[0]), reverse ? pair.second : pair.first);
+                same_point(position(face_panes[1]), reverse ? pair.first : pair.second);
+            }
+        }
+        // A different layout in the same frame must not inherit the compact placement.
+        calculate(false);
+        for (int i = 0; i < 4; i++) same_point(position(face_panes[i]), original[expected_spots[i]]);
+        for (uint32_t vtable : {0x100EE5F8u, 0x100EE378u}) {
+            st32(guide + 4, vtable);
+            st8(guide + 0xDD, vtable == 0x100EE5F8 ? 0x1F : 3);
+            calculate_guide();
+            for (int i = 0; i < 4; i++) same_point(position(face_panes[i]), original[expected_spots[i]]);
+        }
+        st32(guide + 4, 0x100EE5F8); st8(guide + 0xDD, 3);
+    }
+    // Every lone face uses the same anchor in both guides, for all bindings and icon styles.
+    for (auto prompts : {input_map::Mapping::Prompts::kOriginal, input_map::Mapping::Prompts::kXbox,
+                         input_map::Mapping::Prompts::kPlayStation}) {
+        std::array<int, 4> buttons{0, 1, 2, 3};
+        do {
+            auto mapping = input_map::Mapping::defaults();
+            mapping.prompts = prompts;
+            for (int i = 0; i < 4; ++i) mapping.pad[input_map::kA + i] = input_map::kPadA + buttons[i];
+            input_map::set_current(mapping, false); expect_current();
+            for (uint32_t vtable : {0x100EE5F8u, 0x100EE378u}) {
+                st32(guide + 4, vtable);
+                for (int face = 0; face < 4; ++face) {
+                    st8(guide + 0xDD, 1u << face);
+                    for (uint32_t descriptor : {0x1049ECB0u, 0x1049EBD4u, 0x1049EC00u}) {
+                        st32(state + 8, descriptor);
+                        calculate_guide();
+                        same_point(position(face_panes[face]), original[0]);
+                    }
+                    for (uint32_t i = 0; i < nodes.size(); ++i)
+                        for (uint32_t j = 0; j < 8; ++j)
+                            assert(ld32(nodes[i] + 0x1C + 4*j) == authored_positions[i][j]);
+                    // Hidden, full, and face-plus-shoulder guides restore the regular spread.
+                    for (uint8_t mask : {0, 0x1F, 0x3F, 0x11, 0x21}) {
+                        st8(guide + 0xDD, mask);
+                        calculate_guide();
+                        for (int i = 0; i < 4; ++i)
+                            same_point(position(face_panes[i]), original[expected_spots[i]]);
+                    }
+                }
+            }
+            // Unrelated layouts cannot inherit the previous guide's single-button anchor.
+            st32(guide + 4, 0); st8(guide + 0xDD, 1);
+            calculate_guide();
+            for (int i = 0; i < 4; ++i) same_point(position(face_panes[i]), original[expected_spots[i]]);
+        } while (std::next_permutation(buttons.begin(), buttons.end()));
+    }
+    st32(0x101F8344, 0);
 
     // Different viewport origin/scale, and animated container scale/rotation: compare the
     // actual centres in common-parent space, not hard-coded screen offsets or cached globals.
@@ -958,6 +1055,7 @@ extern "C" void f_0286E9F0_orig(Cpu* c) {
 // Inspect the colours the actual draw hook supplies to vertex generation.
 extern "C" void f_028F7C7C_orig(Cpu* c) {
     text_draws++;
+    drawn_ink = ld32(c->r[4] + 0xA4 + 0x10);
     for (uint32_t i = 0; i < 4; i++) drawn_quad[i] = (float)ldf32(c->r[4] + 0xA4 + 4*i);
     drawn_sheet = ld32(c->r[4] + 0xA4 + 0x28);
     drawn_flags = ld8(c->r[4] + 0xA4 + 0x2F);
@@ -970,7 +1068,9 @@ extern "C" void f_028F7C7C_orig(Cpu* c) {
             uint32_t want = expect_tint && face >= 0 && !hud_letter ? button_glyphs::tint(authored[j], expected_buttons[face]) : authored[j];
             if (expected_action >= 0) {
                 const auto look = input_map::prompt_style(input_map::current(), input_map::pad_family());
-                if (look.colours && !look.positions && look.face != input_map::FaceStyle::kOriginal) {
+                if (!look.text_colours) {
+                    want = authored[j] | 0xFFFFFF00u;
+                } else if (look.face != input_map::FaceStyle::kOriginal) {
                     const int button = expected_buttons[expected_action];
                     const uint32_t rgb = look.face == input_map::FaceStyle::kXbox ? button_glyphs::colour(button)
                                                                                  : button_glyphs::kShapeColours[button];
@@ -1260,32 +1360,56 @@ int main() {
             }
         }
     } while (std::next_permutation(permutation.begin(), permutation.end()));
-    // Plain HUD letters and neighbouring action words use the same mapped identity.
-    for (auto appearance : {input_map::Mapping::Prompts::kXbox, input_map::Mapping::Prompts::kPlayStation,
-                            input_map::Mapping::Prompts::kOriginal})
-        for (int face = 0; face < 4; ++face) {
-            auto mapping = input_map::Mapping::defaults(); mapping.prompts = appearance;
-            input_map::set_current(mapping, false); expect_current();
-            constexpr const char* pictures[] = {"P_A_00", "P_B_00", "P_X_00", "P_Y_00"};
-            constexpr const char* letters[] = {"T_A_00", "T_B_00", "T_X_00", "T_Y_00"};
-            constexpr const char* words[] = {"T_CommandA_00", "T_CommandB_00", "T_CommandX_00", "T_CommandY_00"};
-            pane(picture, pictures[face], 0, 0); child(picture, text_box);
-            st32(text_box + 0xA4, base + 0xB000); st16(text_box + 0xCE, 1);
-            st16(base + 0xB000, "ABXY"[face]);
-            for (bool word : {false, true}) {
-                std::strcpy((char*)mem::ptr(text_box + 0x80), word ? words[face] : letters[face]);
-                expected_action = word ? face : -1; hud_letter = !word;
-                expected_plain = !word && appearance == input_map::Mapping::Prompts::kXbox
-                    ? "ABXY"[expected_buttons[face]] : -1;
-                st16(list + 4, 0); st8(list + 6, 0);
-                Cpu c{}; c.r[3] = text_box;
-                button_glyphs::draw_text_box(&c, [](Cpu*) {
-                    print(expected_action >= 0 ? 'R' : ld16(base + 0xB000)); draw();
-                });
-                assert(ld32(first_quad + 0x10) == authored[0] && ld32(first_quad + 0x14) == authored[1]);
-                expected_action = expected_plain = -1; hud_letter = false;
+    // Action words follow every face permutation even when icon colours are disabled.
+    do {
+        for (auto appearance : {input_map::Mapping::Prompts::kXbox, input_map::Mapping::Prompts::kPlayStation,
+                                input_map::Mapping::Prompts::kOriginal})
+            for (bool colours : {true, false}) for (bool text_colours : {true, false})
+            for (int face = 0; face < 4; ++face) {
+                auto mapping = input_map::Mapping::defaults(); mapping.prompts = appearance;
+                mapping.prompt_colours = colours;
+                mapping.prompt_text_colours = text_colours;
+                for (int i = 0; i < 4; ++i) mapping.pad[input_map::kA+i] = input_map::kPadA + permutation[i];
+                input_map::set_current(mapping, false); expect_current();
+                constexpr const char* pictures[] = {"P_A_00", "P_B_00", "P_X_00", "P_Y_00"};
+                constexpr const char* letters[] = {"T_A_00", "T_B_00", "T_X_00", "T_Y_00"};
+                constexpr const char* words[] = {"T_CommandA_00", "T_CommandB_00", "T_CommandX_00", "T_CommandY_00"};
+                pane(picture, pictures[face], 0, 0); child(picture, text_box);
+                st32(text_box + 0xA4, base + 0xB000); st16(text_box + 0xCE, 1);
+                st16(base + 0xB000, "ABXY"[face]);
+                for (bool word : {false, true}) {
+                    std::strcpy((char*)mem::ptr(text_box + 0x80), word ? words[face] : letters[face]);
+                    expected_action = word ? face : -1; hud_letter = !word;
+                    expected_plain = !word && appearance == input_map::Mapping::Prompts::kXbox
+                        ? "ABXY"[expected_buttons[face]] : -1;
+                    st16(list + 4, 0); st8(list + 6, 0);
+                    Cpu c{}; c.r[3] = text_box;
+                    button_glyphs::draw_text_box(&c, [](Cpu*) {
+                        print(expected_action >= 0 ? 'R' : ld16(base + 0xB000)); draw();
+                    });
+                    if (word) {
+                        constexpr uint32_t xbox[] = {0x58BE36FF, 0xE34B49FF, 0x3B91E5FF, 0xEBC52EFF};
+                        constexpr uint32_t ps[] = {0x3C7DD9FF, 0xD9413CFF, 0xD05FB0FF, 0x2AA67DFF};
+                        const uint32_t want = !text_colours ? 0xFFFFFFFFu
+                            : appearance == input_map::Mapping::Prompts::kXbox ? xbox[permutation[face]]
+                            : appearance == input_map::Mapping::Prompts::kPlayStation ? ps[permutation[face]] : authored[0];
+                        assert(drawn_ink == want);
+                        // A text-only setting change must rebuild cached vertices immediately.
+                        mapping.prompt_text_colours = !text_colours;
+                        input_map::set_current(mapping, false); expect_current();
+                        const unsigned before = text_draws;
+                        button_glyphs::draw_text_box(&c, [](Cpu*) { draw(); });
+                        assert(text_draws == before + 1);
+                        button_glyphs::draw_text_box(&c, [](Cpu*) { draw(); });
+                        assert(text_draws == before + 1);
+                        mapping.prompt_text_colours = text_colours;
+                        input_map::set_current(mapping, false); expect_current();
+                    }
+                    assert(ld32(first_quad + 0x10) == authored[0] && ld32(first_quad + 0x14) == authored[1]);
+                    expected_action = expected_plain = -1; hud_letter = false;
+                }
             }
-        }
+    } while (std::next_permutation(permutation.begin(), permutation.end()));
 
 
 #ifdef _WIN32

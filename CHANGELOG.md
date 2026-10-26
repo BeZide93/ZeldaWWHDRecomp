@@ -48,6 +48,12 @@ what is on `devel` and not released yet (also in the
   any set of face bindings, not only by label. For example, with the sword on an Xbox pad's X and items on Y
   and B, the sword shows on the left and the items on top and on the right. By position and by label look as
   before.
+- **Menu and dialogue prompts follow custom face bindings too, and action words take their button's colour.** With
+  Xbox or PlayStation prompts and custom face bindings, the item menu's OK/Back pair stays compact in its original
+  place, laid out in the pad buttons' directions, instead of spreading over the gameplay cluster's area, and keeps
+  that place while the menu fades out; a single prompt (a dialogue's Next) sits where the game puts Confirm. Action
+  words such as Attack or Next are drawn in the colour of the button they belong to; **Coloured face button text**
+  (Controls) turns them white, independently of **Coloured face buttons**.
 - **HDR output on Linux, and HDR10 for displays without scRGB** (Vulkan; #311, thanks @mkopec). Settings → Graphics → HDR output now also
   works on Linux under Wayland. Where the system offers no scRGB output (Mesa drivers on Wayland), the game presents
   HDR10 (BT.2020 with the PQ curve) instead, with the same paper white, peak and exposure settings; the overlay shows

@@ -431,7 +431,7 @@ static void test_prompts() {
     CHECK(pad_family_from_labels(none) == PadFamily::kUnknown);
 
     Mapping m = Mapping::defaults();
-    CHECK(m.prompts == Mapping::Prompts::kAuto && m.shoulder_names == Mapping::ShoulderNames::kAuto && m.prompt_colours);
+    CHECK(m.prompts == Mapping::Prompts::kAuto && m.shoulder_names == Mapping::ShoulderNames::kAuto && m.prompt_colours && m.prompt_text_colours);
     // Full layout x appearance x family matrix. Automatic layout is resolved from labels.
     for (int layout = 0; layout < 4; ++layout)
         for (auto prompts : {Mapping::Prompts::kAuto, Mapping::Prompts::kOriginal,
@@ -538,15 +538,17 @@ static void test_prompts() {
     const Mapping d = Mapping::defaults();
     const std::string plain = to_json(d);
     CHECK(plain.find("button_prompts") == std::string::npos && plain.find("shoulder_names") == std::string::npos &&
-          plain.find("button_colours") == std::string::npos);
+          plain.find("button_colours") == std::string::npos && plain.find("button_text_colours") == std::string::npos);
     for (auto p : {Mapping::Prompts::kAuto, Mapping::Prompts::kOriginal, Mapping::Prompts::kXbox, Mapping::Prompts::kPlayStation})
         for (auto n : {Mapping::ShoulderNames::kAuto, Mapping::ShoulderNames::kNintendo, Mapping::ShoulderNames::kNumbered,
                        Mapping::ShoulderNames::kXbox})
-            for (bool c : {true, false}) {
+            for (bool c : {true, false}) for (bool text : {true, false}) {
                 Mapping w = d, r;
                 w.prompts = p;
                 w.shoulder_names = n;
                 w.prompt_colours = c;
+                w.prompt_text_colours = text;
+                CHECK(prompt_style(w, PadFamily::kXbox).text_colours == text);
                 std::string err;
                 CHECK(from_json(to_json(w), r, &err) && err.empty() && r == w);
             }

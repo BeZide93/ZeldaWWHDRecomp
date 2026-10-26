@@ -511,6 +511,7 @@ PromptStyle prompt_style(const Mapping& m, PadFamily family) {
     s.positions = s.face != FaceStyle::kOriginal && labels;
     if (s.face != FaceStyle::kOriginal) s.spots = hud_spots(m);
     s.colours = s.face != FaceStyle::kOriginal && m.prompt_colours;
+    s.text_colours = m.prompt_text_colours;
     switch (m.shoulder_names) {
     case Mapping::ShoulderNames::kAuto:
         s.shoulders = s.face == FaceStyle::kXbox ? ShoulderStyle::kXbox
@@ -839,6 +840,7 @@ std::string to_json(const Mapping& m) {
     if (m.shoulder_names != Mapping::ShoulderNames::kAuto)
         prompts += std::string(",\n    \"shoulder_names\": \"") + kShoulderIds[(int)m.shoulder_names] + "\"";
     if (!m.prompt_colours) prompts += ",\n    \"button_colours\": false";
+    if (!m.prompt_text_colours) prompts += ",\n    \"button_text_colours\": false";
     // issue #267: written only when on (files without it stay as they were)
     if (m.background_controllers) prompts += ",\n    \"background_controllers\": true";
     char opt[320];
@@ -942,6 +944,7 @@ bool from_json(const std::string& text, Mapping& out, std::string* error) {
             else if (n->s != "auto") warn += "unknown shoulder_names \"" + n->s + "\"; ";
         }
         if (const Json* c = op->get("button_colours"); c && c->type == Json::Bool) m.prompt_colours = c->b;
+        if (const Json* c = op->get("button_text_colours"); c && c->type == Json::Bool) m.prompt_text_colours = c->b;
     }
     // Migration is one-way: an explicit shortcuts.Screenshot wins over the old Photo row.
     for (int i = 0; i < 2; ++i) m.shortcuts[kPhoto].keys[i] = {m.keys[kScreenshot][i], 0};

@@ -86,6 +86,8 @@ void draw_text_box(Cpu* c, PpcFunc draw);
 // each restyled face's complete group moves to the spot of the pad button bound to it
 // (PromptStyle::spots; by label puts A south, B east, X west and Y north).
 void calculate_pane(Cpu* c, PpcFunc calculate);
+// Scope the displayed command-guide button set while calculating its layout.
+void calculate_parts(Cpu* c, PpcFunc calculate);
 
 // a save state was loaded: forget which text boxes were rebuilt for by label (savestate.cpp)
 void ss_reset();

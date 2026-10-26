@@ -15,10 +15,13 @@ The HUD cluster follows the face bindings: each button, with its item art and ac
 drawn where its pad button sits (an Xbox pad's A is the bottom button, which is where the game
 draws B). By position keeps the authored positions (roll right, sword bottom), by label puts A
 bottom, B right, X left and Y top, and a custom set such as Xbox X for the sword puts the sword on
-the left. By label keeps its existing words; the position/custom
-styles also tint face-action words to match their icons when colours are enabled. Custom bindings
-must use four distinct host face buttons; duplicate bindings or non-face inputs fall back to the
-complete original icon set because they cannot describe a four-button controller picture.
+the left.
+
+Face-action words use the mapped button's Xbox or PlayStation prompt colour across all layouts, independently of **Coloured face buttons**. **Coloured face button text** switches these words to white when off, retaining outlines and fades. With text colours enabled, Original prompts preserve the game's text colours. Custom bindings must use four distinct host face buttons; duplicate bindings or non-face inputs fall back to the complete original icon set because they cannot describe a four-button controller picture.
+
+The item menu's OK/Back pair keeps the mapped buttons' relative directions while fitting the original menu area: unused vertical rows are removed, and a pair without the rightmost button shifts one position right. The top/bottom pair retains one-third of its empty middle row to give the labels more clearance. The pair stays compact throughout its exit animation; the separate gameplay guide retains the full diamond spacing.
+
+A guide displaying exactly one face button uses the authored Confirm position for that button and its caption, regardless of the binding or icon style. This also covers lone Back and item prompts. The retained button set keeps that placement stable through transitions; guides with additional buttons retain their normal layout.
 
 Automatic prompts follow Xbox and PlayStation pads. Nintendo and unknown pads keep the original
 look with By position or custom bindings. By label retains its existing Xbox fallback for those
@@ -33,7 +36,8 @@ In the settings overlay's **Controls** tab (and the Controls window on macOS), s
 |---|---|---|
 | **Button prompts** | Automatic, Original, Xbox, PlayStation | Automatic: follows the pad family; By label retains its Xbox fallback |
 | **Shoulder names** | Automatic, L / R / ZL / ZR, L1 / R1 / L2 / R2, LB / RB / LT / RT | Automatic: follows the button prompts |
-| **Coloured face buttons** | on, off | on; off keeps the game's white buttons (in the Xbox positions with by label) |
+| **Coloured face buttons** | on, off | on; affects button icons only, leaving mapped action-text colours enabled |
+| **Coloured face button text** | on, off | on; off uses white action text independently of icon colours |
 
 A fixed **Shoulder names** choice applies with any face-buttons setting. Automatic shoulder
 names follow the resolved prompt style.
@@ -45,7 +49,7 @@ port.
 
 ## How it works (technical notes)
 
-Three function hooks (`tools/recomp/hooks_glyphs.txt`), plus wrappers around the existing aspect
+Four function hooks (`tools/recomp/hooks_glyphs.txt`), plus wrappers around the existing aspect
 (`0x028766CC`) and RTL text (`0x028785C8`) hooks:
 
 - `0x0286E9F0` (`CharWriter::Print`) marks button glyphs (A/B/X/Y: U+E000–E003; L/R/ZL/ZR:
@@ -55,6 +59,7 @@ Three function hooks (`tools/recomp/hooks_glyphs.txt`), plus wrappers around the
   PlayStation shapes to the composed atlas for the vertex build, then restores everything it changed.
 - `0x02874D54` (`Picture::DrawSelf`) tints the HUD button backgrounds (`P_A_00`, `P_B_00`, `P_X_00`,
   `P_Y_00`, `P_ASpecial_00`) and restores their authored vertex colours afterwards.
+- `0x026F8CD0` (`hdParts_c::calcLayout`) scopes compact pair placement to `hdCommandButtonGuide_c` with a retained A/B-only face set (`mCachedButtons`), and single-face placement to either command-guide class with exactly one displayed button. That set stays unchanged during its exit animation, even after the scene has returned to gameplay. Other layouts keep their own placement; no previous-frame state or timeout is needed.
 - `0x028785C8` (`lyt::TextBox::DrawSelf`, the existing RTL wrapper) also recognises
   `CommandA_00`'s floating action hint: `T_A_00` and `P_A_00` are **siblings** under
   `N_Center_01`, unlike the cluster's parent/child pair. The same check supports B/X/Y
@@ -75,7 +80,7 @@ Three function hooks (`tools/recomp/hooks_glyphs.txt`), plus wrappers around the
 - The pane-matrix hook moves the complete CommandGuide cluster (`N_All_00`) for the Xbox positions;
   only the computed global matrices keep the new layout, the authored locals are restored.
 
-**Untouched until used:** none of the hooks write to game memory until a different look has been
+**Glyph styling untouched until used:** text and picture hooks do not write to game memory until a different look has been
 selected once in the session; the first activation rebuilds each cached text box once so its glyphs
 get marked. A loaded save state, or a change from one look to another (colours, shapes, shoulder
 names), clears that rebuild list. The look is resolved once per controls change or new controller
@@ -107,5 +112,5 @@ and shoulder marking, colour restoration, live switches, the untouched-until-use
 HUD positions including 21:9, font fallback, every option, the PlayStation shapes, CommandA sibling letters for all
 four faces in coloured/plain PS and Xbox/Original looks, and special A);
 `runtime/tools/input_map_test.cpp` covers the option resolution and the `controls.json` keys
-(`button_prompts`, `shoulder_names`, `button_colours`). The EU build maps all three hooks. After a change to the
+(`button_prompts`, `shoulder_names`, `button_colours`). The EU build maps these hooks. After a change to the
 hook list, regenerate the game code (setup does this on update).
