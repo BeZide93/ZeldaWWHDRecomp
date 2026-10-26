@@ -7,6 +7,21 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **macOS: move and resize the GamePad picture with the mouse** (#305, thanks @shaneoreilly). In the TV window, drag the
+  picture-in-picture GamePad with the right mouse button (or with Option held) to move it, drag from its bottom-right
+  corner or use the scroll wheel over it to resize it (5–100%). The placement becomes Custom and is saved. A plain left
+  click on it is still a GamePad touch; menus and the editor keep their own mouse handling.
+- **Torchlight on objects is sharp at higher internal resolutions** (#313, thanks @itsarahtonin). Torches and other
+  point lights are lit through a half-size light buffer that lit objects read back with a depth-aware upsample. At 2x
+  and 3x that upsample still worked on the console's grid, so the light along the edges of lit objects came out in
+  blocks the size of console pixels. It now uses the larger buffer's own grid. 1x is unchanged.
+- **Linux on Mali (panvk): no more flickering shapes in the sky** (#310, thanks @mkopec). Parts of the clouds and haze on
+  the title screen and at sea flickered away in hard-edged chunks as the camera moved, because Mali drops pixels just
+  past the far plane. On the panvk driver the game now clamps depth instead (`WWHD_VK_DEPTH_CLAMP_ALL=0` turns this off).
+- **Linux: the installed game is about 10× smaller** (#314, thanks @missionfloyd). Setup now builds the game code without
+  debug information and strips debug data when linking, so the Linux game shrinks from over 500 MB to well under
+  100 MB, and setup compiles faster. Developers can keep debug information with `--debug-info` or
+  `WWHD_SETUP_DEBUG_INFO=1`.
 - **World editor: easier Claude / MCP setup** (#296, thanks @KelpyCode). `--editor --mcp` turns Claude / MCP access on at
   start (`--editor` alone keeps it off). The access token is now kept across restarts (Settings → Editor → Claude / MCP
   shows it, with Copy and New token), the Allow window has **Allow for this session**, and **Copy config for Claude
