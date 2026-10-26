@@ -43,7 +43,7 @@ void forget_rebuilt();
 std::atomic<uint32_t> last_signature{0};
 uint32_t signature(const PromptStyle& s) {
     uint32_t buttons = 0;
-    for (int i = 0; i < 4; ++i) buttons |= uint32_t(s.buttons[i]) << (10 + 2*i);
+    for (int i = 0; i < 4; ++i) buttons |= uint32_t(s.buttons[i]) << (10 + 2*i) | uint32_t(s.spots[i]) << (18 + 2*i);
     return buttons | 0x100u | (uint32_t)s.face | (s.colours ? 4u : 0u) | (uint32_t)s.shoulders << 3 | (s.positions ? 0x20u : 0u);
 }
 
@@ -301,11 +301,13 @@ void button_glyphs::calculate_pane(Cpu* c, PpcFunc calculate) {
     // prompt or the item screen's linear row. Move the group root: labels, item art and effects
     // inherit the same transform. Force its tree's matrices in both modes so switching back or
     // restoring a state cannot leave the previous layout's cached global positions behind.
-    // Only once by label has been used: until then the stock path stays untouched.
+    // Only once a restyled look has been used: until then the stock path stays untouched.
+    // Each group takes the drawn spot of the pad button bound to it (input_map::hud_spots).
     if (marking()) c->r[5] = 1;
-    if (!style().positions) return calculate(c);
+    const int spot = style().spots[face];
+    if (spot == face) return calculate(c);
     const Point from = button_centre(groups[face], pictures[face]);
-    const Point to = button_centre(groups[face ^ 1], pictures[face ^ 1]);
+    const Point to = button_centre(groups[spot], pictures[spot]);
     const float dx = to.x - from.x, dy = to.y - from.y;
     if (!std::isfinite(dx) || !std::isfinite(dy)) return calculate(c);
     const float x = (float)ldf32(pane + 0x1C), y = (float)ldf32(pane + 0x20);

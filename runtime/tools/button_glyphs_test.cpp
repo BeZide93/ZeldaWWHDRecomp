@@ -66,6 +66,7 @@ int expect_names = 0;  // shoulder labels: 0 stock, 1 L1/R1/L2/R2, 2 LB/RB/LT/RT
 int expect_shapes = -1;  // PlayStation shapes: -1 none, 0 without colours, 1 coloured
 bool hud_letter = false;  // the text box under test is a HUD face letter (T_A_00 on P_A_00)
 std::array<int, 4> expected_buttons = {0, 1, 2, 3};
+std::array<int, 4> expected_spots = {0, 1, 2, 3};  // where each face's HUD group is drawn
 std::array<float, 4> drawn_quad{};  // the first quad's size and position as vertex generation saw it
 uint32_t drawn_sheet = 0;
 uint8_t drawn_flags = 0;  // the first quad's +0x2F as vertex generation saw it (bit 0: coverage glyph)
@@ -74,6 +75,7 @@ uint8_t drawn_flags = 0;  // the first quad's +0x2F as vertex generation saw it 
 void expect_current() {
     const auto look = input_map::prompt_style(input_map::current(), input_map::pad_family());
     expected_buttons = look.buttons;
+    expected_spots = look.spots;
     expect_xbox = look.positions;
     expect_tint = look.face == input_map::FaceStyle::kXbox && look.colours;
     expect_names = (int)look.shoulders;
@@ -199,23 +201,34 @@ void positions_test() {
     // Nintendo's A is east, B south, X north, Y west. Xbox transposes each pair's positions.
     assert(original[0].x > original[1].x && original[0].y > original[1].y);
     assert(original[2].y > original[3].y && original[2].x > original[3].x);
-    for (auto mode : {input_map::FaceLayout::kLabels, input_map::FaceLayout::kLabels,
-                     input_map::FaceLayout::kPosition, input_map::FaceLayout::kLabels,
-                     input_map::FaceLayout::kCustom}) {
-        layout(mode);
+    // -1: by-position defaults with a shuffled face set (Xbox A does A, X sword, Y item X,
+    // B item Y), so each group takes its own pad button's spot, not by label's pairwise swap
+    for (int mode : {int(input_map::FaceLayout::kLabels), int(input_map::FaceLayout::kLabels),
+                     int(input_map::FaceLayout::kPosition), int(input_map::FaceLayout::kLabels),
+                     int(input_map::FaceLayout::kCustom), -1, int(input_map::FaceLayout::kPosition)}) {
+        if (mode >= 0) layout(input_map::FaceLayout(mode));
+        else {
+            auto mapping = input_map::Mapping::defaults();
+            mapping.pad[input_map::kA] = input_map::kPadA;
+            mapping.pad[input_map::kB] = input_map::kPadX;
+            mapping.pad[input_map::kX] = input_map::kPadY;
+            mapping.pad[input_map::kY] = input_map::kPadB;
+            mapping.prompts = input_map::Mapping::Prompts::kXbox;
+            input_map::set_current(mapping, false);
+            expect_current();
+            assert(!expect_xbox && (expected_spots == std::array<int, 4>{1, 3, 2, 0}));
+        }
         calculate(false);  // cached matrices must update without an external dirty flag
         for (uint32_t i = 0; i < 4; i++) {
-            const Point expected = original[expect_xbox ? (i ^ 1) : i];
-            if (i == 0 && expect_xbox && std::fabs(position(face_panes[i]).y - expected.y) > 0.001f)
-                std::fprintf(stderr, "A is not at the bottom: y=%g, expected=%g\n", position(face_panes[i]).y, expected.y);
+            const Point expected = original[expected_spots[i]];
+            if (i == 0 && std::fabs(position(face_panes[i]).y - expected.y) > 0.001f)
+                std::fprintf(stderr, "A is not at its spot: y=%g, expected=%g\n", position(face_panes[i]).y, expected.y);
             same_point(position(face_panes[i]), expected);
         }
-        const Point a_delta{original[1].x - original[0].x, original[1].y - original[0].y};
-        const Point x_delta{original[3].x - original[2].x, original[3].y - original[2].y};
-        same_point(position(special_a), {original_special.x + (expect_xbox ? a_delta.x : 0),
-                                        original_special.y + (expect_xbox ? a_delta.y : 0)});
-        same_point(position(item_x), {original_item.x + (expect_xbox ? x_delta.x : 0),
-                                     original_item.y + (expect_xbox ? x_delta.y : 0)});
+        const Point a_delta{original[expected_spots[0]].x - original[0].x, original[expected_spots[0]].y - original[0].y};
+        const Point x_delta{original[expected_spots[2]].x - original[2].x, original[expected_spots[2]].y - original[2].y};
+        same_point(position(special_a), {original_special.x + a_delta.x, original_special.y + a_delta.y});
+        same_point(position(item_x), {original_item.x + x_delta.x, original_item.y + x_delta.y});
         same_point(position(trigger), original_trigger);
         for (uint32_t i = 0; i < nodes.size(); i++)
             for (uint32_t j = 0; j < 8; j++) assert(ld32(nodes[i] + 0x1C + 4*j) == authored_positions[i][j]);

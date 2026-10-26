@@ -460,6 +460,29 @@ PadFamily pad_family_from_labels(const FaceLabel labels[4]) {
     return PadFamily::kUnknown;
 }
 
+std::array<int, 4> hud_spots(const Mapping& m) {
+    // The game draws A east, B south, X north and Y west; host buttons are named by Xbox
+    // position (A south, B east, X west, Y north), so host button h sits on face h ^ 1's spot.
+    std::array<int, 4> spots = {-1, -1, -1, -1};
+    unsigned taken = 0;
+    for (int i = 0; i < 4; ++i) {
+        const int button = m.pad[kA + i] - kPadA;
+        if (button < 0 || button >= 4 || (taken & (1u << (button ^ 1)))) continue;
+        spots[i] = button ^ 1;
+        taken |= 1u << spots[i];
+    }
+    for (int i = 0; i < 4; ++i)  // not on a face button (or one taken already): its own spot if free
+        if (spots[i] < 0 && !(taken & (1u << i))) { spots[i] = i; taken |= 1u << i; }
+    for (int i = 0; i < 4; ++i) {
+        if (spots[i] >= 0) continue;
+        int free = 0;
+        while (taken & (1u << free)) ++free;
+        spots[i] = free;
+        taken |= 1u << free;
+    }
+    return spots;
+}
+
 PromptStyle prompt_style(const Mapping& m, PadFamily family) {
     PromptStyle s;
     const bool labels = face_layout(m) == FaceLayout::kLabels;
@@ -486,6 +509,7 @@ PromptStyle prompt_style(const Mapping& m, PadFamily family) {
     }
     if (s.face == FaceStyle::kOriginal) s.buttons = {0, 1, 2, 3};
     s.positions = s.face != FaceStyle::kOriginal && labels;
+    if (s.face != FaceStyle::kOriginal) s.spots = hud_spots(m);
     s.colours = s.face != FaceStyle::kOriginal && m.prompt_colours;
     switch (m.shoulder_names) {
     case Mapping::ShoulderNames::kAuto:

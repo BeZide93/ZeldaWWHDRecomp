@@ -11,8 +11,11 @@ and custom face bindings. Original always keeps the game's icons.
 | Automatic | Uses the resolved face bindings | Uses the resolved face bindings |
 | Custom | Uses each bound host face button | Uses each bound host face button |
 
-By position keeps the HUD cluster in its authored positions: roll is right, sword is bottom.
-By label keeps its existing rearrangement, including item art and action words. The new position/custom
+The HUD cluster follows the face bindings: each button, with its item art and action word, is
+drawn where its pad button sits (an Xbox pad's A is the bottom button, which is where the game
+draws B). By position keeps the authored positions (roll right, sword bottom), by label puts A
+bottom, B right, X left and Y top, and a custom set such as Xbox X for the sword puts the sword on
+the left. By label keeps its existing words; the position/custom
 styles also tint face-action words to match their icons when colours are enabled. Custom bindings
 must use four distinct host face buttons; duplicate bindings or non-face inputs fall back to the
 complete original icon set because they cannot describe a four-button controller picture.
