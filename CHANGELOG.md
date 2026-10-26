@@ -7,6 +7,11 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **World editor: easier Claude / MCP setup** (#296, thanks @KelpyCode). `--editor --mcp` turns Claude / MCP access on at
+  start (`--editor` alone keeps it off). The access token is now kept across restarts (Settings → Editor → Claude / MCP
+  shows it, with Copy and New token), the Allow window has **Allow for this session**, and **Copy config for Claude
+  Desktop** gives a ready entry for the Claude desktop app (through the `mcp-remote` bridge, needs Node.js 18+). See the
+  editor docs.
 - **World editor: exact joins and marked faces** (#281, thanks @KelpyCode). New ground whose join vertices sit exactly on
   an island's own vertices now counts as joined, so no small offset is needed any more (geometry that only touches, within
   0.25 units, is not overlapping). When a model is refused, the faces that cause the conflict are tinted pink in the editor,
