@@ -362,6 +362,55 @@ void button_glyphs::calculate_pane(Cpu* c, PpcFunc calculate) {
     stf32(pane + 0x20, y);
 }
 
+namespace {
+// The CommandGuide cluster being drawn with its action words held back (draw_pane), and those words'
+// panes with the Pane::Draw they came through, to draw once the whole cluster is down.
+thread_local uint32_t deferring_cluster = 0;
+thread_local std::vector<std::pair<uint32_t, PpcFunc>> deferred_words;
+
+bool command_word(uint32_t box) {
+    const auto name = pane_name(box);
+    return name == "T_CommandA_00" || name == "T_CommandB_00" || name == "T_CommandX_00" || name == "T_CommandY_00";
+}
+
+bool inside(uint32_t pane, uint32_t ancestor) {
+    for (unsigned depth = 0; pane && depth < 16; depth++, pane = ld32(pane + 0x0C))
+        if (pane == ancestor) return true;
+    return false;
+}
+}  // namespace
+
+// Pane::Draw draws a pane, then its children through Pane::Draw again, so the cluster's groups come
+// in the tree's child order (Y's group first, then R, B, A, X), each with its action word inside. The
+// authored layout keeps every word clear of the other buttons, but moved groups can reach into a
+// neighbour, which then covered the word when it came later. With a restyled look, the words of a
+// complete cluster are held back and drawn after the rest of it, with the same DrawInfo.
+void button_glyphs::draw_pane(Cpu* c, PpcFunc draw) {
+    const uint32_t pane = c->r[3];
+    if (deferring_cluster) {
+        if (command_word(pane) && inside(pane, deferring_cluster)) {
+            deferred_words.emplace_back(pane, draw);
+            return;
+        }
+        return draw(c);
+    }
+    if (!marking() || style().face == FaceStyle::kOriginal || pane_name(pane) != "N_All_00") return draw(c);
+    for (const char* group : {"W_SetSeatA_00", "P_B_00", "N_X_00", "N_Y_00"})
+        if (!child_named(pane, group)) return draw(c);
+    const Cpu entry = *c;
+    deferring_cluster = pane;
+    deferred_words.clear();
+    draw(c);
+    deferring_cluster = 0;
+    const auto words = std::move(deferred_words);
+    deferred_words.clear();
+    for (const auto& [word, pane_draw] : words) {
+        Cpu w = entry;
+        w.r[3] = word;
+        pane_draw(&w);
+    }
+}
+
 void button_glyphs::prepare_text_box(uint32_t text_box, Cpu* cpu) {
     const uint32_t list = ld32(text_box + 0xFC);
     if (!list) return;

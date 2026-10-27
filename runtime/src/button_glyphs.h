@@ -86,6 +86,9 @@ void draw_text_box(Cpu* c, PpcFunc draw);
 // each restyled face's complete group moves to the spot of the pad button bound to it
 // (PromptStyle::spots; by label puts A south, B east, X west and Y north).
 void calculate_pane(Cpu* c, PpcFunc calculate);
+// Pane::Draw for the CommandGuide cluster (aspect.cpp's hook): with a restyled look its action words
+// are drawn after its buttons, so moved groups never cover another button's word.
+void draw_pane(Cpu* c, PpcFunc draw);
 // Scope the displayed command-guide button set while calculating its layout.
 void calculate_parts(Cpu* c, PpcFunc calculate);
 

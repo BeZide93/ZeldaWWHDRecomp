@@ -79,6 +79,10 @@ Four function hooks (`tools/recomp/hooks_glyphs.txt`), plus wrappers around the 
   letters (`T_A_00` … `T_Y_00` on their `P_?_00` pictures), which the game prints as plain text.
 - The pane-matrix hook moves the complete CommandGuide cluster (`N_All_00`) for the Xbox positions;
   only the computed global matrices keep the new layout, the authored locals are restored.
+- `Pane::Draw` (`0x02877100`, the existing aspect hook) draws that cluster with its action words
+  (`T_CommandA_00` … `T_CommandY_00`) held back and draws them after its last child, with the same
+  DrawInfo, whenever a restyled look is active: the game draws the groups in a fixed order, so a
+  moved group could otherwise cover a neighbour's word.
 
 **Glyph styling untouched until used:** text and picture hooks do not write to game memory until a different look has been
 selected once in the session; the first activation rebuilds each cached text box once so its glyphs

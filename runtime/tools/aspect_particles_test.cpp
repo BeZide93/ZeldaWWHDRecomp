@@ -18,7 +18,7 @@ bool recording_display_list() { return false; }
 }
 namespace mods::cemu { float aspect_ratio() { return 0; } }
 namespace mods { void play_context_pane(uint32_t) {} }  // the context buttons' pane observer (mods/play_context.cpp)
-namespace button_glyphs { void calculate_pane(Cpu* c,PpcFunc fn) { fn(c); } }
+namespace button_glyphs { void calculate_pane(Cpu* c,PpcFunc fn) { fn(c); } void draw_pane(Cpu* c,PpcFunc fn) { fn(c); } }
 static constexpr uint32_t base=0x20000000, pane=base+0x100, out=base+0x200,
     root=base+0xa00, emitter=base+0x400, projection=base+0x900;
 static float drawn[16];

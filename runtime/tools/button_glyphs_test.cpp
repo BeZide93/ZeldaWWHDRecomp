@@ -15,6 +15,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <string>
 #include <vector>
 #ifdef _WIN32
 #include <windows.h>
@@ -403,6 +404,73 @@ void positions_test() {
     for (uint32_t i = 0; i < 4; i++) same_point(position(face_panes[i]), gamepad[i ^ 1]);
     aspect::set_mode(aspect::kOriginal);
     aspect::on_swap();
+}
+
+// Draw order of the CommandGuide cluster (button_glyphs::draw_pane): a stand-in for Pane::Draw
+// draws the pane, then each child through Pane::Draw again, which in the game is the hooked entry
+// (aspect.cpp), so every child passes draw_pane too.
+std::vector<std::string> drawn_panes;
+void draw_tree(Cpu* c) {
+    assert(c->r[4] == 0x1234);  // the DrawInfo, passed through unchanged (also to the held-back words)
+    drawn_panes.push_back((const char*)mem::ptr(c->r[3] + 0x80));
+    const uint32_t sentinel = c->r[3] + 0x14;
+    for (uint32_t node = ld32(sentinel); node != sentinel; node = ld32(node)) {
+        Cpu child = *c;
+        child.r[3] = node;
+        button_glyphs::draw_pane(&child, draw_tree);
+    }
+}
+long at(const char* name) { return std::find(drawn_panes.begin(), drawn_panes.end(), name) - drawn_panes.begin(); }
+
+void draw_order_test() {
+    constexpr uint32_t root = base + 0x6000;
+    const std::array<uint32_t, 4> group = {base + 0x6200, base + 0x6400, base + 0x6600, base + 0x6800};
+    const std::array<uint32_t, 4> button = {base + 0x6A00, base + 0x6C00, base + 0x6E00, base + 0x7000};
+    const std::array<uint32_t, 4> word = {base + 0x7200, base + 0x7400, base + 0x7600, base + 0x7800};
+    pane(root, "N_All_00", 509, 238);
+    const char* groups[] = {"W_SetSeatA_00", "P_B_00", "N_X_00", "N_Y_00"};
+    const char* buttons[] = {"P_A_00", "P_B_00", "P_X_00", "P_Y_00"};
+    const char* words[] = {"T_CommandA_00", "T_CommandB_00", "T_CommandX_00", "T_CommandY_00"};
+    for (int i = 0; i < 4; i++) {
+        pane(group[i], groups[i], 0, 0);
+        child(root, group[i]);
+        uint32_t picture = group[i];  // B's group is its picture
+        if (i != 1) {
+            pane(button[i], buttons[i], 0, 0);
+            child(group[i], button[i]);
+            picture = button[i];
+        }
+        pane(word[i], words[i], 0, 0);
+        child(picture, word[i]);
+    }
+    auto run = [&] {
+        drawn_panes.clear();
+        Cpu c{};
+        c.r[3] = root;
+        c.r[4] = 0x1234;
+        button_glyphs::draw_pane(&c, draw_tree);
+        assert(c.r[3] == root);
+        for (const char* w : words) assert(at(w) < (long)drawn_panes.size());  // each word drawn exactly once
+        assert(drawn_panes.size() == 4 + 3 + 4 + 1);
+    };
+    // a restyled look: every word after every button, in the game's order among themselves
+    layout(input_map::FaceLayout::kLabels);
+    run();
+    for (const char* w : words)
+        for (const char* b : buttons) assert(at(w) > at(b));
+    assert(at("T_CommandA_00") < at("T_CommandB_00") && at("T_CommandX_00") < at("T_CommandY_00"));
+    // the original look: the game's order, each word with its own button
+    auto mapping = input_map::Mapping::defaults();
+    mapping.prompts = input_map::Mapping::Prompts::kOriginal;
+    input_map::set_current(mapping, false);
+    run();
+    assert(at("T_CommandA_00") < at("P_B_00") && at("T_CommandB_00") < at("P_X_00"));
+    // another layout root with the same name but not the four groups is drawn as it is
+    layout(input_map::FaceLayout::kLabels);
+    std::strcpy((char*)mem::ptr(group[3] + 0x80), "N_Other_00");
+    run();
+    assert(at("T_CommandA_00") < at("P_B_00"));
+    std::strcpy((char*)mem::ptr(group[3] + 0x80), "N_Y_00");
 }
 
 void layout(input_map::FaceLayout choice) {
@@ -1330,6 +1398,7 @@ int main() {
     }
 
     positions_test();
+    draw_order_test();
     shoulders_test();
     font_fallback_test();
     automatic_test();
