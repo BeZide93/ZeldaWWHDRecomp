@@ -768,6 +768,7 @@ bool set_piece_draw(const std::string&archive,int index,PieceDraw draw){
     if(draw.light[0]<0||draw.light[0]>4||draw.light[1]<1||draw.light[1]>4)return false;
     piece_draws[{archive,index}]=draw;return true;
 }
+bool has_collision(const std::string&mod,const std::string&model){std::lock_guard guard(world_mutex);return collision_models.contains({mod,model});}
 bool register_collision(const std::string&mod,const std::string&model,std::shared_ptr<const story_world_collision::mesh::Mesh> collision){
     std::lock_guard guard(world_mutex);std::string why;if(!collision||!story_world_collision::mesh::validate(*collision,why))return false;collision_models[{mod,model}]=std::move(collision);return true;
 }

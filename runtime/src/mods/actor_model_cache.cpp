@@ -48,6 +48,8 @@ std::string failure_for(const std::string& mod,const std::string& model){std::lo
 void note_failure(const std::string& mod,const std::string& model,const std::string& why){std::lock_guard guard(mutex);failures[{mod,model}]=why.empty()?std::string("it could not be prepared"):why;}
 void clear_failure(const std::string& mod,const std::string& model){std::lock_guard guard(mutex);failures.erase({mod,model});}
 bool preparing(const std::string& mod,const std::string& model){std::lock_guard guard(mutex);return running.contains({mod,model});}
+void hold(const std::string& mod,const std::string& model){std::lock_guard guard(mutex);++running[{mod,model}];}
+void release(const std::string& mod,const std::string& model){std::lock_guard guard(mutex);const auto found=running.find({mod,model});if(found!=running.end()&&!--found->second)running.erase(found);}
 std::string prepare(const std::string& mod,const story_notebook::ManifestModel& model,
                     const std::string& package_dir,const std::string& data_dir,
                     const std::vector<std::string>& python,const std::string& tool,const std::string& game_dir,bool collision,bool shoreline,const std::string& material_in,
