@@ -7,11 +7,19 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
-- **HDR output on Linux, and HDR10 for displays without scRGB** (Vulkan). Settings → Graphics → HDR output now also
+- **HDR output on Linux, and HDR10 for displays without scRGB** (Vulkan; #311, thanks @mkopec). Settings → Graphics → HDR output now also
   works on Linux under Wayland. Where the system offers no scRGB output (Mesa drivers on Wayland), the game presents
   HDR10 (BT.2020 with the PQ curve) instead, with the same paper white, peak and exposure settings; the overlay shows
   which one is used. On compositors where SDL picks XWayland (such as sway), choosing HDR makes the game start on
-  Wayland from the next start, since X11 windows can't show HDR. Windows is unchanged.
+  Wayland from the next start, since X11 windows can't show HDR. Under gamescope (Steam Deck),
+  which gives XWayland HDR itself, the game stays on XWayland. Windows is unchanged.
+- **World editor: fixes for full rooms and model changes** (#281, thanks @KelpyCode). When a room's memory was full,
+  the game could crash while loading a placed object's archive. Now an object whose archive doesn't fit is not created
+  (the editor says why) and is tried again on the next room load. Kit models and island buildings were checked against
+  the whole room budget for buildings (32 MiB free) instead of their own size, so a watched model's new version could be
+  refused until something was moved; the check now asks for the model's own size plus a small reserve, and the new
+  version shows up right away. Changing a placement's kit or static model now also brings that model's own collision,
+  live in the running game.
 - **macOS: move and resize the GamePad picture with the mouse** (#305, thanks @shaneoreilly). In the TV window, drag the
   picture-in-picture GamePad with the right mouse button (or with Option held) to move it, drag from its bottom-right
   corner or use the scroll wheel over it to resize it (5–100%). The placement becomes Custom and is saved. A plain left
