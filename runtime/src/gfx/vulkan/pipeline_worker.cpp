@@ -495,7 +495,7 @@ void run(Worker& w, std::vector<uint8_t> seed) {
                  "(pool %zu; process memory %.0f MB; read %.0f ms, ready to compile after %.0f ms)\n", startup.size(),
                  grouped, maxUnusedWarmPipelines, process_memory() / 1e6, readMs, msSince());
     // (the game's stage scan tells when play begins: pipeline_groups::playing)
-    if (!speculative.empty()) pipeline_groups::want();
+    if (!speculative.empty()) pipeline_groups::want_playing();
     if (!speculative.empty() || speculativeMode == SpeculativeMode::Start || speculativeMode == SpeculativeMode::Off)
       std::fprintf(stderr, "[vulkan warmup] Metal-derived recipes: %s (%zu in the background queue)\n",
                    speculative_mode_name(), speculative.size());
