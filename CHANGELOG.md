@@ -7,6 +7,10 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Shader translation: cube-map helper shaders translate again** (Vulkan and Metal). Some library shaders set a
+  cube-map layer index on a texture slot that, in some states, holds an ordinary texture; the translator then used an
+  undeclared variable and the shader failed. Shader preparation now finishes with no failed shaders (11 on Vulkan and
+  18 on Metal before).
 - **Vulkan: shader preparation no longer stops at a shader it can't translate.** One untranslatable shader used to
   end the preparation, leaving every shader and pipeline after it unprepared. Now that shader is skipped and logged,
   and the rest are prepared.
