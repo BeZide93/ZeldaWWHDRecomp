@@ -11,9 +11,10 @@
 // full, and then the archive is not loaded: the load fails as a missing archive does (its actor is not
 // created), instead of writing through a null pointer.
 //
-// probe() tries the game's three allocations in its order with the game's own allocator and frees
-// them again (the request heap is the load task's own ExpHeap; nothing else allocates from it
-// meanwhile, and a free gives the space back as it was).
+// probe() tries the game's three allocations in its order with the game's own allocator and gives them
+// back (nothing else allocates from the request heap meanwhile). The load task's request heaps are frame
+// heaps, where free does nothing: the caller (resmgr_sync.cpp) puts such a heap's head and tail back as
+// they were instead, and release() is then a no-op.
 #pragma once
 #include <cstdint>
 #include <initializer_list>

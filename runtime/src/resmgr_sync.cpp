@@ -34,6 +34,7 @@
 #include "runtime.h"
 #include "interp.h"
 #include "resmgr_fit.h"
+#include "mods/guest_heap_query.h"
 
 extern "C" void f_02613394_orig(Cpu* c);
 extern "C" void f_0260C67C_orig(Cpu* c);
@@ -127,6 +128,20 @@ bool test_refused(const std::string& name) {
     static const std::string list = [] { const char* e = getenv("WWHD_TEST_RESMGR_REFUSE"); return e ? "," + std::string(e) + "," : std::string(); }();
     return !list.empty() && list.find("," + name + ",") != std::string::npos;
 }
+// The game's heaps (sead): the request's heap, or with heap 0 the thread's current heap (HeapMgr::getCurrentHeap
+// 02756140, as the game's operator new takes it). A load task's request heaps are frame (solid) heaps (vtable
+// 10145B38): free is a no-op there, so a probe that allocated and freed kept the archive's whole size taken and the
+// real buffer allocation then failed (the very crash the check exists for). On a frame heap the probe's allocations
+// are undone by putting its head and tail (+0x94, +0x98: everything an allocation changes) back as they were;
+// another heap frees them itself (vtable slot 0x3C, free(heap, address), as the game's operator delete does).
+constexpr uint32_t kFrameHeapHead = 0x94, kFrameHeapTail = 0x98;
+uint32_t probe_heap(Cpu* c, uint32_t heap) { return heap ? heap : guest_call(c, GC(0x02756140), {ld32(GD(0x101F8B4C))}); }
+bool frame_heap(uint32_t heap) { return guest_heap::readable(heap, kFrameHeapTail + 4) && ld32(heap + guest_heap::kVtable) == GD(0x10145B38); }
+void release(Cpu* c, uint32_t heap, uint32_t address) {
+    const uint32_t vt = guest_heap::readable(heap, 0x10) ? ld32(heap + guest_heap::kVtable) : 0;
+    const uint32_t fn = guest_heap::readable(vt, 0x40) ? ld32(vt + 0x3C) : 0;
+    if (fn) guest_call(c, fn, {heap, address});
+}
 // ResMgr_loadArchive / ResMgr_loadFromPack (self, name, path, heap): false when the archive is in a loaded pack, not
 // loaded yet, and the heap can't hold the game's copy of it
 bool pack_archive_fits(Cpu* c, const char* who) {
@@ -157,9 +172,17 @@ bool pack_archive_fits(Cpu* c, const char* who) {
     const uint32_t size = guest_call(c, GC(0x0275F800), {resource});
     const std::string archive = mem::read_cstr(text);
     resmgr_fit::Fit fit = resmgr_fit::Fit::NoBuffer;
-    if (!test_refused(archive))
-        fit = resmgr_fit::probe([&](uint32_t bytes, uint32_t h, uint32_t align) { return guest_call(c, GC(0x0273B0D4), {bytes, h, align}); },
-                                [&](uint32_t address) { guest_call(c, GC(0x0273AFC8), {address}); }, heap, size);
+    const uint32_t owner = probe_heap(c, heap);
+    if (!test_refused(archive) && owner) {
+        const bool frame = frame_heap(owner);
+        const uint32_t head = frame ? ld32(owner + kFrameHeapHead) : 0, tail = frame ? ld32(owner + kFrameHeapTail) : 0;
+        const uint32_t before = g_log ? guest_heap::free_size(c, owner, guest_call) : 0;
+        fit = resmgr_fit::probe([&](uint32_t bytes, uint32_t, uint32_t align) { return guest_call(c, GC(0x0273B0D4), {bytes, owner, align}); },
+                                [&](uint32_t address) { if (!frame) release(c, owner, address); }, owner, size);
+        if (frame) st32(owner + kFrameHeapHead, head), st32(owner + kFrameHeapTail, tail);
+        if (g_log) LOG("[resmgr] %s %s (%u bytes): heap %08X%s, %u free before the check and %u after (%s)", who, archive.c_str(), size, owner,
+                       frame ? " (frame heap)" : "", before, guest_heap::free_size(c, owner, guest_call), resmgr_fit::name(fit));
+    }
     *c = keep;
     if (fit == resmgr_fit::Fit::Fits) return true;
     static std::mutex said_mu;
