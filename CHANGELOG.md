@@ -7,6 +7,13 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Vulkan: shader preparation no longer stops at a shader it can't translate.** One untranslatable shader used to
+  end the preparation, leaving every shader and pipeline after it unprepared. Now that shader is skipped and logged,
+  and the rest are prepared.
+- **Vulkan: pipelines made from Metal recipes compile in a low-priority background queue** instead of the start queue.
+  They no longer compete with the game's own compiles during play; pipelines the game actually uses move to the start
+  queue from the next start. On a Snapdragon 8 Gen 3 phone, play and start-up are unchanged, since all of them finish
+  before play. The queue matters with larger recipe sets. `WWHD_VK_METAL_QUEUE=start` restores the old behaviour.
 - **HDR output on Linux, and HDR10 for displays without scRGB** (Vulkan; #311, thanks @mkopec). Settings → Graphics → HDR output now also
   works on Linux under Wayland. Where the system offers no scRGB output (Mesa drivers on Wayland), the game presents
   HDR10 (BT.2020 with the PQ curve) instead, with the same paper white, peak and exposure settings; the overlay shows
