@@ -1611,7 +1611,7 @@ add_executable(mod_actor_runtime_test runtime/tools/mod_actor_runtime_test.cpp r
   runtime/src/mods/native_actor_profiles.cpp runtime/src/guest_addr_identity.c)
 target_include_directories(mod_actor_runtime_test PRIVATE runtime/include runtime/src)
 target_compile_options(mod_actor_runtime_test PRIVATE -UNDEBUG)
-target_sources(mod_actor_runtime_test PRIVATE runtime/src/mods/mod_actor_knockback.cpp runtime/src/mods/mod_actor_native_combat.cpp runtime/src/mods/mod_actor_attention.cpp runtime/src/mods/native_actor_carry.cpp runtime/src/mods/story_item_models.cpp runtime/src/mods/story_enemy_ownership.cpp runtime/src/mods/story_enemy_projectiles.cpp)
+target_sources(mod_actor_runtime_test PRIVATE runtime/src/mods/mod_actor_knockback.cpp runtime/src/mods/mod_actor_native_combat.cpp runtime/src/mods/mod_actor_attention.cpp runtime/src/mods/native_actor_carry.cpp runtime/src/mods/story_item_models.cpp runtime/src/mods/story_enemy_ownership.cpp runtime/src/mods/story_enemy_projectiles.cpp runtime/src/mods/actor_model_cache.cpp)
 add_test(NAME mod_actor_native_contract COMMAND mod_actor_runtime_test)
 add_test(NAME story_world_collision_profile_order COMMAND mod_actor_runtime_test --world-proof)
 add_test(NAME story_world_collision_profile_isolation COMMAND mod_actor_runtime_test --world-proof-mixed)
