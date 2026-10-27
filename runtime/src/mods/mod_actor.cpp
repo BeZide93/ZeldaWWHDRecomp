@@ -27,6 +27,7 @@
 #include "native_actor_profiles.h"
 #include "mod_actor_shadow_proof.h"
 #include "mod_actor_budget.h"
+#include "actor_model_cache.h"
 #include "mod_actor_motion.h"
 #include "mod_actor_look_bounds.h"
 #include "story_mail.h"
@@ -704,7 +705,17 @@ void backing_archive_wrapper(Cpu*c){
     if(!own){if(!story_item_models::backing_archive_wrapper(c))original(c,GC(0x02612E64));return;}
     const Cpu incoming=*c;const uint32_t before=heap_free(c,allocation_heap);
     const bool cached=call(c,GC(0x02612504),{manager,key})!=0;
-    if(!cached&&before<budget::BackingReserve+(piece_sets.contains(own->archive)?budget::PieceRoomLimit:budget::ModelLimit)){*c=incoming;result(c,0);LOG("[mod_actor_budget] backing heap reserve prevents loading %s",own->archive.c_str());return;}
+    // room for the archive itself and the game's reserve: the archive's own size (its file), or without the file the most
+    // an archive of its kind may take (a game piece or kit model set PieceRoomLimit, a model ModelLimit). The limit is
+    // the room's budget for all its pieces together; as the need of one 3 MB kit model or 5 MB building set it refused
+    // them with up to 32 MiB free (issue #281: a watched kit model's new version, and island buildings, "backing heap
+    // reserve prevents loading" until something else freed room). Test: WWHD_TEST_BACKING_FREE=<bytes> caps the free
+    // space the check sees (a fuller heap).
+    static const uint64_t test_free=[]{const char*e=std::getenv("WWHD_TEST_BACKING_FREE");return e?std::strtoull(e,nullptr,10):0ull;}();
+    const uint64_t seen=test_free?std::min<uint64_t>(before,test_free):before;
+    const uint64_t own_bytes=budget::archive_need(actor_model_cache::archive_for("/vol/content/Common/Object/"+own->archive+".szs"));
+    const uint64_t need=budget::BackingReserve+(own_bytes?own_bytes:piece_sets.contains(own->archive)?budget::PieceRoomLimit:budget::ModelLimit);
+    if(!cached&&seen<need){*c=incoming;result(c,0);LOG("[mod_actor_budget] backing heap reserve prevents loading %s (%llu bytes free, %llu needed: the archive and a reserve of %s)",own->archive.c_str(),static_cast<unsigned long long>(seen),static_cast<unsigned long long>(need),budget::mib(budget::BackingReserve).c_str());return;}
     *c=incoming;
     original(c,GC(0x02612E64));const Cpu returned=*c;
     const uint32_t after=heap_free(c,allocation_heap);
