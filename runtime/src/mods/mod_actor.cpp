@@ -417,6 +417,10 @@ uint32_t phase=call(c,GC(0x02520460),{a+Phase,a+Name});if(phase!=4){if(phase>=5)
     if(!archive_mounted(c,a+Name)){release_unmounted(c,a);create_failed(a,"its model archive "+d->archive+" did not load (the file could not be read or the game heap refused it)");result(c,5);return;}
     if(heap_trace()){HeapSnapshot before{};for(unsigned i=0;i<4;++i)before[i]={ld32(a+HeapBaseline+i*8),ld32(a+HeapBaseline+i*8+4)};report_heaps(a,"archive_load",before,heaps(c));}
     const auto before=heap_trace()?heaps(c):HeapSnapshot{};
+    // the editor changed the placement's model while this actor was being made: it loaded the old model's archive (its
+    // name was taken at the start) and the declaration now names the new one. The editor makes it again from the new
+    // spec right away; not said as a failure (it was "its model could not be made in the game heap", issue #281).
+    if(std::strncmp(reinterpret_cast<const char*>(mem::ptr(a+Name)),d->archive.c_str(),64)!=0){LOG("[mod_actor] %s:%s model changed while it was made (%.64s, now %s): made again",d->mod.c_str(),d->spec.id.c_str(),reinterpret_cast<const char*>(mem::ptr(a+Name)),d->archive.c_str());fail_create(a);result(c,5);return;}
     if(!call(c,GC(0x025D63E8),{a,heap_callback,uint32_t(0x40000+(d->collision?story_world_collision::mesh::allocation_bytes(*d->collision):0))})){create_failed(a,"its model could not be made in the game heap");result(c,5);return;}
     if(heap_trace())report_heaps(a,"model_create",before,heaps(c));
 }
