@@ -20,6 +20,12 @@ what is on `devel` and not released yet (also in the
   refused until something was moved; the check now asks for the model's own size plus a small reserve, and the new
   version shows up right away. Changing a placement's kit or static model now also brings that model's own collision,
   live in the running game.
+- **Bloom is smooth again at higher internal resolutions** (#307, #308, thanks @itsarahtonin). At 2x and 3x the glow around lit windows,
+  doors, torches and Bokoblin eyes broke up into blocks and streaks, and small bright things such as rupees glowed
+  only at some angles. The game makes its bloom from small copies of the picture, which were made at the higher
+  resolution too: the pass that reads the picture skipped pixels, and the blur's lumps, which the console's final
+  upscale blends away, got pixels of their own. The small copies now keep the console's size and read the picture
+  as the Wii U does, so the glow looks as it does at 1x. 1x is unchanged.
 - **macOS: move and resize the GamePad picture with the mouse** (#305, thanks @shaneoreilly). In the TV window, drag the
   picture-in-picture GamePad with the right mouse button (or with Option held) to move it, drag from its bottom-right
   corner or use the scroll wheel over it to resize it (5–100%). The placement becomes Custom and is saved. A plain left

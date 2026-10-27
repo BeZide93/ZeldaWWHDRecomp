@@ -124,6 +124,9 @@ static bool screen_shaped(const Surface* s) {
 // shadow-mask softening samples (restored in v0.2.9); since then both sizes give practically the
 // same soft edges, the larger maps only a hair crisper.
 static float target_scale(const Surface* s) {
+    // the bloom chain: at the console's size its blur and the final bilinear upscale blend the glow
+    // smoothly; at the internal resolution the lumps of the blur's sparse taps showed as blocks (#307)
+    if (s->sizeClaim.size == gfx::TargetSize::Console) return 1.0f;
     uint32_t width,height;
     if(!s->fmt.compressed&&s->mips==1&&mods::cemu::texture_extent(s->width,s->height,s->format,s->slices,s->tileMode,width,height))return 1.0f;
     if (s->fmt.compressed || s->mips > 1) return 1.0f;
@@ -141,7 +144,7 @@ static float target_scale(const Surface* s) {
 }
 // the dynamic resolution factor in target_scale's result (1 where it does not apply)
 static float target_dyn(const Surface* s) {
-    if (g_dyn_frame == 1.0f || s->fmt.compressed || s->mips > 1 || s->slices > 1) return 1.0f;
+    if (g_dyn_frame == 1.0f || s->sizeClaim.size != gfx::TargetSize::Internal || s->fmt.compressed || s->mips > 1 || s->slices > 1) return 1.0f;
     uint32_t width,height;
     if(mods::cemu::texture_extent(s->width,s->height,s->format,s->slices,s->tileMode,width,height))return 1.0f;
     return g_dyn_frame;
@@ -426,7 +429,10 @@ static Surface* find_surface(const SurfaceDesc& d, bool forRendering) {
         // a volume and a 2D array of the same size are different textures
         if (s->width == d.width && s->height == d.height && s->format == d.format && s->slices == d.slices &&
             volume(s->dim) == volume(d.dim) && (forRendering || s->mips >= d.mips || s->gpuWritten)) {
-            if (forRendering) return adopt_newer_alias(rescale(s));
+            if (forRendering) {
+                s->sizeClaim.request(d.sizeRequest, R.frame);
+                return adopt_newer_alias(rescale(s));
+            }
             if (!exact || s->writeSeq > exact->writeSeq) exact = s;
             continue;
         }
@@ -454,6 +460,7 @@ Surface* find_or_create_surface(const SurfaceDesc& d, bool forRendering) {
     s->swizzle = d.swizzle;
     s->isDepth = d.isDepth;
     s->fmt = format_info(d.format, d.isDepth);
+    if (forRendering) s->sizeClaim.request(d.sizeRequest, R.frame);
     float ax = 1.0f, ay = 1.0f;
     if (forRendering) target_aspect(s.get(), ax, ay);
     s->tex = make_texture(s.get(), texture_type(d.dim, s->slices), forRendering, forRendering ? target_scale(s.get()) : 1.0f, ax, ay);
@@ -485,7 +492,7 @@ Surface* find_or_create_surface(const SurfaceDesc& d, bool forRendering) {
 // CB_COLORn_BASE holds the full guest address; CB_COLORn_TILE/FRAG hold width/height (our convention).
 constexpr uint32_t kDim2D = 1, kDim3D = 2, kDim2DArray = 5;
 
-Surface* color_target(const uint32_t* regs, int i, uint32_t* slice) {
+Surface* color_target(const uint32_t* regs, int i, uint32_t* slice, gfx::SizeRequest claim) {
     uint32_t base = regs[mmCB_COLOR0_BASE + i];
     if (!base) return nullptr;
     uint32_t size = regs[mmCB_COLOR0_SIZE + i], info = regs[mmCB_COLOR0_INFO + i];
@@ -507,6 +514,7 @@ Surface* color_target(const uint32_t* regs, int i, uint32_t* slice) {
     d.tileMode = (info >> 8) & 0xF;
     d.slices = slices;
     d.dim = volume ? kDim3D : slices > 1 ? kDim2DArray : kDim2D;
+    d.sizeRequest = claim;
     return find_or_create_surface(d, true);
 }
 

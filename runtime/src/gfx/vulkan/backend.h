@@ -17,6 +17,7 @@
 #include "formats.h"
 #include "api.h"
 #include "buffer_cache_core.h"
+#include "../target_size.h"
 namespace gfxvk {
 class DeferredCommands;
 bool begin_exact_preparation();
@@ -38,6 +39,7 @@ struct Surface {
  std::unordered_map<uint32_t,VkImageView> sampledViews;
  uint32_t addr=0,mipAddr=0,width=0,height=0,slices=1,pitch=0,mips=1,format=0,dim=1,tileMode=0,swizzle=0;
  bool isDepth=false,gpuWritten=false,dirty=true,bcDecoded=false;
+ gfx::SizeClaim sizeClaim; // a size other than the internal resolution, claimed by a pass (target_scale, gfx/target_size.h)
  bool linearFiltering=false; // device capability for the actual optimal-tiling image format
  uint64_t writeSeq=0,contentHash=0,lastCheckedFrame=~0ull,sparseHash=0;
  bool formatViews=false; // another surface at this address has the same texel bits in another format (adopt_newer_alias)
@@ -59,7 +61,8 @@ struct Surface {
  float dyn=1;
  std::vector<std::shared_ptr<Surface>> spares;
 };
-struct SurfaceDesc { uint32_t addr=0,mipAddr=0,width=0,height=0,slices=1,pitch=0,mips=1,format=0,dim=1,tileMode=0,swizzle=0; bool isDepth=false; };
+struct SurfaceDesc { uint32_t addr=0,mipAddr=0,width=0,height=0,slices=1,pitch=0,mips=1,format=0,dim=1,tileMode=0,swizzle=0; bool isDepth=false;
+                     gfx::SizeRequest sizeRequest; /* from the drawing pass (Surface::sizeClaim) */ };
 struct Screen {
 #ifdef WWHD_SDL_HOST
  std::atomic<SDL_Window*> window{nullptr};
@@ -303,7 +306,7 @@ VkImageView make_sampled_view(Surface*,uint32_t key); // a sampled view by its k
 void touch_image(Surface*); // dynamic resolution: clear an image made ahead once (surfaces.cpp)
 VkImageView sampled_texture_view(Surface*,const uint32_t* texWords);
 Surface* find_or_create_surface(const SurfaceDesc&,bool forRendering);
-Surface* color_target(const uint32_t*,int,uint32_t* slice=nullptr);
+Surface* color_target(const uint32_t*,int,uint32_t* slice=nullptr,gfx::SizeRequest claim={});
 Surface* depth_target(const uint32_t*,uint32_t* slice=nullptr);
 Surface* surface_from_color_buffer(uint32_t,uint32_t* firstSlice=nullptr,uint32_t* numSlices=nullptr);
 Surface* surface_from_depth_buffer(uint32_t,uint32_t* firstSlice=nullptr,uint32_t* numSlices=nullptr);
