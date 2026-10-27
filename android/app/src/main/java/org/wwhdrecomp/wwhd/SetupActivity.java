@@ -79,6 +79,7 @@ public class SetupActivity extends Activity {
     private void offerShortcut() {
         if (shortcutChecked || !hasWindowFocus()) return;
         shortcutChecked = true;
+        if (!GameShortcut.supported(this)) return;
         if (!phoneSetup) {  // the PC route: its game folder, once
             File external = getExternalFilesDir(null);
             File game = external == null ? null : new File(external, "game");
@@ -695,7 +696,7 @@ public class SetupActivity extends Activity {
                 setTextIfChanged(resume, getString(hostName.equals("selected") ? R.string.setup_start : R.string.setup_continue));
                 show(updateStatus, hostState != null && SetupPresentation.showUpdate(hostState.optBoolean("updating"), hostName));
                 plainPhase(job, hostState, hostName, needsKeys, resume.isEnabled());
-                show(addIcon, play.isEnabled() && !working && !modelsWaiting);
+                show(addIcon, play.isEnabled() && !working && !modelsWaiting && GameShortcut.supported(SetupActivity.this));
                 String text;
                 if (!phoneSetup) {
                     text = "This APK supports the PC build route. Android device setup needs an APK containing Python and the compiler.";
