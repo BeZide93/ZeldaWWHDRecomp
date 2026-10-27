@@ -39,6 +39,7 @@ struct Surface {
  uint32_t addr=0,mipAddr=0,width=0,height=0,slices=1,pitch=0,mips=1,format=0,dim=1,tileMode=0,swizzle=0;
  bool isDepth=false,gpuWritten=false,dirty=true,bcDecoded=false;
  bool guestSized=false; // drawn by the bloom chain: kept at the console's size (target_scale, issue #307)
+ uint64_t guestSizedFrame=0; // R.frame of the bloom chain's last draw into it (keep_guest_size)
  bool linearFiltering=false; // device capability for the actual optimal-tiling image format
  uint64_t writeSeq=0,contentHash=0,lastCheckedFrame=~0ull,sparseHash=0;
  bool formatViews=false; // another surface at this address has the same texel bits in another format (adopt_newer_alias)

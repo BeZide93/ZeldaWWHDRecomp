@@ -149,6 +149,17 @@ static float target_dyn(const Surface* s) {
     if(mods::cemu::texture_extent(s->width,s->height,s->format,s->slices,s->tileMode,width,height))return 1.0f;
     return g_dyn_frame;
 }
+// a render-target lookup: the bloom chain's draws keep the target at the console's size. Other
+// passes draw into the chain's levels every frame too (a generic pass at PS 44FD8500, also used
+// for the screen), so only a target the chain has left for a few frames goes back to the internal
+// resolution: the game can reuse the address for another target of the same size and format.
+static void keep_guest_size(Surface* s, bool guestSized) {
+    constexpr uint64_t kChainIdleFrames = 10;
+    if (guestSized) {
+        s->guestSized = true;
+        s->guestSizedFrame = R.frame;
+    } else if (s->guestSized && R.frame - s->guestSizedFrame > kChainIdleFrames) s->guestSized = false;
+}
 bool target_aspect_factors(uint32_t w, uint32_t h, float& kx, float& ky) {
     Surface s;
     s.width = w;
@@ -430,7 +441,7 @@ static Surface* find_surface(const SurfaceDesc& d, bool forRendering) {
         if (s->width == d.width && s->height == d.height && s->format == d.format && s->slices == d.slices &&
             volume(s->dim) == volume(d.dim) && (forRendering || s->mips >= d.mips || s->gpuWritten)) {
             if (forRendering) {
-                s->guestSized |= d.guestSized;
+                keep_guest_size(s, d.guestSized);
                 return adopt_newer_alias(rescale(s));
             }
             if (!exact || s->writeSeq > exact->writeSeq) exact = s;
@@ -460,7 +471,7 @@ Surface* find_or_create_surface(const SurfaceDesc& d, bool forRendering) {
     s->swizzle = d.swizzle;
     s->isDepth = d.isDepth;
     s->fmt = format_info(d.format, d.isDepth);
-    s->guestSized = forRendering && d.guestSized;
+    if (forRendering) keep_guest_size(s.get(), d.guestSized);
     float ax = 1.0f, ay = 1.0f;
     if (forRendering) target_aspect(s.get(), ax, ay);
     s->tex = make_texture(s.get(), texture_type(d.dim, s->slices), forRendering, forRendering ? target_scale(s.get()) : 1.0f, ax, ay);

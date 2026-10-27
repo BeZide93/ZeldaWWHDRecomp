@@ -30,6 +30,7 @@ struct Surface {
     bool gpuWritten = false;   // contents produced by the GPU; never reload from guest memory
     uint64_t writeSeq = 0;     // when the GPU last wrote it (several surfaces can alias one address)
     bool guestSized = false;      // drawn by the bloom chain: kept at the console's size (target_scale, issue #307)
+    uint64_t guestSizedFrame = 0; // R.frame of the bloom chain's last draw into it (keep_guest_size)
     bool formatViews = false;     // another surface at this address has the same texel bits in another format (adopt_newer_alias)
     uint64_t writtenBackSeq = 0;  // writeSeq when last written back to guest memory (linear surfaces)
     uint64_t contentHash = 0;  // hash of all guest bytes (every level) at the last check

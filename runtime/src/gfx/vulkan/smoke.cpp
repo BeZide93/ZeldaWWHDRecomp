@@ -470,6 +470,24 @@ void depth_copy_check() {
  g_depthCopyOverride=override;
  fprintf(stderr,"[renderer smoke] depth/stencil target resized by aspect ratio and resolution without blits passed\n");
 }
+// The bloom chain's targets keep the console's size (issue #307) while the chain draws them, also
+// through the other passes into its levels; a target the game later puts at the same address gets
+// the internal resolution once the chain has left it.
+void bloom_chain_size_check() {
+ set_res_scale(2);latch_res_scale();
+ SurfaceDesc d;d.addr=mem::host_alloc(60*40*4,256);d.width=60;d.height=33;d.pitch=64;d.format=0x1A;d.dim=1;d.slices=1;
+ d.guestSized=true;Surface* level=find_or_create_surface(d,true);
+ require(level&&level->extent.width==60&&level->extent.height==33,"bloom chain level is not at the console's size");
+ d.guestSized=false;
+ require(find_or_create_surface(d,true)==level&&level->extent.width==60,"a pass between the chain's levels rescaled a level");
+ R.frame+=11;
+ require(find_or_create_surface(d,true)==level&&level->extent.width==120&&level->extent.height==66,
+         "a target at a level's address the chain has left kept the console's size");
+ d.guestSized=true;
+ require(find_or_create_surface(d,true)==level&&level->extent.width==60,"the chain's next draw did not restore the console's size");
+ set_res_scale(1);latch_res_scale();
+ fprintf(stderr,"[renderer smoke] bloom chain targets keep the console's size until the chain leaves them\n");
+}
 // Volume render targets (issue #53, the Picto Box): the game renders 8x8x8 colour-grading volumes
 // slice by slice (GX2 colour buffers of a 3D surface, the view selecting the slice) and samples them
 // as 3D textures. The render target must be a volume whose slices are attachments, and the sampled
@@ -1531,6 +1549,7 @@ int renderer_smoke_test() {
    fprintf(stderr,"[renderer smoke] queued GPU PNG capture passed: %s\n",capturePath.string().c_str());
    require(R.tv.swapchain!=VK_NULL_HANDLE,"smoke presentation did not create a swapchain");LOG("[renderer smoke] scan-buffer swapchain presentation and PNG readback passed");
    volume_target_check();
+   bloom_chain_size_check();
    completed_scan_retention_check();
   }
   // Ensure deferred objects left by readback and stack-owned images are actually reclaimed.
