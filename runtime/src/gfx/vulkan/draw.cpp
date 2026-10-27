@@ -2268,7 +2268,7 @@ bool resolve_targets(const uint32_t* r, vk::Shader* ps, DrawTargets& t) {
   const uint32_t eyeSize = stereo_eye_size_generation();
   const auto &lcr = *reinterpret_cast<const LatteContextRegister *>(r);
   auto mask = LatteMRT::GetActiveColorBufferMask(ps->dec, lcr);
-  const auto claim = ps->kind == gfx::ProgramKind::BloomChain ? gfx::TargetSize::Console : gfx::TargetSize::Internal;
+  const auto claim = gfx::size_request(ps->kind);
   for (int i = 0; i < 8; i++)
     if (mask & (1 << i))
       t.colors[i] = color_target(r, i, &t.slices[i], claim);

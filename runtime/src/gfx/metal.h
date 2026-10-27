@@ -117,13 +117,13 @@ struct SurfaceDesc {
     uint32_t addr = 0, mipAddr = 0, width = 0, height = 0, slices = 1, pitch = 0, mips = 1;
     uint32_t format = 0, dim = 1, tileMode = 0, swizzle = 0;
     bool isDepth = false;
-    gfx::TargetSize targetSize = gfx::TargetSize::Internal;  // the drawing pass's claim (Surface::sizeClaim)
+    gfx::SizeRequest sizeRequest;  // from the drawing pass (Surface::sizeClaim)
 };
 Surface* find_or_create_surface(const SurfaceDesc& d, bool forRendering);
 // render targets; `slice` receives the array slice the view renders to
-// (claim: the size the drawing pass needs, e.g. Console for gfx::ProgramKind::BloomChain)
+// (claim: what the drawing pass asks of its size, gfx::size_request)
 Surface* color_target(const uint32_t* regs, int index, uint32_t* slice = nullptr,
-                      gfx::TargetSize claim = gfx::TargetSize::Internal);  // from CB_COLOR* registers
+                      gfx::SizeRequest claim = {});  // from CB_COLOR* registers
 Surface* depth_target(const uint32_t* regs, uint32_t* slice = nullptr);             // from DB_DEPTH_* registers
 // from GX2ColorBuffer / GX2DepthBuffer structs; optional: the view's slice range
 Surface* surface_from_color_buffer(uint32_t gx2ColorBuffer, uint32_t* firstSlice = nullptr, uint32_t* numSlices = nullptr);

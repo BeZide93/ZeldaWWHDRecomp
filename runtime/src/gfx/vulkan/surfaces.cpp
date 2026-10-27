@@ -255,7 +255,7 @@ float nominal_height(const Surface* s) { return s ? float(s->extent.height) / s-
 // CB_COLORn_BASE holds the full guest address; CB_COLORn_TILE/FRAG hold width/height (our convention).
 constexpr uint32_t kDim2D = 1, kDim3D = 2, kDim2DArray = 5;
 
-Surface* color_target(const uint32_t* regs, int i, uint32_t* slice, gfx::TargetSize claim) {
+Surface* color_target(const uint32_t* regs, int i, uint32_t* slice, gfx::SizeRequest claim) {
     uint32_t base = regs[mmCB_COLOR0_BASE + i];
     if (!base) return nullptr;
     uint32_t size = regs[mmCB_COLOR0_SIZE + i], info = regs[mmCB_COLOR0_INFO + i];
@@ -285,7 +285,7 @@ Surface* color_target(const uint32_t* regs, int i, uint32_t* slice, gfx::TargetS
         volume = false;
     }
     d.dim = volume ? kDim3D : slices > 1 ? kDim2DArray : kDim2D;
-    d.targetSize = claim;
+    d.sizeRequest = claim;
     return find_or_create_surface(d, true);
 }
 
@@ -1437,7 +1437,7 @@ Surface* find_or_create_surface(const SurfaceDesc& d,bool forRendering) {
         bool sameVolume=(s->imageType==VK_IMAGE_TYPE_3D)==(dimType(d.dim)==VK_IMAGE_TYPE_3D);
         if(s->width==d.width&&s->height==d.height&&s->format==d.format&&s->slices==d.slices&&sameVolume&&
            (forRendering||s->mips>=d.mips||s->gpuWritten)) {
-            if(forRendering) { s->sizeClaim.request(d.targetSize,R.frame); return adopt_newer_alias(rescale(s)); }
+            if(forRendering) { s->sizeClaim.request(d.sizeRequest,R.frame); return adopt_newer_alias(rescale(s)); }
             if(!exact||s->writeSeq>exact->writeSeq)exact=s;
         } else if(!forRendering&&s->gpuWritten&&(s->format&0x3f)==(d.format&0x3f))consider(s);
     }
@@ -1448,7 +1448,7 @@ Surface* find_or_create_surface(const SurfaceDesc& d,bool forRendering) {
     s->slices=std::max(d.slices,1u);s->pitch=d.pitch;s->mips=forRendering?1:std::max(d.mips,1u);
     s->format=d.format;s->dim=d.dim;s->tileMode=d.tileMode;s->swizzle=d.swizzle;s->isDepth=d.isDepth;
     s->fmt=d.isDepth&&!forRendering?comparison_format_info(d.format):format_info(d.format,d.isDepth);
-    if(forRendering)s->sizeClaim.request(d.targetSize,R.frame);
+    if(forRendering)s->sizeClaim.request(d.sizeRequest,R.frame);
     create_surface_image(s.get(),forRendering);
     auto* raw=s.get();cache.emplace(d.addr,std::move(s));++g_surface_epoch;++g_surface_set_gen;
     // format views of one guest surface (adopt_newer_alias): flag them once, so lookups stay cheap

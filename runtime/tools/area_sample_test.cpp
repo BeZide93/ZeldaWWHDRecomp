@@ -190,7 +190,9 @@ void test_classification() {
     assert(pixel_program(nullptr, 2112).units == 0);
     assert(gfx::program_kind(zeros, 656, false) == gfx::ProgramKind::Other);  // the bloom chain's sizes
     assert(gfx::program_kind(zeros, 768, false) == gfx::ProgramKind::Other);
+    assert(gfx::program_kind(zeros, 416, false) == gfx::ProgramKind::Other);  // the chain's helpers' size
     assert(gfx::program_kind(nullptr, 768, false) == gfx::ProgramKind::Other);
+    assert(gfx::size_request(gfx::ProgramKind::BloomHelper).claim == gfx::TargetSize::Internal);  // never claims
 }
 }  // namespace
 

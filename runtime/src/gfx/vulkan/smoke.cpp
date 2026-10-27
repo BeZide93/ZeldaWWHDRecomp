@@ -472,19 +472,28 @@ void depth_copy_check() {
 }
 // The bloom chain's targets keep the console's size (issue #307) while the chain draws them, also
 // through the other passes into its levels; a target the game later puts at the same address gets
-// the internal resolution once the chain has left it.
+// the internal resolution once the chain has left it. After the chain has been idle (the pause
+// menu), its helper pass drawing a level first keeps the level as it is.
 void bloom_chain_size_check() {
  set_res_scale(2);latch_res_scale();
+ const gfx::SizeRequest chain=gfx::size_request(gfx::ProgramKind::BloomChain),
+                        helper=gfx::size_request(gfx::ProgramKind::BloomHelper);
  SurfaceDesc d;d.addr=mem::host_alloc(60*40*4,256);d.width=60;d.height=33;d.pitch=64;d.format=0x1A;d.dim=1;d.slices=1;
- d.targetSize=gfx::TargetSize::Console;Surface* level=find_or_create_surface(d,true);
+ d.sizeRequest=chain;Surface* level=find_or_create_surface(d,true);
  require(level&&level->extent.width==60&&level->extent.height==33,"bloom chain level is not at the console's size");
- d.targetSize=gfx::TargetSize::Internal;
+ d.sizeRequest={};
  require(find_or_create_surface(d,true)==level&&level->extent.width==60,"a pass between the chain's levels rescaled a level");
  R.frame+=gfx::SizeClaim::kIdleFrames+1;
  require(find_or_create_surface(d,true)==level&&level->extent.width==120&&level->extent.height==66,
          "a target at a level's address the chain has left kept the console's size");
- d.targetSize=gfx::TargetSize::Console;
+ d.sizeRequest=chain;
  require(find_or_create_surface(d,true)==level&&level->extent.width==60,"the chain's next draw did not restore the console's size");
+ const VkImage image=level->image;
+ R.frame+=80;
+ d.sizeRequest=helper;
+ require(find_or_create_surface(d,true)==level&&level->image==image,"the chain's helper pass after an idle chain resized a level");
+ d.sizeRequest={};
+ require(find_or_create_surface(d,true)==level&&level->image==image,"the helper pass did not renew the chain's claim");
  set_res_scale(1);latch_res_scale();
  fprintf(stderr,"[renderer smoke] bloom chain targets keep the console's size until the chain leaves them\n");
 }

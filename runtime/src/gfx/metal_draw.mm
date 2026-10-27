@@ -2192,7 +2192,7 @@ void draw(const uint32_t* regs, uint32_t prim, uint32_t count, uint32_t indexTyp
     uint8_t mask = LatteMRT::GetActiveColorBufferMask(ps->dec, lcr);
     Surface* colors[8] = {};
     uint32_t colorSlices[8] = {}, depthSlice = 0;
-    const auto claim = ps->kind == gfx::ProgramKind::BloomChain ? gfx::TargetSize::Console : gfx::TargetSize::Internal;
+    const auto claim = gfx::size_request(ps->kind);
     for (int i = 0; i < 8; i++)
         if (mask & (1 << i)) colors[i] = color_target(regs, i, &colorSlices[i], claim);
     Surface* depth = LatteMRT::GetActiveDepthBufferMask(lcr) ? depth_target(regs, &depthSlice) : nullptr;

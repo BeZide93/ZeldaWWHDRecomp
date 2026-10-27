@@ -62,7 +62,7 @@ struct Surface {
  std::vector<std::shared_ptr<Surface>> spares;
 };
 struct SurfaceDesc { uint32_t addr=0,mipAddr=0,width=0,height=0,slices=1,pitch=0,mips=1,format=0,dim=1,tileMode=0,swizzle=0; bool isDepth=false;
-                     gfx::TargetSize targetSize=gfx::TargetSize::Internal; /* the drawing pass's claim (Surface::sizeClaim) */ };
+                     gfx::SizeRequest sizeRequest; /* from the drawing pass (Surface::sizeClaim) */ };
 struct Screen {
 #ifdef WWHD_SDL_HOST
  std::atomic<SDL_Window*> window{nullptr};
@@ -305,7 +305,7 @@ VkImageView make_sampled_view(Surface*,uint32_t key); // a sampled view by its k
 void touch_image(Surface*); // dynamic resolution: clear an image made ahead once (surfaces.cpp)
 VkImageView sampled_texture_view(Surface*,const uint32_t* texWords);
 Surface* find_or_create_surface(const SurfaceDesc&,bool forRendering);
-Surface* color_target(const uint32_t*,int,uint32_t* slice=nullptr,gfx::TargetSize claim=gfx::TargetSize::Internal);
+Surface* color_target(const uint32_t*,int,uint32_t* slice=nullptr,gfx::SizeRequest claim={});
 Surface* depth_target(const uint32_t*,uint32_t* slice=nullptr);
 Surface* surface_from_color_buffer(uint32_t,uint32_t* firstSlice=nullptr,uint32_t* numSlices=nullptr);
 Surface* surface_from_depth_buffer(uint32_t,uint32_t* firstSlice=nullptr,uint32_t* numSlices=nullptr);
