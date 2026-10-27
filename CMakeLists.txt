@@ -583,6 +583,11 @@ add_executable(target_draw_history_test runtime/tools/target_draw_history_test.c
 target_include_directories(target_draw_history_test PRIVATE runtime/src)
 target_compile_options(target_draw_history_test PRIVATE -UNDEBUG)
 add_test(NAME target_draw_history COMMAND target_draw_history_test)
+# render targets kept at another size while a pass claims them (runtime/src/gfx/target_size.h, issue #307)
+add_executable(target_size_test runtime/tools/target_size_test.cpp)
+target_include_directories(target_size_test PRIVATE runtime/src)
+target_compile_options(target_size_test PRIVATE -UNDEBUG)
+add_test(NAME target_size COMMAND target_size_test)
 
 add_executable(headless_compose_test runtime/tools/headless_compose_test.cpp)
 target_include_directories(headless_compose_test PRIVATE runtime/src)

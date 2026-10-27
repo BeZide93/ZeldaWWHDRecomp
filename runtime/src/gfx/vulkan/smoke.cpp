@@ -476,14 +476,14 @@ void depth_copy_check() {
 void bloom_chain_size_check() {
  set_res_scale(2);latch_res_scale();
  SurfaceDesc d;d.addr=mem::host_alloc(60*40*4,256);d.width=60;d.height=33;d.pitch=64;d.format=0x1A;d.dim=1;d.slices=1;
- d.guestSized=true;Surface* level=find_or_create_surface(d,true);
+ d.targetSize=gfx::TargetSize::Console;Surface* level=find_or_create_surface(d,true);
  require(level&&level->extent.width==60&&level->extent.height==33,"bloom chain level is not at the console's size");
- d.guestSized=false;
+ d.targetSize=gfx::TargetSize::Internal;
  require(find_or_create_surface(d,true)==level&&level->extent.width==60,"a pass between the chain's levels rescaled a level");
- R.frame+=11;
+ R.frame+=gfx::SizeClaim::kIdleFrames+1;
  require(find_or_create_surface(d,true)==level&&level->extent.width==120&&level->extent.height==66,
          "a target at a level's address the chain has left kept the console's size");
- d.guestSized=true;
+ d.targetSize=gfx::TargetSize::Console;
  require(find_or_create_surface(d,true)==level&&level->extent.width==60,"the chain's next draw did not restore the console's size");
  set_res_scale(1);latch_res_scale();
  fprintf(stderr,"[renderer smoke] bloom chain targets keep the console's size until the chain leaves them\n");
