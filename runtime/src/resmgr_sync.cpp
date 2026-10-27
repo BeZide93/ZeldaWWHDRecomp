@@ -26,16 +26,21 @@
 #include <chrono>
 #include <cstdlib>
 #include <string>
+#include <mutex>
+#include <set>
 #include <thread>
 
 #include "guest_addr.h"
 #include "runtime.h"
 #include "interp.h"
+#include "resmgr_fit.h"
 
 extern "C" void f_02613394_orig(Cpu* c);
 extern "C" void f_0260C67C_orig(Cpu* c);
 extern "C" void f_0275F808_orig(Cpu* c);
 extern "C" void f_0260C74C_orig(Cpu* c);
+extern "C" void f_02612E64_orig(Cpu* c);
+extern "C" void f_02610258_orig(Cpu* c);
 
 namespace {
 constexpr uint32_t kRequestState = 0x11248;  // 1 request, 2 permanent packs, 0 idle
@@ -112,4 +117,75 @@ extern "C" void hook_0260C74C(Cpu* c) {
     static const bool every_frame = getenv("WWHD_INTERP_LOAD_STEP") && !atoi(getenv("WWHD_INTERP_LOAD_STEP"));
     if (!every_frame && interp::frame_is_hold()) return;
     f_0260C74C_orig(c);
+}
+
+// ---------------------------------------------------------------- an archive from a pack fits its heap (resmgr_fit.h)
+// Test only: WWHD_TEST_RESMGR_REFUSE=name[,name...] refuses those archives as if their heap were full (the refusal's
+// path through the game, without filling a heap first).
+namespace {
+bool test_refused(const std::string& name) {
+    static const std::string list = [] { const char* e = getenv("WWHD_TEST_RESMGR_REFUSE"); return e ? "," + std::string(e) + "," : std::string(); }();
+    return !list.empty() && list.find("," + name + ",") != std::string::npos;
+}
+// ResMgr_loadArchive / ResMgr_loadFromPack (self, name, path, heap): false when the archive is in a loaded pack, not
+// loaded yet, and the heap can't hold the game's copy of it
+bool pack_archive_fits(Cpu* c, const char* who) {
+    // heap 0: the load task could not make the request's heap (its parent is full); the game's allocations then take
+    // the thread's current heap, and so does the probe
+    const uint32_t self = c->r[3], name = c->r[4], heap = c->r[6];
+    if (!self || !name) return true;  // the game's own path
+    const Cpu keep = *c;
+    // loaded already: the game returns at once
+    if (guest_call(c, GC(0x02613F20), {self + 0x14, ld32(self + 0x14), name})) return *c = keep, true;
+    // the pack entry, found as the game finds it: its name's hash (the C string up to 0x40000 characters)
+    const uint32_t text = ld32(name);
+    if (!text) return *c = keep, true;
+    uint32_t length = 0;
+    while (length <= 0x40000 && ld8(text + length)) ++length;
+    if (length > 0x40000) length = 0;
+    const uint32_t hash = guest_call(c, GC(0x0273B264), {text, length});
+    const uint32_t sp = c->r[1];
+    c->r[1] = sp - 0x20;  // a frame of our own for the key
+    st32(c->r[1], sp);
+    const uint32_t key = c->r[1] + 0x10;
+    st32(key, hash);
+    const uint32_t node = guest_call(c, GC(0x0260ACC8), {self + 0xD228, ld32(self + 0xD228), key});
+    c->r[1] = sp;
+    if (!node) return *c = keep, true;  // not in a pack: the file system path, which checks its allocations
+    const uint32_t holder = ld32(node + 0x18), resource = holder ? ld32(holder + 0x4C) : 0;
+    if (!resource) return *c = keep, true;
+    const uint32_t size = guest_call(c, GC(0x0275F800), {resource});
+    const std::string archive = mem::read_cstr(text);
+    resmgr_fit::Fit fit = resmgr_fit::Fit::NoBuffer;
+    if (!test_refused(archive))
+        fit = resmgr_fit::probe([&](uint32_t bytes, uint32_t h, uint32_t align) { return guest_call(c, GC(0x0273B0D4), {bytes, h, align}); },
+                                [&](uint32_t address) { guest_call(c, GC(0x0273AFC8), {address}); }, heap, size);
+    *c = keep;
+    if (fit == resmgr_fit::Fit::Fits) return true;
+    static std::mutex said_mu;
+    static std::set<std::string> said;
+    std::lock_guard lk(said_mu);
+    if (said.insert(archive).second)
+        LOG("[resmgr] %s: archive %s (%u bytes) is not loaded: its heap %08X is full (%s)%s; what uses it is not created", who, archive.c_str(), size,
+            heap, resmgr_fit::name(fit), test_refused(archive) ? " [test]" : "");
+    return false;
+}
+}  // namespace
+
+// ResMgr_loadArchive (self, name, path, heap, compressed, align, buffer align): 0 when it is not loaded
+extern "C" void hook_02612E64(Cpu* c) {
+    if (!pack_archive_fits(c, "load")) {
+        c->r[3] = 0;
+        return;
+    }
+    f_02612E64_orig(c);
+}
+
+// ResMgr_loadFromPack (self, name, path, heap): 0 when it is not loaded
+extern "C" void hook_02610258(Cpu* c) {
+    if (!pack_archive_fits(c, "load from pack")) {
+        c->r[3] = 0;
+        return;
+    }
+    f_02610258_orig(c);
 }

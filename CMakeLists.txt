@@ -1674,6 +1674,11 @@ add_executable(story_enemy_children_integration_test runtime/tools/story_enemy_c
 target_include_directories(story_enemy_children_integration_test PRIVATE runtime/include runtime/src)
 target_compile_options(story_enemy_children_integration_test PRIVATE -UNDEBUG)
 add_test(NAME story_enemy_children_integration COMMAND story_enemy_children_integration_test)
+add_executable(resmgr_fit_test runtime/tools/resmgr_fit_test.cpp)
+target_include_directories(resmgr_fit_test PRIVATE runtime/src)
+target_compile_options(resmgr_fit_test PRIVATE -UNDEBUG)
+add_test(NAME resmgr_fit COMMAND resmgr_fit_test)
+
 add_executable(guest_heap_query_test runtime/tools/guest_heap_query_test.cpp)
 target_include_directories(guest_heap_query_test PRIVATE runtime/include runtime/src)
 target_compile_options(guest_heap_query_test PRIVATE -UNDEBUG)
