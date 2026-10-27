@@ -4160,9 +4160,9 @@ void LatteDecompiler_emitMSLShader(LatteDecompilerShaderContext* shaderContext, 
 	}
 	for(sint32 i=0; i<LATTE_NUM_MAX_TEX_UNITS; i++)
 	{
-		if(!shaderContext->output->textureUnitMask[i])
-			continue;
-		if( shader->textureUnitDim[i] != Latte::E_DIM::DIM_CUBEMAP )
+		// WWHD: also for a unit whose index a SET_CUBEMAP_INDEX sets while the bound texture is no cube map
+		const bool sampledCube = shaderContext->output->textureUnitMask[i] && shader->textureUnitDim[i] == Latte::E_DIM::DIM_CUBEMAP;
+		if (!sampledCube && !shaderContext->analyzer.texUnitSetsCubeMapIndex.test(i))
 			continue;
 		src->addFmt("float cubeMapArrayIndex{} = 0.0;" _CRLF, i);
 	}
