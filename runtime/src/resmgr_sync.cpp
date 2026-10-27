@@ -42,6 +42,7 @@ extern "C" void f_0275F808_orig(Cpu* c);
 extern "C" void f_0260C74C_orig(Cpu* c);
 extern "C" void f_02612E64_orig(Cpu* c);
 extern "C" void f_02610258_orig(Cpu* c);
+extern "C" void f_02520460_orig(Cpu* c);
 
 namespace {
 constexpr uint32_t kRequestState = 0x11248;  // 1 request, 2 permanent packs, 0 idle
@@ -124,6 +125,10 @@ extern "C" void hook_0260C74C(Cpu* c) {
 // Test only: WWHD_TEST_RESMGR_REFUSE=name[,name...] refuses those archives as if their heap were full (the refusal's
 // path through the game, without filling a heap first).
 namespace {
+// archives the check below refused, until a later load of the same name fits (ResMgrThread writes, the game's
+// actors read: dComIfG_resLoad below)
+std::mutex g_refused_mu;
+std::set<std::string> g_refused;
 bool test_refused(const std::string& name) {
     static const std::string list = [] { const char* e = getenv("WWHD_TEST_RESMGR_REFUSE"); return e ? "," + std::string(e) + "," : std::string(); }();
     return !list.empty() && list.find("," + name + ",") != std::string::npos;
@@ -184,10 +189,13 @@ bool pack_archive_fits(Cpu* c, const char* who) {
                        frame ? " (frame heap)" : "", before, guest_heap::free_size(c, owner, guest_call), resmgr_fit::name(fit));
     }
     *c = keep;
-    if (fit == resmgr_fit::Fit::Fits) return true;
-    static std::mutex said_mu;
+    std::lock_guard lk(g_refused_mu);
+    if (fit == resmgr_fit::Fit::Fits) {
+        g_refused.erase(archive);
+        return true;
+    }
+    g_refused.insert(archive);
     static std::set<std::string> said;
-    std::lock_guard lk(said_mu);
     if (said.insert(archive).second)
         LOG("[resmgr] %s: archive %s (%u bytes) is not loaded: its heap %08X is full (%s)%s; what uses it is not created", who, archive.c_str(), size,
             heap, resmgr_fit::name(fit), test_refused(archive) ? " [test]" : "");
@@ -211,4 +219,49 @@ extern "C" void hook_02610258(Cpu* c) {
         return;
     }
     f_02610258_orig(c);
+}
+
+// dComIfG_resLoad (phase, archive name): 4 when the archive is loaded, 5 on an error. The load task's request
+// "completes" also when the check above refused its archive: the phase is then done (id 2) without an archive in
+// the resource table (ResourceControlHD 101F4F28, archives at +0x14), and a game actor went on to its heap and
+// asserted on a missing model ("model_data != 0", OSPanic), and its delete (dComIfG_resDelete -> deleteRes 02607138)
+// would read the missing table node. For an archive refused here, the phase fails instead, as for a missing
+// archive: the request's reference on the load task (ResLoadTask 101F4F54, its reference tree +0xE0, a node's count
+// +0x18) is given back (on the last one the request's id is forgotten, 0260F61C, as deleteRes does), the phase goes
+// back to 0 so dComIfG_resDelete releases nothing, and the actor's create gets 5 and is not made. A later create
+// requests the archive anew.
+extern "C" void hook_02520460(Cpu* c) {
+    const uint32_t phase = c->r[3], name = c->r[4];
+    f_02520460_orig(c);
+    if (c->r[3] != 4 || !phase || !name || ld32(phase + 4) != 2) return;
+    const std::string archive = mem::read_cstr(name);
+    {
+        std::lock_guard lk(g_refused_mu);
+        if (!g_refused.count(archive)) return;
+    }
+    const Cpu keep = *c;
+    const uint32_t hash = guest_call(c, GC(0x0273B264), {name, uint32_t(archive.size())});
+    const uint32_t sp = c->r[1];
+    c->r[1] = sp - 0x20;  // a frame of our own for the key
+    st32(c->r[1], sp);
+    const uint32_t key = c->r[1] + 0x10;
+    st32(key, hash);
+    const uint32_t control = ld32(GD(0x101F4F28));
+    const bool mounted = control && guest_call(c, GC(0x0260ACC8), {control + 0x14, ld32(control + 0x14), key});
+    if (!mounted) {
+        const uint32_t task = ld32(GD(0x101F4F54));
+        if (const uint32_t node = task ? guest_call(c, GC(0x0260ACC8), {task + 0xE0, ld32(task + 0xE0), key}) : 0) {
+            const uint32_t count = ld32(node + 0x18);
+            if (count > 1) st32(node + 0x18, count - 1);
+            else guest_call(c, GC(0x0260F61C), {task, hash});
+        }
+    }
+    c->r[1] = sp;
+    *c = keep;
+    if (mounted) return;
+    st32(phase + 4, 0);
+    c->r[3] = 5;
+    static std::set<std::string> said;
+    std::lock_guard lk(g_refused_mu);
+    if (said.insert(archive).second) LOG("[resmgr] %s was refused: what loads it is not created", archive.c_str());
 }
