@@ -156,8 +156,10 @@ static void prepare_ao_neighbours(const Surface& dst, const Surface* like) {
 Surface* private_ao_surface(Surface& dst, const Surface* like) {
   const uint64_t logicalWidth = uint64_t(like->width) * 3 / 2;
   const uint64_t logicalHeight = uint64_t(like->height) * 3 / 2;
-  const uint64_t physicalWidth = uint64_t(like->extent.width) * 3 / 2;
-  const uint64_t physicalHeight = uint64_t(like->extent.height) * 3 / 2;
+  // Full-size torchlight doubles the depth copy (target_scale): the private image keeps the AO pass's size
+  const uint64_t light = like->sizeClaim.size == gfx::TargetSize::Light && render::full_light() ? 2 : 1;
+  const uint64_t physicalWidth = uint64_t(like->extent.width) * 3 / (2 * light);
+  const uint64_t physicalHeight = uint64_t(like->extent.height) * 3 / (2 * light);
   const auto limit = R.properties.limits.maxImageDimension2D;
   if (!logicalWidth || !logicalHeight || logicalWidth > UINT32_MAX ||
       logicalHeight > UINT32_MAX || !physicalWidth || !physicalHeight ||
@@ -2720,6 +2722,10 @@ StageResources bind_stage(const uint32_t *r, vk::Shader *sh,
       continue;
     bool substituted = false;
     Surface* s = resolve_texture(r, sh, unit, &substituted);
+    // the point-light passes read the buffer's depth copy on unit 0: they claim the buffer's size for it,
+    // which it gets from the next time it is drawn (target_scale)
+    if (sh->kind == gfx::ProgramKind::PointLight && unit == 0 && s && s->gpuWritten && !substituted)
+      s->sizeClaim.request(gfx::size_request(sh->kind), R.frame);
     bool aliases = aliases_target(s, colors, depth);
     int scaleOffset = sh->uniforms.offset_texScale[unit];
     if (scaleOffset >= 0 && size_t(scaleOffset) + 8 <= supportUniforms.size()) {
