@@ -270,13 +270,14 @@ int face_group(std::string_view name) {
 struct Point { float x, y; };
 
 // The button centres in their common parent's coordinates, from authored locals, not cached
-// global matrices (which may already contain last frame's Xbox placement). A/X/Y pictures are
-// children of different containers. Include those containers' animated scale and Z rotation.
+// global matrices (which may already contain last frame's Xbox placement), and never another
+// thread's moved group. A/X/Y pictures are children of different containers. Include those
+// containers' animated scale and Z rotation.
 Point button_centre(uint32_t group, uint32_t picture) {
-    Point p{(float)ldf32(group + 0x1C), (float)ldf32(group + 0x20)};
+    Point p{shared_patch::authored_float(group + 0x1C), shared_patch::authored_float(group + 0x20)};
     if (picture != group) {
-        const float x = (float)ldf32(picture + 0x1C) * (float)ldf32(group + 0x34);
-        const float y = (float)ldf32(picture + 0x20) * (float)ldf32(group + 0x38);
+        const float x = shared_patch::authored_float(picture + 0x1C) * (float)ldf32(group + 0x34);
+        const float y = shared_patch::authored_float(picture + 0x20) * (float)ldf32(group + 0x38);
         const float angle = (float)ldf32(group + 0x30) * 0.01745329252f;
         p.x += std::cos(angle) * x - std::sin(angle) * y;
         p.y += std::sin(angle) * x + std::cos(angle) * y;
@@ -353,14 +354,14 @@ void button_glyphs::calculate_pane(Cpu* c, PpcFunc calculate) {
     }
     const float dx = to.x - from.x, dy = to.y - from.y;
     if (!std::isfinite(dx) || !std::isfinite(dy)) return calculate(c);
-    const float x = (float)ldf32(pane + 0x1C), y = (float)ldf32(pane + 0x20);
-    stf32(pane + 0x1C, x + dx);
-    stf32(pane + 0x20, y + dy);
-    calculate(c);
     // Animation/gameplay still own the local positions. Only the resulting global matrices
-    // retain the rearrangement, matching how the aspect hook handles temporary anchoring.
-    stf32(pane + 0x1C, x);
-    stf32(pane + 0x20, y);
+    // retain the rearrangement; the move is held (shared_patch: two threads can calculate the
+    // same cluster, #326) only while the pane's tree is calculated.
+    std::vector<shared_patch::Held> held;
+    shared_patch::hold_offset(held, pane + 0x1C, dx);
+    shared_patch::hold_offset(held, pane + 0x20, dy);
+    calculate(c);
+    shared_patch::release(held);
 }
 
 namespace {

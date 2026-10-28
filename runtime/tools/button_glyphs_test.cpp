@@ -1265,17 +1265,26 @@ void shared_patch_test() {
     }
 }
 
-// #326 end to end: two threads draw the same Xbox-tinted picture at once, as the item screen does
-// in "play on GamePad" mode. Every draw must see exactly one tint, and nothing may stay behind:
-// the plain save and restore made the tint permanent, darker each time.
+// #326 end to end: two threads draw the same Xbox-tinted picture and calculate the same moved HUD
+// cluster at once, as the item screen does in "play on GamePad" mode. Every draw must see exactly
+// one tint, and nothing may stay behind: the plain save and restore made the tint permanent,
+// darker each time, and could leave a face group moved for good.
 void concurrent_draw_test() {
     layout(input_map::FaceLayout::kLabels);
-    assert(expect_tint);
+    assert(expect_tint && expect_xbox);
     constexpr uint32_t slot = base + 0x9400;
     std::memset(mem::ptr(slot), 0, 0xC0);
     std::strcpy((char*)mem::ptr(slot + 0x80), "P_Y_00");
     picture_face = 3;
     for (uint32_t i = 0; i < 4; i++) st32(slot + 0xA8 + i * 4, corners[i]);
+    aspect::set_mode(aspect::kOriginal);
+    aspect::on_swap();
+    build_cluster();
+    calculate(true);
+    std::array<Point, 4> drawn;
+    std::array<std::array<uint32_t, 2>, 5> locals;
+    for (int i = 0; i < 4; ++i) drawn[i] = position(face_panes[i]);
+    for (int i = 0; i < 5; ++i) locals[i] = {ld32(groups[i] + 0x1C), ld32(groups[i] + 0x20)};
     const unsigned draws_before = picture_draws;
     yield_in_draw = true;
     auto work = [] {
@@ -1283,6 +1292,7 @@ void concurrent_draw_test() {
             Cpu c{};
             c.r[3] = slot;
             hook_02874D54(&c);  // the stub checks the colours it is drawn with
+            calculate(true);
         }
     };
     std::thread main_pass(work), worker_pass(work);
@@ -1291,6 +1301,9 @@ void concurrent_draw_test() {
     yield_in_draw = false;
     assert(picture_draws == draws_before + 8000);
     for (uint32_t i = 0; i < 4; i++) assert(ld32(slot + 0xA8 + i * 4) == corners[i]);
+    for (int i = 0; i < 5; ++i) assert(ld32(groups[i] + 0x1C) == locals[i][0] && ld32(groups[i] + 0x20) == locals[i][1]);
+    calculate(true);
+    for (int i = 0; i < 4; ++i) same_point(position(face_panes[i]), drawn[i]);
     layout(input_map::FaceLayout::kPosition);
 }
 
