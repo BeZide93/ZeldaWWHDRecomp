@@ -131,7 +131,7 @@ or **Off**. It is off for controllers by default because of that short wait on e
 is **paused** (the game's own short pause, as when a strong hit lands; the music plays on).
 
 **Item button names**: X Y R, A1 A2 A3, or **Automatic** (default: A1, A2, A3 while you play by touch).
-The ring shows them; the game's own HUD keeps its letters for now.
+The ring, the game's HUD buttons and the GamePad's item slots show them.
 
 ## Controllers while the game isn't focused
 

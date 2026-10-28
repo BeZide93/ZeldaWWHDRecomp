@@ -2258,8 +2258,8 @@ void item_ring_rows() {
          "(the game's own pause, as when a strong hit lands).");
     ImGui::EndDisabled();
     row("Item button names", mods::item_button_names(), {"X Y R", "A1 A2 A3", "Automatic"}, mods::set_item_button_names);
-    help("How the item ring names the item buttons. Automatic (default): A1, A2, A3 while you play by touch, "
-         "else X, Y, R as in the game.");
+    help("The item buttons' names in the item ring, on the game's HUD and the GamePad's item slots. Automatic "
+         "(default): A1, A2, A3 while you play by touch, else X, Y, R as in the game.");
     ImGui::PopID();
 }
 

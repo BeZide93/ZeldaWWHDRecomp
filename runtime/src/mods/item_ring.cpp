@@ -241,6 +241,10 @@ void set_item_ring_pace(int p) { g_pace.set(p); }
 int item_button_names() { return g_names.get(); }
 void set_item_button_names(int n) { g_names.set(n); }
 const char* item_button_name(int button) { return button_name(button, g_names.get(), playing_by_touch()); }
+bool item_names_on_hud() {
+    const int n = g_names.get();
+    return n == kNamesA123 || (n == kNamesAuto && playing_by_touch());
+}
 
 // ---- the pad reads (game thread) ----
 void item_ring_pad(input::PadState& p, bool repeat) {

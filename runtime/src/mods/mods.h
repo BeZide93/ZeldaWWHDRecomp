@@ -145,6 +145,7 @@ void set_item_ring_pace(int pace);
 int item_button_names();         // item_ring::Names: 0 X Y R, 1 A1 A2 A3, 2 auto (default)
 void set_item_button_names(int names);
 const char* item_button_name(int button);  // as the names are now: "X" or "A1" ...
+bool item_names_on_hud();                  // A1 A2 A3 now: the HUD's X, Y and R show them (button_glyphs.cpp)
 bool story_system();                      // letters, quests, the story notebook, mod charts (mods/required.h)
 void set_story_system(bool on);
 void set_auto_wind(bool on);
