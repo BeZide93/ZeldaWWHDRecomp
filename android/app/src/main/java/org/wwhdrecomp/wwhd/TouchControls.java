@@ -36,11 +36,22 @@ public class TouchControls extends View implements InputManager.InputDeviceListe
     private static native void nativeScreenDpi(float dpi);
     private static native void nativeRevealButtons();
     private static native void nativeShowControls(boolean shown);
+    // Jump anywhere and the moon jump (P6; idea from the GreenNaugahyde Android fork): buttons of their own
+    // that never press the game's L. Which show (bit 0 Jump, bit 1 Moon jump: hidden in water, cutscenes,
+    // talks, menus, the Picto Box and the telescope) is decided natively from the game's state
+    // (mods/context_buttons.h jump_buttons); their presses go in as virtual inputs.
+    private static native int nativeJumpButtons();
+    private static native void nativeSetVirtual(int bits);
+    // a real game controller connected (ControllerHintPolicy): native code offers it the controller setup
+    // on its first press
+    private static native void nativeControllerSetupOffer();
 
     // SDL_GamepadButton numbers
     private static final int BACK = 4, START = 6,
             LEFT_SHOULDER = 9, RIGHT_SHOULDER = 10, DPAD_UP = 11, DPAD_DOWN = 12, DPAD_LEFT = 13, DPAD_RIGHT = 14;
-    private static final int KIND_BUTTON = 0, KIND_STICK = 1, KIND_TRIGGER = 2, KIND_TOGGLE = 3, KIND_FACE = 4;
+    private static final int KIND_BUTTON = 0, KIND_STICK = 1, KIND_TRIGGER = 2, KIND_TOGGLE = 3, KIND_FACE = 4,
+            KIND_VIRTUAL = 5;  // code: the virtual input bit (VIRT_JUMP, VIRT_MOON)
+    private static final int VIRT_JUMP = 1, VIRT_MOON = 2;
     // KIND_FACE codes: the Wii U button drawn on it (touch_face.h sends the pad button the controls
     // mapping binds to it, so the drawn A is the Wii U's A with either face-button preset)
     private static final int FACE_A = 0, FACE_B = 1, FACE_X = 2, FACE_Y = 3;
@@ -78,14 +89,15 @@ public class TouchControls extends View implements InputManager.InputDeviceListe
     private boolean controller; // a game controller is connected and no touch came since
     private boolean buttonsVisible = true, revealGesture, settingsOpen;
     private boolean toggleTo;   // what the show/hide button sets when released (shown before the touch: hide)
-    private int lastButtons = -1, lastTouchDevice;
+    private int lastButtons = -1, lastTouchDevice, lastVirtual = -1;
+    private int jumpShown;  // nativeJumpButtons: the virtual buttons that show now
     private float lastLx, lastLy, lastRx, lastRy, lastLt, lastRt;
 
     public TouchControls(Context context) {
         super(context);
         prefs = context.getSharedPreferences("controls", Context.MODE_PRIVATE);
         shown = prefs.getBoolean("touch_controls", true);
-        hintPolicy = new ControllerHintPolicy(prefs.getBoolean("settings_shortcut_hint_shown", false));
+        hintPolicy = new ControllerHintPolicy();
         inputs = (InputManager) context.getSystemService(Context.INPUT_SERVICE);
         if (inputs != null) {
             inputs.registerInputDeviceListener(this, null);
@@ -112,6 +124,8 @@ public class TouchControls extends View implements InputManager.InputDeviceListe
         controls.add(new Control(KIND_TRIGGER, 1, "ZR", 0.81f, 0.15f, 0.05f));
         controls.add(new Control(KIND_BUTTON, BACK, "−", 0.42f, 0.92f, 0.04f));
         controls.add(new Control(KIND_BUTTON, START, "+", 0.58f, 0.92f, 0.04f));
+        controls.add(new Control(KIND_VIRTUAL, VIRT_JUMP, "Jump", 0.41f, 0.15f, 0.05f));
+        controls.add(new Control(KIND_VIRTUAL, VIRT_MOON, "Moon", 0.52f, 0.15f, 0.045f));
         toggle = new Control(KIND_TOGGLE, 0, "🎮", 0f, 0f, 0.04f);  // placed in onSizeChanged
         editLongPress = () -> {
             if (toggle.pressed && owner.size()==1 && !settingsOpen) {
@@ -127,7 +141,8 @@ public class TouchControls extends View implements InputManager.InputDeviceListe
         refresh = new Runnable() {
             @Override public void run() {
                 syncTouchState();
-                maybeShowHint();
+                announceControllers();
+                syncJumpButtons();
                 invalidate();
                 postDelayed(this, 100);
             }
@@ -144,7 +159,7 @@ public class TouchControls extends View implements InputManager.InputDeviceListe
         removeCallbacks(editLongPress);
         removeCallbacks(refresh);
         if (inputs != null) inputs.unregisterInputDeviceListener(this);
-        try { nativeDetachPad(); } catch (UnsatisfiedLinkError ignored) {}
+        try { nativeDetachPad(); nativeSetVirtual(0); } catch (UnsatisfiedLinkError ignored) {}
         super.onDetachedFromWindow();
     }
 
@@ -187,7 +202,7 @@ public class TouchControls extends View implements InputManager.InputDeviceListe
 
     @Override
     protected void onDraw(Canvas canvas) {
-        if (editor.editing() || active()) for (Control c : controls) drawControl(canvas, c);
+        if (editor.editing() || active()) for (Control c : controls) if (editor.editing() || visible(c)) drawControl(canvas, c);
         if (!editor.editing() && buttonsVisible && !settingsOpen) drawControl(canvas, toggle);
     }
 
@@ -203,7 +218,7 @@ public class TouchControls extends View implements InputManager.InputDeviceListe
             return;
         }
         text.setColor(0xE0FFFFFF);
-        text.setTextSize(c.r * 0.9f);
+        text.setTextSize(c.r * (c.label.length() > 2 ? 0.5f : 0.9f));  // "Jump", "Moon": smaller
         canvas.drawText(c.label, c.cx, c.cy - (text.descent() + text.ascent()) / 2, text);
     }
 
@@ -213,6 +228,7 @@ public class TouchControls extends View implements InputManager.InputDeviceListe
         Control best = null;
         float bestD = Float.MAX_VALUE;
         for (Control c : controls) {
+            if (!visible(c)) continue;
             float reach = c.kind == KIND_STICK ? 1.5f : 1.3f;
             float dx = x - c.cx, dy = y - c.cy, dd = (dx * dx + dy * dy) / (c.r * c.r);
             if (dd <= reach * reach && dd < bestD) { best = c; bestD = dd; }
@@ -339,8 +355,8 @@ public class TouchControls extends View implements InputManager.InputDeviceListe
             try { SDLActivity.onNativeTouch(lastTouchDevice,owner.keyAt(i),MotionEvent.ACTION_CANCEL,0,0,0); }
             catch (UnsatisfiedLinkError ignored) {}
         owner.clear();
-        try { nativeDetachPad(); } catch (UnsatisfiedLinkError ignored) {}
-        lastButtons=-1;
+        try { nativeDetachPad(); nativeSetVirtual(0); } catch (UnsatisfiedLinkError ignored) {}
+        lastButtons=-1; lastVirtual=-1;
     }
 
     private void beginEditing() {
@@ -430,7 +446,7 @@ public class TouchControls extends View implements InputManager.InputDeviceListe
         for (Control c : controls) { c.pressed = false; c.sx = 0; c.sy = 0; }
         for (int i = owner.size() - 1; i >= 0; i--) if (owner.valueAt(i) != null && owner.valueAt(i) != toggle) owner.removeAt(i);
         nativeShowControls(on);
-        if (!on) { nativeDetachPad(); lastButtons = -1; }
+        if (!on) { nativeDetachPad(); nativeSetVirtual(0); lastButtons = -1; lastVirtual = -1; }
     }
 
     // shown, and not hidden for a connected controller
@@ -456,33 +472,33 @@ public class TouchControls extends View implements InputManager.InputDeviceListe
                     owner.removeAt(i);
                 }
             }
-            nativeDetachPad(); lastButtons = -1;
+            nativeDetachPad(); nativeSetVirtual(0); lastButtons = -1; lastVirtual = -1;
             if (active()) update();
         } catch (UnsatisfiedLinkError ignored) { /* SDL has not loaded the native library yet. */ }
     }
 
-    private void maybeShowHint() {
-        if (!(getParent() instanceof android.widget.RelativeLayout) || !hintPolicy.claim(controller)) return;
-        final android.widget.RelativeLayout parent = (android.widget.RelativeLayout) getParent();
-        final android.widget.TextView hint = new android.widget.TextView(getContext());
-        boolean home = false;
-        if (inputs != null) for (int id : inputs.getInputDeviceIds()) {
+    // a Jump / Moon jump button shows only while its mod is on and it does something (native rules)
+    private boolean visible(Control c) { return c.kind != KIND_VIRTUAL || (jumpShown & c.code) != 0; }
+
+    private void syncJumpButtons() {
+        int shown;
+        try { shown = nativeJumpButtons(); } catch (UnsatisfiedLinkError e) { return; }
+        if (shown == jumpShown) return;
+        jumpShown = shown;
+        boolean released = false;
+        for (Control c : controls)
+            if (c.kind == KIND_VIRTUAL && !visible(c) && c.pressed) { c.pressed = false; released = true; }
+        if (released) update();
+    }
+
+    // each real game controller once per session: native code offers it the setup on its first press
+    private void announceControllers() {
+        if (inputs == null) return;
+        for (int id : inputs.getInputDeviceIds()) {
             InputDevice d = InputDevice.getDevice(id);
-            if (isController(d)) home |= d.hasKeys(android.view.KeyEvent.KEYCODE_BUTTON_MODE)[0];
+            if (d != null && hintPolicy.claim(d.getDescriptor(), isController(d)))
+                try { nativeControllerSetupOffer(); } catch (UnsatisfiedLinkError ignored) { return; }
         }
-        hint.setText(getContext().getString(home ? R.string.controller_settings_hint_home : R.string.controller_settings_hint));
-        hint.setTextSize(18); hint.setTextColor(0xFFFFFFFF); hint.setBackgroundColor(0xEE123340);
-        hint.setGravity(android.view.Gravity.CENTER);
-        final int pad = (int)(16 * getResources().getDisplayMetrics().density);
-        hint.setPadding(pad, pad, pad, pad);
-        android.widget.RelativeLayout.LayoutParams lp = new android.widget.RelativeLayout.LayoutParams(
-                android.view.ViewGroup.LayoutParams.MATCH_PARENT, android.view.ViewGroup.LayoutParams.WRAP_CONTENT);
-        lp.addRule(android.widget.RelativeLayout.ALIGN_PARENT_BOTTOM);
-        lp.setMargins(pad, pad, pad, pad);
-        parent.addView(hint, lp);
-        hint.setOnClickListener(v -> parent.removeView(hint));
-        hint.postDelayed(() -> parent.removeView(hint), 8000);
-        prefs.edit().putBoolean("settings_shortcut_hint_shown", true).apply();
     }
 
     private static boolean isController(InputDevice d) {
@@ -498,7 +514,7 @@ public class TouchControls extends View implements InputManager.InputDeviceListe
         controller = true;
         for (Control c : controls) { c.pressed = false; c.sx = 0; c.sy = 0; }
         for (int i = owner.size() - 1; i >= 0; i--) if (owner.valueAt(i) != null && owner.valueAt(i) != toggle) owner.removeAt(i);
-        if (shown) { nativeDetachPad(); lastButtons = -1; }
+        if (shown) { nativeDetachPad(); nativeSetVirtual(0); lastButtons = -1; lastVirtual = -1; }
         invalidate();
     }
     @Override public void onInputDeviceRemoved(int id) {
@@ -517,13 +533,17 @@ public class TouchControls extends View implements InputManager.InputDeviceListe
 
     private void update() {
         if (!active()) return;
-        int buttons = 0, face = 0;
+        int buttons = 0, face = 0, virt = 0;
         float lx = 0, ly = 0, rx = 0, ry = 0, lt = 0, rt = 0;
         for (Control c : controls) {
-            if (c.kind == KIND_BUTTON && c.pressed) buttons |= 1 << c.code;
+            if (c.kind == KIND_VIRTUAL && c.pressed && visible(c)) virt |= c.code;
+            else if (c.kind == KIND_BUTTON && c.pressed) buttons |= 1 << c.code;
             else if (c.kind == KIND_FACE && c.pressed) face |= 1 << c.code;
             else if (c.kind == KIND_TRIGGER && c.pressed) { if (c.code == 0) lt = 1; else rt = 1; }
             else if (c.kind == KIND_STICK) { if (c.code == 0) { lx = c.sx; ly = c.sy; } else { rx = c.sx; ry = c.sy; } }
+        }
+        if (virt != lastVirtual) {
+            try { nativeSetVirtual(virt); lastVirtual = virt; } catch (UnsatisfiedLinkError e) { lastVirtual = -1; }
         }
         buttons |= face << 16;  // (only for the change check below)
         if (buttons == lastButtons && lx == lastLx && ly == lastLy && rx == lastRx && ry == lastRy && lt == lastLt && rt == lastRt)

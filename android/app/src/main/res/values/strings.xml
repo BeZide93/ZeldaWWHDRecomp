@@ -78,8 +78,6 @@
     <string name="game_icon_present">The icon is already on the home screen. Hold it and open its settings.</string>
     <string name="game_icon_present_shortcut">The icon is already on the home screen. Hold it for the saves and setup.</string>
     <string name="game_icon_none">Set up the game first</string>
-    <string name="controller_settings_hint">Hold Select/− to open Settings</string>
-    <string name="controller_settings_hint_home">Hold Select/− or press Home to open Settings</string>
     <string name="touch_layout_access">Touch controls. Hold the controller button to edit the layout.</string>
     <string name="touch_layout_hint">Drag a control to move it. Select one, then change its size.</string>
     <string name="touch_layout_smaller">Size −</string>
