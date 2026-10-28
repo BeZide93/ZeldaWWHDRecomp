@@ -80,15 +80,3 @@ void start(Cpu* main) {
 }
 
 }  // namespace mainprof
-
-#ifdef _WIN32
-#include <windows.h>
-namespace mainprof {
-uint64_t own_cpu_ns_windows() {
-    FILETIME c, e, k, u;
-    if (!GetThreadTimes(GetCurrentThread(), &c, &e, &k, &u)) return 0;
-    auto v = [](FILETIME f) { return ((uint64_t)f.dwHighDateTime << 32 | f.dwLowDateTime) * 100; };
-    return v(k) + v(u);
-}
-}  // namespace mainprof
-#endif

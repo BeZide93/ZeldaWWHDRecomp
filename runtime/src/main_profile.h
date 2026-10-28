@@ -59,17 +59,11 @@ inline void bump(std::atomic<uint64_t>& a, uint64_t v = 1) {
 void start(Cpu* main);
 // the main thread's CPU time so far and the time it held its core, as of its last core release
 inline std::atomic<uint64_t> g_held_ns{0}, g_cpu_ns{0};
-#ifdef _WIN32
-uint64_t own_cpu_ns_windows();
-#endif
 inline uint64_t own_cpu_ns() {
-#ifdef _WIN32
-    return own_cpu_ns_windows();  // main_profile.cpp: keeps <windows.h> out of runtime.h's includers
-#else
+    // (MinGW's winpthreads provides CLOCK_THREAD_CPUTIME_ID too: no <windows.h> in this header)
     timespec t{};
     if (clock_gettime(CLOCK_THREAD_CPUTIME_ID, &t)) return 0;
     return (uint64_t)t.tv_sec * 1000000000ull + (uint64_t)t.tv_nsec;
-#endif
 }
 // the main thread gives up its core after holding it held_ns (threads.cpp core_release)
 inline void note_release(uint64_t held_ns) {
