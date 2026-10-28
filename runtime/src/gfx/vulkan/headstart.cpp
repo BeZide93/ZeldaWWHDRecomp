@@ -228,6 +228,8 @@ int warm_headstart_shaders() {
     const bool metalOn = metal_recipes_enabled();
     std::vector<MetalPipelineRecipe> metalRecipes;
     std::unordered_map<uint64_t, long> metalShaders;
+    std::unordered_map<long, size_t> metalShaderRecords;  // file offset -> shader record (WWHD_HEADSTART_MAP)
+    static FILE* map = [] { const auto p = path_environment_utf8("WWHD_HEADSTART_MAP"); return p && !p->empty() ? open_utf8_file(*p, "w") : nullptr; }();
     std::vector<std::shared_ptr<PipelineRecipe>> portable;
     size_t known = 0, speculative = 0, failed = 0, metalPipelines = 0, vulkanPipelines = 0, skippedPipelines = 0;
     uint64_t count = 0, rawBytes = 0;
@@ -267,8 +269,10 @@ int warm_headstart_shaders() {
       const auto record = decode_headstart_shader_record(raw, type);
       const bool vertex = record.vertex;
       // debug: WWHD_HEADSTART_MAP=file lists per shader record (in file order) the shader it translates to
-      // ("V <record> <vertex> <pipeline id or 0 when it failed> <variant key>"), for template distilling
-      static FILE* map = [] { const auto p = path_environment_utf8("WWHD_HEADSTART_MAP"); return p && !p->empty() ? open_utf8_file(*p, "w") : nullptr; }();
+      // ("V <record> <vertex> <pipeline id or 0 when it failed> <variant key>"), and with WWHD_VK_METAL_RECIPES=1
+      // per Metal recipe (in file order) the records its two shaders came from and the Vulkan pipeline it gives
+      // ("D <recipe> <pixel record> <vertex record> <pipeline key hash>", -1 and 0 when it gives none),
+      // for template distilling
       const size_t shaderRecord = shaderRecords++;
       auto mapLine = [&](const vk::Shader* s) {
         if (map) std::fprintf(map, "V %zu %u %016llx %016llx\n", shaderRecord, vertex ? 1u : 0u,
@@ -293,6 +297,7 @@ int warm_headstart_shaders() {
         gfx::mtlkey::FetchProgram program;
         uint64_t metalFetch = 0;
         if (!vertex || (gfx::mtlkey::fetch_program(regs.data(), program) && (metalFetch = gfx::mtlkey::fetch_key(regs.data(), program), true)))
+          if (map) metalShaderRecords.try_emplace(recordAt, shaderRecord);
           metalShaders.try_emplace(gfx::mtlkey::wide_key(regs.data(), vertex,
               gfx::mtlkey::program_seed(record.program.data(), codeSize, vertex), metalFetch), recordAt);
       }
@@ -423,9 +428,16 @@ int warm_headstart_shaders() {
       std::unordered_set<std::string> known;  // (the head start's own Vulkan recipes are skipped when warmed: ready)
       std::vector<std::shared_ptr<PipelineRecipe>> derived;
       std::unordered_map<std::string, size_t> reasons;
-      size_t repeats = 0;
+      size_t repeats = 0, recipeIndex = 0;
       for (const auto& m : metalRecipes) {
         const char* why = nullptr;
+        uint64_t derivedKey = 0;
+        auto recordOf = [&](uint64_t key) -> long long {
+          auto at = metalShaders.find(key);
+          if (at == metalShaders.end()) return -1;
+          auto record = metalShaderRecords.find(at->second);
+          return record == metalShaderRecords.end() ? -1 : (long long)record->second;
+        };
         if (!load(m.psKey, regs, false)) why = "pixel shader not in the head start";
         else if (!load(m.vsKey, vertexRegs, true)) why = "vertex shader not in the head start";
         if (!why) {
@@ -436,6 +448,8 @@ int warm_headstart_shaders() {
           for (int i = 0; i < 16; ++i) regs[mmSQ_VTX_ATTRIBUTE_BLOCK_START + i * 7 + 2] = m.strides[i];
           try {
             if (auto recipe = derive_guest_pipeline_recipe(regs.data(), m.color, m.depth, &why)) {
+              derivedKey = 1469598103934665603ull;
+              for (uint8_t byte : recipe->key) derivedKey = (derivedKey ^ byte) * 1099511628211ull;
               if (known.emplace(recipe->key.begin(), recipe->key.end()).second) {
                 recipe->add_group(kSpeculativeGroup);  // compiled now; in play only in the background queue
                 resolvedShaderPool.freeze(*recipe);
@@ -445,6 +459,9 @@ int warm_headstart_shaders() {
           } catch (const std::exception& error) { why = "translation"; }
         }
         if (why) ++reasons[why];
+        if (map) std::fprintf(map, "D %zu %lld %lld %016llx\n", recipeIndex, recordOf(m.psKey), recordOf(m.vsKey),
+            (unsigned long long)derivedKey);
+        ++recipeIndex;
       }
       std::string unresolvedText;
       for (const auto& [why, n] : reasons) unresolvedText += " " + std::to_string(n) + " " + why + ";";
