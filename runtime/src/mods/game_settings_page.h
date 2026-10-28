@@ -39,8 +39,11 @@ inline constexpr float kWinX = 70, kWinY = 34, kWinW = 1060, kWinH = 652;
 inline constexpr float kRowX = kWinX + 60, kRowY = kWinY + 122, kRowW = kWinW - 120, kRowH = 56;
 inline constexpr unsigned kRowsShown = 7;
 inline constexpr float kValueW = 300, kValueX = kRowX + kRowW - kValueW - 10;
-inline constexpr float kArrowX = 34, kArrowY = 360, kArrowR = 30;           // the entry arrow (closed)
-inline constexpr float kBackX = kWinX + kWinW + 52, kBackY = 360, kBackR = 34;  // the arrow back to the items (open)
+// The page arrows: the game's own right arrow (its place and size; the driver reads them from the item
+// screen, these are the USA layout's), ours its mirror at the left edge (closed), and while the page is
+// open the arrow back to the items where the game's right arrow is (which is hidden then).
+struct ArrowPlace { float x = 1230, y = 360, w = 80, h = 160; };
+inline constexpr float kArrowSlop = 24;
 inline constexpr float kTapSlop = 24;
 
 // the game's menu ink and paper (as the notebook's window)
@@ -80,6 +83,13 @@ inline bool near(float x, float y, float cx, float cy, float r) { return (x - cx
 class Page {
 public:
     float (*measure)(const std::string& text, float size) = nullptr;  // the game's font, when loaded
+    ArrowPlace game_arrow;  // the game's right page arrow
+
+    float entry_x() const { return 1280 - game_arrow.x; }
+    bool on_arrow(float x, float y, bool entry) const {
+        return inside(x, y, (entry ? entry_x() : game_arrow.x) - game_arrow.w / 2 - kArrowSlop, game_arrow.y - game_arrow.h / 2 - kArrowSlop, game_arrow.w + 2 * kArrowSlop,
+                      game_arrow.h + 2 * kArrowSlop);
+    }
 
     bool open() const { return open_; }
     // the page, or its slide out, is on screen
@@ -99,7 +109,7 @@ public:
         prev_ = in.buttons;
         bool tap = false;
         track_touch(in, tap);
-        return (pressed & kPadZL) || (tap && near(down_x_, down_y_, kArrowX, kArrowY, kArrowR + 20) && near(in_x_, in_y_, kArrowX, kArrowY, kArrowR + 30));
+        return (pressed & kPadZL) || (tap && on_arrow(down_x_, down_y_, true) && on_arrow(in_x_, in_y_, true));
     }
 
     Action input(const Input& in, const std::vector<Row>& rows, int tabs) {
@@ -147,7 +157,7 @@ public:
         bool tap = false;
         track_touch(in, tap);
         if (tap) {
-            if (near(in_x_, in_y_, kBackX, kBackY, kBackR + 24)) return close(act);
+            if (on_arrow(in_x_, in_y_, false)) return close(act);
             for (unsigned i = 0; i < kRowsShown && top_ + i < rows.size(); i++) {
                 const float y = kRowY + kRowH * float(i);
                 if (!inside(in_x_, in_y_, kRowX, y, kRowW, kRowH)) continue;
@@ -176,7 +186,7 @@ public:
     std::vector<Command> draw_entry() const {
         std::vector<Command> out;
         const float pulse = 1.0f + 0.06f * std::sin(time_ * 6.2831853f * 0.8f);
-        arrow(out, kArrowX + 4, kArrowY, kArrowR * pulse, true);
+        arrow(out, entry_x(), game_arrow.y, pulse, true);
         return out;
     }
 
@@ -207,10 +217,12 @@ public:
             const uint32_t ink = r.enabled ? kInk : kInkDim;
             out.push_back(text(kRowX + 20, y + 15, 28, ink, sel ? bold(r.label) : r.label));
             // the value: a plate (lit when on), with step marks on numbers
-            const bool lit = r.toggle ? r.on : false;
-            out.push_back(box(lit ? "nb:plate-on" : "nb:plate", kValueX, y + 6, kValueW, kRowH - 12));
+            // On: the game's strong green plate with white letters; Off and dimmed rows: the muted tab plate;
+            // numbers and choices: the light plate
+            const bool on = r.toggle && r.on && r.enabled, muted = !r.enabled || (r.toggle && !r.on);
+            out.push_back(box(on ? "nb:plate" : muted ? "nb:tab" : "nb:plate-on", kValueX, y + 6, kValueW, kRowH - 12));
             const float vw = width(bold(r.value), 26);
-            out.push_back(text(kValueX + (kValueW - vw) / 2, y + 16, 26, r.enabled ? kInk : kInkDim, bold(r.value)));
+            out.push_back(text(kValueX + (kValueW - vw) / 2, y + 16, 26, on ? kWhite : !r.enabled ? kInkDim : muted ? kInkSoft : kInk, bold(r.value)));
             if (r.number && r.enabled) {
                 chevron(out, kValueX + 26, y + kRowH / 2, 9, false, kInk);
                 chevron(out, kValueX + kValueW - 26, y + kRowH / 2, 9, true, kInk);
@@ -233,7 +245,7 @@ public:
         prompt(out, x, hy, true, "Change");
         out.push_back(text(kWinX + 60, hy + 6, 22, kInkSoft, "More in Settings (Esc / hold Select)"));
         // the arrow back to the items, right of the page
-        arrow(out, kBackX, kBackY, kBackR, false);
+        arrow(out, game_arrow.x, game_arrow.y, 1.0f, false);
         for (size_t i = from; i < out.size(); i++) out[i].x += dx;
         return out;
     }
@@ -278,12 +290,21 @@ private:
         out.push_back(line(cx - d * s * 0.5f, cy - s, cx + d * s * 0.5f, cy, rgba, t));
         out.push_back(line(cx + d * s * 0.5f, cy, cx - d * s * 0.5f, cy + s, rgba, t));
     }
-    // a round page arrow (the game's BtnMenuArrow_00 look: a light rim, a green disc, a white chevron)
-    static void arrow(std::vector<Command>& out, float cx, float cy, float r, bool left) {
+    // A page arrow at (cx, cy), scaled by `s`: the game's arrow picture ("gs:arrow-left/right", the driver
+    // draws the game's own picture when it could read it) and, for when it couldn't, a round drawn arrow
+    // (commands tagged "gs:drawn", left out then)
+    void arrow(std::vector<Command>& out, float cx, float cy, float s, bool left) const {
+        const float w = game_arrow.w * s, h = game_arrow.h * s;
+        Command p = box("", cx - w / 2, cy - h / 2, w, h);
+        p.text = left ? "gs:arrow-left" : "gs:arrow-right";
+        out.push_back(p);
+        const float r = std::min(game_arrow.w, game_arrow.h) * 0.4f * s;
+        const size_t from = out.size();
         out.push_back(circle(cx + 2, cy + 4, r + 4, 0x00000050, true));
         out.push_back(circle(cx, cy, r + 4, kArrowRim, true));
         out.push_back(circle(cx, cy, r, kArrowFill, true));
         chevron(out, cx + (left ? -2.0f : 2.0f), cy, r * 0.42f, !left, kWhite, r * 0.22f);
+        for (size_t i = from; i < out.size(); i++) out[i].text = "gs:drawn";
     }
     static Command rect(float x, float y, float w, float h, uint32_t rgba) {
         Command c;

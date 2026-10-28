@@ -6,6 +6,7 @@
 #include "mods/game_settings_page.h"
 
 using namespace game_settings_page;
+static const float kEntryX = Page().entry_x(), kArrowYc = ArrowPlace().y, kBackXc = ArrowPlace().x;
 
 static Input pad(uint32_t buttons, float dt = 1.0f / 30) {
     Input in;
@@ -30,12 +31,12 @@ int main() {
     assert(!q.entry(pad(0)));
     assert(q.entry(pad(kPadZL)));
     Page t;
-    assert(!t.entry(touch(true, kArrowX, kArrowY)));
-    assert(t.entry(touch(false, kArrowX, kArrowY)));
+    assert(!t.entry(touch(true, kEntryX, kArrowYc)));
+    assert(t.entry(touch(false, kEntryX, kArrowYc)));
     Page d;
-    assert(!d.entry(touch(true, kArrowX, kArrowY)));
-    assert(!d.entry(touch(true, kArrowX + 200, kArrowY)));
-    assert(!d.entry(touch(false, kArrowX + 200, kArrowY)));  // a drag is not a tap
+    assert(!d.entry(touch(true, kEntryX, kArrowYc)));
+    assert(!d.entry(touch(true, kEntryX + 200, kArrowYc)));
+    assert(!d.entry(touch(false, kEntryX + 200, kArrowYc)));  // a drag is not a tap
     // open: the opening button acts only after its release
     q.show(1);
     for (int i = 0; i < 10; i++) q.tick(1.0f / 30);  // slid in
@@ -83,8 +84,8 @@ int main() {
     // the arrow back to the items closes too
     q.show(1);
     q.input(pad(0), rows, 1);
-    a = q.input(touch(true, kBackX, kBackY), rows, 1);
-    a = q.input(touch(false, kBackX, kBackY), rows, 1);
+    a = q.input(touch(true, kBackXc, kArrowYc), rows, 1);
+    a = q.input(touch(false, kBackXc, kArrowYc), rows, 1);
     assert(a.closed);
     // drawing: the page and the entry arrow produce commands, the window first after the dim
     q.show(1);

@@ -24,6 +24,7 @@
 #include <memory>
 
 #include "game_settings.h"
+#include "game_look.h"
 #include "guest_hud.h"
 #include "story_notebook_game.h"
 #include "story_notebook.h"
@@ -55,6 +56,8 @@ bool object(uint32_t p, uint32_t size) { return (p & 3) == 0 && p >= mem::kMem2S
 
 struct Menu {
     uint32_t ui = 0, descriptor = 0, items = 0, window = ~0u;
+    uint32_t selection_mode = ~0u, selected = ~0u;  // hdMenuMain_c::mSelectionMode (+0x50), mSelectedChild (+0x58)
+    float offset = 0;                                // hdMenuMain_c::mWindowOffset (+0x5C): the pages' slide
     bool items_page = false;  // the + menu stands still with no bag window
 };
 Menu read_menu() {
@@ -65,125 +68,139 @@ Menu read_menu() {
     m.descriptor = object(current, 12) ? ld32(current + 8) : ld32(m.ui + kUiPendingState);
     m.items = ld32(m.ui + kUiItemScreen);
     m.window = object(m.items, 0x58) ? ld32(m.items + kMenuWindowMode) : ~0u;
+    if (object(m.items, 0x64))
+        m.selection_mode = ld32(m.items + 0x50), m.selected = ld32(m.items + 0x58), m.offset = u32_as_f32(ld32(m.items + 0x5C));
     m.items_page = m.descriptor == kStateMenu && m.window >= 3 && m.window != ~0u;
     return m;
 }
 
-// ---- the look: the game's fonts and menu art (a copy of the notebook's, story_notebook.cpp) ----
-struct Look {
-    font::Face main, fallback, icons;
-    bool font_failed = false, icons_probed = false;
-    font::Atlas atlas;
-    Handle atlas_image = 0;
-    uint64_t atlas_generation = 0, store_generation = 0, fonts_key = 0;
-    style::Art art;
-    uint32_t art_menu = 0;
-    bool art_ok = false;
-    struct Box { Handle handle = 0; uint64_t generation = 0; std::shared_ptr<guestmods::hud::Image> image; };
-    std::map<std::string, Box> boxes;
-    font::Prompts prompts;
-} g_look;
-constexpr float kFontScale = 1.05f, kAtlasScale = 0.62f, kBoxResolution = 0.75f;
+// ---- the look: the game's fonts and menu art (game_look.h, shared with the story notebook) ----
+game_look::Look g_look(kOwner, "game-settings");
+uint32_t g_art_menu = 0;  // the item screen the art was read from (the game builds a new one on a stage change)
+float game_measure(const std::string& text, float size) { return g_look.measure(text, size); }
 
-float game_measure(const std::string& text, float size) {
-    const int h = g_look.main.cell_height;
-    return h ? float(font::Atlas::line_width(text, g_look.main, &g_look.fallback, h)) * size * kFontScale / float(h) : 0.0f;
-}
+// The game's page arrow (the item screen's L_MenuArrowR_00: BtnMenuArrow_00, its shadow and its body, two
+// BC5 pictures the layout tints yellow), composed once and mirrored for ours; where the game shows its own.
+struct Arrow {
+    std::shared_ptr<guestmods::hud::Image> right, left;  // composed at the pictures' size
+    Handle right_handle = 0, left_handle = 0;
+    uint64_t generation = 0;
+    float x = 1280 - 50, y = 360, w = 80, h = 160;  // the game's right arrow in page units (centre, size)
+} g_arrow;
+constexpr uint32_t kArrowYellowDark = 0xE2C40CFF, kArrowYellowLight = 0xFFF7A0FF, kArrowShadow = 0x2B4A1EFF;
 
-void load_glyphs(Cpu* c, const std::vector<std::string>& lines) {
-    const auto& ui = story_notebook::game_ui();
-    if (!ui.glyphs || !c || g_look.font_failed) return;
-    std::vector<uint32_t> want;
-    for (const std::string& l : lines)
-        for (uint32_t cp : font::codes(l))
-            if (!font::Atlas::button(cp) && !font::style_code(cp) && !g_look.main.glyphs.count(cp) && !g_look.main.missing.count(cp) &&
-                std::find(want.begin(), want.end(), cp) == want.end())
-                want.push_back(cp);
-    if (!g_look.main.cell_height) want.push_back('?');
-    if (!want.empty()) {
-        const size_t before = g_look.main.glyphs.size();
-        if (!ui.glyphs(c, 0, want, g_look.main) || !g_look.main.ready()) {
-            if (trace()) LOG("[game-settings] the game's menu font is not readable yet");
-            return;  // (the font loads with the game's UI; tried again next frame)
-        }
-        std::vector<uint32_t> lacking;
-        for (uint32_t cp : want)
-            if (g_look.main.missing.count(cp) && !g_look.fallback.glyphs.count(cp) && !g_look.fallback.missing.count(cp)) lacking.push_back(cp);
-        if (!lacking.empty()) ui.glyphs(c, 1, lacking, g_look.fallback);  // the message font for what the menu font lacks
-        if (g_look.main.glyphs.size() != before || !lacking.empty()) g_look.fonts_key++;
-        if (before == 0) LOG("[game-settings] the page uses the game's menu font (cell height %d)", g_look.main.cell_height);
-    }
-    if (!g_look.icons_probed) {
-        g_look.icons_probed = true;
-        for (int slot : {1, 4, 0}) {
-            font::Face f;
-            if (ui.glyphs(c, slot, {font::kButtonA, font::kButtonB, font::kButtonA + 2, font::kButtonA + 3}, f) && f.glyphs.count(font::kButtonA) &&
-                f.glyphs.count(font::kButtonB)) {
-                g_look.icons = std::move(f);
-                g_look.fonts_key++;
-                break;
+std::shared_ptr<guestmods::hud::Image> compose_arrow(const game_glyph::Bitmap& shadow, const game_glyph::Bitmap& body,
+                                                     const game_glyph::Bitmap& gloss, bool mirror) {
+    const int w = body.width, h = body.height, sw = shadow.width, sh = shadow.height;
+    const int W = std::max(w, sw), H = std::max(h, sh);
+    style::Canvas cv(W, H);
+    auto layer = [&](const game_glyph::Bitmap& b, auto&& colour) {
+        if (b.width <= 0) return;
+        const int ox = (W - b.width) / 2, oy = (H - b.height) / 2;
+        for (int y = 0; y < b.height; y++)
+            for (int x = 0; x < b.width; x++) {
+                const uint8_t* s = &b.rgba[(size_t(y) * b.width + x) * 4];
+                float c[4];
+                colour(s, c);
+                cv.over(mirror ? W - 1 - (ox + x) : ox + x, oy + y, c);
             }
-        }
-    }
+    };
+    using style::ch;
+    layer(shadow, [](const uint8_t* s, float c[4]) {
+        for (int i = 0; i < 3; i++) c[i] = ch(kArrowShadow, i);
+        c[3] = s[3] * 0.55f;
+    });
+    layer(body, [](const uint8_t* s, float c[4]) {
+        const float l = s[0] / 255.0f;
+        for (int i = 0; i < 3; i++) c[i] = ch(kArrowYellowDark, i) * (1 - l) + ch(kArrowYellowLight, i) * l;
+        c[3] = s[3];
+    });
+    layer(gloss, [](const uint8_t* s, float c[4]) {
+        c[0] = c[1] = c[2] = 255.0f;
+        c[3] = s[3] * (s[0] / 255.0f) * 0.5f;
+    });
+    return cv.image();
 }
 
 void load_art(uint32_t menu) {
     const auto& ui = story_notebook::game_ui();
-    if (!ui.art || !menu || menu == g_look.art_menu) return;
-    g_look.art_menu = menu;  // once per item screen (the game builds a new one on a stage change)
+    g_look.ui = &ui;
+    g_look.trace = trace;
+    if (!ui.art || !menu || menu == g_art_menu) return;
+    g_art_menu = menu;
     std::string why;
     g_look.art_ok = ui.art(menu, g_look.art, why);
     if (g_look.art_ok) style::trim_plates(g_look.art);
-    g_look.boxes.clear();
+    g_look.forget_boxes();
     LOG("[game-settings] menu art %s%s%s", g_look.art_ok ? "read" : "not read (plain boxes)", why.empty() ? "" : ": ", why.c_str());
+    // the page arrow's pictures
+    const uint32_t arrow = game_look::find_pane(game_look::layout_root(menu), "L_MenuArrowR_00");
+    const uint32_t body = game_look::find_pane(arrow, "P_Btn_00"), shadow = game_look::find_pane(arrow, "P_BtnShadow_00");
+    game_glyph::Bitmap b, s, g;
+    if (body && game_look::texture(body, {0xF4, 0x28}, b)) {
+        game_look::texture(shadow, {0xF4, 0x28}, s);
+        game_look::texture(body, {0xF4, 0x44}, g);
+        g_arrow.right = compose_arrow(s, b, g, false), g_arrow.left = compose_arrow(s, b, g, true);
+        g_arrow.right_handle = g_arrow.left_handle = 0;
+        LOG("[game-settings] the page arrows use the game's arrow picture (%dx%d)", b.width, b.height);
+    } else {
+        g_arrow.right = g_arrow.left = nullptr;
+        LOG("[game-settings] the game's page arrow is not readable: drawn arrows");
+    }
 }
 
-std::vector<Command> render(std::vector<Command> cmds, std::vector<Handle>& images, uint32_t screen) {
+// where the game's right page arrow is now (layout units: centre origin, y up -> page units)
+void read_arrow_place(uint32_t menu) {
+    const uint32_t root = game_look::layout_root(menu), arrow = game_look::find_pane(root, "L_MenuArrowR_00");
+    if (!arrow) return;
+    const float x = u32_as_f32(ld32(arrow + 0x1C)), y = u32_as_f32(ld32(arrow + 0x20));
+    const float w = u32_as_f32(ld32(arrow + 0x3C)), h = u32_as_f32(ld32(arrow + 0x40));
+    if (!std::isfinite(x) || !std::isfinite(y) || std::fabs(x) > 1280 || std::fabs(y) > 720 || !(w > 8 && w < 400) || !(h > 8 && h < 400)) return;
+    g_arrow.x = 640 + x, g_arrow.y = 360 - y, g_arrow.w = w, g_arrow.h = h;
+}
+
+// The game's own pieces the page covers (its right page arrow, the GamePad's A / B guide at the top
+// right), hidden while the page is up and given back as they were when it goes.
+struct Hidden { uint32_t pane = 0; bool was = false; std::string name; };
+std::vector<Hidden> g_hidden;
+constexpr uint32_t kUiCommandGuides[] = {0x188, 0x18C};  // sIngameUi: the command guides (A / B prompts; GamePad, TV)
+void hide_game_pieces(const Menu& m, bool hide) {
+    if (!hide) {
+        for (const Hidden& h : g_hidden)  // (only a pane that is still there: a stage change frees the screens)
+            if (game_look::pane_name(h.pane) == h.name) game_look::set_visible(h.pane, h.was);
+        if (!g_hidden.empty() && trace()) LOG("[game-settings] %zu game panes shown again", g_hidden.size());
+        g_hidden.clear();
+        return;
+    }
+    if (g_hidden.empty()) {
+        std::vector<uint32_t> panes = {game_look::find_pane(game_look::layout_root(m.items), "L_MenuArrowR_00")};
+        for (uint32_t o : kUiCommandGuides) panes.push_back(game_look::layout_root(object(m.ui, 0x24C) ? ld32(m.ui + o) : 0));
+        for (uint32_t p : panes)
+            if (p) g_hidden.push_back({p, game_look::visible(p), game_look::pane_name(p)});
+        if (trace()) LOG("[game-settings] %zu game panes hidden under the page", g_hidden.size());
+    }
+    for (const Hidden& h : g_hidden)  // (every read: the game may show them again)
+        if (game_look::pane_name(h.pane) == h.name) game_look::set_visible(h.pane, false);
+}
+
+// "gs:arrow-left" / "gs:arrow-right" pictures: the game's arrow, ours mirrored (page units)
+void append_arrows(Handle list, const std::vector<Command>& arrows, uint32_t screen) {
     auto& store = guestmods::hud::store();
     const uint64_t generation = store.state_generation();
-    cmds = style::resolve(cmds, g_look.art_ok ? &g_look.art : nullptr);
-    const bool have_font = g_look.main.ready();
-    const float pixels = store.pixels(screen) * (screen == 1 ? 854.0f / 1280.0f : 1.0f);
-    if (have_font) {
-        const std::vector<std::string> lines = font::lines_of(cmds, kFontScale, pixels);
-        if (!g_look.atlas.holds(lines, g_look.prompts, g_look.fonts_key)) {
-            g_look.atlas.build(lines, g_look.main, &g_look.fallback, g_look.icons.ready() ? &g_look.icons : nullptr, g_look.prompts, g_look.fonts_key,
-                               kAtlasScale);
-            if (g_look.atlas_image) store.release(kOwner, g_look.atlas_image);
-            g_look.atlas_image = 0;
-        }
-        if (!g_look.atlas_image || g_look.store_generation != generation) {
-            const auto img = g_look.atlas.image();
-            g_look.atlas_image = img ? store.create_image(kOwner, img->width, img->height, img->width * 4, img->rgba.data(), img->rgba.size()) : 0;
-            g_look.store_generation = generation;
-        }
-    }
-    cmds = font::to_pictures(cmds, have_font && g_look.atlas_image ? &g_look.atlas : nullptr, kFontScale, pixels);
-    images.assign(cmds.size(), 0);
-    for (size_t i = 0; i < cmds.size(); i++) {
-        Command& c = cmds[i];
-        if (c.kind != Command::Picture || c.image) continue;
-        if (c.text.rfind("art:", 0) != 0) {
-            images[i] = g_look.atlas_image;
-            c.text.clear();
-            continue;
-        }
-        int bw, bh;
-        style::box_size(c.text, bw, bh);
-        const std::string name = "nb:" + style::box_name(c.text).substr(4);
-        const int w = int(std::lround(bw * kBoxResolution)), h = int(std::lround(bh * kBoxResolution));
-        const std::string key = name + ":" + std::to_string(w) + "x" + std::to_string(h);
-        Look::Box& box = g_look.boxes[key];
-        if (!box.image) box.image = style::compose(g_look.art, name, w, h);
-        if (box.image && (!box.handle || box.generation != generation)) {
-            box.handle = store.create_image(kOwner, box.image->width, box.image->height, box.image->width * 4, box.image->rgba.data(),
-                                            box.image->rgba.size());
-            box.generation = generation;
-        }
-        images[i] = box.handle;
+    if (g_arrow.generation != generation) g_arrow.right_handle = g_arrow.left_handle = 0, g_arrow.generation = generation;
+    auto handle = [&](bool left) {
+        Handle& h = left ? g_arrow.left_handle : g_arrow.right_handle;
+        const auto& img = left ? g_arrow.left : g_arrow.right;
+        if (!h && img) h = store.create_image(kOwner, img->width, img->height, img->width * 4, img->rgba.data(), img->rgba.size());
+        return h;
+    };
+    for (Command c : arrows) {
+        const bool left = c.text == "gs:arrow-left";
         c.text.clear();
+        std::vector<Command> one{c};
+        story_notebook::fit_to_screen(one, screen);
+        if (const Handle h = handle(left)) store.picture(kOwner, list, h, one[0]);
     }
-    return cmds;
 }
 
 void publish(std::vector<Command> cmds, Cpu* c) {
@@ -192,20 +209,28 @@ void publish(std::vector<Command> cmds, Cpu* c) {
         store.drop(kOwner);
         return;
     }
-    load_glyphs(c, font::texts_of(cmds));
+    g_look.load_glyphs(c, font::texts_of(cmds));
     const uint32_t screen = story_notebook::menu_screen(input::pro_controller());
     const Handle list = store.begin(kOwner, screen);
     if (!list) return;
-    std::vector<Handle> images;
-    cmds = render(std::move(cmds), images, screen);
-    story_notebook::fit_to_screen(cmds, screen);
-    for (size_t i = 0; i < cmds.size(); i++) {
-        if (cmds[i].kind == Command::Picture) {
-            if (images[i]) store.picture(kOwner, list, images[i], std::move(cmds[i]));
+    // the arrows: the game's picture when it was read (else the page's drawn arrow stays)
+    std::vector<Command> arrows, rest;
+    for (Command& k : cmds) {
+        if (k.kind == Command::Picture && k.text.rfind("gs:arrow", 0) == 0) {
+            if (g_arrow.right) arrows.push_back(k);
             continue;
         }
-        store.append(kOwner, list, std::move(cmds[i]));
+        if (g_arrow.right && k.text.rfind("gs:drawn", 0) == 0) continue;  // the drawn arrow's parts
+        rest.push_back(std::move(k));
     }
+    for (Command& k : rest)
+        if (k.text.rfind("gs:drawn", 0) == 0) k.text.clear();
+    std::vector<Handle> images;
+    // in drawing order: the arrows belong to the page's layers (the closed page: only the entry arrow)
+    rest = g_look.render(std::move(rest), images, screen);
+    story_notebook::fit_to_screen(rest, screen);
+    g_look.append(list, rest, images);
+    append_arrows(list, arrows, screen);
     store.commit(kOwner, list);
 }
 
@@ -259,7 +284,7 @@ std::vector<Row> rows_of(const std::string& tab) {
 // Test aid WWHD_TEST_GAME_SETTINGS_SHOTS=1: a screenshot (screenshot.h; the GamePad picture too with
 // WWHD_SCREENSHOT_GAMEPAD=1) a few reads after the entry arrow first shows, the page opens and each change
 void shot_after(int reads) {
-    static const bool on = getenv("WWHD_TEST_GAME_SETTINGS_SHOTS") != nullptr;
+    static const bool on = getenv("WWHD_TEST_GAME_SETTINGS_SHOTS") && *getenv("WWHD_TEST_GAME_SETTINGS_SHOTS");
     static int countdown = -1;
     if (!on) return;
     if (reads > 0) { countdown = reads; return; }
@@ -285,7 +310,7 @@ void pad(input::PadState& p, Cpu* c) {
     static bool disabled = getenv("WWHD_GAME_SETTINGS") && *getenv("WWHD_GAME_SETTINGS") == '0';
     if (disabled) return;
     game_settings::register_builtin();
-    g_page.measure = g_look.main.ready() ? game_measure : nullptr;
+    g_page.measure = g_look.font_ready() ? game_measure : nullptr;
     const float dt = frame_seconds();
     shot_after(0);
     const Menu m = read_menu();
@@ -295,6 +320,11 @@ void pad(input::PadState& p, Cpu* c) {
             LOG("[game-settings] in-game UI %08X: state %08X%s, bag window %d -> %s", m.ui, m.descriptor, m.descriptor == kStateMenu ? " (Menu)" : "",
                 int(m.window), m.items_page ? "the page is offered" : "not offered");
         last_descriptor = m.descriptor, last_window = m.window;
+        static uint32_t last_selected = ~1u, last_mode = ~1u;
+        static float last_offset = -1e9f;
+        if (m.items_page && (m.selected != last_selected || m.selection_mode != last_mode || m.offset != last_offset))
+            LOG("[game-settings] item screen: selection mode %u, selected child %d, page offset %.1f", m.selection_mode, int(m.selected), m.offset);
+        last_selected = m.selected, last_mode = m.selection_mode, last_offset = m.offset;
     }
     const bool other_page = story_notebook::page_open();
     const std::vector<std::string> tabs = game_settings::tabs();
@@ -310,18 +340,33 @@ void pad(input::PadState& p, Cpu* c) {
             p.buttons &= ~s;
         }
         if (g_page.shown()) {  // sliding out
+            if (m.items_page) hide_game_pieces(m, true);
             const std::string tab = tabs.empty() ? "" : tabs[size_t(std::min<int>(g_page.tab(), int(tabs.size()) - 1))];
             publish(g_page.draw(rows_of(tab), labels), c);
             p = input::PadState{};
             return;
         }
         g_has_controller.store(false, std::memory_order_relaxed);
+        hide_game_pieces(m, false);
         if (!m.items_page || other_page || tabs.empty()) {
             g_page.entry(in);  // (follows the buttons: a ZL held into the menu does not open it)
             publish({}, c);
             return;
         }
         load_art(m.items);
+        read_arrow_place(m.items);
+        g_page.game_arrow = {g_arrow.x, g_arrow.y, g_arrow.w, g_arrow.h};
+        if (static bool dumped = false; !dumped && getenv("WWHD_GAME_SETTINGS_PANES") && story_notebook::game_ui().dump) {
+            dumped = true;  // research aid: the item screen's panes and textures, in the log
+            story_notebook::game_ui().dump(c, m.items, "");
+            for (uint32_t o = 0x100; o < 0x248; o += 4) {  // the in-game UI's other screens with a layout
+                const uint32_t s = ld32(m.ui + o), lay = object(s, 0x48) ? ld32(s + 0x44) : 0, lyt = object(lay, 8) ? ld32(lay + 4) : 0;
+                const uint32_t root = object(lyt, 0x10) ? ld32(lyt + 0xC) : 0;
+                if (!object(root, 0x100) || s == m.items) continue;
+                LOG("[notebook-panes] ---- sIngameUi+%X: screen %08X", o, s);
+                story_notebook::game_ui().dump(c, s, "");
+            }
+        }
         if (story_notebook::game_ui().prompts) g_look.prompts = story_notebook::game_ui().prompts();
         if (g_page.entry(in)) {
             g_page.show(int(tabs.size()));
@@ -342,7 +387,10 @@ void pad(input::PadState& p, Cpu* c) {
     g_has_controller.store(true, std::memory_order_relaxed);
     if (!m.items_page && m.descriptor != kStateMenu) {  // the menu closed under the page (a state load, a cutscene)
         g_page.hide();
+        g_hidden.clear();  // (its screens may be gone: nothing is written back)
         LOG("[game-settings] page closed: the menu is gone");
+    } else {
+        hide_game_pieces(m, true);
     }
     const std::string tab = tabs.empty() ? "" : tabs[size_t(std::min<int>(g_page.tab(), int(tabs.size()) - 1))];
     std::vector<Row> rows = rows_of(tab);
