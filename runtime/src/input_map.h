@@ -111,7 +111,7 @@ struct Mapping {
     Prompts prompts = Prompts::kAuto;            // face-button look while the face buttons are by label
     ShoulderNames shoulder_names = ShoulderNames::kAuto;
     bool prompt_colours = true;                  // coloured face buttons (Xbox / PlayStation colours)
-    bool prompt_text_colours = true;             // mapped action-text colours; off uses white
+    bool prompt_text_colours = true;             // action words in their button's colour; off keeps the game's
     static Mapping defaults();
     bool operator==(const Mapping&) const = default;
 };
@@ -193,12 +193,12 @@ enum class ShoulderStyle : uint8_t { kOriginal, kNumbered, kXbox };
 struct PromptStyle {
     FaceStyle face = FaceStyle::kOriginal;
     bool colours = false;         // face colours (only with a face style)
-    bool text_colours = true;     // action words; independent of icon colours
+    bool text_colours = false;    // action words in their button's colour (only with a face style)
     ShoulderStyle shoulders = ShoulderStyle::kOriginal;
     bool positions = false;       // by label's look: the HUD face cluster in the Xbox/PlayStation positions
     std::array<int, 4> buttons = {0, 1, 2, 3};  // Wii U face -> host A/B/X/Y
     std::array<int, 4> spots = {0, 1, 2, 3};    // HUD cluster: Wii U face -> the face whose drawn spot it takes
-    bool active() const { return face != FaceStyle::kOriginal || shoulders != ShoulderStyle::kOriginal || !text_colours; }
+    bool active() const { return face != FaceStyle::kOriginal || shoulders != ShoulderStyle::kOriginal; }
     bool operator==(const PromptStyle&) const = default;
 };
 PromptStyle prompt_style(const Mapping& m, PadFamily family);

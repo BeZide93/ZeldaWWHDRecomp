@@ -548,7 +548,11 @@ static void test_prompts() {
                 w.shoulder_names = n;
                 w.prompt_colours = c;
                 w.prompt_text_colours = text;
-                CHECK(prompt_style(w, PadFamily::kXbox).text_colours == text);
+                const auto style = prompt_style(w, PadFamily::kXbox);
+                // Original prompts keep the game's words whatever the setting, and stay inactive.
+                CHECK(style.text_colours == (text && style.face != FaceStyle::kOriginal));
+                if (style.face == FaceStyle::kOriginal)
+                    CHECK(style.active() == (style.shoulders != ShoulderStyle::kOriginal));
                 std::string err;
                 CHECK(from_json(to_json(w), r, &err) && err.empty() && r == w);
             }

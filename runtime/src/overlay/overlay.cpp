@@ -2145,7 +2145,7 @@ void tab_controls() {
             input_map::set_current(m);
         }
         help("Action text follows the mapped button's Xbox or PlayStation colour, independently of icon colours. "
-             "Off: white action text. Original prompts keep their original text colours when enabled.");
+             "Off: the game's own text colours (white).");
     }
     // status line: capture prompt > note > hovered input > duplicates > help
     std::string status;

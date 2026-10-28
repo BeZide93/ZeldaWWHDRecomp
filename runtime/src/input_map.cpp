@@ -511,7 +511,7 @@ PromptStyle prompt_style(const Mapping& m, PadFamily family) {
     s.positions = s.face != FaceStyle::kOriginal && labels;
     if (s.face != FaceStyle::kOriginal) s.spots = hud_spots(m);
     s.colours = s.face != FaceStyle::kOriginal && m.prompt_colours;
-    s.text_colours = m.prompt_text_colours;
+    s.text_colours = s.face != FaceStyle::kOriginal && m.prompt_text_colours;
     switch (m.shoulder_names) {
     case Mapping::ShoulderNames::kAuto:
         s.shoulders = s.face == FaceStyle::kXbox ? ShoulderStyle::kXbox

@@ -1149,7 +1149,7 @@ static NSTextField* label(NSString* s) {
     self.promptColours = pc;
     NSButton* ptc = [NSButton checkboxWithTitle:@"Coloured face button text" target:self action:@selector(promptsChanged:)];
     ptc.toolTip = @"Action text follows the mapped button's Xbox or PlayStation colour, independently of icon colours. "
-                  @"Off: white action text. Original prompts keep their original text colours when enabled.";
+                  @"Off: the game's own text colours (white).";
     self.promptTextColours = ptc;
     for (NSView* v in @[which, skip, fl, pi, pv, sep, st, reset, dzl, dz, dzv, inv, lrl, lr, lrv, rrl, rr, rrv, rh, ppl, pp, snl, sn, pc, ptc]) {
         v.translatesAutoresizingMaskIntoConstraints = NO;

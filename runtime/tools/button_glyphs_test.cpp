@@ -1163,9 +1163,7 @@ extern "C" void f_028F7C7C_orig(Cpu* c) {
             uint32_t want = expect_tint && face >= 0 && !hud_letter ? button_glyphs::tint(authored[j], expected_buttons[face]) : authored[j];
             if (expected_action >= 0) {
                 const auto look = input_map::prompt_style(input_map::current(), input_map::pad_family());
-                if (!look.text_colours) {
-                    want = authored[j] | 0xFFFFFF00u;
-                } else if (look.face != input_map::FaceStyle::kOriginal) {
+                if (look.text_colours) {
                     const int button = expected_buttons[expected_action];
                     const uint32_t rgb = look.face == input_map::FaceStyle::kXbox ? button_glyphs::colour(button)
                                                                                  : button_glyphs::kShapeColours[button];
@@ -1341,6 +1339,17 @@ int main() {
     button_glyphs::draw_text_box(&hint_draw, [](Cpu* c) { assert(c->r[3] == base + 0xC200); c->r[3] = 0x1234; });
     assert(hint_draw.r[3] == 0x1234);
     assert(!std::memcmp(stock_list.data(), mem::ptr(list), stock_list.size()));
+    // With Original prompts, Coloured face button text off changes nothing: the gate stays
+    // closed, so a printed button is not marked and the guides run the stock matrix pass.
+    auto text_off = input_map::Mapping::defaults();
+    text_off.prompts = input_map::Mapping::Prompts::kOriginal;
+    text_off.prompt_text_colours = false;
+    input_map::set_current(text_off, false); expect_current();
+    const uint16_t printed = ld16(list + 4);
+    print(0xE001);
+    assert(ld16(list + 4) == printed + 1);
+    assert(button_glyphs::marked_face(ld8(first_quad + printed * 0x30 + 0x2F)) == -1);
+    st16(list + 4, printed);
     stock_guide_test();
 
     // Selecting by label for the first time rebuilds each cached text box once: no markers
@@ -1487,18 +1496,20 @@ int main() {
                     if (word) {
                         constexpr uint32_t xbox[] = {0x58BE36FF, 0xE34B49FF, 0x3B91E5FF, 0xEBC52EFF};
                         constexpr uint32_t ps[] = {0x3C7DD9FF, 0xD9413CFF, 0xD05FB0FF, 0x2AA67DFF};
-                        const uint32_t want = !text_colours ? 0xFFFFFFFFu
-                            : appearance == input_map::Mapping::Prompts::kXbox ? xbox[permutation[face]]
-                            : appearance == input_map::Mapping::Prompts::kPlayStation ? ps[permutation[face]] : authored[0];
+                        // Off, or with Original prompts, the words keep the game's own colours.
+                        const bool restyled = appearance != input_map::Mapping::Prompts::kOriginal;
+                        const uint32_t want = !text_colours || !restyled ? authored[0]
+                            : appearance == input_map::Mapping::Prompts::kXbox ? xbox[permutation[face]] : ps[permutation[face]];
                         assert(drawn_ink == want);
-                        // A text-only setting change must rebuild cached vertices immediately.
+                        // A text-only setting change rebuilds cached vertices immediately, except with
+                        // Original prompts, where it changes nothing.
                         mapping.prompt_text_colours = !text_colours;
                         input_map::set_current(mapping, false); expect_current();
                         const unsigned before = text_draws;
                         button_glyphs::draw_text_box(&c, [](Cpu*) { draw(); });
-                        assert(text_draws == before + 1);
+                        assert(text_draws == before + (restyled ? 1 : 0));
                         button_glyphs::draw_text_box(&c, [](Cpu*) { draw(); });
-                        assert(text_draws == before + 1);
+                        assert(text_draws == before + (restyled ? 1 : 0));
                         mapping.prompt_text_colours = text_colours;
                         input_map::set_current(mapping, false); expect_current();
                     }
