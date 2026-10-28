@@ -1503,8 +1503,11 @@ void pad(input::PadState& p, Cpu* c) {
     action_rewards(c);
     chart_test_open(ticks);
     // test aid WWHD_NOTEBOOK_TEST_OPEN=<read>: the page opens at that controller read (visual checks)
-    if (static const long at = getenv("WWHD_NOTEBOOK_TEST_OPEN") ? atol(getenv("WWHD_NOTEBOOK_TEST_OPEN")) : -1; at >= 0 && ticks == uint32_t(at))
+    // (a save without the notebook gets it first, as the world editor's test mode does: test runs use a copy)
+    if (static const long at = getenv("WWHD_NOTEBOOK_TEST_OPEN") ? atol(getenv("WWHD_NOTEBOOK_TEST_OPEN")) : -1; at >= 0 && ticks == uint32_t(at)) {
+        if (!notebook_owned()) story_mail::own_notebook_for_test();
         open_page("WWHD_NOTEBOOK_TEST_OPEN");
+    }
     bag_icon();
     story_item_buttons::test_assign();
     story_item_buttons::tick();  // ours on X/Y/R: the item number the game reads this frame
