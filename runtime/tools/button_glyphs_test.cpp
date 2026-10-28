@@ -8,14 +8,17 @@
 #include "gfx/stereo.h"
 #include "input_map.h"
 #include "runtime.h"
+#include "shared_patch.h"
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cassert>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <string>
+#include <thread>
 #include <vector>
 #ifdef _WIN32
 #include <windows.h>
@@ -85,7 +88,9 @@ void expect_current() {
     expect_shapes = look.face == input_map::FaceStyle::kPlayStation ? (look.colours ? 1 : 0) : -1;
 }
 int picture_face;
-unsigned prints = 0, text_draws = 0, picture_draws = 0;
+unsigned prints = 0, text_draws = 0;
+std::atomic<unsigned> picture_draws{0};  // also drawn from two threads (concurrent_draw_test)
+std::atomic<bool> yield_in_draw{false};  // let the other thread run while a picture is drawn
 uint32_t atlas = 0;
 bool expect_frame = true;
 bool font_available = true;
@@ -1203,11 +1208,90 @@ extern "C" void f_028F7C7C_orig(Cpu* c) {
 
 extern "C" void f_02874D54_orig(Cpu* c) {
     picture_draws++;
-    for (uint32_t i = 0; i < 4; i++) {
-        const uint32_t want = expect_tint && picture_face >= 0 ? button_glyphs::tint(corners[i], expected_buttons[picture_face]) : corners[i];
-        assert(ld32(c->r[3] + 0xA8 + i * 4) == want);
+    for (int pass = 0; pass < (yield_in_draw ? 2 : 1); pass++) {
+        if (pass) std::this_thread::yield();
+        for (uint32_t i = 0; i < 4; i++) {
+            const uint32_t want = expect_tint && picture_face >= 0 ? button_glyphs::tint(corners[i], expected_buttons[picture_face]) : corners[i];
+            assert(ld32(c->r[3] + 0xA8 + i * 4) == want);
+        }
     }
     c->r[3] = 0xC003;
+}
+
+// #326: a temporary change held by two threads at once. Whichever leaves last restores the game's
+// value, a game write in between is kept, and other words (the text list's cache byte) are untouched.
+void shared_patch_test() {
+    constexpr uint32_t word = base + 0x9000, count = base + 0x9004, cache = base + 0x9006;
+    auto doubled = [](uint32_t v) { return v * 2; };
+    for (bool first_leaves_first : {true, false}) {
+        st32(word, 21);
+        std::vector<shared_patch::Held> a, b;
+        shared_patch::hold(a, word, 4, doubled);
+        assert(ld32(word) == 42 && shared_patch::authored(word) == 21);
+        shared_patch::hold(b, word, 4, doubled);  // from the kept original: 42, not 84
+        assert(ld32(word) == 42 && shared_patch::authored(word) == 21);
+        shared_patch::release(first_leaves_first ? a : b);
+        assert(ld32(word) == 42);  // still drawn by the other thread
+        shared_patch::release(first_leaves_first ? b : a);
+        assert(ld32(word) == 21);
+    }
+    // The game writes while a change is held: its value is the new original, and it stays.
+    {
+        st32(word, 21);
+        std::vector<shared_patch::Held> a, b;
+        shared_patch::hold(a, word, 4, doubled);
+        st32(word, 50);
+        assert(shared_patch::authored(word) == 50);
+        shared_patch::hold(b, word, 4, doubled);
+        assert(ld32(word) == 100);
+        shared_patch::release(a);
+        shared_patch::release(b);
+        assert(ld32(word) == 50);
+        shared_patch::hold(a, word, 4, doubled);
+        st32(word, 7);
+        shared_patch::release(a);
+        assert(ld32(word) == 7);
+    }
+    // 16- and 8-bit words: the glyph count beside the game's cache byte.
+    {
+        st16(count, 5);
+        st8(cache, 0);
+        std::vector<shared_patch::Held> a;
+        shared_patch::hold_value(a, count, 2, 1);
+        assert(ld16(count) == 1 && shared_patch::authored(count, 2) == 5);
+        st8(cache, 1);  // the vertex build marks its cache valid
+        shared_patch::release(a);
+        assert(ld16(count) == 5 && ld8(cache) == 1);
+    }
+}
+
+// #326 end to end: two threads draw the same Xbox-tinted picture at once, as the item screen does
+// in "play on GamePad" mode. Every draw must see exactly one tint, and nothing may stay behind:
+// the plain save and restore made the tint permanent, darker each time.
+void concurrent_draw_test() {
+    layout(input_map::FaceLayout::kLabels);
+    assert(expect_tint);
+    constexpr uint32_t slot = base + 0x9400;
+    std::memset(mem::ptr(slot), 0, 0xC0);
+    std::strcpy((char*)mem::ptr(slot + 0x80), "P_Y_00");
+    picture_face = 3;
+    for (uint32_t i = 0; i < 4; i++) st32(slot + 0xA8 + i * 4, corners[i]);
+    const unsigned draws_before = picture_draws;
+    yield_in_draw = true;
+    auto work = [] {
+        for (int n = 0; n < 4000; ++n) {
+            Cpu c{};
+            c.r[3] = slot;
+            hook_02874D54(&c);  // the stub checks the colours it is drawn with
+        }
+    };
+    std::thread main_pass(work), worker_pass(work);
+    main_pass.join();
+    worker_pass.join();
+    yield_in_draw = false;
+    assert(picture_draws == draws_before + 8000);
+    for (uint32_t i = 0; i < 4; i++) assert(ld32(slot + 0xA8 + i * 4) == corners[i]);
+    layout(input_map::FaceLayout::kPosition);
 }
 
 int main() {
@@ -1505,6 +1589,8 @@ int main() {
             }
     } while (std::next_permutation(permutation.begin(), permutation.end()));
 
+    shared_patch_test();
+    concurrent_draw_test();
 
 #ifdef _WIN32
     VirtualFree(memory, 0, MEM_RELEASE);
@@ -1513,5 +1599,5 @@ int main() {
     munmap(memory, kArena);
     munmap(globals, 0x10000);
 #endif
-    std::printf("button_glyphs_test: passed (%u prints, %u cached text draws, %u HUD draws)\n", prints, text_draws, picture_draws);
+    std::printf("button_glyphs_test: passed (%u prints, %u cached text draws, %u HUD draws)\n", prints, text_draws, picture_draws.load());
 }

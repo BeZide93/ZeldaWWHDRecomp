@@ -16,6 +16,7 @@
 #include "input_map.h"
 #include "runtime.h"
 #include "guest_addr.h"
+#include "shared_patch.h"
 
 extern "C" {
 void f_0286E9F0_orig(Cpu* c);  // CharWriter::Print(writer, character)
@@ -637,14 +638,14 @@ extern "C" void hook_02874D54(Cpu* c) {
     const int face = button_glyphs::face_picture(pane_name(picture));
     const PromptStyle look = style();
     if (face < 0 || look.face != FaceStyle::kXbox || !look.colours) return f_02874D54_orig(c);
-    std::array<uint32_t, 4> saved;
-    for (uint32_t i = 0; i < saved.size(); i++) {
-        const uint32_t address = picture + 0xA8 + 4 * i;
-        saved[i] = ld32(address);
-        st32(address, button_glyphs::tint(saved[i], look.buttons[face]));
-    }
+    // Through shared_patch: in "play on GamePad" mode the item screen draws these pictures on two
+    // threads at once, and a plain save and restore made the tint permanent, darker each time (#326).
+    const int button = look.buttons[face];
+    std::vector<shared_patch::Held> held;
+    for (uint32_t i = 0; i < 4; i++)
+        shared_patch::hold(held, picture + 0xA8 + 4 * i, 4, [button](uint32_t rgba) { return button_glyphs::tint(rgba, button); });
     f_02874D54_orig(c);
-    for (uint32_t i = 0; i < saved.size(); i++) st32(picture + 0xA8 + 4 * i, saved[i]);
+    shared_patch::release(held);
 }
 
 namespace button_glyphs {
