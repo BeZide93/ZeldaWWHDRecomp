@@ -24,7 +24,9 @@ struct Fixture {
     void str(uint32_t a, const char* s) { for (int i = 0; i < 8; i++) s8(a + i, i < (int)strlen(s) ? uint8_t(s[i]) : 0); }
 };
 
-constexpr uint32_t G = kGameInfo;
+// the USA addresses of g_dComIfG_gameInfo, l_fopOvlpM_overlap[0] and the save info pointer
+constexpr uint32_t G = 0x1046F0B0, kOverlap = 0x101F36CC, kSaveInfoPtr = 0x101F84DC;
+const Addresses kUsa{G, kOverlap, kSaveInfoPtr};
 constexpr uint32_t kLinkAddr = 0x16000000, kAtt = 0x16100000, kEntry = 0x16100054, kEnemy = 0x17000000,
                    kNpc = 0x17100000, kSave = 0x18000000;
 
@@ -49,7 +51,7 @@ Fixture outset() {
 }
 
 PlayContext read_at(const Fixture& f, LockTracker& lock, GameUiSignals ui = {}, PaneSignals panes = {}, uint64_t step = 1) {
-    return read(f, Addresses{}, ui, panes, lock, step);
+    return read(f, kUsa, ui, panes, lock, step);
 }
 }  // namespace
 

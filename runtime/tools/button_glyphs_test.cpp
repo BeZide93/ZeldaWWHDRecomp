@@ -43,6 +43,7 @@ void emit(Op op, const uint32_t* words, uint32_t count) {
 }
 }
 namespace mods::cemu { float aspect_ratio() { return 0; } }
+namespace mods { void play_context_pane(uint32_t) {} }  // the context buttons' pane observer (mods/play_context.cpp)
 extern "C" void f_025A847C_orig(Cpu*) {}
 extern "C" void f_02704D2C_orig(Cpu*) {}
 extern "C" void f_0282D9C0_orig(Cpu*) {}

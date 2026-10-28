@@ -35,10 +35,8 @@
 
 namespace mods::playctx {
 
-// ---- addresses (canonical USA data addresses; play_context.cpp maps them through GD()) ----
-constexpr uint32_t kGameInfo = 0x1046F0B0;  // g_dComIfG_gameInfo
-constexpr uint32_t kOverlap = 0x101F36CC;   // l_fopOvlpM_overlap[0]: a fade / wipe runs (turbo.cpp)
-constexpr uint32_t kSaveInfoPtr = 0x101F84DC;  // *this + 0x20: dSv_player_c (cheats.cpp)
+// ---- globals: g_dComIfG_gameInfo, l_fopOvlpM_overlap[0], the save info pointer; their addresses (USA
+// 1046F0B0, 101F36CC, 101F84DC) are mapped through GD() in play_context.cpp (struct Addresses below) ----
 
 // gameInfo-relative
 constexpr uint32_t kStage = 0x5134, kNextStageEnable = 0x514C, kEventMode = 0x5292, kPlayer = 0x5B2C;
@@ -84,7 +82,7 @@ enum : uint32_t {
     kSt0Hang = 0x100, kSt0BowAim = 0x1000, kSt0FirstPerson = 0x2000, kSt0HookshotAim = 0x4000,
     kSt0SwordSwing = 0x8000, kSt0ShipRide = 0x10000, kSt0RopeAim = 0x20000, kSt0BoomerangAim = 0x80000,
     kSt0Swim = 0x100000, kSt0Telescope = 0x200000, kSt0BoomerangWait = 0x400000, kSt0Rope = 0x800000,
-    kSt0Hang2 = 0x2000000, kSt0Ladder = 0x4000000, kSt0Crawl = 0x8000000, kSt0SpinAttack = 0x40000000,
+    kSt0Hang2 = 1u << 25, kSt0Ladder = 0x4000000, kSt0Crawl = 0x8000000, kSt0SpinAttack = 0x40000000,
     kSt0Aims = kSt0BowAim | kSt0HookshotAim | kSt0RopeAim | kSt0BoomerangAim,
 };
 enum : uint32_t { kSt1Conduct = 0x1, kSt1PictoAim = 0x8, kSt1LeafFly = 0x20, kSt1LeafFan = 0x40, kSt1Sail = 0x400 };
@@ -257,8 +255,10 @@ struct PaneSignals {  // from the Pane::Draw observer (play_context.cpp), alread
 struct GameUiSignals {  // hud_gate.cpp's reading (mods::GameUi)
     bool event = false, message = false, menu = false;
 };
-struct Addresses {  // the build's addresses of the canonical globals above (GD())
-    uint32_t game_info = kGameInfo, overlap = kOverlap, save_info_ptr = kSaveInfoPtr;
+struct Addresses {  // this build's addresses of the globals (play_context.cpp: GD())
+    uint32_t game_info = 0;      // g_dComIfG_gameInfo (dComIfGp_get() returns it)
+    uint32_t overlap = 0;        // l_fopOvlpM_overlap[0]: a fade / wipe runs (turbo.cpp)
+    uint32_t save_info_ptr = 0;  // *this + 0x20: dSv_player_c (cheats.cpp)
 };
 
 // A Quest Log is played: a stage is loaded that is not the title screen ("sea_T") or the file select ("Name")

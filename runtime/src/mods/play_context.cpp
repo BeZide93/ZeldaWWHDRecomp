@@ -57,6 +57,11 @@ int log_level() {
 std::atomic<int> g_wanted{0};
 bool wanted() { return g_wanted.load(std::memory_order_relaxed) > 0 || log_level() > 0; }
 
+const Addresses& addresses() {
+    static const Addresses a{GD(0x1046F0B0), GD(0x101F36CC), GD(0x101F84DC)};
+    return a;
+}
+
 std::mutex g_mu;
 PlayContext g_last;
 LockTracker g_lock;
@@ -115,7 +120,7 @@ playctx::PlayContext play_context() {
 void play_context_pane(uint32_t pane) {
     if (!wanted()) return;
     const char* n = (const char*)mem::ptr(pane + kPaneName);
-    if (log_level() >= 2 && n[0] && ld8(GD(kGameInfo) + kStage)) log_new_pane(n);
+    if (log_level() >= 2 && n[0] && ld8(addresses().game_info + kStage)) log_new_pane(n);
     const PaneSignal s = classify_pane(n);
     switch (s) {
         case kPaneNone: return;
@@ -165,9 +170,8 @@ void play_context_pane(uint32_t pane) {
 
 void play_context_step() {
     if (!wanted()) return;
-    static const Addresses addresses{GD(kGameInfo), GD(kOverlap), GD(kSaveInfoPtr)};
     const GameUi ui = game_ui_now();
-    const PlayContext c = read(GuestMem{}, addresses, {ui.event, ui.message, ui.menu}, aged_panes(), g_lock, step());
+    const PlayContext c = read(GuestMem{}, addresses(), {ui.event, ui.message, ui.menu}, aged_panes(), g_lock, step());
     PlayContext previous;
     {
         std::lock_guard<std::mutex> lk(g_mu);
