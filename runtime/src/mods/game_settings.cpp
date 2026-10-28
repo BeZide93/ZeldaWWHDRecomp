@@ -337,6 +337,14 @@ void register_controls() {
 void register_screen() {
     {
         Item it;
+        it.id = "screen.large-picto", it.tab = "screen", it.label = "Large Picto Box view", it.kind = Kind::Toggle;
+        it.help = "The finder fills the screen; the photo is what the corner marks frame.";
+        it.get = [] { return mods::large_picto_on() ? 1.0f : 0.0f; };
+        it.set = [](float v) { mods::set_large_picto_on(v >= 0.5f); };
+        add(std::move(it));
+    }
+    {
+        Item it;
         it.id = "screen.fov", it.tab = "screen", it.label = "Gameplay field of view", it.kind = Kind::Number;
         it.help = "100% is the original. Wider shows more of the world; cutscenes keep theirs.";
         it.min = 0.75f, it.max = 2.5f, it.step = 0.05f;

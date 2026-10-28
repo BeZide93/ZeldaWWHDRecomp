@@ -57,6 +57,24 @@ bool log_on() {
     return on;
 }
 
+// the large Picto Box view (controls plan P8): the finder's black frame (PictographBox_00 N_Frame_00: P_FramerT_00,
+// P_FrameL_00, P_FramerR_00, P_FrameB_00) isn't drawn while the finder is up; the game draws the scene on the whole
+// screen behind it, so the picture fills it. The photo is still the finder's part (its corner marks stay).
+// Option hudLargePicto (WWHD_LARGE_PICTO for tests, not saved), off by default.
+std::atomic<int> g_large_picto{-1};
+std::atomic<bool> g_picto_frame_hidden{false};
+bool large_picto_option() {
+    int v = g_large_picto.load(std::memory_order_relaxed);
+    if (v >= 0) return v != 0;
+    if (const char* e = getenv("WWHD_LARGE_PICTO"); e && *e) v = atoi(e) != 0;
+    else {
+        std::string s;
+        v = hostui::get("hudLargePicto", s) && s == "1";
+    }
+    g_large_picto.store(v, std::memory_order_relaxed);
+    return v != 0;
+}
+
 std::mutex g_mu;
 Rules g_rules;
 std::atomic<float> g_alpha[kCount] = {1.f, 1.f, 1.f};
@@ -77,10 +95,21 @@ void set_hud_fade_on(int e, bool on) {
     if (!test_env()) hostui::set(kKeys[e], on ? "1" : "0");
 }
 
+bool large_picto_on() { return large_picto_option(); }
+void set_large_picto_on(bool on) {
+    g_large_picto.store(on, std::memory_order_relaxed);
+    if (!getenv("WWHD_LARGE_PICTO")) hostui::set("hudLargePicto", on ? "1" : "0");
+}
+
 void hud_fade_step(const playctx::PlayContext& c) {
     const auto now = std::chrono::steady_clock::now();
     const float seconds = g_last.time_since_epoch().count() ? std::min(0.25f, std::chrono::duration<float>(now - g_last).count()) : 0.f;
     g_last = now;
+    if (large_picto_option()) {
+        static const bool wanted = (play_context_want(true), true);
+        (void)wanted;
+    }
+    g_picto_frame_hidden.store(large_picto_option() && c.has(playctx::kPictoFinder) && !c.has(playctx::kAlbum), std::memory_order_relaxed);
     if (!any_on()) {
         for (auto& a : g_alpha) a.store(1.f, std::memory_order_relaxed);
         return;
@@ -118,6 +147,7 @@ int hud_pane_hide(uint32_t pane) {
     const char* n = reinterpret_cast<const char*>(mem::ptr(pane + kPaneName));
     if (const int e = element_of(n); e >= 0) return g_alpha[e].load(std::memory_order_relaxed) <= 0.f ? 1 : 0;
     if (one_screen_hidden_pane(n)) return 1;
+    if (n[0] == 'N' && !strncmp(n, "N_Frame_00", 24) && g_picto_frame_hidden.load(std::memory_order_relaxed)) return 1;
     if (!context_touch_hide_cluster()) return 0;
     if (n[0] != 'N' && n[0] != 'P' && n[0] != 'L' && n[0] != 'W') return 0;
     for (const char* c : kCluster)

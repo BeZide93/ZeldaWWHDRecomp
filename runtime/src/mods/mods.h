@@ -207,7 +207,9 @@ bool hud_fade_on(int element);  // hudfade::Element
 void set_hud_fade_on(int element, bool on);
 void hud_fade_step(const playctx::PlayContext& c);  // each logic step, after the context was read
 float hud_fade_alpha_of(uint32_t pane);  // Pane::CalculateMtx: the alpha factor of a faded pane (1: none)
-int hud_pane_hide(uint32_t pane);  // Pane::Draw: 0 draw, 1 skip (a faded-out element), 2 skip in TV layouts (the hidden cluster)
+int hud_pane_hide(uint32_t pane);
+bool large_picto_on();  // the large Picto Box view: its finder's frame not drawn (hud_fade.cpp)
+void set_large_picto_on(bool on);  // Pane::Draw: 0 draw, 1 skip (a faded-out element), 2 skip in TV layouts (the hidden cluster)
 bool story_system();                      // letters, quests, the story notebook, mod charts (mods/required.h)
 void set_story_system(bool on);
 void set_auto_wind(bool on);

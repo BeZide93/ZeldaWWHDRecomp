@@ -67,6 +67,16 @@ int main() {
     assert(free_touch(o, 0.9f, false) == FreeSwipe);
     assert(free_touch(o, 0.1f, true) == FreeGame && free_touch(o, 0.9f, true) == FreeGame);  // view button, GamePad picture
     assert(free_touch(o, nan, false) == FreeGame);
+    // the first-start question (P8): once, on a touch device with the controls on, unless a style was chosen
+    assert(ask_first_start(true, true, false, false));
+    assert(!ask_first_start(false, true, false, false) && !ask_first_start(true, false, false, false));
+    assert(!ask_first_start(true, true, true, false) && !ask_first_start(true, true, false, true));
+    {
+        Options c = classic;
+        c.right = RightStick;
+        const Options yes = first_start_answer(c, true), no = first_start_answer(o, false);
+        assert(yes.style == Flexible && yes.right == RightSwipe && no.style == Classic && no.right == o.right);
+    }
     // a talk claims the picture (P5), in either style; the game's own areas stay the game's
     assert(free_touch(o, 0.2f, false, true) == FreeTalk && free_touch(classic, 0.8f, false, true) == FreeTalk);
     assert(free_touch(o, 0.2f, true, true) == FreeGame && free_touch(classic, nan, false, true) == FreeGame);

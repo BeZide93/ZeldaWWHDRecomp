@@ -26,6 +26,7 @@
 #include "../file_select_quit.h"
 #include "gyro_popup.h"
 #include "controller_setup.h"
+#include "touch_question.h"
 #include "controller_details.h"
 #include "popup.h"
 #include "widgets.h"
@@ -1566,6 +1567,9 @@ void tab_display() {
     help("The rupee counter shows for a few seconds after the count changed, and in shops.");
     if (check("Magic only while used", mods::hud_fade_on(2), &v)) hostui::post([v] { mods::set_hud_fade_on(2, v); });
     help("The magic bar shows for a moment whenever magic is used or refilled.");
+    if (check("Large Picto Box view", mods::large_picto_on(), &v)) hostui::post([v] { mods::set_large_picto_on(v); });
+    help("The Picto Box's finder fills the screen instead of its small window. The photo is still what the "
+         "corner marks frame.");
     heading("Picture scaling");
     static const char *const f[] = {"Smooth", "Sharp", "Integer scale (pixel exact)"};
     const bool fok = hostui::scale_filter_available();
@@ -2199,6 +2203,43 @@ void controller_setup_frame() {
         g_setup_capture = false;
         external_binding_capture(false);
     }
+}
+
+// The first-start question (controls plan P8; touch_style.h ask_first_start): "Use the new touch controls?",
+// once, over the game's first pictures on a touch device. Test aid on the Mac: WWHD_TEST_TOUCH_QUESTION=1 asks it
+// there (never answered by the test: an answer is saved) and takes a screenshot of it.
+std::atomic<bool> g_touch_question{false}, g_question_opened_menu{false};
+void touch_question_check(bool open) {
+    static bool decided = false;
+    if (decided || render::frame_count() < 120) return;  // (the game's first pictures are up)
+    decided = true;
+#ifdef __ANDROID__
+    const bool touch = true;
+#else
+    const bool touch = getenv("WWHD_TEST_TOUCH_QUESTION") != nullptr;
+#endif
+    if (!touch_style::ask_first_start(touch, gfx::g_touch_controls.load(), touch_options::style_saved(), touch_options::first_start_asked()))
+        return;
+    LOG("[touch] first start: asking which touch controls to use");
+    g_touch_question = true;
+    if (!open) {
+        g_question_opened_menu = true;
+        set_open(true, OpenReason::API);
+    }
+}
+void touch_question_frame() {
+    if (!g_touch_question.load()) return;
+    const bool back = navigation_pressed(input_map::face_input(input_map::kB));
+    const touch_question::Answer answer = touch_question::frame(back);
+    if (back) g_pad_b_used = true;
+    static int test_frames = 0;
+    if (getenv("WWHD_TEST_TOUCH_QUESTION") && ++test_frames == 30) screenshot::request();
+    if (answer == touch_question::kNone) return;
+    const bool flexible = answer == touch_question::kNew;
+    hostui::post([flexible] { touch_options::answer_first_start(flexible); });
+    LOG("[touch] first start: %s touch controls", flexible ? "the new (Flexible)" : "the classic");
+    g_touch_question = false;
+    if (g_question_opened_menu.exchange(false)) set_open(false, OpenReason::API);
 }
 
 void start_controller_setup(const std::string& guid, const std::string& name) {
@@ -3022,6 +3063,7 @@ void settings_window() {
         }
         quit_row(open);
         controller_setup_frame();  // the controller setup and its offer, over any tab
+        touch_question_frame();    // the first-start touch controls question (P8)
     }
     ImGui::End();
     // B (not while choosing an input or in a list) or the close button closes the menu
@@ -3550,6 +3592,7 @@ ImDrawData* frame(float pw, float ph, void (*renderer_init)()) {
     setup_run_tick();
     modsui::tick(mods_host(), open);
     if (!open && !g_restart_notice.started()) restart_notice_frame(false);
+    touch_question_check(open);
     const int layer = open ? 0 : layer_mode();
     g_wants_text = (open || layer) && io.WantTextInput;
     guesthud::frame();

@@ -16,4 +16,9 @@ void set(const touch_style::Options& o);
 // start-up: the saved values (settings.ini keys touchStyle, touchShowSticks, touchFollow, touchRight,
 // touchSwipeSpeed, touchSwipeBoat); missing keys keep the defaults
 void load(const std::map<std::string, std::string>& saved);
+// the first-start question (touch_style.h ask_first_start): a style was saved, the question was answered;
+// answering sets the style and remembers it (settings.ini touchStyleAsked=1); main thread
+bool style_saved();
+bool first_start_asked();
+void answer_first_start(bool flexible);
 }  // namespace touch_options

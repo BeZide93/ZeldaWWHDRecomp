@@ -76,6 +76,21 @@ inline bool game_touch(const GameTouch& g) {
     return g.view_button || g.pip;
 }
 
+// The first-start question (controls plan P8): "Use the new touch controls?" (Flexible, recommended) or the
+// classic ones, asked once on a touch device with the on-screen controls on, unless the player already chose a
+// style (settings.ini touchStyle) or answered it (touchStyleAsked). Flexible is the default either way; the
+// question tells the player, and lets them keep the classic fixed sticks. Idea from the GreenNaugahyde Android
+// fork (StarterQuestions), reimplemented.
+inline bool ask_first_start(bool touch_device, bool controls_on, bool style_saved, bool asked) {
+    return touch_device && controls_on && !style_saved && !asked;
+}
+// the answer: the new controls (Flexible with the swipe camera) or the classic ones
+inline Options first_start_answer(Options o, bool flexible) {
+    o.style = flexible ? Flexible : Classic;
+    if (flexible) o.right = RightSwipe;
+    return o;
+}
+
 // For Java (TouchControls.nativeTouchOptions): ints, speeds in percent.
 //   [0] version  [1] style  [2] show sticks  [3] follow  [4] right side  [5] swipe speed %  [6] boat %
 constexpr int kPackVersion = 1, kPackLen = 7;
