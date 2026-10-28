@@ -69,6 +69,28 @@ int main() {
     assert(free_touch(o, nan, false) == FreeGame);
     o.right = RightStick;
     assert(free_touch(o, 0.9f, false) == FreeRightStick && free_touch(o, 0.2f, false) == FreeLeftStick);
+    // the game's own touch areas, as the renderer routes a primary-screen finger (game_touch); the CI
+    // display smoke's case: two screens with roles swapped, a tap on the GamePad picture the phone shows
+    // must reach the game, not become a floating stick or a swipe in the default Flexible style
+    {
+        GameTouch g;
+        assert(!game_touch(g));  // one screen, off the view button and the GamePad picture
+        g.view_button = true;
+        assert(game_touch(g));
+        g = {};
+        g.pip = true;
+        assert(game_touch(g));
+        GameTouch swapped;
+        swapped.dual = swapped.swapped = true;
+        assert(!game_touch(swapped));
+        swapped.primary_gamepad = true;
+        assert(game_touch(swapped));
+        assert(free_touch(Options{}, 0.5f, game_touch(swapped)) == FreeGame);  // the CI tap (screen centre)
+        GameTouch tv;  // two screens, the phone shows the TV: the one-screen areas do not count there
+        tv.dual = true, tv.view_button = true, tv.pip = true, tv.primary_gamepad = true;
+        assert(!game_touch(tv));
+        assert(free_touch(Options{}, 0.5f, game_touch(tv)) == FreeSwipe);
+    }
     // sanitize: unknown enum values and out-of-range speeds
     Options bad;
     bad.style = 7, bad.right = -3, bad.swipe_speed = 40, bad.swipe_boat = nan;

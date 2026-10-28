@@ -107,13 +107,8 @@ extern "C" JNIEXPORT jint JNICALL Java_org_wwhdrecomp_wwhd_TouchControls_nativeT
     }
     return touch_style::kPackVersion;
 }
-// a finger landed on no control at (x, y), 0..1 of the view: what it does (touch_style::Free). The
-// game's own touch areas (the view button, the GamePad picture) keep their touches in every style.
-extern "C" JNIEXPORT jint JNICALL Java_org_wwhdrecomp_wwhd_TouchControls_nativeFreeTouch(JNIEnv*, jclass, jfloat x, jfloat y) {
-    float tx, ty;
-    const bool game = gfx::view_button_hit(x, y) || gfx::overlay_hit(x, y, &tx, &ty, false);
-    return touch_style::free_touch(touch_options::get(), x, game);
-}
+// TouchControls.nativeFreeTouch (a finger on no control: touch_style::Free) is in gfx/vulkan/backend.cpp,
+// next to the finger routing whose GamePad-touch areas it must agree with.
 // the swipe camera: the finger moved by (dx, dy) pixels on a display of dpi
 extern "C" JNIEXPORT void JNICALL Java_org_wwhdrecomp_wwhd_TouchControls_nativeSwipe(JNIEnv*, jclass, jfloat dx, jfloat dy, jfloat dpi) {
     phone_rumble::last_input_touch = true;

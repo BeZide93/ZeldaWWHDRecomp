@@ -81,6 +81,7 @@
 #include "platform/perf_hint.h"
 #include "platform/gamepad_touch.h"
 #include "platform/dual_display.h"
+#include "platform/touch_options.h"
 #include "runtime.h"
 #include "screenshot.h"
 #include "shaders.h"
@@ -5061,6 +5062,24 @@ bool android_display_touch_event(const SDL_Event& event) {
   default:
     return false;
   }
+}
+// TouchControls.nativeFreeTouch: a finger landed on no on-screen control at (x, y), 0..1 of the view.
+// The game's own touch areas, exactly as android_display_touch_event above routes a finger
+// (touch_style::game_touch), keep it in every style; elsewhere the touch style decides (a floating
+// stick or the swipe camera in Flexible, the game in Classic).
+extern "C" JNIEXPORT jint JNICALL Java_org_wwhdrecomp_wwhd_TouchControls_nativeFreeTouch(JNIEnv*, jclass, jfloat x, jfloat y) {
+  touch_style::GameTouch g;
+  float tx = 0, ty = 0;
+  g.dual = gfx::g_has_drc_window;
+  g.swapped = dual_display::active_swap;
+  if (g.dual) {
+    std::lock_guard<std::mutex> guard(secondaryMutex);
+    g.primary_gamepad = gamepad_touch::map(primaryTouchBox, x, y, false, tx, ty);
+  } else {
+    g.view_button = gfx::view_button_hit(x, y);
+    g.pip = gfx::overlay_hit(x, y, &tx, &ty, false);
+  }
+  return touch_style::free_touch(touch_options::get(), x, touch_style::game_touch(g));
 }
 #endif
 static bool gamepad_touch(const SDL_Event& event) {

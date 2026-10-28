@@ -57,6 +57,21 @@ inline Free free_touch(const Options& o, float x, bool on_game_ui) {
     return o.right == RightStick ? FreeRightStick : FreeSwipe;
 }
 
+// Whether a finger at a point is the game's own touch, as the renderer routes a primary-screen finger
+// (gfx/vulkan/backend.cpp android_display_touch_event; nativeFreeTouch asks this first):
+//   one screen: the view button or the GamePad picture (picture-in-picture or GamePad alone);
+//   two screens, roles swapped (the phone shows the GamePad): the GamePad picture on the phone;
+//   two screens, not swapped (the phone shows the TV): nothing on the phone is the GamePad's.
+struct GameTouch {
+    bool dual = false, swapped = false;  // a second display; its roles swapped
+    bool view_button = false, pip = false;  // one screen: on the view button / the GamePad picture
+    bool primary_gamepad = false;           // swapped: on the GamePad picture shown on the phone
+};
+inline bool game_touch(const GameTouch& g) {
+    if (g.dual) return g.swapped && g.primary_gamepad;
+    return g.view_button || g.pip;
+}
+
 // For Java (TouchControls.nativeTouchOptions): ints, speeds in percent.
 //   [0] version  [1] style  [2] show sticks  [3] follow  [4] right side  [5] swipe speed %  [6] boat %
 constexpr int kPackVersion = 1, kPackLen = 7;
