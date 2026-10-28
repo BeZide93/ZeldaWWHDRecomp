@@ -23,6 +23,7 @@
 #include "../one_screen.h"
 
 #include <atomic>
+#include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <string>
