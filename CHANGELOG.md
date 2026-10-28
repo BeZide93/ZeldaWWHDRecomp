@@ -7,6 +7,11 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Faster, lighter shader preparation in setup.** The shader template that ships with the game is now distilled:
+  one entry per distinct shader instead of every recorded state (447 KB instead of 8 MB). Setup's "Resolving
+  shaders from your game files" step takes about 12 seconds instead of a minute on a Mac (more saved on phones)
+  and needs far less memory; the shaders and pipelines it prepares are exactly the same. Idea from SwitchWakerHD
+  (thanks @Pulpparty and @depende3000).
 - **Settings in the game's own pause menu.** The common settings now have a page in the item menu, drawn like the
   game's own menus (its paper, font, arrows and menu sounds, read from your copy of the game). Open it with the new
   arrow left of the items, by pressing Left from the leftmost item column, or by swiping. Tabs: Camera, Controls,
