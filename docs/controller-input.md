@@ -98,7 +98,8 @@ you play, d-pad down in menus.
 
 **L turns the GamePad page** (Controls, off by default): in play the game reads L only to turn its
 GamePad screen between Items and Map. Off, L reaches the game only outside play, so L1 can jump
-without turning the page. Turn it on for a GamePad picture on a second screen.
+without turning the page. Turn it on for a GamePad picture on a second screen. It applies the same
+way with **Wii U Pro Controller** chosen in Controls.
 
 Controls files from before these options (format 1) keep working: Jump anywhere and the moon jump
 take the inputs that pressed the Wii U's L, and the old Jump anywhere button choice (R, ZL, ZR, L3,
