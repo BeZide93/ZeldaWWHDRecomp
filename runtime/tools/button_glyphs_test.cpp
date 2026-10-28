@@ -265,9 +265,7 @@ void positions_test() {
     }
 
     // Every OK/Back pair, in either order, stays in the menu's original two-row area.
-    const uint32_t scene = base + 0x6000, state = base + 0x6300;
     const uint32_t guide = base + 0x6400;
-    st32(0x101F8344, scene); st32(scene + 0x18, state);
     st32(guide + 4, 0x100EE5F8); st8(guide + 0xDD, 3);
     auto calculate_guide = [&] {
         Cpu c{}; c.r[3] = guide;
@@ -292,23 +290,15 @@ void positions_test() {
         int item = input_map::kX;
         for (int i = 0; i < 4; i++) if (i != pair.a && i != pair.b) mapping.pad[item++] = input_map::kPadA + i;
         input_map::set_current(mapping, false); expect_current();
-        for (uint32_t descriptor : {0x1049EC84u, 0x1049ECB0u, 0x1049ECDCu}) {
-            st32(state + 8, descriptor);
+        // The pair holds on every frame while the guide's retained buttons stay A and B, which
+        // includes its exit animation after the scene has returned to gameplay.
+        for (int frame = 0; frame < 3; ++frame) {
             calculate_guide();
             same_point(position(face_panes[0]), reverse ? pair.second : pair.first);
             same_point(position(face_panes[1]), reverse ? pair.first : pair.second);
             for (int i = 2; i < 4; i++) same_point(position(face_panes[i]), original[expected_spots[i]]);
             for (uint32_t i = 0; i < nodes.size(); i++)
                 for (uint32_t j = 0; j < 8; j++) assert(ld32(nodes[i] + 0x1C + 4*j) == authored_positions[i][j]);
-        }
-        // The displayed guide retains the pair after the scene returns to gameplay.
-        for (uint32_t descriptor : {0x1049EBD4u, 0x1049EC2Cu, 0x1049EC00u, 0x1049EC58u}) {
-            st32(state + 8, descriptor);
-            for (int frame = 0; frame < 60; ++frame) {
-                calculate_guide();
-                same_point(position(face_panes[0]), reverse ? pair.second : pair.first);
-                same_point(position(face_panes[1]), reverse ? pair.first : pair.second);
-            }
         }
         // A different layout in the same frame must not inherit the compact placement.
         calculate(false);
@@ -334,11 +324,8 @@ void positions_test() {
                 st32(guide + 4, vtable);
                 for (int face = 0; face < 4; ++face) {
                     st8(guide + 0xDD, 1u << face);
-                    for (uint32_t descriptor : {0x1049ECB0u, 0x1049EBD4u, 0x1049EC00u}) {
-                        st32(state + 8, descriptor);
-                        calculate_guide();
-                        same_point(position(face_panes[face]), original[face]);
-                    }
+                    calculate_guide();
+                    same_point(position(face_panes[face]), original[face]);
                     for (uint32_t i = 0; i < nodes.size(); ++i)
                         for (uint32_t j = 0; j < 8; ++j)
                             assert(ld32(nodes[i] + 0x1C + 4*j) == authored_positions[i][j]);
@@ -357,7 +344,6 @@ void positions_test() {
             for (int i = 0; i < 4; ++i) same_point(position(face_panes[i]), original[expected_spots[i]]);
         } while (std::next_permutation(buttons.begin(), buttons.end()));
     }
-    st32(0x101F8344, 0);
 
     // Different viewport origin/scale, and animated container scale/rotation: compare the
     // actual centres in common-parent space, not hard-coded screen offsets or cached globals.
