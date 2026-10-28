@@ -1892,7 +1892,12 @@ void tab_shortcuts() {
 // P6: per-controller bindings, the setup and its offer (see controller_setup_frame below)
 std::mutex g_offer_mu;
 std::vector<std::pair<std::string, std::string>> g_offers;  // guid, name: offers waiting for the menu
-controller_setup::State g_setup;
+// (made on first use: a State holds a Mapping, which tests that include this file without input_map
+// must not construct at start-up)
+controller_setup::State& setup_state() {
+    static controller_setup::State s;
+    return s;
+}
 std::atomic<bool> g_setup_opened_menu{false};  // the offer opened Settings: closing the setup closes it
 bool g_setup_capture = false;
 controller_setup::Displacing g_displace;
@@ -2072,56 +2077,56 @@ const input::ControllerInfo* find_controller(const std::vector<input::Controller
 // Settings' frame: the setup and its offer, over any tab
 void controller_setup_frame() {
     using namespace controller_setup;
-    if (!g_setup.active() && !ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId)) {
+    if (!setup_state().active() && !ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId)) {
         std::lock_guard<std::mutex> lk(g_offer_mu);
         if (!g_offers.empty()) {
             const auto [guid, name] = g_offers.front();
             g_offers.erase(g_offers.begin());
-            if (input_map::setup_offer_due(input_map::current(), guid, name, false)) g_setup.begin(guid, name, true);
+            if (input_map::setup_offer_due(input_map::current(), guid, name, false)) setup_state().begin(guid, name, true);
         }
     }
-    if (!g_setup.active()) return;
+    if (!setup_state().active()) return;
     static std::vector<input::ControllerInfo> list;
     list = input::controllers();
-    const input::ControllerInfo* pad = find_controller(list, g_setup.guid, g_setup.name);
+    const input::ControllerInfo* pad = find_controller(list, setup_state().guid, setup_state().name);
     input_map::FaceLabel labels[4];
     for (int i = 0; i < 4; i++) labels[i] = pad ? input_map::FaceLabel(pad->labels[i]) : input_map::FaceLabel::kUnknown;
     Io io;
     io.values = pad && int(pad->values.size()) >= input_map::kPadCount ? pad->values.data() : nullptr;
     io.labels = labels;
     io.now = now_s();
-    io.back = !g_setup.takes_controller() && navigation_pressed(input_map::face_input(input_map::kB));
-    const Answer a = frame(g_setup, input_map::current(), io);
+    io.back = !setup_state().takes_controller() && navigation_pressed(input_map::face_input(input_map::kB));
+    const Answer a = frame(setup_state(), input_map::current(), io);
     if (io.back) g_pad_b_used = true;  // B answered the setup: the menu stays open
     // its own steps take the controller: no shortcut (hold Select closes the menu) while they run
-    if (g_setup.takes_controller() != g_setup_capture) {
-        g_setup_capture = g_setup.takes_controller();
+    if (setup_state().takes_controller() != g_setup_capture) {
+        g_setup_capture = setup_state().takes_controller();
         external_binding_capture(g_setup_capture);
     }
     if (a == Answer::kDone) {
-        input_map::set_current(g_setup.result.mapping);
-        LOG("[input] controller setup: %s has its own bindings%s", g_setup.name.c_str(),
-            g_setup.result.jump_on ? "; Jump anywhere on" : "");
-        if (g_setup.result.jump_on && !mods::jump_anywhere()) hostui::post([] { mods::manager::set_enabled("jump-anywhere", true); });
+        input_map::set_current(setup_state().result.mapping);
+        LOG("[input] controller setup: %s has its own bindings%s", setup_state().name.c_str(),
+            setup_state().result.jump_on ? "; Jump anywhere on" : "");
+        if (setup_state().result.jump_on && !mods::jump_anywhere()) hostui::post([] { mods::manager::set_enabled("jump-anywhere", true); });
         g_edit_controller = true;  // the Controls tab shows what was made
-        g_edit_guid = g_setup.guid;
-        g_edit_name = g_setup.name;
+        g_edit_guid = setup_state().guid;
+        g_edit_name = setup_state().name;
     } else if (a == Answer::kNeverAsk) {
         input_map::Mapping m = input_map::current();
-        m.setup_declined.push_back(input_map::controller_key(g_setup.guid, g_setup.name));
+        m.setup_declined.push_back(input_map::controller_key(setup_state().guid, setup_state().name));
         input_map::set_current(m);
     }
-    if (a != Answer::kNone && !g_setup.active() && g_setup_opened_menu.exchange(false)) {
+    if (a != Answer::kNone && !setup_state().active() && g_setup_opened_menu.exchange(false)) {
         if (a != Answer::kDone) set_open(false, OpenReason::API);  // back to the game (after Done: Controls stays)
     }
-    if (!g_setup.active() && g_setup_capture) {
+    if (!setup_state().active() && g_setup_capture) {
         g_setup_capture = false;
         external_binding_capture(false);
     }
 }
 
 void start_controller_setup(const std::string& guid, const std::string& name) {
-    g_setup.begin(guid, name, false);
+    setup_state().begin(guid, name, false);
 }
 
 // Controls tab, top: which bindings the drawing edits, the setup, the details, L and the GamePad page

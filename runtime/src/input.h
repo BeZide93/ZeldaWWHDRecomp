@@ -22,10 +22,10 @@ enum : uint32_t { kVirtJump = 1, kVirtMoonJump = 2 };
 
 struct PadState {
     uint32_t buttons = 0;
-    uint32_t virt = 0;                     // kVirt* bits (never reach the game)
     float lx = 0, ly = 0, rx = 0, ry = 0;  // -1..1, +y = up
     bool touch = false;
     float tx = 0, ty = 0;                  // touch position on the GamePad screen, 0..1 from top left
+    uint32_t virt = 0;                     // kVirt* bits (never reach the game); last: positional initialisers stay
 };
 
 // Mouse button order: left, right, middle, side 4, side 5 (converted by the host).
