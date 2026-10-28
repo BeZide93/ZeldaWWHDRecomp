@@ -62,6 +62,7 @@ static GamePadUiState gamepad_ui() {
     const unsigned bits = g_gamepad_ui.load();
     return {bool(bits & 1), bool(bits & 2), bool(bits & 4), bool(bits & 8), bool(bits & 16)};
 }
+bool gamepad_ui_menu() { return gamepad_ui().menu; }
 std::atomic<float> g_drc_aspect{854.0f / 480.0f};
 std::atomic<bool> g_has_drc_window{false};
 std::atomic<bool> g_one_screen{false}, g_one_screen_off_tv{false};

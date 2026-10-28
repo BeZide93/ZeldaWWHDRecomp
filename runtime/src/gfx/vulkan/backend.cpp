@@ -5122,7 +5122,7 @@ extern "C" JNIEXPORT jint JNICALL Java_org_wwhdrecomp_wwhd_TouchControls_nativeF
     // One screen in Off-TV Play: the whole picture is the GamePad's; the game's touch only in its menus
     // (one_screen.h picture_is_game_touch: here the controls are shown, they asked)
     if (g.pip && gfx::g_one_screen_off_tv.load() &&
-        !one_screen::picture_is_game_touch(gfx::gamepad_ui().menu, true))
+        !one_screen::picture_is_game_touch(gfx::gamepad_ui_menu(), true))
       g.pip = false;
   }
   // a talk, a choice, a shop... (mods/touch_talk.h) claims the game's picture: only where the phone shows it

@@ -122,6 +122,7 @@ int display_saved_mode();
 bool display_gamepad_state_needed();
 void display_read_gamepad_ui(); // guest thread, once at swap; returns immediately outside auto/pause
 void display_gamepad_ui(GamePadUiState state); // publish a host-only snapshot
+bool gamepad_ui_menu();                          // that snapshot: a GamePad menu is open (any thread)
 
 // pixel rectangles in the target (drawable), top-left origin
 struct Layout { Box tv, pip; bool pip_on = false; bool drc_only = false; float scale = 1; };
