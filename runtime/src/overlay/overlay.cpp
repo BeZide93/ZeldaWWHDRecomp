@@ -1522,7 +1522,39 @@ void tab_display() {
              "first-person views keep the normal speed.");
         if (!flexible || to.right != touch_style::RightSwipe) ImGui::EndDisabled();
     }
+    // the context buttons (mods/context_touch.cpp, touch_play.h): each applies at once
+    if (check("Context buttons", mods::context_buttons_on(), &v)) hostui::post([v] { mods::set_context_buttons_on(v); });
+    help("Only the buttons that do something now show, with the game's own word or item on them (Open, Lift, "
+         "Speak, the bow...); the game's button display is hidden then. A golden ring shows when A offers "
+         "something new. Off: every button always shows.");
+    if (check("Items by tap", mods::item_tap_on(), &v)) hostui::post([v] { mods::set_item_tap_on(v); });
+    help("A tap on the bow, boomerang, hookshot or grappling hook takes it out and keeps it aimed; each tap "
+         "then shoots, B puts it away. Off: hold the button as on the Wii U.");
+    if (!mods::item_tap_on()) ImGui::BeginDisabled();
+    if (check("Only aiming buttons while aiming", mods::aim_only_on(), &v)) hostui::post([v] { mods::set_aim_only_on(v); });
+    help("While an item is aimed only its button (shoot), B, ZL and ZR show, so a stray tap can't lose the aim.");
+    if (!mods::item_tap_on()) ImGui::EndDisabled();
+    if (check("Put away the sword and the Deku Leaf", mods::auto_put_away_on(), &v)) hostui::post([v] { mods::set_auto_put_away_on(v); });
+    help("The sword goes back 5 seconds after the last swing or step, the Deku Leaf once Link stands still. "
+         "Only while you play by touch: with a controller they stay out until you put them away.");
+    {
+        int zl = mods::zl_latch_mode();
+        if (combo("ZL tapped", &zl, "Holds nothing\0Locks on until tapped; lets go after a defeat\0Locks on until tapped; next target after a defeat\0"))
+            hostui::post([zl] { mods::set_zl_latch_mode(zl); });
+        help("A tap on ZL with a target in reach keeps the lock until the next tap. When the enemy is defeated "
+             "it lets go (default), or locks the next enemy in reach. A tap with no target turns the camera "
+             "behind Link, as in the game.");
+    }
 #endif
+    // HUD fades (mods/hud_fade.h): every platform
+    heading("Screen (HUD)");
+    if (check("Hearts only in combat", mods::hud_fade_on(0), &v)) hostui::post([v] { mods::set_hud_fade_on(0, v); });
+    help("The hearts fade out unless the sword is drawn, an enemy is locked on, Link was hit or healed in the "
+         "last 5 seconds, or his life is low.");
+    if (check("Rupees only when they change", mods::hud_fade_on(1), &v)) hostui::post([v] { mods::set_hud_fade_on(1, v); });
+    help("The rupee counter shows for a few seconds after the count changed, and in shops.");
+    if (check("Magic only while used", mods::hud_fade_on(2), &v)) hostui::post([v] { mods::set_hud_fade_on(2, v); });
+    help("The magic bar shows for a moment whenever magic is used or refilled.");
     heading("Picture scaling");
     static const char *const f[] = {"Smooth", "Sharp", "Integer scale (pixel exact)"};
     const bool fok = hostui::scale_filter_available();

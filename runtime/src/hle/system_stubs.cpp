@@ -116,6 +116,7 @@ HLE(vpad, VPADRead) {
         live = true;
     }
     if (!input::pro_controller()) mods::item_ring_pad(p, repeat);  // X / Y / R: tap, or hold for the item ring
+    if (!input::pro_controller()) mods::context_touch_pad(p, repeat);  // touch play: items by tap, put-away, ZL latch
     last_p = p;
     story_notebook::pad(p, c);  // the story notebook's page takes the controller while it is open
     story_scenes::mute(p);

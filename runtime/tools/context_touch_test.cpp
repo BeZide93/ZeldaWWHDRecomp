@@ -3,6 +3,7 @@
 #include "mods/context_touch.h"
 
 #include <cassert>
+#include <cstdint>
 #include <cstdio>
 
 using namespace mods;
@@ -25,6 +26,11 @@ int main() {
     ctxtouch::pack(b, e, out, 48);
     assert(out[0] == ctxtouch::kPackVersion && ctxtouch::kPackLen == 40);
     assert(out[1] == (ctxtouch::kEnabled | ctxtouch::kActive | ctxtouch::kZlLatched));
+    e.item_names_a = true;
+    int32_t names[ctxtouch::kPackLen];
+    ctxtouch::pack(b, e, names, ctxtouch::kPackLen);
+    assert(names[1] == (ctxtouch::kEnabled | ctxtouch::kActive | ctxtouch::kZlLatched | ctxtouch::kItemNamesA));
+    e.item_names_a = false;
     assert(out[2] == 7 && out[3] == 0);
     auto st = [&](int i) { return out[ctxtouch::kButtons + 3 * i]; };
     auto lb = [&](int i) { return out[ctxtouch::kButtons + 3 * i + 1]; };

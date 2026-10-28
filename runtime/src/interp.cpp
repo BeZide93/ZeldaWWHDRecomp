@@ -1960,6 +1960,7 @@ extern "C" void hook_0203593C(Cpu* c) {
     // the item ring: its equip, the game's pace while open (full logic passes, and true 60's half passes,
     // which also run Link), the ring drawn
     mods::item_ring_service(c, !enabled() || !g_hold_next, enabled() && g_hold_next && true60::enabled());
+    mods::context_touch_service();  // tests: the context buttons' assets export (WWHD_CONTEXT_ASSETS)
     mods::hud_service();  // the boost bar and climb wheel fade out over the game's menus, events, messages
     const bool was_fast_forward = mods::fast_forward_active();
     mods::fast_forward_service();

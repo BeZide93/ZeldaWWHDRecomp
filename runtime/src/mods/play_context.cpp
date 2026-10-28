@@ -169,7 +169,10 @@ void play_context_pane(uint32_t pane) {
 }
 
 void play_context_step() {
-    if (!wanted()) return;
+    if (!wanted()) {
+        hud_fade_step(PlayContext{});  // (asks for the reading when a HUD fade is on)
+        return;
+    }
     const GameUi ui = game_ui_now();
     const PlayContext c = read(GuestMem{}, addresses(), {ui.event, ui.message, ui.menu}, aged_panes(), g_lock, step());
     PlayContext previous;
@@ -178,6 +181,8 @@ void play_context_step() {
         previous = g_last;
         g_last = c;
     }
+    context_touch_step(c);
+    hud_fade_step(c);
     if (log_level() && (!same_for_log(previous, c) || previous.step == 0)) {
         char buf[512], buttons[160];
         format(c, buf, sizeof buf);

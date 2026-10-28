@@ -7,6 +7,7 @@
 // Test/start-up switches: WWHD_MOD_<NAME>=1 (see mods.cpp).
 #pragma once
 #include <cstdint>
+#include <string>
 
 #include "move_speed.h"  // MoveMode (the run/swim speed mod's public vocabulary)
 #include "fast_forward.h"
@@ -146,6 +147,32 @@ int item_button_names();         // item_ring::Names: 0 X Y R, 1 A1 A2 A3, 2 aut
 void set_item_button_names(int names);
 const char* item_button_name(int button);  // as the names are now: "X" or "A1" ...
 bool item_names_on_hud();                  // A1 A2 A3 now: the HUD's X, Y and R show them (button_glyphs.cpp)
+// ---- the context buttons on the touch controls (context_touch.cpp; rules in touch_play.h) ----
+// the active controller's pad read, after the item ring: items by tap, auto put-away, the ZL latch (touch play only)
+void context_touch_pad(input::PadState& p, bool repeat);
+namespace playctx { struct PlayContext; }
+void context_touch_step(const playctx::PlayContext& c);  // each logic step, after the context was read
+void context_touch_service();                            // frame boundary (tests: WWHD_CONTEXT_ASSETS)
+bool context_touch_hide_cluster();  // the game's own button cluster is hidden now (aspect.cpp)
+bool context_touch_aim_latched();   // an item is latched by a tap (no jump buttons then)
+void context_touch_pack(int32_t* out, int n);       // context_touch.h pack (Java)
+int context_touch_assets(const std::string& dir);   // 0 not yet, -1 failed, > 0 generation
+bool context_buttons_on();
+void set_context_buttons_on(bool on);
+bool item_tap_on();
+void set_item_tap_on(bool on);
+bool aim_only_on();
+void set_aim_only_on(bool on);
+bool auto_put_away_on();
+void set_auto_put_away_on(bool on);
+int zl_latch_mode();  // touchplay::ZlLatch: 0 off, 1 let go (default), 2 next target
+void set_zl_latch_mode(int mode);
+// ---- HUD fades (hud_fade.cpp; rules in hud_fade.h): the game's hearts, rupees, magic bar ----
+bool hud_fade_on(int element);  // hudfade::Element
+void set_hud_fade_on(int element, bool on);
+void hud_fade_step(const playctx::PlayContext& c);  // each logic step, after the context was read
+float hud_fade_alpha_of(uint32_t pane);  // Pane::CalculateMtx: the alpha factor of a faded pane (1: none)
+int hud_pane_hide(uint32_t pane);  // Pane::Draw: 0 draw, 1 skip (a faded-out element), 2 skip in TV layouts (the hidden cluster)
 bool story_system();                      // letters, quests, the story notebook, mod charts (mods/required.h)
 void set_story_system(bool on);
 void set_auto_wind(bool on);

@@ -53,6 +53,7 @@ void pad_play_rules(input::PadState& p) {
 
 uint32_t jump_touch_buttons() {
     want_context();
+    if (context_touch_aim_latched()) return 0;  // aim-only: an item is held out by a tap
     return ctxbtn::jump_buttons(play_context(), jump_anywhere(), infinite(kMoonJump));
 }
 }  // namespace mods

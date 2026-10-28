@@ -28,6 +28,7 @@
 #include "aspect_panes.h"
 #include "mods/cemu_pack.h"
 #include "mods/play_context.h"
+#include "mods/mods.h"
 
 #include <algorithm>
 #include <atomic>
@@ -442,6 +443,17 @@ static void calculate_aspect_pane(Cpu* c) {
 }
 
 extern "C" void hook_028766CC(Cpu* c) {
+    // HUD fades (mods/hud_fade.h): the hearts, rupees and magic bar fade by their own alpha (+0x45), which
+    // the calculation passes on to the children that inherit alpha; set only for the call
+    const uint32_t pane = c->r[3];
+    const float fade = mods::hud_fade_alpha_of(pane);
+    if (fade < 1.f) {
+        const uint8_t a0 = ld8(pane + 0x45);
+        st8(pane + 0x45, uint8_t(a0 * fade));
+        button_glyphs::calculate_pane(c, calculate_aspect_pane);
+        st8(pane + 0x45, a0);
+        return;
+    }
     button_glyphs::calculate_pane(c, calculate_aspect_pane);
 }
 
@@ -462,6 +474,17 @@ extern "C" void hook_02877100(Cpu* c) {
         if (!ld32(pane+kPaneParent)) trace(trace,pane,0);
     }
     mods::play_context_pane(pane);  // the message's parts, the Picto Box screens... (returns at once unless wanted)
+    {
+        // the game's HUD parts the port hides: a faded-out heart / rupee / magic display, the button cluster
+        // while the touch controls show the context buttons (only TV layouts: the GamePad keeps its own)
+        const int hide = mods::hud_pane_hide(pane);
+        if (hide == 1) return;
+        if (hide == 2) {
+            uint32_t root = pane;
+            for (int i = 0; i < 32 && ld32(root + kPaneParent); i++) root = ld32(root + kPaneParent);
+            if (root != pane && root_on_tv(root)) return;
+        }
+    }
     if (original()) { f_02877100_orig(c); return; }
     uint32_t parent = ld32(pane + kPaneParent);
     if (!parent) {

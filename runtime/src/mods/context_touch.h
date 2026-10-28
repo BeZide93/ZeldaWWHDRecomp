@@ -29,6 +29,7 @@ enum : int32_t {
     kAimLatched = 1 << 3,    // items by tap: an item is held out / aimed by a tap (the buttons are the aim set)
     kZlLatched = 1 << 4,     // the ZL latch holds the lock-on (draw ZL pressed)
     kClusterHidden = 1 << 5, // the game's own button cluster is hidden now (information only)
+    kItemNamesA = 1 << 6,    // the item buttons are named A1 A2 A3 now (Controls > Item button names): draw those, not X Y R
 };
 // per-button state (out[kButtons + 3 * button]); kind as ctxbtn::Kind
 enum : int32_t {
@@ -43,7 +44,7 @@ constexpr int kPackLen = kButtons + 3 * ctxbtn::kCount + 3;  // 40
 
 struct Extra {          // what the touch-only state adds to the rules' view
     bool enabled = false;
-    bool aim_latched = false, zl_latched = false, cluster_hidden = false;
+    bool aim_latched = false, zl_latched = false, cluster_hidden = false, item_names_a = false;
     int assets_generation = 0;
     uint32_t held = 0;       // bit per ctxbtn::Button drawn pressed
     int32_t ring[ctxbtn::kCount] = {};  // golden-ring counters
@@ -57,7 +58,7 @@ inline void pack(const ctxbtn::Buttons& b, const Extra& e, int32_t* out, int n) 
     int32_t v[kPackLen] = {};
     v[0] = kPackVersion;
     v[1] = (e.enabled ? kEnabled : 0) | (b.active ? kActive : 0) | (b.tap_continues ? kTapContinues : 0) |
-           (e.aim_latched ? kAimLatched : 0) | (e.zl_latched ? kZlLatched : 0) | (e.cluster_hidden ? kClusterHidden : 0);
+           (e.aim_latched ? kAimLatched : 0) | (e.zl_latched ? kZlLatched : 0) | (e.cluster_hidden ? kClusterHidden : 0) | (e.item_names_a ? kItemNamesA : 0);
     v[2] = e.assets_generation;
     for (int i = 0; i < ctxbtn::kCount; i++) {
         const ctxbtn::ButtonView& bv = b.b[i];

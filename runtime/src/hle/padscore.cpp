@@ -94,6 +94,7 @@ HLE(padscore, KPADReadEx) {
         live = true;
     }
     if (input::pro_controller() && chan == 0) mods::item_ring_pad(p, repeat);  // X / Y / R: tap, or hold for the item ring
+    if (input::pro_controller() && chan == 0) mods::context_touch_pad(p, repeat);  // touch play: items by tap, put-away, ZL latch
     last_p = p;
     if (!input::pro_controller()) p = input::PadState{};  // held connected for a controller switch: idle
     story_notebook::mute(p);  // the notebook's page has the controller (VPADRead drives it)
