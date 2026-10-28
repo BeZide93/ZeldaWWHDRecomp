@@ -11,6 +11,8 @@
 //             stick under the thumb: on the left half the movement stick, on the right half the camera
 //             (a floating right stick, or the swipe camera). The sticks can be invisible. A finger on
 //             the game's own touch areas (the view button, the GamePad picture) still goes to the game.
+// Flexible with the swipe camera is the default (user decision 2026-10-28, after the phone session);
+// a player who picked Classic keeps it (settings.ini touchStyle=0).
 //
 // Idea from the GreenNaugahyde Android fork (GreenNaugahyde/ZeldaWWHDRecompAndroid, MPL-2.0), the
 // "Flexible" controls of ControlsView; reimplemented for our design.
@@ -26,7 +28,7 @@ enum Style : int { Classic = 0, Flexible = 1 };
 enum RightSide : int { RightSwipe = 0, RightStick = 1 };
 
 struct Options {
-    int style = Classic;
+    int style = Flexible;
     bool show_sticks = true;  // Flexible: draw the floating sticks under the thumbs
     bool follow = true;       // the left stick follows a thumb that slides past its edge (both styles)
     int right = RightSwipe;   // Flexible: what the right half is
@@ -39,7 +41,7 @@ struct Options {
 };
 
 inline Options sanitize(Options o) {
-    o.style = o.style == Flexible ? Flexible : Classic;
+    o.style = o.style == Classic ? Classic : Flexible;  // unknown values: the default
     o.right = o.right == RightStick ? RightStick : RightSwipe;
     o.swipe_speed = mods::camera_swipe::speed(o.swipe_speed);
     o.swipe_boat = mods::camera_swipe::boat(o.swipe_boat);

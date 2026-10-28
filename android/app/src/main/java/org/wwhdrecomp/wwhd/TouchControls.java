@@ -142,7 +142,7 @@ public class TouchControls extends View implements InputManager.InputDeviceListe
     private float lastLx, lastLy, lastRx, lastRy, lastLt, lastRt;
     // the touch options (C++), as last polled
     private final int[] options = new int[8];
-    private int style = STYLE_CLASSIC, rightMode = RIGHT_SWIPE;
+    private int style = STYLE_FLEXIBLE, rightMode = RIGHT_SWIPE;
     private boolean showSticks = true, follow = true;
     private int swipePointer = -1;
     private float swipeX, swipeY, screenDpi = 400;
@@ -192,11 +192,17 @@ public class TouchControls extends View implements InputManager.InputDeviceListe
         HashSet<String> keys=new HashSet<>();
         for (Control c : controls) { keys.add(key(c)); baseRadius.put(key(c), c.fr); }
         layout=new TouchLayout(keys);
-        // format 1 layouts (one, for the only style there was) become the Classic layout; the old key stays
-        if (!prefs.contains(layoutKey(STYLE_CLASSIC)) && prefs.contains("touch_layout_v1"))
-            prefs.edit().putString(layoutKey(STYLE_CLASSIC), prefs.getString("touch_layout_v1", "")).apply();
+        // a format 1 layout (one, for the only style there was) seeds both styles' layouts, so the buttons
+        // stay where the player put them in the default Flexible style too; the old key stays
+        if (prefs.contains("touch_layout_v1")) {
+            SharedPreferences.Editor ed = prefs.edit();
+            for (int s : new int[] {STYLE_CLASSIC, STYLE_FLEXIBLE})
+                if (!prefs.contains(layoutKey(s))) ed.putString(layoutKey(s), prefs.getString("touch_layout_v1", ""));
+            ed.apply();
+        }
         presets.fromJson(prefs.getString("touch_layout_presets", null), null);
-        style = prefs.getInt("touch_style_seen", STYLE_CLASSIC) == STYLE_FLEXIBLE ? STYLE_FLEXIBLE : STYLE_CLASSIC;
+        // the style the game last reported (Flexible by default, touch_style.h) until the first poll
+        style = prefs.getInt("touch_style_seen", STYLE_FLEXIBLE) == STYLE_CLASSIC ? STYLE_CLASSIC : STYLE_FLEXIBLE;
         layout.decode(prefs.getString(layoutKey(style), ""));
         setContentDescription(context.getString(R.string.touch_layout_access));
         refresh = new Runnable() {
@@ -788,7 +794,7 @@ public class TouchControls extends View implements InputManager.InputDeviceListe
     private void pollOptions() {
         try {
             if (nativeTouchOptions(options) < 1) return;
-        } catch (UnsatisfiedLinkError e) { return; }  // a game library from before the touch options: Classic
+        } catch (UnsatisfiedLinkError e) { return; }  // a game library from before the touch options: as seen last
         final int newStyle = options[1] == STYLE_FLEXIBLE ? STYLE_FLEXIBLE : STYLE_CLASSIC;
         showSticks = options[2] != 0;
         follow = options[3] != 0;

@@ -1496,8 +1496,8 @@ void tab_display() {
         auto apply = [](touch_style::Options o) { hostui::post([o] { touch_options::set(o); }); };
         int style = to.style;
         if (combo("Touch style", &style, "Classic\0Flexible\0")) { auto o = to; o.style = style; apply(o); }
-        help("Classic: sticks and buttons stay where the layout puts them. Flexible: a stick appears where "
-             "your thumb lands, the left half moves Link and the right half turns the camera. "
+        help("Flexible (the default): a stick appears where your thumb lands, the left half moves Link and "
+             "the right half turns the camera. Classic: sticks and buttons stay where the layout puts them. "
              "Hold the controller button (top left) to edit the layout of either style.");
         const bool flexible = to.style == touch_style::Flexible;
         if (!flexible) ImGui::BeginDisabled();

@@ -53,10 +53,14 @@ int main() {
     // ---- touch_style.h
     using namespace touch_style;
     Options o;
-    assert(o.style == Classic && o.show_sticks && o.follow && o.right == RightSwipe);
-    // Classic: every free finger goes to the game
-    for (float x : {0.f, 0.3f, 0.7f, 1.f}) assert(free_touch(o, x, false) == FreeGame);
-    o.style = Flexible;
+    // the defaults: Flexible with the swipe camera, visible and following sticks, 100 % / 1x
+    assert(o.style == Flexible && o.show_sticks && o.follow && o.right == RightSwipe);
+    assert(o.swipe_speed == 1.0f && o.swipe_boat == 1.0f && sanitize(o) == o);
+    // Classic (a player's explicit choice): every free finger goes to the game
+    Options classic;
+    classic.style = Classic;
+    assert(sanitize(classic).style == Classic);
+    for (float x : {0.f, 0.3f, 0.7f, 1.f}) assert(free_touch(classic, x, false) == FreeGame);
     assert(free_touch(o, 0.1f, false) == FreeLeftStick);
     assert(free_touch(o, 0.49f, false) == FreeLeftStick);
     assert(free_touch(o, 0.5f, false) == FreeSwipe);
@@ -69,7 +73,7 @@ int main() {
     Options bad;
     bad.style = 7, bad.right = -3, bad.swipe_speed = 40, bad.swipe_boat = nan;
     Options s = sanitize(bad);
-    assert(s.style == Classic && s.right == RightSwipe && s.swipe_speed == kSpeedMax && s.swipe_boat == kBoatDefault);
+    assert(s.style == Flexible && s.right == RightSwipe && s.swipe_speed == kSpeedMax && s.swipe_boat == kBoatDefault);
     // pack: the layout TouchControls.java reads
     Options p;
     p.style = Flexible, p.show_sticks = false, p.follow = true, p.right = RightStick, p.swipe_speed = 1.25f, p.swipe_boat = 2.5f;
