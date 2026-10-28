@@ -5,12 +5,15 @@ import android.app.AlertDialog;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
 import android.graphics.Paint;
 import android.graphics.Path;
 import android.graphics.RectF;
 import android.hardware.input.InputManager;
 import android.net.Uri;
+import android.os.SystemClock;
 import android.util.SparseArray;
 import android.view.InputDevice;
 import android.view.MotionEvent;
@@ -22,6 +25,8 @@ import org.libsdl.app.SDLActivity;
 import org.libsdl.app.SDLControllerManager;
 
 import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.FileInputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
@@ -53,6 +58,16 @@ import android.view.ViewGroup;
 // (up, cancel, focus, hiding, a controller, a style change) releases the sticks (TouchStick.release).
 // Flexible style, invisible and following sticks, swipe camera, per-control look, mirrored grid,
 // saved layouts and the Arc layout: idea from the GreenNaugahyde Android fork (MPL-2.0); reimplemented.
+//
+// Context buttons (controls plan P3; ContextPack, polled with nativeContextButtons): while native code
+// says the rules apply, A B X Y R ZR ZL + and the D-pad's up and left/right show only when they do
+// something, with the game's word (an action), item icon or ▶▶ (fast forward) and the button's own name
+// small beside it; L and D-pad down hide. Buttons native code holds (a latched item, the ZL latch) are
+// drawn pressed, and A plays the golden rings when it gains a new action (GoldenRings). The words and
+// icons are the game's, exported once into the app cache (ContextAssets). Items by tap, aim-only buttons,
+// the auto put-away and the ZL latch are native: the fingers go to the pad as before. A control that
+// hides under a finger lets go. The layout editor shows every control.
+// Context buttons and the golden rings: idea from the GreenNaugahyde Android fork (MPL-2.0); reimplemented.
 public class TouchControls extends View implements InputManager.InputDeviceListener {
     private static native void nativeSetPad(int buttons, int face, float lx, float ly, float rx, float ry, float lt, float rt);
     private static native void nativeDetachPad();
@@ -74,6 +89,8 @@ public class TouchControls extends View implements InputManager.InputDeviceListe
     // from where it landed, in the button's radii (+y down). Native code decides when the ring opens and
     // what the drag picks, and draws the ring; this view only passes the finger on.
     private static native void nativeItemRingFinger(int button, boolean down, float dx, float dy);
+    // the ring is open: its finger's item button stays (shown, pressed) even when the context rules hide it
+    private static native boolean nativeItemRingOpen();
     // context buttons (P3; runtime/src/mods/context_touch.h, the pack's layout): which buttons show, with the
     // game's word or item icon, which are held natively (items by tap, the ZL latch) and the golden rings;
     // nativeContextAssets(dir) exports the game's words and item icons into dir once (0 not yet, -1 failed,
@@ -152,6 +169,19 @@ public class TouchControls extends View implements InputManager.InputDeviceListe
     private boolean showSticks = true, follow = true;
     private int swipePointer = -1;
     private float swipeX, swipeY, screenDpi = 400;
+    // context buttons (P3)
+    private final int[] contextRaw = new int[ContextPack.LEN];
+    private final ContextPack contextPack = new ContextPack();
+    private final GoldenRings rings = new GoldenRings(ContextPack.COUNT);
+    private final ContextAssets assets = new ContextAssets();
+    private File assetDir;
+    private Map<Integer, String> words = new HashMap<>();
+    private final Map<Integer, Bitmap> icons = new HashMap<>();  // null values: no such file
+    private final Paint ringPaint = new Paint(Paint.ANTI_ALIAS_FLAG), iconPaint = new Paint(Paint.FILTER_BITMAP_FLAG);
+    private final RectF iconRect = new RectF();
+    private long slowSyncAt;
+    private boolean ringOpen;  // nativeItemRingOpen, as last polled
+    private static final long FAST_TICK_MS = 33, SLOW_TICK_MS = 100;
 
     public TouchControls(Context context) {
         super(context);
@@ -213,11 +243,18 @@ public class TouchControls extends View implements InputManager.InputDeviceListe
         setContentDescription(context.getString(R.string.touch_layout_access));
         refresh = new Runnable() {
             @Override public void run() {
-                syncTouchState();
-                announceControllers();
-                syncJumpButtons();
-                invalidate();
-                postDelayed(this, 100);
+                // the context buttons each frame-ish while they apply (they change with every step Link
+                // takes), the rest at the old pace
+                final long now = SystemClock.uptimeMillis();
+                if (now - slowSyncAt >= SLOW_TICK_MS - FAST_TICK_MS / 2) {
+                    slowSyncAt = now;
+                    syncTouchState();
+                    announceControllers();
+                    syncJumpButtons();
+                    invalidate();
+                }
+                syncContext(now);
+                postDelayed(this, active() && contextPack.on() ? FAST_TICK_MS : SLOW_TICK_MS);
             }
         };
         post(refresh);
@@ -296,24 +333,95 @@ public class TouchControls extends View implements InputManager.InputDeviceListe
                 drawControl(canvas, c);
             }
         if (!editor.editing() && buttonsVisible && !settingsOpen) drawControl(canvas, toggle);
+        if (!editor.editing() && rings.playing(SystemClock.uptimeMillis())) postInvalidateOnAnimation();
     }
 
     private static int alpha(int a, int opacity) { return Math.round(a * opacity / 100f) << 24 | 0xFFFFFF; }
     private void drawControl(Canvas canvas, Control c) {
-        final boolean on = (editor.editing() && c==selected) || c.pressed || (c.kind == KIND_TOGGLE && active());
+        final boolean editing = editor.editing();
+        final String k = key(c);
+        final int b = c.kind == KIND_TOGGLE ? ContextPack.UNCHANGED : ContextPack.buttonFor(k);
+        final boolean on = (editing && c==selected) || c.pressed || (c.kind == KIND_TOGGLE && active())
+                || (!editing && contextPack.held(k));
         final float x = c.stick != null ? c.stick.cx : c.cx, y = c.stick != null ? c.stick.cy : c.cy;
         final int op = c.kind == KIND_TOGGLE ? TouchLayout.OPACITY_DEFAULT : c.opacity;
+        // the golden rings: the button pops a little and gold rings spread from it
+        final float flash = editing || b < 0 ? -1 : rings.progress(b, SystemClock.uptimeMillis());
+        final float r = c.r * GoldenRings.pop(flash);
         fill.setColor(alpha(on ? 0x90 : c.filled ? 0x38 : 0, op));
         edge.setColor(alpha(0x80, op));
-        drawShape(canvas, c.kind == KIND_TOGGLE ? TouchLayout.SHAPE_CIRCLE : c.shape, x, y, c.r);
+        drawShape(canvas, c.kind == KIND_TOGGLE ? TouchLayout.SHAPE_CIRCLE : c.shape, x, y, r);
+        if (flash >= 0) drawRings(canvas, x, y, c.r, flash);
         if (c.stick != null) {
             fill.setColor(alpha(c.pressed ? 0xB0 : 0x70, op));
             canvas.drawCircle(x + c.stick.sx * c.r * 0.6f, y + c.stick.sy * c.r * 0.6f, c.r * 0.42f, fill);
             return;
         }
+        final String letter = b >= 0 ? ContextPack.letter(b, c.label, contextPack.itemNamesA()) : c.label;
+        final int look = editing ? ContextPack.KIND_PLAIN : contextPack.kindFor(k);
+        boolean drawn = false;
+        if (look == ContextPack.KIND_ACTION) drawn = drawWord(canvas, ContextPack.word(contextPack.labelFor(k), words), x, y, r, op);
+        else if (look == ContextPack.KIND_FAST_FORWARD) drawn = drawWord(canvas, "▶▶", x, y, r, op);
+        else if (look == ContextPack.KIND_ITEM) drawn = drawIcon(canvas, contextPack.labelFor(k), x, y, r, op);
+        if (drawn) { drawBadge(canvas, letter, x, y, r, op); return; }
         text.setColor(alpha(0xE0, op));
-        text.setTextSize(c.r * (c.label.length() > 2 ? 0.5f : 0.9f));  // "Jump", "Moon": smaller
-        canvas.drawText(c.label, x, y - (text.descent() + text.ascent()) / 2, text);
+        text.setTextSize(r * (letter.length() > 2 ? 0.5f : 0.9f));  // "Jump", "Moon": smaller
+        canvas.drawText(letter, x, y - (text.descent() + text.ascent()) / 2, text);
+    }
+    // an action's word (or ▶▶) inside the button: as large as a letter, smaller to fit, on two lines when
+    // one would be too small; false: no word (the letter shows)
+    private boolean drawWord(Canvas canvas, String word, float x, float y, float r, int op) {
+        if (word == null || word.isEmpty() || r <= 0) return false;
+        final float maxWidth = r * 1.7f, minSize = r * 0.28f, readable = r * 0.42f;
+        text.setColor(alpha(0xF0, op));
+        text.setTextSize(1f);
+        float size = ContextPack.fitTextSize(text.measureText(word), r, maxWidth, minSize);
+        final String[] two = size < readable ? ContextAssets.twoLines(word) : null;
+        if (two == null) {
+            text.setTextSize(size);
+            canvas.drawText(word, x, y - (text.descent() + text.ascent()) / 2, text);
+            return true;
+        }
+        text.setTextSize(1f);
+        final float wide = Math.max(text.measureText(two[0]), text.measureText(two[1]));
+        size = Math.min(r * 0.55f, ContextPack.fitTextSize(wide, r, r * 1.6f, minSize));
+        text.setTextSize(size);
+        final float line = text.descent() - text.ascent();
+        canvas.drawText(two[0], x, y - line * 0.5f - (text.descent() + text.ascent()) / 2, text);
+        canvas.drawText(two[1], x, y + line * 0.5f - (text.descent() + text.ascent()) / 2, text);
+        return true;
+    }
+    // an item's icon (the game's, from the cache); false: not there (the letter shows)
+    private boolean drawIcon(Canvas canvas, int item, float x, float y, float r, int op) {
+        final Bitmap bm = icon(item);
+        if (bm == null) return false;
+        final float h = r * 0.68f;
+        iconRect.set(x - h, y - h, x + h, y + h);
+        iconPaint.setAlpha(Math.round(255 * op / 100f));
+        canvas.drawBitmap(bm, null, iconRect, iconPaint);
+        return true;
+    }
+    // the button's own name beside a word or icon: a small disc on its lower right edge
+    private void drawBadge(Canvas canvas, String letter, float x, float y, float r, int op) {
+        final float br = r * 0.3f, bx = x + r * 0.74f, by = y + r * 0.74f;
+        final int fillWas = fill.getColor();
+        fill.setColor(Math.round(0xC0 * op / 100f) << 24 | 0x101820);
+        canvas.drawCircle(bx, by, br, fill);
+        fill.setColor(fillWas);
+        text.setColor(alpha(0xF0, op));
+        text.setTextSize(br * (letter.length() > 1 ? 1.0f : 1.3f));
+        canvas.drawText(letter, bx, by - (text.descent() + text.ascent()) / 2, text);
+    }
+    private void drawRings(Canvas canvas, float x, float y, float r, float f) {
+        ringPaint.setStyle(Paint.Style.STROKE);
+        for (int k = 0; k < GoldenRings.RINGS; k++) {
+            final float t = GoldenRings.ringT(k, f);
+            if (t < 0) continue;
+            ringPaint.setColor(GoldenRings.GOLD);
+            ringPaint.setAlpha(GoldenRings.alpha(t));
+            ringPaint.setStrokeWidth(r * GoldenRings.stroke(t));
+            canvas.drawCircle(x, y, r * GoldenRings.radius(t), ringPaint);
+        }
     }
     private void drawShape(Canvas canvas, int shape, float x, float y, float r) {
         if (shape == TouchLayout.SHAPE_CIRCLE) {
@@ -475,7 +583,7 @@ public class TouchControls extends View implements InputManager.InputDeviceListe
                         }
                     }
                     else if (c.stick != null) c.stick.move(x, y, follow && c == leftStick);
-                    else if (itemButton(c) >= 0) itemRingFinger(c, true, x, y);
+                    else if (itemButton(c) >= 0 && c.pressed) itemRingFinger(c, true, x, y);
                     else if (c == toggle && !near(c,x,y,1.3f)) removeCallbacks(editLongPress);
                 }
                 break;
@@ -597,11 +705,18 @@ public class TouchControls extends View implements InputManager.InputDeviceListe
         }
         TouchLayout.Placement p=placement(selected);
         String name=selected==leftStick ? getContext().getString(R.string.touch_layout_left_stick)
-                : selected==rightStick ? getContext().getString(R.string.touch_layout_right_stick) : selected.label;
+                : selected==rightStick ? getContext().getString(R.string.touch_layout_right_stick)
+                : ContextPack.letter(ContextPack.buttonFor(key(selected)),selected.label,contextPack.itemNamesA());
         String[] shapes=getResources().getStringArray(R.array.touch_layout_shapes);
-        editorStatus.setText(getContext().getString(R.string.touch_layout_status,name,
+        String status=getContext().getString(R.string.touch_layout_status,name,
                 TouchLayout.sizePercent(p.radius,selected.fr),shapes[Math.max(0,Math.min(shapes.length-1,p.shape))],p.opacity,
-                getContext().getString(p.filled ? R.string.touch_layout_filled : R.string.touch_layout_outline)));
+                getContext().getString(p.filled ? R.string.touch_layout_filled : R.string.touch_layout_outline));
+        // with context buttons on, say when this control shows in play
+        final int b=ContextPack.buttonFor(key(selected));
+        if (contextPack.enabled() && b!=ContextPack.UNCHANGED)
+            status+="\n"+getContext().getString(b==ContextPack.HIDDEN ? R.string.touch_layout_context_hidden
+                    : R.string.touch_layout_context_shows);
+        editorStatus.setText(status);
     }
     private void endEditing() {
         if (!editor.editing()) return;
@@ -847,7 +962,76 @@ public class TouchControls extends View implements InputManager.InputDeviceListe
     }
 
     // a Jump / Moon jump button shows only while its mod is on and it does something (native rules)
-    private boolean visible(Control c) { return c.kind != KIND_VIRTUAL || (jumpShown & c.code) != 0; }
+    // ... and a context button only while it does something (ContextPack: native rules)
+    private boolean visible(Control c) {
+        if (c.kind == KIND_VIRTUAL) return (jumpShown & c.code) != 0;
+        if (c.pressed && ringOpen && itemButton(c) >= 0) return true;  // its finger picks in the item ring
+        return c.kind == KIND_TOGGLE || contextPack.visible(key(c));
+    }
+
+    // the context buttons (P3): poll the pack, play the golden rings, let go of a control that hid under a
+    // finger, and load the game's words and icons once native code has exported them
+    private void syncContext(long now) {
+        int version;
+        try { version = nativeContextButtons(contextRaw); }
+        catch (UnsatisfiedLinkError e) { return; }  // not loaded yet, or a game library from before P3
+        boolean changed = contextPack.set(contextRaw, version);
+        if (contextPack.on()) {
+            boolean open;
+            try { open = nativeItemRingOpen(); } catch (UnsatisfiedLinkError e) { open = false; }
+            if (open != ringOpen) { ringOpen = open; changed = true; }
+        } else if (ringOpen) { ringOpen = false; changed = true; }
+        if (!contextPack.valid()) rings.forget();
+        else for (int b = 0; b < ContextPack.COUNT; b++)
+            if (rings.note(b, contextPack.ring(b), active() && contextPack.on() && contextPack.shown(b), now)) invalidate();
+        if (contextPack.enabled()) syncAssets(now);
+        if (!changed) return;
+        boolean released = false;
+        for (Control c : controls) {
+            if (visible(c)) continue;
+            rings.stop(ContextPack.buttonFor(key(c)));
+            if (!c.pressed) continue;
+            c.pressed = false;  // as the up event would, and its finger now does nothing
+            itemRingFinger(c, false, c.downX, c.downY);
+            for (int i = 0; i < owner.size(); i++) if (owner.valueAt(i) == c) owner.setValueAt(i, dead);
+            released = true;
+        }
+        if (released) update();
+        invalidate();
+    }
+
+    private void syncAssets(long now) {
+        final int generation = contextPack.assetsGeneration();
+        if (!assets.shouldAsk(now, generation)) return;
+        if (assetDir == null) assetDir = new File(getContext().getCacheDir(), "context");
+        int r;
+        try { r = nativeContextAssets(assetDir.getPath()); }
+        catch (UnsatisfiedLinkError e) { r = -1; }
+        if (assets.result(r, now, generation)) loadAssets();
+    }
+    // a new generation of the exported files: the words now, the icons when first drawn
+    private void loadAssets() {
+        icons.clear();
+        Map<Integer, String> loaded = new HashMap<>();
+        File f = new File(assetDir, ContextAssets.ACTIONS);
+        if (f.isFile() && f.length() <= ContextAssets.MAX_TEXT) {
+            try (InputStream in = new FileInputStream(f)) {
+                loaded = ContextAssets.parseActions(new String(in.readAllBytes(), StandardCharsets.UTF_8));
+            } catch (java.io.IOException ignored) { /* English words */ }
+        }
+        words = loaded;
+        invalidate();
+    }
+    private Bitmap icon(int item) {
+        if (assetDir == null || assets.generation() <= 0) return null;
+        if (icons.containsKey(item)) return icons.get(item);
+        File f = new File(assetDir, ContextAssets.itemFile(item));
+        Bitmap bm = null;
+        try { if (f.isFile()) bm = BitmapFactory.decodeFile(f.getPath()); }
+        catch (RuntimeException | OutOfMemoryError ignored) { /* the letter shows */ }
+        icons.put(item, bm);
+        return bm;
+    }
 
     private void syncJumpButtons() {
         int shown;
