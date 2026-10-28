@@ -122,8 +122,10 @@ public class SetupService extends Service {
             // run has finished meanwhile (the setup screen saw "preparing models" as the models step's last
             // attempt closed). A finished setup with nothing to rebuild starts nothing.
             File selectedHost = new File(selected, "host.json");
-            if (action == null && !running && selectedHost.isFile() &&
-                    SetupStore.read(selectedHost).optString("state").equals("complete") && !AndroidGame.needsRebuild(this)) {
+            String finished = action == null && !running && selectedHost.isFile() ?
+                SetupStore.read(selectedHost).optString("state") : null;
+            if (SetupRecoveryPolicy.automaticStartIsIdle(action, running, finished,
+                    "complete".equals(finished) && AndroidGame.needsRebuild(this))) {
                 Log.i("wwhd-setup", "setup complete; nothing to start");
                 job = selected;
                 updateNotification();

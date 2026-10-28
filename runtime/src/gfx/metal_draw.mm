@@ -2198,8 +2198,9 @@ void draw(const uint32_t* regs, uint32_t prim, uint32_t count, uint32_t indexTyp
     Surface* colors[8] = {};
     uint32_t colorSlices[8] = {}, depthSlice = 0;
     const bool lightGrid = ps->kind == gfx::ProgramKind::PointLight;
+    const auto claim = gfx::size_request(ps->kind);
     for (int i = 0; i < 8; i++)
-        if (mask & (1 << i)) colors[i] = color_target(regs, i, &colorSlices[i], lightGrid);
+        if (mask & (1 << i)) colors[i] = color_target(regs, i, &colorSlices[i], claim, lightGrid);
     Surface* depth = LatteMRT::GetActiveDepthBufferMask(lcr) ? depth_target(regs, &depthSlice) : nullptr;
     if (depth && depth->width == 1280 && depth->height == 720) R.mainDepthAddr = depth->addr;
     // must this draw run even if its compile takes longer than the budget? (see wait_compiled)

@@ -19,6 +19,7 @@
 #include "../metal_recipe_keys.h"
 #include <zlib.h>
 #include <array>
+#include <atomic>
 #include <algorithm>
 #include <cstdlib>
 #include <cstdio>
@@ -70,6 +71,11 @@ std::shared_ptr<PipelineRecipe> derive_guest_pipeline_recipe(const uint32_t* r, 
     uint32_t depthFormat, const char** why);  // draw.cpp
 
 namespace {
+// a head start record whose shader could not be translated: said for the first few (the rest are counted as failed)
+void note_translation_failure(const std::exception& error) {
+  static std::atomic<int> said{0};
+  if (said.fetch_add(1) < 5) std::fprintf(stderr, "[vulkan headstart] a shader record could not be translated: %s\n", error.what());
+}
 // metal_draw.mm PipelineRecipe (the head start's type 2 payload)
 struct MetalPipelineRecipe {
   uint64_t vsKey, psKey, fsKey;
@@ -289,10 +295,16 @@ int warm_headstart_shaders() {
         regs[mmSQ_PGM_START_VS] = pool.copy(record.linkedVertex.data(), vsSize) >> 8;
         regs[mmSQ_PGM_START_VS + 1] = vsSize >> 3;
         if (!fetch) { ++failed; continue; }
-        linkedVs = vk::translate(regs.data(), true, fetch, fetchKey);
+        try { linkedVs = vk::translate(regs.data(), true, fetch, fetchKey); }
+        catch (const std::exception& error) { linkedVs = nullptr; note_translation_failure(error); }
         if (!linkedVs || !linkedVs->ready()) { ++failed; continue; }
       }
-      auto* shader = vk::translate(regs.data(), vertex != 0, fetch, fetchKey, ~uint64_t{0}, ~uint64_t{0}, linkedVs);
+      // A shader the translator cannot compile (an exception from the SPIR-V compiler) is one failed record, as in
+      // play; it no longer ends the whole preparation (seen with a speculative record: "'cubeMapArrayIndex0' :
+      // undeclared identifier", every shader after it left unprepared).
+      const vk::Shader* shader = nullptr;
+      try { shader = vk::translate(regs.data(), vertex != 0, fetch, fetchKey, ~uint64_t{0}, ~uint64_t{0}, linkedVs); }
+      catch (const std::exception& error) { note_translation_failure(error); }
       // debug: WWHD_VK_RECIPE_KEY_DUMP also lists the shader identities the head start's records translate to ("S")
       static FILE* keyDump = [] { const char* p = std::getenv("WWHD_VK_RECIPE_KEY_DUMP"); return p && *p ? std::fopen(p, "a") : nullptr; }();
       if (keyDump && shader && shader->ready())
@@ -415,6 +427,7 @@ int warm_headstart_shaders() {
           try {
             if (auto recipe = derive_guest_pipeline_recipe(regs.data(), m.color, m.depth, &why)) {
               if (known.emplace(recipe->key.begin(), recipe->key.end()).second) {
+                recipe->add_group(kSpeculativeGroup);  // compiled now; in play only in the background queue
                 resolvedShaderPool.freeze(*recipe);
                 derived.push_back(std::move(recipe));
               } else ++repeats;

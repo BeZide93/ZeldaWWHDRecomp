@@ -7,13 +7,36 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
-- **Full-size torchlight** (Graphics, on by default). Torches and other point lights light the scene through a
-  half-size light buffer that every lit object reads back with a depth-aware upsample. A pixel on an object's edge
-  often has no half-size sample of its own and takes the light meant for the wall behind it, which the flame's
-  flicker turns into a blocky, flickering outline around torches at every resolution. Full-size torchlight gives the
-  buffer as many pixels as the screen, so every pixel gets its own light. Off keeps the original game's half size
-  (`WWHD_FULL_LIGHT=0`). On Android it starts off, like full-size occlusion depth, since the phone's GPU is the limit
-  in heavy views (`WWHD_FULL_LIGHT=1` or the Graphics tab turns it on).
+- **Shader translation: cube-map helper shaders translate again** (Vulkan and Metal). Some library shaders set a
+  cube-map layer index on a texture slot that, in some states, holds an ordinary texture; the translator then used an
+  undeclared variable and the shader failed. Shader preparation now finishes with no failed shaders (11 on Vulkan and
+  18 on Metal before).
+- **Vulkan: shader preparation no longer stops at a shader it can't translate.** One untranslatable shader used to
+  end the preparation, leaving every shader and pipeline after it unprepared. Now that shader is skipped and logged,
+  and the rest are prepared.
+- **Vulkan: pipelines made from Metal recipes compile in a low-priority background queue** instead of the start queue.
+  They no longer compete with the game's own compiles during play; pipelines the game actually uses move to the start
+  queue from the next start. On a Snapdragon 8 Gen 3 phone, play and start-up are unchanged, since all of them finish
+  before play. The queue matters with larger recipe sets. `WWHD_VK_METAL_QUEUE=start` restores the old behaviour.
+- **HDR output on Linux, and HDR10 for displays without scRGB** (Vulkan; #311, thanks @mkopec). Settings → Graphics → HDR output now also
+  works on Linux under Wayland. Where the system offers no scRGB output (Mesa drivers on Wayland), the game presents
+  HDR10 (BT.2020 with the PQ curve) instead, with the same paper white, peak and exposure settings; the overlay shows
+  which one is used. On compositors where SDL picks XWayland (such as sway), choosing HDR makes the game start on
+  Wayland from the next start, since X11 windows can't show HDR. Under gamescope (Steam Deck),
+  which gives XWayland HDR itself, the game stays on XWayland. Windows is unchanged.
+- **World editor: fixes for full rooms and model changes** (#281, thanks @KelpyCode). When a room's memory was full,
+  the game could crash while loading a placed object's archive. Now an object whose archive doesn't fit is not created
+  (the editor says why) and is tried again on the next room load. Kit models and island buildings were checked against
+  the whole room budget for buildings (32 MiB free) instead of their own size, so a watched model's new version could be
+  refused until something was moved; the check now asks for the model's own size plus a small reserve, and the new
+  version shows up right away. Changing a placement's kit or static model now also brings that model's own collision,
+  live in the running game.
+- **Bloom is smooth again at higher internal resolutions** (#307, #308, thanks @itsarahtonin). At 2x and 3x the glow around lit windows,
+  doors, torches and Bokoblin eyes broke up into blocks and streaks, and small bright things such as rupees glowed
+  only at some angles. The game makes its bloom from small copies of the picture, which were made at the higher
+  resolution too: the pass that reads the picture skipped pixels, and the blur's lumps, which the console's final
+  upscale blends away, got pixels of their own. The small copies now keep the console's size and read the picture
+  as the Wii U does, so the glow looks as it does at 1x. 1x is unchanged.
 - **macOS: move and resize the GamePad picture with the mouse** (#305, thanks @shaneoreilly). In the TV window, drag the
   picture-in-picture GamePad with the right mouse button (or with Option held) to move it, drag from its bottom-right
   corner or use the scroll wheel over it to resize it (5–100%). The placement becomes Custom and is saved. A plain left

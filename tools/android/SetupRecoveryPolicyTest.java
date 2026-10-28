@@ -15,6 +15,18 @@ public final class SetupRecoveryPolicyTest {
                             throw new AssertionError("Recovery decision: " + state);
                     }
         }
-        System.out.println("Setup recovery policy checks passed (96 combinations)");
+        // A start without an action on a finished setup with nothing to rebuild is idle; explicit starts
+        // (Resume: the player's own start) always run, as does any start while a run is active.
+        int idle = 0;
+        for (String action : new String[] {null, "org.wwhdrecomp.wwhd.SETUP_RESUME", "org.wwhdrecomp.wwhd.SETUP_RUN_MODELS"})
+            for (boolean running : new boolean[] {false,true})
+                for (String state : new String[] {null,"complete","failed","running","preparing models"})
+                    for (boolean changed : new boolean[] {false,true}) {
+                        boolean expected = action == null && !running && "complete".equals(state) && !changed;
+                        if (SetupRecoveryPolicy.automaticStartIsIdle(action,running,state,changed) != expected)
+                            throw new AssertionError("Idle start: " + action + " " + running + " " + state + " " + changed);
+                        idle++;
+                    }
+        System.out.println("Setup recovery policy checks passed (96 combinations, " + idle + " start cases)");
     }
 }

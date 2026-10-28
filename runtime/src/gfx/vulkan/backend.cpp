@@ -75,6 +75,7 @@
 #include <SDL3/SDL_vulkan.h>
 #endif
 #include "platform/display_rate.h"
+#include "platform/gaming_mode.h"
 #include "platform/host.h"
 #include "platform/perf_hint.h"
 #include "platform/gamepad_touch.h"
@@ -1639,6 +1640,20 @@ static void retire_secondary_swapchain(bool surface);
 static bool secondary_retirement_available();
 #endif
 static bool async_present();
+#if defined(WWHD_SDL_HOST) && defined(WWHD_HDR_OUTPUT)
+// Whether the display can show HDR. Linux: wlroots compositors (sway) give every surface an
+// sRGB preferred image description even on PQ outputs, so SDL never reports HDR there; Mesa
+// offers the HDR colour spaces only when the compositor accepts them, so those count too.
+// The HDR choice itself stays explicit.
+static bool display_hdr_enabled(SDL_Window* window) {
+  const bool sdl=SDL_GetBooleanProperty(SDL_GetWindowProperties(window),SDL_PROP_WINDOW_HDR_ENABLED_BOOLEAN,false);
+#ifdef _WIN32
+  return sdl;
+#else
+  return sdl||hdr::formatSupported.load();
+#endif
+}
+#endif
 static void make_swapchain(Screen &s) {
   if (&s == &R.tv) present_held(true);  // even frame delivery: a held frame goes out first
   if(active_deferred_commands)active_deferred_commands->finish_exact();
@@ -1674,21 +1689,29 @@ static void make_swapchain(Screen &s) {
   fs.resize(n);
   if (fs.empty())
     exception_report::raise("No presentation formats");
-  bool wantHdr=false;
+  bool wantHdr=false,wantPq=false;
+  // HDR swapchain candidates: scRGB FP16, else HDR10 PQ (10-bit preferred).
+  auto hdrCandidate=[&](const VkSurfaceFormatKHR& f,bool pq) {
+    if(pq ? f.colorSpace!=VK_COLOR_SPACE_HDR10_ST2084_EXT ||
+              (f.format!=VK_FORMAT_A2B10G10R10_UNORM_PACK32 && f.format!=VK_FORMAT_A2R10G10B10_UNORM_PACK32 &&
+               f.format!=VK_FORMAT_R16G16B16A16_SFLOAT)
+          : f.format!=VK_FORMAT_R16G16B16A16_SFLOAT || f.colorSpace!=VK_COLOR_SPACE_EXTENDED_SRGB_LINEAR_EXT)
+      return false;
+    VkFormatProperties props;vkGetPhysicalDeviceFormatProperties(R.physicalDevice,f.format,&props);
+    return (caps.supportedUsageFlags&VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT) &&
+      (props.optimalTilingFeatures&VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT) &&
+      (props.optimalTilingFeatures&VK_FORMAT_FEATURE_BLIT_DST_BIT);
+  };
   if(&s==&R.tv) {
-    bool supported=false;
-    for(const auto& f:fs)if(f.format==VK_FORMAT_R16G16B16A16_SFLOAT &&
-        f.colorSpace==VK_COLOR_SPACE_EXTENDED_SRGB_LINEAR_EXT) {
-      VkFormatProperties props;vkGetPhysicalDeviceFormatProperties(R.physicalDevice,f.format,&props);
-      supported=(caps.supportedUsageFlags&VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT) &&
-        (props.optimalTilingFeatures&VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT) &&
-        (props.optimalTilingFeatures&VK_FORMAT_FEATURE_BLIT_DST_BIT);
-    }
-    hdr::formatSupported=supported;
-#if defined(_WIN32) && defined(WWHD_SDL_HOST)
-    hdr::displayEnabled=SDL_GetBooleanProperty(SDL_GetWindowProperties(s.window),SDL_PROP_WINDOW_HDR_ENABLED_BOOLEAN,false);
+    bool scrgb=false,pq=false;
+    for(const auto& f:fs){scrgb|=hdrCandidate(f,false);pq|=hdrCandidate(f,true);}
+    hdr::scrgbSupported=scrgb;hdr::pqSupported=pq;
+    hdr::formatSupported=scrgb||pq;
+#if defined(WWHD_SDL_HOST) && defined(WWHD_HDR_OUTPUT)
+    hdr::displayEnabled=display_hdr_enabled(s.window);
 #endif
     wantHdr=hdr::resolve_output();
+    wantPq=wantHdr&&!scrgb;
   }
   // Presentation uses image blits, so both advertised surface support and
   // optimal-tiling BLIT_DST format support must hold.
@@ -1705,8 +1728,13 @@ static void make_swapchain(Screen &s) {
 #endif
   for (auto f : fs) {
     if(wantHdr) {
-      if(f.format!=VK_FORMAT_R16G16B16A16_SFLOAT || f.colorSpace!=VK_COLOR_SPACE_EXTENDED_SRGB_LINEAR_EXT)continue;
-    } else if(f.colorSpace!=VK_COLOR_SPACE_SRGB_NONLINEAR_KHR)continue;
+      // hdrCandidate checks blits too. PQ: a 10-bit format wins over FP16.
+      if(hdrCandidate(f,wantPq) && (!found || format.format==VK_FORMAT_R16G16B16A16_SFLOAT)) {
+        format=f;found=true;
+      }
+      continue;
+    }
+    if(f.colorSpace!=VK_COLOR_SPACE_SRGB_NONLINEAR_KHR)continue;
     VkFormatProperties props;
     vkGetPhysicalDeviceFormatProperties(R.physicalDevice, f.format, &props);
     if (!(props.optimalTilingFeatures & VK_FORMAT_FEATURE_BLIT_DST_BIT))
@@ -1848,7 +1876,13 @@ static void make_swapchain(Screen &s) {
   ++s.swapchainGeneration;
   s.swapFormat = format.format;
   s.hdrOutput = wantHdr;
-  if(&s==&R.tv)LOG("[HDR] output %s; scRGB format %s; Windows HDR %s",wantHdr?"scRGB FP16":"SDR",hdr::formatSupported.load()?"supported":"unavailable",hdr::displayEnabled.load()?"enabled":"disabled");
+  s.hdrPq = wantPq;
+  if(&s==&R.tv) {
+    hdr::pqOutput=wantPq;
+    LOG("[HDR] output %s; scRGB format %s; HDR10 PQ format %s; display HDR %s",
+        wantPq?"HDR10 PQ":wantHdr?"scRGB FP16":"SDR",hdr::scrgbSupported.load()?"supported":"unavailable",
+        hdr::pqSupported.load()?"supported":"unavailable",hdr::displayEnabled.load()?"enabled":"disabled");
+  }
   s.swapExtent = extent;
   vkGetSwapchainImagesKHR(R.device, sc, &n, nullptr);
   s.images.resize(n);
@@ -4756,8 +4790,26 @@ void init() {
   // hidden test runs: no Dock icon, no activation (the app never takes the focus from the user)
   if (hidden_windows())
     SDL_SetHint(SDL_HINT_MAC_BACKGROUND_APP, "1");
+#if defined(WWHD_HDR_OUTPUT) && !defined(_WIN32)
+  // SDL prefers XWayland on compositors without wp_fifo_v1 (sway), and X11 Vulkan surfaces have
+  // no HDR colour spaces there. A saved HDR choice asks for Wayland (hdr::wayland_for_hdr).
+  const bool waylandForHdr = hdr::wayland_for_hdr(getenv("SDL_VIDEO_DRIVER") != nullptr,
+                                                  getenv("WAYLAND_DISPLAY") != nullptr, gaming_mode::active());
+  {
+    std::string saved;
+    if (waylandForHdr && hostui::get("hdrEnabled", saved) && atoi(saved.c_str()) != 0)
+      SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "wayland,x11");
+  }
+#endif
   if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD | SDL_INIT_AUDIO))
     exception_report::raise(SDL_GetError());
+#if defined(WWHD_HDR_OUTPUT) && !defined(_WIN32)
+  {
+    const char* driver = SDL_GetCurrentVideoDriver();
+    hdr::waylandAfterRestart = waylandForHdr && driver && !strcmp(driver, "x11");
+    LOG("[display] SDL video driver %s", driver ? driver : "none");
+  }
+#endif
   // the Vulkan loader (vulkan-1.dll, libvulkan.so.1), loaded here rather than imported (loader.h); the
   // windows below use the same one
   if (!SDL_Vulkan_LoadLibrary(nullptr))
@@ -5218,9 +5270,9 @@ void run_main_loop() {
   for (;;) {
     SDL_Event event;
     while (SDL_PollEvent(&event)) {
-#ifdef _WIN32
+#ifdef WWHD_HDR_OUTPUT
       if(event.type==SDL_EVENT_WINDOW_HDR_STATE_CHANGED && event.window.windowID==SDL_GetWindowID(R.tv.window)) {
-        const bool enabled=SDL_GetBooleanProperty(SDL_GetWindowProperties(R.tv.window),SDL_PROP_WINDOW_HDR_ENABLED_BOOLEAN,false);
+        const bool enabled=display_hdr_enabled(R.tv.window);
         // SDL also reports white-level/headroom changes after presentation.
         // Our explicit nits controls do not require a new swapchain for those.
         if(hdr::displayEnabled.exchange(enabled)!=enabled)R.tv.resize=true;

@@ -27,6 +27,7 @@
 #include "native_actor_profiles.h"
 #include "mod_actor_shadow_proof.h"
 #include "mod_actor_budget.h"
+#include "actor_model_cache.h"
 #include "mod_actor_motion.h"
 #include "mod_actor_look_bounds.h"
 #include "story_mail.h"
@@ -412,10 +413,14 @@ if(data&&d->skinned){
 void create(Cpu*c){uint32_t a=c->r[3];auto*d=declaration(a);if(!d){result(c,5);return;}if(!ld8(a+0x3AA)){call(c,GC(0x025D4ED0),{a});std::memset(mem::ptr(a+Phase),0,Size-Phase);if(d->spec.combat_enabled){combat::State state;if(!combat::initialize(state,combat_config(*d))){result(c,5);return;}write_combat(a,state);const auto captured=story_actors::identity::record(d->fingerprint);std::memcpy(mem::ptr(a+CombatIdentity),captured.data(),captured.size());}if(d->spec.carry_enabled){carry::State state;state.pid=ld32(a+4);write_carry(a,state);const auto captured=story_actors::identity::record(d->fingerprint);std::memcpy(mem::ptr(a+CombatIdentity),captured.data(),captured.size());}if(d->visual_role){const auto captured=story_actors::identity::record(d->fingerprint);std::memcpy(mem::ptr(a+CombatIdentity),captured.data(),captured.size());const float scale[]={d->spec.scale.x,d->spec.scale.y,d->spec.scale.z};for(unsigned i=0;i<3;++i)number(a+0x330+i*4,scale[i]);if(d->visual_role==1)number(a+0x364,kDistantCullFar);}if(!d->visual_role&&d->spec.background_drawn())number(a+0x364,kGroundCullFar);
 number(a+Radius,d->spec.collision_radius);number(a+Height,d->spec.collision_height);st32(a+CollisionFlags,d->visual_role?0:1|(d->spec.pushable?2:0));st32(a+LookObject,a+LookVtable);st32(a+LookObject+4,a);st32(a+LookVtable+0xC,look_callback);st32(a+PostObject,a+PostVtable);st32(a+PostObject+4,a);st32(a+PostVtable+0xC,post_callback);MotionState motion_;motion_.count=unsigned(d->spec.path.points.size());motion_.speed=d->spec.path.speed;motion_.loop=d->spec.path.loop;motion_.bounce=d->spec.path.back_and_forth;motion_.pauses=d->spec.path.pauses;motion_.enabled=motion_.count>=2;for(unsigned i=0;i<motion_.count;++i)motion_.points[i]=d->spec.path.points[i];write_motion(a+Motion,motion_);std::memcpy(mem::ptr(a+Name),d->archive.c_str(),d->archive.size()+1);call(c,GC(0x0200BD2C),{a+Stts});call(c,GC(0x02515DA0),{a+Stts+0x1C});st32(a+Stts+0x18,GD(0x1004AE88));st32(a+Stts+0x1C,GD(0x1004AEC0));call(c,GC(0x02515FB8),{a+Cyl});st32(a+Cyl+0x114,GD(0x100015A8));st32(a+Cyl+0x110,GD(0x1001251C));call(c,GC(0x02018590),{a+Cyl+0x118});st32(a+Cyl+0x3C,GD(0x1004B108));st32(a+Cyl+0x114,GD(0x1004B160));st32(a+Cyl+0x12C,GD(0x1004B150));}
 if(heap_trace()&&!ld32(a+HeapStarted)){const auto before=heaps(c);for(unsigned i=0;i<4;++i){st32(a+HeapBaseline+i*8,before[i].first);st32(a+HeapBaseline+i*8+4,before[i].second);}st32(a+HeapStarted,1);}
-uint32_t phase=call(c,GC(0x02520460),{a+Phase,a+Name});if(phase!=4){if(phase>=5)fail_create(a);result(c,phase);return;}if(!ld32(a+Model)){
+uint32_t phase=call(c,GC(0x02520460),{a+Phase,a+Name});if(phase!=4){if(phase>=5)create_failed(a,"its model archive "+d->archive+" did not load (the file could not be read or the game heap had no room for it)");result(c,phase);return;}if(!ld32(a+Model)){
     if(!archive_mounted(c,a+Name)){release_unmounted(c,a);create_failed(a,"its model archive "+d->archive+" did not load (the file could not be read or the game heap refused it)");result(c,5);return;}
     if(heap_trace()){HeapSnapshot before{};for(unsigned i=0;i<4;++i)before[i]={ld32(a+HeapBaseline+i*8),ld32(a+HeapBaseline+i*8+4)};report_heaps(a,"archive_load",before,heaps(c));}
     const auto before=heap_trace()?heaps(c):HeapSnapshot{};
+    // the editor changed the placement's model while this actor was being made: it loaded the old model's archive (its
+    // name was taken at the start) and the declaration now names the new one. The editor makes it again from the new
+    // spec right away; not said as a failure (it was "its model could not be made in the game heap", issue #281).
+    if(std::strncmp(reinterpret_cast<const char*>(mem::ptr(a+Name)),d->archive.c_str(),64)!=0){LOG("[mod_actor] %s:%s model changed while it was made (%.64s, now %s): made again",d->mod.c_str(),d->spec.id.c_str(),reinterpret_cast<const char*>(mem::ptr(a+Name)),d->archive.c_str());fail_create(a);result(c,5);return;}
     if(!call(c,GC(0x025D63E8),{a,heap_callback,uint32_t(0x40000+(d->collision?story_world_collision::mesh::allocation_bytes(*d->collision):0))})){create_failed(a,"its model could not be made in the game heap");result(c,5);return;}
     if(heap_trace())report_heaps(a,"model_create",before,heaps(c));
 }
@@ -704,7 +709,17 @@ void backing_archive_wrapper(Cpu*c){
     if(!own){if(!story_item_models::backing_archive_wrapper(c))original(c,GC(0x02612E64));return;}
     const Cpu incoming=*c;const uint32_t before=heap_free(c,allocation_heap);
     const bool cached=call(c,GC(0x02612504),{manager,key})!=0;
-    if(!cached&&before<budget::BackingReserve+(piece_sets.contains(own->archive)?budget::PieceRoomLimit:budget::ModelLimit)){*c=incoming;result(c,0);LOG("[mod_actor_budget] backing heap reserve prevents loading %s",own->archive.c_str());return;}
+    // room for the archive itself and the game's reserve: the archive's own size (its file), or without the file the most
+    // an archive of its kind may take (a game piece or kit model set PieceRoomLimit, a model ModelLimit). The limit is
+    // the room's budget for all its pieces together; as the need of one 3 MB kit model or 5 MB building set it refused
+    // them with up to 32 MiB free (issue #281: a watched kit model's new version, and island buildings, "backing heap
+    // reserve prevents loading" until something else freed room). Test: WWHD_TEST_BACKING_FREE=<bytes> caps the free
+    // space the check sees (a fuller heap).
+    static const uint64_t test_free=[]{const char*e=std::getenv("WWHD_TEST_BACKING_FREE");return e?std::strtoull(e,nullptr,10):0ull;}();
+    const uint64_t seen=test_free?std::min<uint64_t>(before,test_free):before;
+    const uint64_t own_bytes=budget::archive_need(actor_model_cache::archive_for("/vol/content/Common/Object/"+own->archive+".szs"));
+    const uint64_t need=budget::BackingReserve+(own_bytes?own_bytes:piece_sets.contains(own->archive)?budget::PieceRoomLimit:budget::ModelLimit);
+    if(!cached&&seen<need){*c=incoming;result(c,0);LOG("[mod_actor_budget] backing heap reserve prevents loading %s (%llu bytes free, %llu needed: the archive and a reserve of %s)",own->archive.c_str(),static_cast<unsigned long long>(seen),static_cast<unsigned long long>(need),budget::mib(budget::BackingReserve).c_str());return;}
     *c=incoming;
     original(c,GC(0x02612E64));const Cpu returned=*c;
     const uint32_t after=heap_free(c,allocation_heap);
@@ -768,6 +783,7 @@ bool set_piece_draw(const std::string&archive,int index,PieceDraw draw){
     if(draw.light[0]<0||draw.light[0]>4||draw.light[1]<1||draw.light[1]>4)return false;
     piece_draws[{archive,index}]=draw;return true;
 }
+bool has_collision(const std::string&mod,const std::string&model){std::lock_guard guard(world_mutex);return collision_models.contains({mod,model});}
 bool register_collision(const std::string&mod,const std::string&model,std::shared_ptr<const story_world_collision::mesh::Mesh> collision){
     std::lock_guard guard(world_mutex);std::string why;if(!collision||!story_world_collision::mesh::validate(*collision,why))return false;collision_models[{mod,model}]=std::move(collision);return true;
 }

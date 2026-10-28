@@ -293,6 +293,13 @@ the local database. With the full template: 38,094 Metal recipes give 1,160 dist
 template's own Vulkan ones, and in four test scenes the share of pipelines the game asks for that the database
 already has rose from 54–84 % to 66–95 % (`[vulkan pipelines] ... new keys N, K of them in the recipe database`,
 with `WWHD_VK_STATS` or `WWHD_VK_CPU_ONLY_STATS=1`), the same pipelines the Metal head start lacks in those scenes.
+In play these Metal-derived recipes are not part of the start queue (compiling ~1,000 of them there took the 1 % lows
+down on a phone): they carry a mark in the database and are compiled ahead by one low-priority thread, back to back
+before play and throttled once a play stage is drawing (after each compile it rests four times as long, at least
+8 ms: `WWHD_VK_METAL_QUEUE_REST`, `WWHD_VK_METAL_QUEUE_REST_MS`), waiting while the game's own compiles run, and only
+while the pool of ready pipelines has room. A recipe the game asks for loses the mark and joins the start queue from
+the next start. `WWHD_VK_METAL_QUEUE=start` (with the start queue, as before), `off` (demand only; the driver cache
+still has them) and `play` (measurements: no run before play) compare the choices.
 `WWHD_VK_WARM_PRUNE=1` (preparation only) starts the driver pipeline cache empty and compiles every recipe of the
 database into it, so entries no recipe uses any more are not carried over. `WWHD_VK_DEMAND_PROMOTE=1`: a pipeline
 the game needs while the warm-up worker's driver compile of it is running waits for that compile (at most
