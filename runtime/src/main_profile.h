@@ -15,9 +15,6 @@
 #include <cstdint>
 #include <cstring>
 #include <ctime>
-#ifdef _WIN32
-#include <windows.h>
-#endif
 #include <string>
 #include <utility>
 #include <vector>
@@ -62,12 +59,12 @@ inline void bump(std::atomic<uint64_t>& a, uint64_t v = 1) {
 void start(Cpu* main);
 // the main thread's CPU time so far and the time it held its core, as of its last core release
 inline std::atomic<uint64_t> g_held_ns{0}, g_cpu_ns{0};
+#ifdef _WIN32
+uint64_t own_cpu_ns_windows();
+#endif
 inline uint64_t own_cpu_ns() {
 #ifdef _WIN32
-    FILETIME c, e, k, u;
-    if (!GetThreadTimes(GetCurrentThread(), &c, &e, &k, &u)) return 0;
-    auto v = [](FILETIME f) { return ((uint64_t)f.dwHighDateTime << 32 | f.dwLowDateTime) * 100; };
-    return v(k) + v(u);
+    return own_cpu_ns_windows();  // main_profile.cpp: keeps <windows.h> out of runtime.h's includers
 #else
     timespec t{};
     if (clock_gettime(CLOCK_THREAD_CPUTIME_ID, &t)) return 0;
