@@ -84,6 +84,13 @@ Four function hooks (`tools/recomp/hooks_glyphs.txt`), plus wrappers around the 
   DrawInfo, whenever a restyled look is active: the game draws the groups in a fixed order, so a
   moved group could otherwise cover a neighbour's word.
 
+**Two threads at once (#326):** in the game's "play on GamePad" mode the item screen is drawn on two
+threads at the same time, so every temporary change above (colours, positions, glyph quads, the HUD
+letter) goes through `runtime/src/shared_patch.h`. The first thread to change a value keeps the
+original on the host, later threads change it from that original, and the last one out restores it,
+unless the game wrote the value meanwhile. A plain save and restore let the second thread keep the
+first one's change as the original, which made the Xbox tint permanent, a little darker each time.
+
 **Untouched until used:** none of the hooks write to game memory until a different look has been
 selected once in the session; the first activation rebuilds each cached text box once so its glyphs
 get marked. A loaded save state, or a change from one look to another (colours, shapes, shoulder
