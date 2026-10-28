@@ -149,6 +149,9 @@ MoveHud move_hud();
 // once per frame on the game thread (interp.cpp, frame start): reads whether a game menu, an event
 // or a message is up and advances the HUDs' fade over it
 void hud_service();
+// what the game shows over gameplay now: an event, a message, a menu (hud_visibility.h GameUi); game thread
+struct GameUi;
+GameUi game_ui_now();
 // 0..1, multiplies the boost bar's and the climb wheel's own alpha (mod_hud.mm, vulkan/present.cpp):
 // 0 while a game menu, a cutscene/event or a dialogue is shown. Any thread.
 float game_ui_hud_alpha();

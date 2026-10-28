@@ -27,6 +27,7 @@
 #include "button_glyphs.h"
 #include "aspect_panes.h"
 #include "mods/cemu_pack.h"
+#include "mods/play_context.h"
 
 #include <algorithm>
 #include <atomic>
@@ -460,6 +461,7 @@ extern "C" void hook_02877100(Cpu* c) {
         };
         if (!ld32(pane+kPaneParent)) trace(trace,pane,0);
     }
+    mods::play_context_pane(pane);  // the message's parts, the Picto Box screens... (returns at once unless wanted)
     if (original()) { f_02877100_orig(c); return; }
     uint32_t parent = ld32(pane + kPaneParent);
     if (!parent) {

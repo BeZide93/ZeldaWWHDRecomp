@@ -1840,6 +1840,7 @@ static void after_pass(int phase) {
 }  // namespace interp
 
 namespace mods { void cheats_service(); }  // mods/cheats.cpp
+namespace mods { void play_context_step(); }  // mods/play_context.cpp
 
 // debug: WWHD_INTERP_PASS_STATS=1 adds to the 300-step log the main thread's CPU time per pass
 // (thread CPU time, so waits for the vsync and the GPU are left out): logic passes, blended hold
@@ -1988,6 +1989,7 @@ extern "C" void hook_0203593C(Cpu* c) {
     if (!enabled() || !g_hold_next) {
         g_logic_steps++;
         true60_test::logic_step(g_logic_steps);
+        mods::play_context_step();  // once per full logic step (the context buttons' reading)
     }
     if (!enabled()) {
         g_hold_next = false;
