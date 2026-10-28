@@ -67,6 +67,14 @@ int main() {
             last = d.offset();
         }
         assert(d.offset() == 0);  // gone within about a second
+        // true 60: setStickData twice per logic step eases once per step
+        Direction e;
+        e.step(true, 0, up, false, false, 500, o);
+        e.step(true, units(40), up, true, false, 501, o);
+        e.step(true, units(40), up, false, false, 501 + kEaseAfter + 1, o);
+        const int16_t once = e.offset();
+        e.step(true, units(40), up, false, false, 501 + kEaseAfter + 1, o);
+        assert(e.offset() == once && once < units(40));
     }
     // ---- wrap-around: turns across +-180 degrees add up as short turns
     {
