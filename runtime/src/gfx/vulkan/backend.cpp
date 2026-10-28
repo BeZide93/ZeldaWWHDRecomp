@@ -39,6 +39,7 @@
 #include "background_cache_readiness.h"
 #include "../../build_info.h"
 #include "../../tv_pointer.h"
+#include "../../one_screen.h"
 #include "deferred_commands.h"
 #include "record_worker.h"
 #include "submission_cpu_ack.h"
@@ -5078,16 +5079,21 @@ extern "C" JNIEXPORT jint JNICALL Java_org_wwhdrecomp_wwhd_TouchControls_nativeF
   } else {
     g.view_button = gfx::view_button_hit(x, y);
     g.pip = gfx::overlay_hit(x, y, &tx, &ty, false);
+    // One screen in Off-TV Play: the whole picture is the GamePad's; the game's touch only in its menus
+    // (one_screen.h picture_is_game_touch: here the controls are shown, they asked)
+    if (g.pip && gfx::g_one_screen_off_tv.load() &&
+        !one_screen::picture_is_game_touch(gfx::gamepad_ui().menu, true))
+      g.pip = false;
   }
-  // a talk, a choice, a shop... (mods/touch_talk.h) claims the TV picture: only where the phone shows it
-  const bool talk = mods::touch_talk_claims() && !(g.dual && g.swapped) && gfx::tv_picture_hit(x, y, &tx, &ty, &aspect);
+  // a talk, a choice, a shop... (mods/touch_talk.h) claims the game's picture: only where the phone shows it
+  const bool talk = mods::touch_talk_claims() && !(g.dual && g.swapped) && gfx::game_picture_hit(x, y, &tx, &ty, &aspect);
   return touch_style::free_touch(touch_options::get(), x, touch_style::game_touch(g), talk);
 }
 // TouchControls.nativeTalkFinger: a finger nativeFreeTouch gave the talk (FreeTalk) went down (0), moved (1),
 // went up (2) or was cancelled (3) at (x, y), 0..1 of the view: as a point of the TV picture in layout units
 extern "C" JNIEXPORT void JNICALL Java_org_wwhdrecomp_wwhd_TouchControls_nativeTalkFinger(JNIEnv*, jclass, jint action, jfloat x, jfloat y) {
   tv_pointer::State s;
-  if (!gfx::tv_picture_hit(x, y, &s.x, &s.y, &s.aspect, action != 0)) {
+  if (!gfx::game_picture_hit(x, y, &s.x, &s.y, &s.aspect, action != 0)) {
     if (action == 0) return;
     action = 3;  // (no picture any more: let go)
   }
@@ -5138,9 +5144,17 @@ static bool gamepad_touch(const SDL_Event& event) {
     } else if (event.button.windowID == tvId && !overlay::captures()) {
       float nx, ny;
       tv_window_point(event.button.x, event.button.y, nx, ny);
+      {  // One screen's Off-TV Play: the GamePad picture is the game's; a talk by mouse takes it first (touch_talk.h)
+        float px, py, aspect;
+        if (gfx::g_one_screen_off_tv.load() && tv_pointer::wanted(tv_pointer::kOwnerTalk) && gfx::game_picture_hit(nx, ny, &px, &py, &aspect)) {
+          tv_pointer::set(true, px, py, aspect);
+          touchHeld = TouchIn::TvPicture;
+          return true;
+        }
+      }
       if (!gfx::overlay_hit(nx, ny, &tx, &ty)) {
         float px, py, aspect;  // a port page on the TV that wants the pointer (tv_pointer.h)
-        if (tv_pointer::wanted() && gfx::tv_picture_hit(nx, ny, &px, &py, &aspect)) {
+        if (tv_pointer::wanted() && gfx::game_picture_hit(nx, ny, &px, &py, &aspect)) {
           tv_pointer::set(true, px, py, aspect);
           touchHeld = TouchIn::TvPicture;
           return true;
@@ -5165,7 +5179,7 @@ static bool gamepad_touch(const SDL_Event& event) {
     if (touchHeld == TouchIn::TvPicture) {
       float nx, ny, px = 0, py = 0, aspect = 16.0f / 9.0f;
       tv_window_point(x, y, nx, ny);
-      gfx::tv_picture_hit(nx, ny, &px, &py, &aspect, true);
+      gfx::game_picture_hit(nx, ny, &px, &py, &aspect, true);
       if (up) touchHeld = TouchIn::None;
       tv_pointer::set(!up, px, py, aspect);
       return true;

@@ -181,6 +181,14 @@ bool talk_hold_ff_on();
 void set_talk_hold_ff_on(bool on);
 bool pad_hold_a_on();
 void set_pad_hold_a_on(bool on);
+// ---- One screen (handheld) mode (one_screen.cpp; rules in ../one_screen.h) ----
+bool one_screen_enabled();         // on for this session (decided at start)
+bool one_screen_active();          // ... and the controller acts as the GamePad
+bool one_screen_off_tv();          // ... and the game plays Off-TV now
+bool one_screen_next();            // the choice for the next start
+void set_one_screen_next(bool on);
+void one_screen_pad(input::PadState& p);         // VPADRead full reads: Minus as Plus
+bool one_screen_hidden_pane(const char* name);   // the GamePad's slide-conducting guide in Off-TV Play
 // ---- HUD fades (hud_fade.cpp; rules in hud_fade.h): the game's hearts, rupees, magic bar ----
 bool hud_fade_on(int element);  // hudfade::Element
 void set_hud_fade_on(int element, bool on);

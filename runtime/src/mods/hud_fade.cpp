@@ -117,10 +117,11 @@ float hud_fade_alpha_of(uint32_t pane) {
 int hud_pane_hide(uint32_t pane) {
     const char* n = reinterpret_cast<const char*>(mem::ptr(pane + kPaneName));
     if (const int e = element_of(n); e >= 0) return g_alpha[e].load(std::memory_order_relaxed) <= 0.f ? 1 : 0;
+    if (one_screen_hidden_pane(n)) return 1;
     if (!context_touch_hide_cluster()) return 0;
     if (n[0] != 'N' && n[0] != 'P' && n[0] != 'L' && n[0] != 'W') return 0;
     for (const char* c : kCluster)
-        if (!strncmp(n, c, 24)) return 2;
+        if (!strncmp(n, c, 24)) return one_screen_off_tv() ? 1 : 2;  // (One screen: the game's HUD is the GamePad's)
     return 0;
 }
 }  // namespace mods

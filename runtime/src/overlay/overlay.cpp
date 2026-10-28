@@ -1412,6 +1412,13 @@ static void pip_percent(const char* label, float value, float minimum, float max
 void tab_display() {
     bool v;
     heading("GamePad screen");
+    // One screen (handheld) mode (mods/one_screen.cpp): applies at the next start
+    if (check("One screen (handheld)", mods::one_screen_next(), &v)) hostui::post([v] { mods::set_one_screen_next(v); });
+    help("The game plays on one screen as on the Wii U GamePad alone (Off-TV Play) from the start: no GamePad "
+         "or Pro Controller question, Plus or Minus pauses, touches on the picture work the game's menus. "
+         "Off: the TV and GamePad pictures as on the Wii U. With the Pro Controller chosen in Controls it does "
+         "nothing. Applies at the next start.");
+    if (mods::one_screen_next() != mods::one_screen_enabled()) note("Restart the game to apply.");
 #ifdef __ANDROID__
     if (check("Swap TV and GamePad displays", hostui::displays_swapped(), &v))
         hostui::post([v] { hostui::set_displays_swapped(v); });

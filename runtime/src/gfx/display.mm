@@ -260,13 +260,18 @@ static void load_options() {
     NSPoint p = [self convertPoint:e.locationInWindow fromView:nil];
     NSSize sz = self.bounds.size;
     float x, y, aspect;
-    if (sz.width <= 0 || sz.height <= 0 || !gfx::tv_picture_hit(p.x / sz.width, 1.0f - p.y / sz.height, &x, &y, &aspect, c)) return false;
+    if (sz.width <= 0 || sz.height <= 0 || !gfx::game_picture_hit(p.x / sz.width, 1.0f - p.y / sz.height, &x, &y, &aspect, c)) return false;
     tv_pointer::set(down, x, y, aspect);
     return true;
 }
 - (void)mouseDown:(NSEvent*)e {
     float x, y;
     if ((e.modifierFlags & NSEventModifierFlagOption) && [self pipBegin:e]) return;
+    // One screen's Off-TV Play: the GamePad picture is the game's; a talk by mouse takes it first (touch_talk.h)
+    if (gfx::g_one_screen_off_tv.load() && tv_pointer::wanted(tv_pointer::kOwnerTalk) && [self picture:e down:true clamp:false]) {
+        self.pointing = true;
+        return;
+    }
     if ([self map:e x:&x y:&y clamp:false]) {
         self.touching = true;
         input::set_touch(true, x, y);

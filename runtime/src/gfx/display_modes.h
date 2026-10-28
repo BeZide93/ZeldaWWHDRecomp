@@ -77,6 +77,10 @@ extern std::atomic<bool> g_auto_pin;       // auto mode: Cmd+G keeps the overlay
 extern std::atomic<double> g_auto_until;   // auto mode: closing grace expires at this time (display_now)
 extern std::atomic<float> g_drc_aspect;    // of the GamePad image, for the GamePad window's touch
 extern std::atomic<bool> g_has_drc_window; // the host made a GamePad window (window mode possible)
+// One screen (handheld) mode is on (mods/one_screen.cpp, decided at start): the window shows the GamePad
+// picture while the game plays Off-TV, in any mode, and the view button hides then
+extern std::atomic<bool> g_one_screen;
+extern std::atomic<bool> g_one_screen_off_tv;  // ... and the game plays Off-TV (also on the title screen): set each pad read
 // a physical second screen (Android) switched off by the player while it was connected: Off chosen, or the
 // GamePad screen hidden (#222). Not the single-screen mode, which is Off by default on Android.
 extern std::atomic<bool> g_second_screen_off;
@@ -136,6 +140,8 @@ bool main_picture(float* x, float* y, float* w, float* h);
 // width / height (tv_pointer.h); false off the picture (clamp_outside: a drag keeps its edge) or when
 // the window shows the GamePad picture alone
 bool tv_picture_hit(float nx, float ny, float* px, float* py, float* aspect, bool clamp_outside = false);
+// the same for the game's picture: the TV picture, or in One screen mode's Off-TV Play the GamePad picture
+bool game_picture_hit(float nx, float ny, float* px, float* py, float* aspect, bool clamp_outside = false);
 
 // Touch screens (Android; WWHD_VIEW_BUTTON=1 elsewhere for tests): a button in the TV window's top
 // left corner. A tap cycles the views offered there (picture-in-picture, GamePad only, TV only);
