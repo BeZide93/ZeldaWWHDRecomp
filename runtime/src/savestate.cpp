@@ -532,6 +532,7 @@ bool do_save_fast(int slot, const std::string& destination, std::function<void(b
     mods::quick_use_reset();
     mods::item_ring_reset();
     mods::touch_talk_reset();
+    mods::steer_reset();
     std::string busy, why;
     auto t0 = std::chrono::steady_clock::now();
     if (!threads::quiesce(250, busy, 1, 30)) {
@@ -652,6 +653,7 @@ bool do_save_streaming(int slot, const std::string& destination, std::function<v
     mods::quick_use_reset();
     mods::item_ring_reset();
     mods::touch_talk_reset();
+    mods::steer_reset();
     std::string busy, why;
     // Defer before freezing if a previous slot read is still in progress.
     std::unique_lock<std::mutex> io(g_io,std::try_to_lock);
@@ -774,6 +776,7 @@ bool do_load(const std::shared_ptr<Snapshot>& s) {
     mods::quick_use_reset();
     mods::item_ring_reset();
     mods::touch_talk_reset();
+    mods::steer_reset();
     std::string busy, why;
     // Structural checks precede targets: that helper changes thread wait state.
     try {
@@ -1059,6 +1062,7 @@ bool capture_portable(Cpu* c, pstate::State& s, std::string& why) {
     mods::quick_use_reset();
     mods::item_ring_reset();
     mods::touch_talk_reset();
+    mods::steer_reset();
     bool retry;
     if (!gameplay_ready(why, retry)) return false;
     CallScope scope(c);
@@ -1140,6 +1144,7 @@ bool apply_portable(Cpu* c, const pstate::State& s, std::string& why, bool& retr
     mods::quick_use_reset();
     mods::item_ring_reset();
     mods::touch_talk_reset();
+    mods::steer_reset();
     if (mod_stages::missing(s.stage)) { why = "it was made in a mod stage that no installed package makes"; retry = false; return false; }
     if (!gameplay_ready(why, retry)) return false;
     // Portable states do not overwrite the runtime arena. Prove clean owned

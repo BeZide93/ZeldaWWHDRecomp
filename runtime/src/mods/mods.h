@@ -181,6 +181,19 @@ bool talk_hold_ff_on();
 void set_talk_hold_ff_on(bool on);
 bool pad_hold_a_on();
 void set_pad_hold_a_on(bool on);
+// ---- camera extras (steer.cpp; rules in steer.h): walking direction, camera swing, boat speed, pinch FOV ----
+int steer_mode();                  // steer::Mode: 0 as the game (default), 1 kept while the player turns the camera, 2 while the stick is held
+void set_steer_mode(int mode);
+bool camera_swing();               // the camera swings behind Link while he runs
+void set_camera_swing(bool on);
+bool direct_boat_speed();          // the direct camera as fast on the boat as on foot (default on)
+void set_direct_boat_speed(bool on);
+bool pinch_fov_on();               // Android: a pinch changes the field of view (default on)
+void set_pinch_fov_on(bool on);
+float steer_swing_degrees(bool player_camera);  // camera.cpp, once per logic step
+bool steer_pinch(int phase, float d);           // 0 begin (true: on), 1 move, 2 end
+void steer_reset();                // a state load
+bool camera_turned_by_player();    // camera.cpp: the right stick, the mouse or a swipe turned the camera in the last steps
 // ---- One screen (handheld) mode (one_screen.cpp; rules in ../one_screen.h) ----
 bool one_screen_enabled();         // on for this session (decided at start)
 bool one_screen_active();          // ... and the controller acts as the GamePad

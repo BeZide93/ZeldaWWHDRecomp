@@ -86,6 +86,9 @@
 0246B848  # daSea_packet_c::CalcFlatInterTarget: min with the mods' calm-water zones around the player
 # Shops by touch (controls plan P5; mods/touch_talk.cpp): the shop's item choice runs, r4 = its ShopItems_c
 025BB698  # dShop_now_triggercheck(stick, ShopItems_c*, msg*, cb, arg): notes the ShopItems_c (read only)
+# Walking direction (controls plan P7; mods/steer.cpp): the two `sth r9, 0x6930(r31)` of daPy_lk_c::setStickData
+@023F35BC # setStickData: r9 = stick angle (r10) + camera angle (r3), the direction Link walks to
+@023F3610 # setStickData: the same on the other branch
 # One screen (handheld) mode (controls plan P2b; one_screen.cpp): the GamePad in Off-TV Play from the first frame
 02618094  # hdInputManager::setMode(this, mode): TV play (1) and the picture on both (3) become Off-TV Play (2)
 @02617874 # hdInputManager setup: stw r0 (3, both screens) to +0x1D0: Off-TV Play from the first title screen

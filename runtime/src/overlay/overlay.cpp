@@ -2339,6 +2339,26 @@ void item_ring_rows() {
     ImGui::PopID();
 }
 
+// camera extras (mods/steer.cpp): each applies at once
+void camera_extra_rows() {
+    bool v;
+    int mode = mods::steer_mode();
+    if (combo("Walking direction", &mode, "Follows the camera (as the game)\0Kept while you turn the camera\0Kept while the stick is held\0"))
+        hostui::post([mode] { mods::set_steer_mode(mode); });
+    help("Turning the camera while Link walks turns him with it in the game. Kept: he walks on the way you pushed "
+         "the stick until you move the stick. \"While you turn the camera\" keeps only your own turns; the camera "
+         "following by itself still turns him.");
+    if (mods::steer_mode() == 0) ImGui::BeginDisabled();
+    if (check("Camera swings behind Link", mods::camera_swing(), &v)) hostui::post([v] { mods::set_camera_swing(v); });
+    help("While Link runs and you leave the camera alone for a second, it turns slowly to look over his shoulder.");
+    if (mods::steer_mode() == 0) ImGui::EndDisabled();
+    if (check("Direct camera as fast on the boat", mods::direct_boat_speed(), &v)) hostui::post([v] { mods::set_direct_boat_speed(v); });
+    help("With the direct camera (Gameplay), the right stick turns the camera as fast while sailing as on foot.");
+#ifdef __ANDROID__
+    if (check("Pinch changes the field of view", mods::pinch_fov_on(), &v)) hostui::post([v] { mods::set_pinch_fov_on(v); });
+    help("Two fingers on the picture: apart for a closer view, together for a wider one (Graphics' field of view).");
+#endif
+}
 // talks, answers and shops by touch or mouse, hold to go on (mods/touch_talk.cpp): each applies at once
 void talk_rows() {
     bool v;
@@ -2412,6 +2432,7 @@ void tab_controls() {
 #endif
     item_ring_rows();
     talk_rows();
+    camera_extra_rows();
     // face-button preset (issue #78): which host face buttons drive A/B/X/Y
     const input_map::FaceLayout fl = input_map::face_layout(m);
     ImGui::AlignTextToFramePadding();
