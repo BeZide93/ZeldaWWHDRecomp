@@ -1145,7 +1145,7 @@ static NSTextField* label(NSString* s) {
     self.shoulderNames = sn;
     NSButton* pc = [NSButton checkboxWithTitle:@"Coloured face buttons" target:self action:@selector(promptsChanged:)];
     pc.toolTip = @"Green A, red B, blue X and yellow Y in the Xbox look; coloured shapes in the PlayStation look. "
-                 @"Off: the game's white buttons (in the Xbox positions while the face buttons are by label).";
+                 @"Off: the game's white buttons, still placed where the bound buttons sit on the pad.";
     self.promptColours = pc;
     NSButton* ptc = [NSButton checkboxWithTitle:@"Coloured face button text" target:self action:@selector(promptsChanged:)];
     ptc.toolTip = @"Action text follows the mapped button's Xbox or PlayStation colour, independently of icon colours. "
