@@ -2303,6 +2303,14 @@ if(NOT ANDROID)
       target_link_libraries(settings_popup_ui_test PRIVATE ws2_32)
     endif()
     add_test(NAME settings_popup_ui COMMAND settings_popup_ui_test)
+    # Controls > Set up controller: the setup's steps by touch and by controller, the Move / Take off
+    # question, Controller details (overlay/controller_setup.h, controller_details.h)
+    add_executable(controller_setup_test runtime/tools/controller_setup_test.cpp runtime/third_party/imgui/backends/imgui_impl_sdlrenderer3.cpp
+      runtime/src/input_map.cpp)
+    target_include_directories(controller_setup_test PRIVATE runtime/src runtime/include)
+    target_compile_options(controller_setup_test PRIVATE -UNDEBUG)
+    target_link_libraries(controller_setup_test PRIVATE imgui SDL3::SDL3 Threads::Threads)
+    add_test(NAME controller_setup COMMAND controller_setup_test)
   endif()
 endif()
 

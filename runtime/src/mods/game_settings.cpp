@@ -16,6 +16,7 @@
 #include "../aspect.h"
 #include "../input.h"
 #include "../rumble.h"
+#include "../platform/phone_rumble.h"
 #ifdef __ANDROID__
 #include "../gfx/display_modes.h"
 #endif
@@ -286,6 +287,29 @@ void register_controls() {
         it.set = [](float v) { change_mapping([v](M& m) { m.skip_controller_selection = v >= 0.5f; }); };
         add(std::move(it));
     }
+    {
+        Item it;
+        it.id = "controls.l-turns-page", it.tab = "controls", it.label = "L turns the GamePad page", it.kind = Kind::Toggle;
+        it.help = "On: in play L turns the GamePad screen between Items and Map, as on the Wii U. Off: only in menus, so L1 can jump.";
+        it.get = [] { return input_map::current().l_turns_page ? 1.0f : 0.0f; };
+        it.set = [](float v) { change_mapping([v](M& m) { m.l_turns_page = v >= 0.5f; }); };
+        add(std::move(it));
+    }
+#ifdef __ANDROID__
+    {
+        Item it;
+        it.id = "controls.rumble-on", it.tab = "controls", it.label = "Rumble on", it.kind = Kind::Choice;
+        it.help = "Automatic: this device while you play by touch, the controller's motors otherwise.";
+        for (int m = 0; m < phone_rumble::kModeCount; m++) it.choices.push_back(phone_rumble::label(phone_rumble::Mode(m)));
+        it.get = [] { return float(phone_rumble::choice.load()); };
+        it.set = [](float v) {
+            const int mode = std::clamp(int(v + 0.5f), 0, phone_rumble::kModeCount - 1);
+            phone_rumble::choice = phone_rumble::Mode(mode);
+            hostui::set("phoneRumble", std::to_string(mode));
+        };
+        add(std::move(it));
+    }
+#endif
 }
 void register_screen() {
     {
