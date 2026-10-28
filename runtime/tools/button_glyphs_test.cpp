@@ -91,6 +91,8 @@ int picture_face;
 unsigned prints = 0, text_draws = 0;
 std::atomic<unsigned> picture_draws{0};  // also drawn from two threads (concurrent_draw_test)
 std::atomic<bool> yield_in_draw{false};  // let the other thread run while a picture is drawn
+bool reenter_build = false;  // each text build first runs a second one of the same text inside it
+bool inside_build = false;
 uint32_t atlas = 0;
 bool expect_frame = true;
 bool font_available = true;
@@ -1140,6 +1142,14 @@ extern "C" void f_0286E9F0_orig(Cpu* c) {
 
 // Inspect the colours the actual draw hook supplies to vertex generation.
 extern "C" void f_028F7C7C_orig(Cpu* c) {
+    if (reenter_build && !inside_build) {
+        // Another thread builds the same text while this one has its changes in (#326): it must
+        // see the same, singly styled glyphs, and leave this build's changes in place.
+        inside_build = true;
+        Cpu other = *c;
+        hook_028F7C7C(&other);
+        inside_build = false;
+    }
     text_draws++;
     drawn_ink = ld32(c->r[4] + 0xA4 + 0x10);
     for (uint32_t i = 0; i < 4; i++) drawn_quad[i] = (float)ldf32(c->r[4] + 0xA4 + 4*i);
@@ -1538,7 +1548,9 @@ int main() {
             st32(text_box + 0xFC, list); st32(writer + 0x2C, list);
             st32(list, 8); st16(list + 4, 0); st8(list + 6, 0);
             for (int face = 0; face < 4; ++face) print(0xE000 + face);
+            reenter_build = true;
             draw();
+            reenter_build = false;
             for (int face = 0; face < 4; ++face) {
                 picture_face = face;
                 constexpr const char* names[] = {"P_A_00", "P_B_00", "P_X_00", "P_Y_00"};
@@ -1573,9 +1585,11 @@ int main() {
                         ? "ABXY"[expected_buttons[face]] : -1;
                     st16(list + 4, 0); st8(list + 6, 0);
                     Cpu c{}; c.r[3] = text_box;
+                    reenter_build = true;
                     button_glyphs::draw_text_box(&c, [](Cpu*) {
                         print(expected_action >= 0 ? 'R' : ld16(base + 0xB000)); draw();
                     });
+                    reenter_build = false;
                     if (word) {
                         constexpr uint32_t xbox[] = {0x58BE36FF, 0xE34B49FF, 0x3B91E5FF, 0xEBC52EFF};
                         constexpr uint32_t ps[] = {0x3C7DD9FF, 0xD9413CFF, 0xD05FB0FF, 0x2AA67DFF};
