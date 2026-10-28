@@ -74,6 +74,12 @@ public class TouchControls extends View implements InputManager.InputDeviceListe
     // from where it landed, in the button's radii (+y down). Native code decides when the ring opens and
     // what the drag picks, and draws the ring; this view only passes the finger on.
     private static native void nativeItemRingFinger(int button, boolean down, float dx, float dy);
+    // context buttons (P3; runtime/src/mods/context_touch.h, the pack's layout): which buttons show, with the
+    // game's word or item icon, which are held natively (items by tap, the ZL latch) and the golden rings;
+    // nativeContextAssets(dir) exports the game's words and item icons into dir once (0 not yet, -1 failed,
+    // > 0 the files' generation)
+    private static native int nativeContextButtons(int[] out);
+    private static native int nativeContextAssets(String dir);
     private static native int nativeTouchOptions(int[] out);
     private static native int nativeFreeTouch(float x, float y);
     private static native void nativeSwipe(float dx, float dy, float dpi);
