@@ -7,6 +7,18 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Sound: waves, wind and other looping ambience no longer cut out.** The game's sound engine stops a sound channel
+  when its audio work runs late, which on the Wii U meant an overloaded sound chip. On a computer or phone a single
+  slow frame looked like that, so looping sounds went silent until the game started them again. That check is now off
+  (also after loading a save state); `WWHD_DSP_KILL=1` restores the game's own behaviour. In a test with a short stall
+  every two seconds, 33 sounds were cut before and none now. Ideas from GreenNaugahyde's Android fork and SwitchWakerHD
+  (thanks @Pulpparty).
+- **Diagnostics: a hang watchdog and a main-thread profile.** When no new frame arrives for 3 seconds, the log now
+  gets a dump of the render thread and every game thread (what each waits for and where), repeated a few times, and a
+  note when frames resume; `WWHD_NO_WATCHDOG=1` turns it off. `WWHD_MAIN_SAMPLER=1` (also in Android's `env.txt`) logs
+  every 5 seconds where the game's main thread spends its time. The Vulkan memory log (`WWHD_VK_MEMORY_LOG_FRAMES`)
+  now also lists pipeline counts, the warm pool and the recipe database. Idea from SwitchWakerHD (thanks @Pulpparty
+  and @depende3000).
 - **Shader translation: cube-map helper shaders translate again** (Vulkan and Metal). Some library shaders set a
   cube-map layer index on a texture slot that, in some states, holds an ordinary texture; the translator then used an
   undeclared variable and the shader failed. Shader preparation now finishes with no failed shaders (11 on Vulkan and
