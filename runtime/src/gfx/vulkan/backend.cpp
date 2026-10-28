@@ -3638,6 +3638,15 @@ void swap() {
     LOG("[gfx] memory disk %llu unshared-SPIRV-capacity %.2f MiB pending-compiles %llu retained-source-capacity %.2f MiB",
         (unsigned long long)memory.diskEntries,memory.diskSpirvCapacity/mib,
         (unsigned long long)memory.pendingCompiles,memory.retainedSourceCapacity/mib);
+    {
+      size_t total=0,compiling=0,failed=0;
+      guest_pipeline_counts(total,compiling,failed);
+      PipelineWorkerMemory wm;
+      pipeline_worker_memory(wm);
+      LOG("[gfx] memory pipelines: %zu of the game's (%zu compiling, holding <= %zu shader modules; %zu failed); "
+          "unused warm %zu of %zu (%zu dropped); recipe database %zu recipes %.2f MiB",
+          total,compiling,compiling*2,failed,wm.unusedWarm,wm.unusedWarmLimit,wm.evicted,wm.recipes,wm.recipeBytes/mib);
+    }
     LOG("[gfx] memory scope: payload/capacity excludes compiler results, disk snapshots, metadata and allocator overhead");
     LOG("[gfx] memory scope: cached image allocations exclude retired, non-cache and driver images");
     // Excludes map/metadata/allocator overhead, compiler tickets/results,

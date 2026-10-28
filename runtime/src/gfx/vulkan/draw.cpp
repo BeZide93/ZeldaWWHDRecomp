@@ -2958,6 +2958,15 @@ ContinuedReason continued_reason(uint32_t prim) {
   return kContinued;
 }
 } // namespace
+// Sizing (WWHD_VK_MEMORY_LOG_FRAMES): the game's pipelines (never freed), those still compiling (each holds its two
+// VkShaderModules until done; a finished pipeline keeps none) and the failed ones.
+void guest_pipeline_counts(size_t& total, size_t& compiling, size_t& failed) {
+  total = pipelines.size(); compiling = failed = 0;
+  for (const auto& [key, p] : pipelines) {
+    if (p.pendingCompile) ++compiling;
+    else if (!p.pipeline) ++failed;
+  }
+}
 VkDescriptorSet texture_stage_smoke_bind(const uint32_t* registers,
     VkDescriptorSetLayout layout, uint32_t textureCount) {
   if (textureCount > LATTE_NUM_MAX_TEX_UNITS)
