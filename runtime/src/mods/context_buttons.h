@@ -159,6 +159,20 @@ inline Buttons context_buttons(const PlayContext& c, const Options& o = {}) {
     return r;
 }
 
+// The on-screen Jump and Moon jump buttons (P6): bits as input::kVirtJump (1) and kVirtMoonJump (2),
+// each only while its mod is on and Link plays (no event, talk, menu, fade or stage change), never
+// in the Picto Box or the telescope. Jump anywhere doesn't jump out of water: its button also hides
+// while Link swims, climbs or hangs, where it does nothing (jump_policy::ground_proc). The moon jump
+// lifts him out of water, so its button stays. Idea from the GreenNaugahyde Android fork.
+constexpr uint32_t kShowJump = 1, kShowMoonJump = 2;
+inline uint32_t jump_buttons(const PlayContext& c, bool jump_on, bool moon_on) {
+    if (!c.has(kInPlay) || !c.has(kLink) || picto_mode(c) || telescope(c)) return 0;
+    uint32_t r = 0;
+    if (jump_on && !swimming(c) && !climbing(c)) r |= kShowJump;
+    if (moon_on) r |= kShowMoonJump;
+    return r;
+}
+
 // for traces and tests: "A:02 B:35 X:i35 ZL -ZR..." (shown buttons; i = item, ff = fast forward; "all" without the rules)
 inline int format(const Buttons& b, char* buf, int size) {
     static const char* const kNames[kCount] = {"A", "B", "X", "Y", "R", "ZR", "ZL", "+", "R3", "Up", "LR"};

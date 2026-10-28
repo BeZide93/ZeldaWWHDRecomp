@@ -84,9 +84,14 @@ HLE(padscore, KPADReadEx) {
     static input::PadState last_p;
     const bool repeat = interp::repeat_input();
     input::PadState p = repeat ? last_p : crashrec::read(1);  // see interp.cpp; crash recovery records/replays it
+    if (!repeat) mods::pad_play_rules(p);  // L and d-pad down by whether Link plays (input_map::play_buttons)
+    uint32_t live_virt = p.virt;  // as VPADRead: the virtual inputs as read now, also on half steps
+    bool live = !repeat;
     if (repeat && interp::fresh_sticks()) {  // true 60: sticks every pass, buttons on full passes
         input::PadState f = input::read();
         p.lx = f.lx; p.ly = f.ly; p.rx = f.rx; p.ry = f.ry;
+        live_virt = f.virt;
+        live = true;
     }
     last_p = p;
     if (!input::pro_controller()) p = input::PadState{};  // held connected for a controller switch: idle
@@ -96,7 +101,7 @@ HLE(padscore, KPADReadEx) {
     game_settings_page::mute(p);  // and the settings page
     mods::moon_jump_input(p);
     mods::move_speed_input(p.buttons);
-    mods::jump_input(p.buttons);
+    if (live && input::pro_controller()) mods::jump_input(live_virt);
     mods::fast_forward_input(p.buttons);
     if (!repeat) motion::right_stick(p.rx, p.ry);  // the Pro Controller's stick decides gyro use too (motion.h)
     uint32_t hold = pro_buttons(p.buttons);

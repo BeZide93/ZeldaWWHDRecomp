@@ -278,7 +278,51 @@ static void item_rules() {
     assert(item_usable(c, kItemSail) && item_usable(c, kItemTelescope) && !item_usable(c, kItemBow));
 }
 
+// P6: the on-screen Jump and Moon jump buttons
+static void jump_buttons_shown() {
+    PlayContext c = walking();
+    assert(jump_buttons(c, false, false) == 0);
+    assert(jump_buttons(c, true, false) == kShowJump);
+    assert(jump_buttons(c, true, true) == (kShowJump | kShowMoonJump));
+    assert(jump_buttons(c, false, true) == kShowMoonJump);
+    // swimming, climbing, hanging: Jump anywhere does nothing there, the moon jump lifts him out
+    PlayContext w = walking();
+    w.player_status0 |= kSt0Swim;
+    w.mode_flags |= kModeSwim;
+    assert(jump_buttons(w, true, true) == kShowMoonJump);
+    PlayContext l = walking();
+    l.mode_flags |= kModeLadder;
+    assert(jump_buttons(l, true, false) == 0);
+    // the boat's own "hang" is no climbing: Jump stays
+    PlayContext b = walking();
+    b.mode_flags |= kModeHang | kModeInShip;
+    assert(jump_buttons(b, true, false) == kShowJump);
+    // cutscenes and talks (not in play), menus, fades, the title screen: none
+    for (uint32_t f : {kEvent, kMenu, kFade, kStageChange}) {
+        PlayContext e = walking();
+        e.flags = (e.flags | f) & ~kInPlay;
+        assert(jump_buttons(e, true, true) == 0);
+    }
+    PlayContext t;
+    assert(jump_buttons(t, true, true) == 0);
+    // the Picto Box (aiming, finder, album) and the telescope: none
+    PlayContext p = walking();
+    p.player_status1 |= kSt1PictoAim;
+    assert(jump_buttons(p, true, true) == 0);
+    PlayContext a = walking();
+    a.flags |= kAlbum;
+    assert(jump_buttons(a, true, true) == 0);
+    PlayContext s = walking();
+    s.player_status0 |= kSt0Telescope;
+    assert(jump_buttons(s, true, true) == 0);
+    // another actor controlled (no Link): none
+    PlayContext n = walking();
+    n.flags &= ~kLink;
+    assert(jump_buttons(n, true, true) == 0);
+}
+
 int main() {
+    jump_buttons_shown();
     off_and_menus();
     walking_around();
     carrying_a_pot();

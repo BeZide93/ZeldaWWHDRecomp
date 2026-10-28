@@ -113,15 +113,21 @@ bool double_jump();                       // once more in the air
 void set_double_jump(bool on);
 bool no_auto_jump();                      // the game's own jump off ledges becomes a plain fall
 void set_no_auto_jump(bool on);
-uint32_t jump_button();                   // one of L3, R3, L, R, ZL, ZR (default L)
+// Format 1 controls.json only (input_map::adopt_legacy_jump_button): the Wii U button Jump anywhere
+// used before it had an input of its own (input_map kJump). One of L3, R3, L, R, ZL, ZR (default L).
+uint32_t jump_button();
 void set_jump_button(uint32_t button);
 inline bool valid_jump_button(uint32_t b) {
     constexpr uint32_t allowed = 0x40000 | 0x20000 | 0x20 | 0x10 | 0x80 | 0x40;
     return b && !(b & (b - 1)) && (b & allowed);
 }
-void jump_input(uint32_t buttons);                  // the active controller's buttons (VPAD/KPAD read)
+void jump_input(uint32_t virt);                     // the virtual inputs (input::kVirt*) of every VPAD/KPAD read
 void jump_step(Cpu* c, uint32_t link, bool before); // around daPy_lk_c::execute (climb.cpp)
 void jump_reset();                                  // game thread after a state load
+// controller_play.cpp: L and d-pad down by whether Link plays (VPAD/KPAD full reads), and which
+// on-screen Jump / Moon jump buttons show (input::kVirt* bits)
+void pad_play_rules(input::PadState& p);
+uint32_t jump_touch_buttons();
 bool story_system();                      // letters, quests, the story notebook, mod charts (mods/required.h)
 void set_story_system(bool on);
 void set_auto_wind(bool on);
