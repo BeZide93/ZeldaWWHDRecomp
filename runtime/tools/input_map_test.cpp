@@ -435,7 +435,7 @@ static void test_prompts() {
     CHECK(pad_family_from_labels(none) == PadFamily::kUnknown);
 
     Mapping m = Mapping::defaults();
-    CHECK(m.prompts == Mapping::Prompts::kAuto && m.shoulder_names == Mapping::ShoulderNames::kAuto && m.prompt_colours);
+    CHECK(m.prompts == Mapping::Prompts::kAuto && m.shoulder_names == Mapping::ShoulderNames::kAuto && m.prompt_colours && m.prompt_text_colours);
     // Full layout x appearance x family matrix. Automatic layout is resolved from labels.
     for (int layout = 0; layout < 4; ++layout)
         for (auto prompts : {Mapping::Prompts::kAuto, Mapping::Prompts::kOriginal,
@@ -463,14 +463,45 @@ static void test_prompts() {
                 CHECK(actual.face == expected);
                 CHECK(actual.positions == (labels && expected != FaceStyle::kOriginal));
                 CHECK(actual.colours == (expected != FaceStyle::kOriginal));
-                for (int i = 0; i < 4; ++i)
+                for (int i = 0; i < 4; ++i) {
                     CHECK(actual.buttons[i] == (expected == FaceStyle::kOriginal ? i : candidate.pad[kA+i] - kPadA));
+                    // the HUD cluster: by label swaps each pair, by position stays, any other
+                    // face set puts each button on its pad button's spot
+                    CHECK(actual.spots[i] == (expected == FaceStyle::kOriginal ? i : (candidate.pad[kA+i] - kPadA) ^ 1));
+                    if (labels && expected != FaceStyle::kOriginal) CHECK(actual.spots[i] == (i ^ 1));
+                }
                 // Every invalid/ambiguous face set falls back together.
                 for (int invalid : {int(kPadNone), int(kPadLB), candidate.pad[kB]}) {
                     auto bad = candidate; bad.pad[kA] = invalid;
                     CHECK(prompt_style(bad, family).face == FaceStyle::kOriginal);
                 }
             }
+    // hud_spots: the game draws A east, B south, X north, Y west
+    {
+        using Spots = std::array<int, 4>;
+        Mapping h = Mapping::defaults();
+        apply_face_layout(h, FaceLayout::kPosition);
+        CHECK(hud_spots(h) == (Spots{0, 1, 2, 3}));
+        apply_face_layout(h, FaceLayout::kLabels);
+        CHECK(hud_spots(h) == (Spots{1, 0, 3, 2}));
+        // Xbox A does A (south), X sword (west), Y item X (north), B item Y (east)
+        h.pad[kA] = kPadA; h.pad[kB] = kPadX; h.pad[kX] = kPadY; h.pad[kY] = kPadB;
+        CHECK(hud_spots(h) == (Spots{1, 3, 2, 0}));
+        // Y on RB: its own spot (west) is the sword's, so it takes the free east spot
+        h.pad[kY] = kPadRB;
+        CHECK(hud_spots(h) == (Spots{1, 3, 2, 0}));
+        // two off the face buttons: X keeps its free own spot, Y takes the last one
+        h.pad[kX] = kPadLB;
+        CHECK(hud_spots(h) == (Spots{1, 3, 2, 0}));
+        h.pad[kB] = kPadRT;  // only A on a face button: the rest keep their own free spots, then fill
+        CHECK(hud_spots(h) == (Spots{1, 0, 2, 3}));
+        // the same face button twice: the first action takes its spot, the second a free one
+        apply_face_layout(h, FaceLayout::kPosition);
+        h.pad[kY] = h.pad[kX];  // both on Xbox Y (north): X there, Y keeps its own free west spot
+        CHECK(hud_spots(h) == (Spots{0, 1, 2, 3}));
+        h.pad[kA] = h.pad[kB];  // both on Xbox A (south): A there, B to the free east spot
+        CHECK(hud_spots(h) == (Spots{1, 0, 2, 3}));
+    }
     // by label, automatic: Xbox look (LB/RB/LT/RT) unless the pad is a PlayStation one (L1/R1/L2/R2)
     apply_face_layout(m, FaceLayout::kLabels);
     PromptStyle s = prompt_style(m, PadFamily::kXbox);
@@ -511,15 +542,21 @@ static void test_prompts() {
     const Mapping d = Mapping::defaults();
     const std::string plain = to_json(d);
     CHECK(plain.find("button_prompts") == std::string::npos && plain.find("shoulder_names") == std::string::npos &&
-          plain.find("button_colours") == std::string::npos);
+          plain.find("button_colours") == std::string::npos && plain.find("button_text_colours") == std::string::npos);
     for (auto p : {Mapping::Prompts::kAuto, Mapping::Prompts::kOriginal, Mapping::Prompts::kXbox, Mapping::Prompts::kPlayStation})
         for (auto n : {Mapping::ShoulderNames::kAuto, Mapping::ShoulderNames::kNintendo, Mapping::ShoulderNames::kNumbered,
                        Mapping::ShoulderNames::kXbox})
-            for (bool c : {true, false}) {
+            for (bool c : {true, false}) for (bool text : {true, false}) {
                 Mapping w = d, r;
                 w.prompts = p;
                 w.shoulder_names = n;
                 w.prompt_colours = c;
+                w.prompt_text_colours = text;
+                const auto style = prompt_style(w, PadFamily::kXbox);
+                // Original prompts keep the game's words whatever the setting, and stay inactive.
+                CHECK(style.text_colours == (text && style.face != FaceStyle::kOriginal));
+                if (style.face == FaceStyle::kOriginal)
+                    CHECK(style.active() == (style.shoulders != ShoulderStyle::kOriginal));
                 std::string err;
                 CHECK(from_json(to_json(w), r, &err) && err.empty() && r == w);
             }

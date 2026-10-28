@@ -144,6 +144,7 @@ struct Mapping {
     };
     std::vector<Controller> controllers;
     std::vector<std::string> setup_declined;  // controller_key()s that asked "Don't ask again"
+    bool prompt_text_colours = true;             // action words in their button's colour; off keeps the game's
     static Mapping defaults();
     bool operator==(const Mapping&) const = default;
 };
@@ -225,13 +226,19 @@ enum class ShoulderStyle : uint8_t { kOriginal, kNumbered, kXbox };
 struct PromptStyle {
     FaceStyle face = FaceStyle::kOriginal;
     bool colours = false;         // face colours (only with a face style)
+    bool text_colours = false;    // action words in their button's colour (only with a face style)
     ShoulderStyle shoulders = ShoulderStyle::kOriginal;
-    bool positions = false;       // HUD face cluster in the Xbox/PlayStation positions
+    bool positions = false;       // by label's look: the HUD face cluster in the Xbox/PlayStation positions
     std::array<int, 4> buttons = {0, 1, 2, 3};  // Wii U face -> host A/B/X/Y
+    std::array<int, 4> spots = {0, 1, 2, 3};    // HUD cluster: Wii U face -> the face whose drawn spot it takes
     bool active() const { return face != FaceStyle::kOriginal || shoulders != ShoulderStyle::kOriginal; }
     bool operator==(const PromptStyle&) const = default;
 };
 PromptStyle prompt_style(const Mapping& m, PadFamily family);
+// Where each Wii U face's HUD button is drawn, so the cluster matches the pad: an action on a
+// host face button takes that button's spot (Xbox A south is where the game draws B, and so on);
+// any other action keeps its own spot if it is free, else takes the first free one (A, B, X, Y).
+std::array<int, 4> hud_spots(const Mapping& m);
 const char* prompts_label(Mapping::Prompts p);              // for the UI
 const char* shoulder_names_label(Mapping::ShoulderNames n);  // for the UI
 

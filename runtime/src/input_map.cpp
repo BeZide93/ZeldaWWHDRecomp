@@ -470,6 +470,29 @@ PadFamily pad_family_from_labels(const FaceLabel labels[4]) {
     return PadFamily::kUnknown;
 }
 
+std::array<int, 4> hud_spots(const Mapping& m) {
+    // The game draws A east, B south, X north and Y west; host buttons are named by Xbox
+    // position (A south, B east, X west, Y north), so host button h sits on face h ^ 1's spot.
+    std::array<int, 4> spots = {-1, -1, -1, -1};
+    unsigned taken = 0;
+    for (int i = 0; i < 4; ++i) {
+        const int button = m.pad[kA + i] - kPadA;
+        if (button < 0 || button >= 4 || (taken & (1u << (button ^ 1)))) continue;
+        spots[i] = button ^ 1;
+        taken |= 1u << spots[i];
+    }
+    for (int i = 0; i < 4; ++i)  // not on a face button (or one taken already): its own spot if free
+        if (spots[i] < 0 && !(taken & (1u << i))) { spots[i] = i; taken |= 1u << i; }
+    for (int i = 0; i < 4; ++i) {
+        if (spots[i] >= 0) continue;
+        int free = 0;
+        while (taken & (1u << free)) ++free;
+        spots[i] = free;
+        taken |= 1u << free;
+    }
+    return spots;
+}
+
 PromptStyle prompt_style(const Mapping& m, PadFamily family) {
     PromptStyle s;
     const bool labels = face_layout(m) == FaceLayout::kLabels;
@@ -496,7 +519,9 @@ PromptStyle prompt_style(const Mapping& m, PadFamily family) {
     }
     if (s.face == FaceStyle::kOriginal) s.buttons = {0, 1, 2, 3};
     s.positions = s.face != FaceStyle::kOriginal && labels;
+    if (s.face != FaceStyle::kOriginal) s.spots = hud_spots(m);
     s.colours = s.face != FaceStyle::kOriginal && m.prompt_colours;
+    s.text_colours = s.face != FaceStyle::kOriginal && m.prompt_text_colours;
     switch (m.shoulder_names) {
     case Mapping::ShoulderNames::kAuto:
         s.shoulders = s.face == FaceStyle::kXbox ? ShoulderStyle::kXbox
@@ -1035,6 +1060,7 @@ std::string to_json(const Mapping& m) {
     if (m.shoulder_names != Mapping::ShoulderNames::kAuto)
         prompts += std::string(",\n    \"shoulder_names\": \"") + kShoulderIds[(int)m.shoulder_names] + "\"";
     if (!m.prompt_colours) prompts += ",\n    \"button_colours\": false";
+    if (!m.prompt_text_colours) prompts += ",\n    \"button_text_colours\": false";
     // issue #267: written only when on (files without it stay as they were)
     if (m.background_controllers) prompts += ",\n    \"background_controllers\": true";
     if (m.l_turns_page) prompts += ",\n    \"l_turns_gamepad_page\": true";
@@ -1189,6 +1215,7 @@ bool from_json(const std::string& text, Mapping& out, std::string* error) {
             else if (n->s != "auto") warn += "unknown shoulder_names \"" + n->s + "\"; ";
         }
         if (const Json* c = op->get("button_colours"); c && c->type == Json::Bool) m.prompt_colours = c->b;
+        if (const Json* c = op->get("button_text_colours"); c && c->type == Json::Bool) m.prompt_text_colours = c->b;
     }
     // Migration is one-way: an explicit shortcuts.Screenshot wins over the old Photo row.
     for (int i = 0; i < 2; ++i) m.shortcuts[kPhoto].keys[i] = {m.keys[kScreenshot][i], 0};
