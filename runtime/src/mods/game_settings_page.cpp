@@ -33,6 +33,9 @@
 #include "input.h"
 #include "runtime.h"
 #include "screenshot.h"
+#include "tv_pointer.h"
+#include "fixed_seed.h"
+#include "gfx/renderer.h"
 
 namespace game_settings_page {
 namespace {
@@ -317,6 +320,32 @@ void shot_after(int reads) {
     }
 }
 
+// Test aid WWHD_TEST_TV_POINTER=4000-4006:0.05:0.5,... holds the TV pointer down at (x, y) (0..1 of a 16:9
+// TV picture) during those (scripted) TV frames, as a click there would while the page wants it
+bool test_tv_pointer(tv_pointer::State& s) {
+    struct Hold { uint64_t from, to; float x, y; };
+    static const std::vector<Hold> holds = [] {
+        std::vector<Hold> v;
+        const char* e = getenv("WWHD_TEST_TV_POINTER");
+        unsigned long long a, b;
+        float x, y;
+        int n;
+        while (e && sscanf(e, "%llu-%llu:%f:%f%n", &a, &b, &x, &y, &n) == 4) {
+            v.push_back({a, b, x, y});
+            e += n;
+            if (*e != ',') break;
+            e++;
+        }
+        return v;
+    }();
+    if (holds.empty()) return false;
+    const uint64_t f = fixed_seed::script_frame(render::frame_count());
+    s = {};
+    for (const Hold& h : holds)
+        if (f >= h.from && f < h.to) s.down = true, s.x = h.x, s.y = h.y;
+    return true;
+}
+
 }  // namespace
 
 bool page_open() { return g_has_controller.load(std::memory_order_relaxed); }
@@ -372,6 +401,20 @@ void pad(input::PadState& p, Cpu* c) {
     Input in;
     in.buttons = p.buttons, in.lx = p.lx, in.ly = p.ly, in.touch = p.touch, in.dt = dt;
     in.x = p.tx * 1280.0f, in.y = p.ty * 720.0f;  // the GamePad picture as the page's 1280 x 720
+    // With the Pro Controller the menu (and the page) are on the TV: the mouse on the TV picture is the
+    // page's touch (tv_pointer.h), wanted while the page or its entry arrow is there
+    const bool pro = input::pro_controller();
+    {
+        const bool on_tv = pro && ((m.items_page && m.still && !other_page && !tabs.empty()) || g_page.shown());
+        tv_pointer::set_wanted(on_tv);
+        if (pro) {
+            tv_pointer::State s = tv_pointer::read();
+            if (!on_tv) s.down = false;
+            if (!test_tv_pointer(s) && !on_tv) s.down = false;
+            in.touch = s.down;
+            tv_pointer::to_page(s, in.x, in.y);
+        }
+    }
     if (!g_page.open()) {
         g_page.tick(dt);
         if (const uint32_t s = g_swallow.load(std::memory_order_relaxed)) {
@@ -399,7 +442,7 @@ void pad(input::PadState& p, Cpu* c) {
         in.cursor_left = m.cursor && m.cursor_x < kLeftColumnX;
         Input watched = in;
         if (!eligible) watched.touch = false;  // (the buttons are followed: a ZL held into the menu does not open it)
-        const bool on_arrow_touch = eligible && p.touch && g_page.on_arrow(in.x, in.y, true);
+        const bool on_arrow_touch = eligible && !pro && p.touch && g_page.on_arrow(in.x, in.y, true);
         if (g_page.entry(watched) && eligible) {
             g_page.show(int(tabs.size()));
             g_has_controller.store(true, std::memory_order_relaxed);

@@ -38,6 +38,7 @@
 #include "attachment_view_usage.h"
 #include "background_cache_readiness.h"
 #include "../../build_info.h"
+#include "../../tv_pointer.h"
 #include "deferred_commands.h"
 #include "record_worker.h"
 #include "submission_cpu_ack.h"
@@ -4952,7 +4953,7 @@ void shutdown_renderer_caches() {
 // GamePad only: display_modes.cpp maps the point as on macOS), mapped to 0..1 touch coordinates. A
 // press that starts on the picture keeps touching while it is dragged, clamped to the picture's edge.
 // The settings overlay keeps its clicks in the TV window.
-enum class TouchIn { None, DrcWindow, TvWindow };
+enum class TouchIn { None, DrcWindow, TvWindow, TvPicture };  // TvPicture: a port page's pointer (tv_pointer.h)
 static TouchIn touchHeld = TouchIn::None;
 static bool drc_window_point(float x, float y, float &tx, float &ty) {
   int pw = 0, ph = 0;
@@ -5104,7 +5105,15 @@ static bool gamepad_touch(const SDL_Event& event) {
     } else if (event.button.windowID == tvId && !overlay::captures()) {
       float nx, ny;
       tv_window_point(event.button.x, event.button.y, nx, ny);
-      if (!gfx::overlay_hit(nx, ny, &tx, &ty)) return false;  // the game's window: mouse camera etc.
+      if (!gfx::overlay_hit(nx, ny, &tx, &ty)) {
+        float px, py, aspect;  // a port page on the TV that wants the pointer (tv_pointer.h)
+        if (tv_pointer::wanted() && gfx::tv_picture_hit(nx, ny, &px, &py, &aspect)) {
+          tv_pointer::set(true, px, py, aspect);
+          touchHeld = TouchIn::TvPicture;
+          return true;
+        }
+        return false;  // the game's window: mouse camera etc.
+      }
       touchHeld = TouchIn::TvWindow;
     } else {
       return false;
@@ -5120,6 +5129,14 @@ static bool gamepad_touch(const SDL_Event& event) {
     }
     if (touchHeld == TouchIn::None || (up && event.button.button != SDL_BUTTON_LEFT)) return false;
     const float x = up ? event.button.x : event.motion.x, y = up ? event.button.y : event.motion.y;
+    if (touchHeld == TouchIn::TvPicture) {
+      float nx, ny, px = 0, py = 0, aspect = 16.0f / 9.0f;
+      tv_window_point(x, y, nx, ny);
+      gfx::tv_picture_hit(nx, ny, &px, &py, &aspect, true);
+      if (up) touchHeld = TouchIn::None;
+      tv_pointer::set(!up, px, py, aspect);
+      return true;
+    }
     if (touchHeld == TouchIn::DrcWindow) {
       drc_window_point(x, y, tx, ty);
       tx = std::clamp(tx, 0.0f, 1.0f);
@@ -5134,7 +5151,9 @@ static bool gamepad_touch(const SDL_Event& event) {
     return true;
   }
   case SDL_EVENT_WINDOW_FOCUS_LOST:
-    if (touchHeld != TouchIn::None) { touchHeld = TouchIn::None; input::set_touch(false, 0, 0); }
+    if (touchHeld == TouchIn::TvPicture) tv_pointer::set(false, 0, 0, 16.0f / 9.0f);
+    else if (touchHeld != TouchIn::None) input::set_touch(false, 0, 0);
+    touchHeld = TouchIn::None;
     return false;
   default:
     return false;
