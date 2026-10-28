@@ -172,9 +172,13 @@ void set_zl_latch_mode(int mode);
 // the held A; `repeat`: true 60's repeated read (the pushed stick stays)
 void touch_talk_pad(input::PadState& p, bool repeat);
 void touch_talk_reset();  // a state load
+// code mods (guest_mods.cpp, guest_live.h): the touches their claims got and their input filters, on the game's
+// controller reads after the port's own filters
+void guest_pad_filter(Cpu* c, input::PadState& p, bool repeat);
 // a finger on the TV picture (Finger::Kind: 0 down, 1 move, 2 up, 3 cancel), layout units (centre, +y up)
 void touch_talk_finger(int kind, float x, float y);
-bool touch_talk_claims();  // a finger landing on the picture is the talk's now (Android: nativeFreeTouch)
+bool touch_talk_claims();  // a finger landing on the picture is the talk's now
+bool touch_talk_claims_at(float x, float y);  // ... or a code mod's at this point (Android: nativeFreeTouch)
 bool touch_talk_on();
 void set_touch_talk_on(bool on);
 bool talk_hold_ff_on();

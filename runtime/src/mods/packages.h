@@ -21,8 +21,8 @@ struct Option {
     std::string id,name,description,type;
     // The item menu's settings page (game_settings.h): "menu": true shows the option there, in the Mods tab
     // under its mod (and its "section", when it has one); "live": true says the mod follows a change while the
-    // game runs (otherwise the page says it applies at the next start). Optional; provisional until the SDK's
-    // live options and manifest sections land (they replace these if they differ).
+    // game runs (otherwise the page says it applies at the next start): wwhd_config_* then return the value as it
+    // is now and wwhd_config_changed(id) its revision (Mod SDK, QoL M0; guest_live.h). Optional.
     std::string section;
     bool menu=false,live=false;
     json::Value value,default_value;
@@ -81,6 +81,11 @@ bool acknowledge_experimental(const std::string& id,std::string& error);
 // Catalogue installs record the catalogue's flag (a package built before its manifest had it).
 void mark_experimental(const std::string& id,bool on);
 bool configure(const std::string& id,const std::string& option,const json::Value& value,std::string& error);
+bool configure_option(const std::string& id,const std::string& option,const json::Value& value,std::string& error,bool& live);
+// After a successful configure: the mod, the option, its new value and whether the manifest marks it "live"
+// (guest_mods.cpp passes live changes on to the running mod: wwhd_config_*, wwhd_config_changed). Main thread.
+using OptionObserver=std::function<void(const std::string& mod,const std::string& option,const json::Value& value,bool live)>;
+void set_option_observer(OptionObserver observer);
 struct SetupView {catalogue::Step step;bool satisfied=false;};
 std::vector<SetupView> setup_steps(const std::string& id);
 // Snapshot shown by the setup dialog. Acceptance atomically saves trust, choices and run intent.

@@ -31,6 +31,7 @@
 
 #include "fast_forward.h"
 #include "game_settings_page.h"
+#include "guest_mods.h"
 #include "guest_addr.h"
 #include "mods.h"
 #include "play_context.h"
@@ -285,6 +286,8 @@ void touch_talk_finger(int kind, float x, float y) {
     push_finger(Finger::Kind(kind), x, y);
 }
 bool touch_talk_claims() { return g_claims.load(std::memory_order_relaxed); }
+// a finger landing at (x, y) (layout units) is the talk's or a code mod's (its claim, guest_live.h)
+bool touch_talk_claims_at(float x, float y) { return g_claims.load(std::memory_order_relaxed) || guestmods::touch_claimed_at(x, y); }
 
 // ---- the pad reads (VPADRead / KPADReadEx, after the touch controls' rules)
 void touch_talk_pad(input::PadState& p, bool repeat) {
@@ -299,8 +302,9 @@ void touch_talk_pad(input::PadState& p, bool repeat) {
     else if (wanted && !o.touch && !o.pad_hold) wanted = false, play_context_want(false);
     const PlayContext c = play_context();
     const bool menu_on_tv = input::pro_controller() && !game_settings_page::page_open();
-    const bool claim = talktouch::claims(c, o, menu_on_tv);
-    g_claims.store(claim, std::memory_order_relaxed);
+    const bool talk_claim = talktouch::claims(c, o, menu_on_tv);
+    g_claims.store(talk_claim, std::memory_order_relaxed);
+    const bool claim = talk_claim || guestmods::touch_claims();  // (code mods' claims: their fingers first)
     pointer_fingers(claim);
     test_fingers();
     std::vector<Finger> fingers;
@@ -308,8 +312,11 @@ void touch_talk_pad(input::PadState& p, bool repeat) {
         std::lock_guard<std::mutex> lk(g_finger_mu);
         fingers.swap(g_fingers);
     }
+    // a code mod's claimed fingers are the mod's (guest_mods.cpp delivers them in this read)
+    fingers.erase(std::remove_if(fingers.begin(), fingers.end(), [](const Finger& f) { return guestmods::touch_route(uint32_t(f.kind), f.x, f.y) >= 0; }),
+                  fingers.end());
     // fingers that came while nothing was claimed are nobody's (the touch controls had them)
-    if (!claim) {
+    if (!talk_claim) {
         bool cancel = false;
         for (const Finger& f : fingers) cancel = cancel || f.kind == Finger::kUp || f.kind == Finger::kCancel;
         fingers.clear();

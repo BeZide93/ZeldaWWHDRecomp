@@ -76,12 +76,16 @@ void wwhd_log_hex(const char* label, u32 value);
 void wwhd_log_float(const char* label, double value);
 /* integer option `id` of this mod, or `fallback` */
 int wwhd_config_int(const char* id, int fallback);
-/* Other typed manager options (values are frozen until restart). Strings include enum options.
+/* Other typed manager options. Values are those of the start, except options the manifest marks "live": true,
+ * which follow changes made in Settings or the item menu's page while the game runs. Strings include enum options.
  * config_string copies at most capacity-1 bytes, terminates them and returns bytes copied;
  * a missing/wrong-type option returns zero without modifying the buffer. */
 int wwhd_config_bool(const char* id, int fallback);
 double wwhd_config_float(const char* id, double fallback);
 u32 wwhd_config_string(const char* id, char* buffer, u32 capacity);
+/* Live options: the option's revision, 1 at start and one more per change of a "live" option; 0 for an option
+ * the mod doesn't have. Compare with the last revision seen (each logic step is fine) and read the value again. */
+unsigned long long wwhd_config_changed(const char* id);
 /* Per-mod heap: 16-byte aligned, default 256 KiB (manifest guest.heap_size changes it).
  * malloc returns null on exhaustion; free accepts null. Heap/data are part of full states. */
 void* wwhd_malloc(u32 size);
@@ -94,6 +98,30 @@ typedef struct {
     f32 tx, ty;
 } wwhd_input_state;
 void wwhd_input_read(wwhd_input_state* state);
+/* Input filter: `filter` gets the controller state of each of the game's controller reads (full logic steps)
+ * after the port's own rules (touch controls, talks by touch) and before the game sees it, and may change its
+ * buttons and sticks (touch fields are read only). Mods' filters run in load order. One per mod; 0 removes it.
+ * The callback must be this mod's own function. Returns 1 when registered. */
+typedef void (*wwhd_input_filter_fn)(wwhd_input_state* state);
+int wwhd_input_filter_register(wwhd_input_filter_fn filter);
+/* Touches on the TV picture (the device's touch screen, or the mouse on the desktop): the mod claims rectangles
+ * in layout units (1280 x 720 around the picture's centre, +y up; a wider picture extends x) with
+ * wwhd_touch_claim; a finger landing in one goes to `callback` (down, moves, up or cancel) and to nothing else
+ * (no on-screen stick, no talk by touch) until it lifts. The newest claim wins where claims overlap. Events
+ * arrive on the next controller read, before the input filters. Up to 8 rectangles per mod (slots 0..7); a
+ * rectangle with x1 <= x0 or y1 <= y0 removes the slot's claim. Register first (0 removes the callback and the
+ * claims). Returns 1 when done. */
+#define WWHD_TOUCH_DOWN 0
+#define WWHD_TOUCH_MOVE 1
+#define WWHD_TOUCH_UP 2
+#define WWHD_TOUCH_CANCEL 3
+typedef struct {
+    u32 kind;  /* WWHD_TOUCH_* */
+    f32 x, y;  /* layout units */
+} wwhd_touch_event;
+typedef void (*wwhd_touch_fn)(const wwhd_touch_event* event);
+int wwhd_touch_register(wwhd_touch_fn callback);
+int wwhd_touch_claim(u32 slot, f32 x0, f32 y0, f32 x1, f32 y1);
 /* Flat filenames in this mod's Data/<id> folder; no paths or symlinks. At most 1 MiB per call.
  * read returns bytes read (zero at EOF), write replaces the file; -1 indicates failure. */
 s32 wwhd_file_read(const char* filename, void* buffer, u32 size);

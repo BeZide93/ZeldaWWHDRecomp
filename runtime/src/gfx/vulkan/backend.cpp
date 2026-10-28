@@ -5086,7 +5086,14 @@ extern "C" JNIEXPORT jint JNICALL Java_org_wwhdrecomp_wwhd_TouchControls_nativeF
       g.pip = false;
   }
   // a talk, a choice, a shop... (mods/touch_talk.h) claims the game's picture: only where the phone shows it
-  const bool talk = mods::touch_talk_claims() && !(g.dual && g.swapped) && gfx::game_picture_hit(x, y, &tx, &ty, &aspect);
+  bool talk = false;
+  if (!(g.dual && g.swapped) && gfx::game_picture_hit(x, y, &tx, &ty, &aspect)) {
+    tv_pointer::State s;
+    s.x = tx, s.y = ty, s.aspect = aspect;
+    float px, py;
+    tv_pointer::to_page(s, px, py);
+    talk = mods::touch_talk_claims_at(px - 640.0f, 360.0f - py);  // the talk anywhere, a code mod in its claims
+  }
   return touch_style::free_touch(touch_options::get(), x, touch_style::game_touch(g), talk);
 }
 // TouchControls.nativeTalkFinger: a finger nativeFreeTouch gave the talk (FreeTalk) went down (0), moved (1),

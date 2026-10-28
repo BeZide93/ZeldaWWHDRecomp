@@ -41,6 +41,10 @@
 #include "guest_files.h"
 #include "guest_settings.h"
 #include "guest_hud.h"
+#include "guest_live.h"
+#include "../fixed_seed.h"
+#include "../gfx/renderer.h"
+#include "../overlay/hostui.h"
 #include "game_layouts.h"
 #include <fstream>
 #include <filesystem>
@@ -164,7 +168,8 @@ struct Loaded {
     bool hud_called=false;
     const WWHDGuestModuleV1* m=nullptr;
     uint32_t region_size=0;
-    mods::json::Value options;
+    mods::json::Value options;  // the start values; live options change here while the game runs (g_options_mutex)
+    uint32_t input_filter=0, touch_callback=0, scratch=0;  // live features (guest_live.h): callbacks, a 32-byte exchange area
     std::unique_ptr<Heap> heap;
     std::unique_ptr<Files> files;
 };
@@ -613,16 +618,54 @@ void svc_log_hex(Cpu* c) { LOG("[guestmod:%s] %s %08X",owner(c).id.c_str(),cstr(
 void svc_log_float(Cpu* c) { LOG("[guestmod:%s] %s %g",owner(c).id.c_str(),cstr(c->r[3]).c_str(),c->f[1].ps0); }
 void svc_memcpy(Cpu* c) { memmove(mem::ptr(c->r[3]), mem::ptr(c->r[4]), c->r[5]); }
 void svc_memset(Cpu* c) { memset(mem::ptr(c->r[3]), (int)(c->r[4] & 0xFF), c->r[5]); }
-const mods::json::Value& option(Cpu* c) {return owner(c).options.get(cstr(c->r[3]));}
+// ---- live options, input filters, touches (guest_live.h; QoL track M0)
+std::mutex g_options_mutex;  // Loaded::options (the main thread changes live ones), g_revisions
+guestlive::Revisions g_revisions;
+std::mutex g_touch_mutex;    // g_touch, g_touch_queue
+guestlive::Touch g_touch;
+std::vector<std::pair<int,guestlive::Event>> g_touch_queue;  // (mod index, event) for the next pad read
+mods::json::Value option(Cpu* c) {std::lock_guard lock(g_options_mutex);return owner(c).options.get(cstr(c->r[3]));}
+void svc_config_changed(Cpu* c) {
+    auto& mod=owner(c);uint64_t revision;
+    {std::lock_guard lock(g_options_mutex);revision=g_revisions.revision(mod.id,cstr(c->r[3]));}
+    c->r[3]=uint32_t(revision>>32);c->r[4]=uint32_t(revision);
+}
+bool own_function(const Loaded& mod,uint32_t fn) {
+    for(uint32_t i=0;i<mod.m->func_count;++i)if(mod.m->funcs[i].addr==fn)return true;
+    return false;
+}
+bool exchange_area(Loaded& mod) {
+    if(!mod.scratch)mod.scratch=mod.heap->allocate(32);
+    return mod.scratch!=0;
+}
+void svc_input_filter_register(Cpu* c) {
+    auto& mod=owner(c);uint32_t fn=c->r[3];c->r[3]=0;
+    if(fn&&(!own_function(mod,fn)||!exchange_area(mod))){LOG("[guestmod:%s] input filter refused: the callback must be the mod's own",mod.id.c_str());return;}
+    mod.input_filter=fn;c->r[3]=1;
+}
+void svc_touch_register(Cpu* c) {
+    auto& mod=owner(c);uint32_t fn=c->r[3];c->r[3]=0;
+    if(fn&&(!own_function(mod,fn)||!exchange_area(mod))){LOG("[guestmod:%s] touch callback refused: the callback must be the mod's own",mod.id.c_str());return;}
+    mod.touch_callback=fn;
+    if(!fn){std::lock_guard lock(g_touch_mutex);g_touch.drop(int(&mod-g_loaded.data()));}
+    c->r[3]=1;
+}
+void svc_touch_claim(Cpu* c) {
+    auto& mod=owner(c);const int slot=int32_t(c->r[3]);c->r[3]=0;
+    if(!mod.touch_callback||slot<0||slot>=guestlive::kSlots)return;
+    const guestlive::Rect r{float(c->f[1].ps0),float(c->f[2].ps0),float(c->f[3].ps0),float(c->f[4].ps0)};
+    std::lock_guard lock(g_touch_mutex);
+    g_touch.claim(int(&mod-g_loaded.data()),slot,r);c->r[3]=1;
+}
 void svc_config_int(Cpu* c) {
-    const auto& v=option(c);
+    const auto v=option(c);
     if(v.type==mods::json::Value::Number&&v.number>=INT32_MIN&&v.number<=INT32_MAX&&std::floor(v.number)==v.number)c->r[3]=uint32_t(int32_t(v.number));
     else c->r[3]=c->r[4];
 }
-void svc_config_bool(Cpu* c) {const auto& v=option(c);c->r[3]=v.type==mods::json::Value::Bool?v.boolean:!!c->r[4];}
-void svc_config_float(Cpu* c) {const auto& v=option(c);if(v.type==mods::json::Value::Number)c->f[1].ps0=v.number;}
+void svc_config_bool(Cpu* c) {const auto v=option(c);c->r[3]=v.type==mods::json::Value::Bool?v.boolean:!!c->r[4];}
+void svc_config_float(Cpu* c) {const auto v=option(c);if(v.type==mods::json::Value::Number)c->f[1].ps0=v.number;}
 void svc_config_string(Cpu* c) {
-    const auto& v=option(c);uint32_t dst=c->r[4],size=c->r[5];
+    const auto v=option(c);uint32_t dst=c->r[4],size=c->r[5];
     if(v.type!=mods::json::Value::String||!dst||!size||size>1024*1024){c->r[3]=0;return;}
     uint32_t n=uint32_t(std::min<size_t>(v.text.size(),size-1));
     memcpy(mem::ptr(dst),v.text.data(),n);mem::ptr(dst)[n]=0;c->r[3]=n;
@@ -968,7 +1011,8 @@ const std::unordered_map<std::string, PpcFunc> kServices = {
     {"wwhd_audio_available",svc_audio_available},{"wwhd_audio_submit",svc_audio_submit},{"wwhd_audio_close",svc_audio_close},
     {"wwhd_log", svc_log},       {"wwhd_log_int", svc_log_int}, {"wwhd_log_hex", svc_log_hex},
     {"wwhd_log_float", svc_log_float}, {"wwhd_config_int", svc_config_int},
-    {"wwhd_config_bool",svc_config_bool},{"wwhd_config_float",svc_config_float},{"wwhd_config_string",svc_config_string},
+    {"wwhd_config_bool",svc_config_bool},{"wwhd_config_changed",svc_config_changed},
+    {"wwhd_input_filter_register",svc_input_filter_register},{"wwhd_touch_register",svc_touch_register},{"wwhd_touch_claim",svc_touch_claim},{"wwhd_config_float",svc_config_float},{"wwhd_config_string",svc_config_string},
     {"wwhd_malloc",svc_malloc},{"wwhd_free",svc_free},{"wwhd_input_read",svc_input},
     {"wwhd_file_read",svc_file_read},{"wwhd_file_write",svc_file_write},
     {"wwhd_hud_register",svc_hud_register},{"wwhd_hud_texture",svc_hud_texture},
@@ -1111,6 +1155,7 @@ bool load_one(const std::string& path, std::string& err,const mods::packages::Gu
         }
     Loaded loaded;
     loaded.path=path;loaded.package_path=pkg.path;loaded.data_path=pkg.data_path;loaded.id=pkg.id;loaded.name=pkg.name;loaded.version=pkg.version;loaded.m=m;loaded.region_size=reserved;loaded.options=pkg.options;
+    {std::lock_guard lock(g_options_mutex);for(const auto& [key,value]:pkg.options.object)g_revisions.declare(pkg.id,key);}
     loaded.files=std::make_unique<Files>(pkg.data_path);
     uint32_t heap_base=(m->mem_base+m->mem_size+15)&~15u;
     loaded.heap=std::make_unique<Heap>(mem::ptr(heap_base),heap_base,pkg.heap_size);
@@ -1241,6 +1286,16 @@ void init() {
     std::lock_guard mutation(native_hook_mutex());
     if(guest_init_started.exchange(true)||native_hooks_sealed.load()){native_hooks_fault=true;return;}
     namespace packages=mods::packages;
+    // live options (guest_live.h): a change of a "live" option reaches the running mod
+    packages::set_option_observer([](const std::string& id,const std::string& option,const mods::json::Value& value,bool live) {
+        if(!live)return;
+        std::lock_guard lock(g_options_mutex);
+        for(auto& mod:g_loaded)
+            if(mod.id==id&&g_revisions.bump(id,option)){
+                mod.options[option]=value;
+                LOG("[guestmod:%s] live option %s changed (revision %llu)",id.c_str(),option.c_str(),(unsigned long long)g_revisions.revision(id,option));
+            }
+    });
     // start_guests invokes callbacks under the package-manager mutex. Resolve its
     // directory before entering those callbacks to avoid recursively locking it.
 #ifdef __ANDROID__
@@ -1780,6 +1835,74 @@ bool native_camera_run_original_pending(const Cpu*c,const story_native_event_dep
 
 bool hooks_built() { return g_mod_hook_count != 0 && g_mod_hook_flags && g_mod_bodies; }
 
+// ---- live features (guest_live.h): touches routed to the mods' claims, the input filters
+int touch_route(uint32_t kind,float x,float y) {
+    std::lock_guard lock(g_touch_mutex);
+    const guestlive::Event e{kind,x,y};
+    const int owner=g_touch.route(e);
+    if(owner>=0&&size_t(owner)<g_loaded.size()&&g_touch_queue.size()<64)g_touch_queue.push_back({owner,e});
+    return owner;
+}
+bool touch_claimed_at(float x,float y) {std::lock_guard lock(g_touch_mutex);return g_touch.owner_at(x,y)>=0;}
+bool touch_claims() {std::lock_guard lock(g_touch_mutex);return g_touch.any();}
+// test aid: WWHD_TEST_MOD_OPTION=frame:mod:option:json,... changes a mod's option at that (scripted) TV frame, as the
+// Settings window would (packages::configure on the main thread: a live option reaches the mod)
+void test_option_changes() {
+    struct Change {uint64_t frame;std::string mod,option,value;bool done=false;};
+    static std::vector<Change> changes=[] {
+        std::vector<Change> v;
+        const char* e=std::getenv("WWHD_TEST_MOD_OPTION");
+        std::string s=e?e:"";
+        size_t at=0;
+        while(at<s.size()) {
+            size_t end=s.find(',',at);if(end==std::string::npos)end=s.size();
+            const std::string item=s.substr(at,end-at);at=end+1;
+            size_t a=item.find(':'),b=a==std::string::npos?a:item.find(':',a+1),d=b==std::string::npos?b:item.find(':',b+1);
+            if(d==std::string::npos)continue;
+            v.push_back({std::strtoull(item.c_str(),nullptr,10),item.substr(a+1,b-a-1),item.substr(b+1,d-b-1),item.substr(d+1)});
+        }
+        return v;
+    }();
+    if(changes.empty())return;
+    const uint64_t f=fixed_seed::script_frame(render::frame_count());
+    for(auto& ch:changes) {
+        if(ch.done||f<ch.frame)continue;
+        ch.done=true;
+        hostui::post([ch] {
+            std::string error;
+            mods::json::Value v;
+            try{v=mods::json::parse(ch.value);}catch(...){LOG("[guestmods] test option: bad value %s",ch.value.c_str());return;}
+            if(!mods::packages::configure(ch.mod,ch.option,v,error))LOG("[guestmods] test option %s.%s: %s",ch.mod.c_str(),ch.option.c_str(),error.c_str());
+            else LOG("[guestmods] test option %s.%s = %s",ch.mod.c_str(),ch.option.c_str(),ch.value.c_str());
+        });
+    }
+}
+void pad_filter(Cpu* c,input::PadState& p,bool repeat) {
+    if(!repeat)test_option_changes();
+    if(!c||repeat||g_loaded.empty())return;
+    std::vector<std::pair<int,guestlive::Event>> events;
+    {std::lock_guard lock(g_touch_mutex);events.swap(g_touch_queue);}
+    for(const auto& [index,e]:events) {  // the touches first: a mod may claim and filter in the same read
+        Loaded& mod=g_loaded[size_t(index)];
+        if(!mod.touch_callback||!mod.scratch)continue;
+        st32(mod.scratch,e.kind);stf32(mod.scratch+4,e.x);stf32(mod.scratch+8,e.y);
+        Cpu saved=*c;
+        try{guest_call(c,mod.touch_callback,{mod.scratch});}catch(...){LOG("[guestmod:%s] touch callback failed",mod.id.c_str());}
+        *c=saved;
+    }
+    for(auto& mod:g_loaded) {  // in load order
+        if(!mod.input_filter||!mod.scratch)continue;
+        const uint32_t a=mod.scratch;
+        st32(a,p.buttons);stf32(a+4,p.lx);stf32(a+8,p.ly);stf32(a+12,p.rx);stf32(a+16,p.ry);
+        st32(a+20,p.touch);stf32(a+24,p.tx);stf32(a+28,p.ty);
+        Cpu saved=*c;
+        try{guest_call(c,mod.input_filter,{a});}catch(...){LOG("[guestmod:%s] input filter failed",mod.id.c_str());*c=saved;continue;}
+        *c=saved;
+        auto stick=[](float v){return std::isfinite(v)?std::clamp(v,-1.0f,1.0f):0.0f;};
+        p.buttons=ld32(a);p.lx=stick(float(ldf32(a+4)));p.ly=stick(float(ldf32(a+8)));p.rx=stick(float(ldf32(a+12)));p.ry=stick(float(ldf32(a+16)));
+    }
+}
+
 void frame(uint64_t step) {g_logic_step.store(step,std::memory_order_relaxed);hud::store().set_step(step);story_notebook::logic_step(step);}
 void draw_frame(Cpu* c,uint64_t step) {
     if(!c||!g_hud_callbacks.load(std::memory_order_acquire))return;
@@ -1845,6 +1968,7 @@ void state_loaded() {
 }
 
 }  // namespace guestmods
+namespace mods { void guest_pad_filter(Cpu* c, input::PadState& p, bool repeat) { guestmods::pad_filter(c, p, repeat); } }
 
 using namespace guestmods;
 
