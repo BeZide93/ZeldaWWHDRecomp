@@ -7,6 +7,14 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Settings in the game's own pause menu.** The common settings now have a page in the item menu, drawn like the
+  game's own menus (its paper, font, arrows and menu sounds, read from your copy of the game). Open it with the new
+  arrow left of the items, by pressing Left from the leftmost item column, or by swiping. Tabs: Camera, Controls,
+  Screen, Game (the built-in gameplay options, applied at once) and Mods, where a mod can show its own options. It
+  works with a controller, keyboard, mouse (also on the TV picture in Pro Controller mode) and touch, and follows the
+  game's language in English, French, German, Italian and Spanish. The full Settings window (Esc, F1 or holding
+  Select) stays for everything else; both change the same settings. `WWHD_GAME_SETTINGS=0` hides the page. Players'
+  and mod authors' notes: [docs/settings-page.md](docs/settings-page.md). Idea from GreenNaugahyde's Android fork.
 - **Sound: waves, wind and other looping ambience no longer cut out.** The game's sound engine stops a sound channel
   when its audio work runs late, which on the Wii U meant an overloaded sound chip. On a computer or phone a single
   slow frame looked like that, so looping sounds went silent until the game started them again. That check is now off
