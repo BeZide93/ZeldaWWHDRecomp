@@ -77,6 +77,7 @@ namespace gfxvk { bool buffer_cache_enabled(); unsigned submission_pool_slots();
 #include "../mods/climb.h"
 #include "../mods/mods.h"
 #include "../mods/manager.h"
+#include "../mods/game_settings.h"
 #include "../mods/packages.h"
 #include "../mods/catalogue_client.h"
 #include "../platform/https.h"
@@ -1603,7 +1604,7 @@ void builtin_options(const std::string& id) {
     if (id == "direct-camera") {
         float speed = mods::camera_speed();
         if (ImGui::SliderFloat("Camera speed", &speed, .5f, 2.f, "%.2fx"))
-            hostui::post([speed] { mods::set_camera_speed(speed); hostui::set("mod.direct-camera.speed", std::to_string(speed)); mods::packages::remember_option("direct-camera.speed", speed); });
+            hostui::post([speed] { game_settings::set_camera_speed(speed); });  // as the item menu's settings page (game_settings.h)
     } else if (id == "lock-on") {
         float range = mods::lock_on_range();
         if (ImGui::SliderFloat("Enemy lock-on range", &range, 1.f, 3.f, "%.2fx"))
@@ -1735,7 +1736,7 @@ void builtin_options(const std::string& id) {
     } else if (id == "mouse-camera") {
         float sensitivity = mods::mouse_sensitivity();
         if (ImGui::SliderFloat("Sensitivity", &sensitivity, .08f, .3f, "%.3f"))
-            hostui::post([sensitivity] { mods::set_mouse_sensitivity(sensitivity); hostui::set("mod.mouse-camera.sensitivity", std::to_string(sensitivity)); mods::packages::remember_option("mouse-camera.sensitivity", sensitivity); });
+            hostui::post([sensitivity] { game_settings::set_mouse_sensitivity(sensitivity); });
     }
 }
 

@@ -6,6 +6,7 @@
 #include "../input.h"
 #include "../mods/story_notebook.h"
 #include "../mods/story_bag.h"
+#include "../mods/game_settings_page.h"
 #include "../mods/story_scenes.h"
 #include "../rumble.h"
 #include "../motion/motion.h"
@@ -113,6 +114,7 @@ HLE(vpad, VPADRead) {
     story_notebook::pad(p, c);  // the story notebook's page takes the controller while it is open
     story_scenes::mute(p);
     story_bag::pad(p, c);       // then the Delivery Bag's extra pages (mod items), while open
+    game_settings_page::pad(p, c);  // the settings page in the item menu (left of the items), while open
     if (!input::pro_controller()) mods::moon_jump_input(p);
     if (!input::pro_controller()) mods::move_speed_input(p.buttons);
     if (!input::pro_controller()) mods::jump_input(p.buttons);

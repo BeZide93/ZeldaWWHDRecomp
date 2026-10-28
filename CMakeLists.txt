@@ -634,6 +634,10 @@ add_executable(story_bag_page_test runtime/tools/story_bag_page_test.cpp)
 target_include_directories(story_bag_page_test PRIVATE runtime/src)
 target_compile_options(story_bag_page_test PRIVATE -UNDEBUG)
 add_test(NAME story_bag_page COMMAND story_bag_page_test)
+add_executable(game_settings_page_test runtime/tools/game_settings_page_test.cpp)
+target_include_directories(game_settings_page_test PRIVATE runtime/include runtime/src runtime/src/mods)
+target_compile_options(game_settings_page_test PRIVATE -UNDEBUG)
+add_test(NAME game_settings_page COMMAND game_settings_page_test)
 # the port's layout writer (runtime/src/mods/lyt_build.cpp); tools/story_mods/test_lyt.py compares its
 # output with the reference generator's
 add_executable(lyt_build_test runtime/tools/lyt_build_test.cpp runtime/src/mods/lyt_build.cpp runtime/src/mods/guest_png.cpp
