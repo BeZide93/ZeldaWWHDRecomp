@@ -19,6 +19,7 @@
 #include <cstring>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 #ifdef _WIN32
 #include <windows.h>
@@ -81,7 +82,7 @@ uint32_t drawn_ink = 0;
 // Mirror the production style from the live mapping (input_map::prompt_style, tested on its own
 // in input_map_test); the hooks must draw exactly that.
 void expect_current() {
-    const auto look = input_map::prompt_style(input_map::current(), input_map::pad_family());
+    const auto look = input_map::active_prompt_style();
     expected_buttons = look.buttons;
     expected_spots = look.spots;
     expect_xbox = look.positions;
@@ -770,6 +771,51 @@ void automatic_test() {
     layout(input_map::FaceLayout::kPosition);  // leave the manual default for later tests
 }
 
+// Per-controller bindings: the prompts follow the controller in use. Two pads with different face
+// bindings (one with A and B swapped, one with X and Y), pressed in turn: each print of the Wii U A
+// and X icons draws the button that controller has them on; a controller without bindings of its
+// own, or none (keyboard only), the shared ones. No set_current in between: the switch alone must
+// renew the cached style.
+void active_controller_test() {
+    const auto previous = input_map::current();
+    const uint32_t previous_list = ld32(writer + 0x2C);
+    st32(writer + 0x2C, 0);
+    auto mapping = input_map::Mapping::defaults();
+    input_map::apply_face_layout(mapping, input_map::FaceLayout::kLabels);
+    mapping.prompts = input_map::Mapping::Prompts::kXbox;
+    input_map::Mapping::Controller one, two;
+    one.guid = "03000000000000000000000000000001";
+    one.name = "Pad One";
+    one.pad = mapping.pad;
+    std::swap(one.pad[input_map::kA], one.pad[input_map::kB]);
+    two.guid = "03000000000000000000000000000002";
+    two.name = "Pad Two";
+    two.pad = mapping.pad;
+    std::swap(two.pad[input_map::kX], two.pad[input_map::kY]);
+    mapping.controllers = {one, two};
+    input_map::set_active_controller("", "");
+    input_map::set_current(mapping, false);
+    const auto drawn = [](uint32_t icon, uint32_t want) {
+        expected_plain = (int)want;
+        print(icon);
+        expected_plain = -1;
+    };
+    drawn(0xE000, 0xE000); drawn(0xE002, 0xE002);  // keyboard only: the shared bindings
+    input_map::set_active_controller(one.guid, one.name);
+    drawn(0xE000, 0xE001); drawn(0xE001, 0xE000); drawn(0xE002, 0xE002);
+    input_map::set_active_controller(two.guid, two.name);
+    drawn(0xE000, 0xE000); drawn(0xE002, 0xE003); drawn(0xE003, 0xE002);
+    input_map::set_active_controller("03000000000000000000000000000003", "Pad Three");
+    drawn(0xE000, 0xE000); drawn(0xE002, 0xE002);
+    input_map::set_active_controller(one.guid, one.name);
+    drawn(0xE000, 0xE001);
+    input_map::set_active_controller("", "");
+    drawn(0xE000, 0xE000);
+    st32(writer + 0x2C, previous_list);
+    input_map::set_current(previous, false);
+    expect_current();
+}
+
 // #143: the prompt options. Each applies to text that is already cached (no new Print calls),
 // a change between two restyled looks rebuilds each text once, and an unchanged look reuses it.
 void set_options(input_map::FaceLayout face, input_map::Mapping::Prompts prompts, input_map::Mapping::ShoulderNames names,
@@ -1121,7 +1167,7 @@ extern "C" void ppc_dispatch(Cpu* c) {
 extern "C" void f_0286E9F0_orig(Cpu* c) {
     prints++;
     const int face = button_glyphs::face_character(printed_character);
-    const auto look = input_map::prompt_style(input_map::current(), input_map::pad_family());
+    const auto look = input_map::active_prompt_style();
     assert(c->r[4] == (expected_plain >= 0 ? uint32_t(expected_plain) : face >= 0 && look.face == input_map::FaceStyle::kXbox
                        ? uint32_t(0xE000 + expected_buttons[face]) : printed_character));
     const uint32_t target = ld32(c->r[3] + 0x2C);
@@ -1535,6 +1581,7 @@ int main() {
     font_fallback_test();
     automatic_test();
     options_test();
+    active_controller_test();
     shoulder_colour_source_test();
     // Position and all 24 custom permutations: letters, colours and shapes share one identity.
     std::array<int, 4> permutation = {0, 1, 2, 3};

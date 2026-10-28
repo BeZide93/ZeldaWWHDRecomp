@@ -770,6 +770,14 @@ Mapping view_for(const Mapping& m, int index) {
     return v;
 }
 
+Mapping active_view(const Mapping& m) {
+    std::string guid, name;
+    active_controller(guid, name);
+    return guid.empty() && name.empty() ? m : view_for(m, profile_index(m, guid, name));
+}
+
+PromptStyle active_prompt_style() { return prompt_style(active_view(current()), pad_family()); }
+
 void store_view(Mapping& m, const Mapping& view, int index) {
     if (index < 0 || index >= (int)m.controllers.size()) {
         auto controllers = m.controllers;
@@ -1421,8 +1429,10 @@ void adopt_legacy_jump_button(uint32_t vpad_bit) {
 
 void set_active_controller(const std::string& guid, const std::string& name) {
     std::lock_guard<std::mutex> lk(g_active_mu);
+    if (g_active_guid == guid && g_active_name == name) return;
     g_active_guid = guid;
     g_active_name = name;
+    g_gen++;  // the game's prompts follow the bindings of the controller in use (button_glyphs::style)
 }
 void active_controller(std::string& guid, std::string& name) {
     std::lock_guard<std::mutex> lk(g_active_mu);

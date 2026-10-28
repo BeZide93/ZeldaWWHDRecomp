@@ -1,6 +1,7 @@
 // Unit tests for the controls mapping (runtime/src/input_map.cpp).
 //   make -C build/cmake input_map_test && ./build/cmake/input_map_test
 #include "platform/keycodes.h"
+#include <array>
 #include <filesystem>
 #include <chrono>
 #include <barrier>
@@ -10,6 +11,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <string>
+#include <utility>
 
 #include "input_map.h"
 #include "mouse_bindings.h"
@@ -1360,6 +1362,57 @@ static void test_profiles() {
     CHECK(r.controllers[0].pad[kB] == r.pad[kB] && !err.empty());
 }
 
+// The game's prompts follow the bindings of the controller in use: its own profile's, else the
+// shared ones (no controller in use: keyboard only). A switch bumps generation() so cached styles
+// (button_glyphs::style) re-read; the same controller again does not.
+static void test_active_prompts() {
+    const Mapping previous = current();
+    Mapping m = Mapping::defaults();
+    apply_face_layout(m, FaceLayout::kLabels);  // shared: by label (A south, B east, X west, Y north)
+    m.prompts = Mapping::Prompts::kXbox;
+    Mapping::Controller one, two;
+    one.guid = "03000000000000000000000000000001";
+    one.name = "Pad One";
+    one.pad = m.pad;
+    std::swap(one.pad[kA], one.pad[kB]);  // Wii U A on the east button, B on the south one
+    two.guid = "03000000000000000000000000000002";
+    two.name = "Pad Two";
+    two.pad = m.pad;
+    std::swap(two.pad[kX], two.pad[kY]);
+    m.controllers = {one, two};
+    set_current(m, false);
+    const PromptStyle shared = prompt_style(m, pad_family());
+    CHECK(shared.face == FaceStyle::kXbox && shared.buttons == (std::array<int, 4>{0, 1, 2, 3}));
+
+    set_active_controller("", "");
+    CHECK(active_prompt_style() == shared);  // keyboard only: the shared bindings
+
+    uint32_t gen = generation();
+    set_active_controller(one.guid, one.name);
+    CHECK(generation() != gen);
+    const PromptStyle a = active_prompt_style();
+    CHECK(a.face == FaceStyle::kXbox && a.buttons == (std::array<int, 4>{1, 0, 2, 3}));
+    CHECK(a.spots == hud_spots(view_for(m, 0)) && a.spots != shared.spots);
+    gen = generation();
+    set_active_controller(one.guid, one.name);  // the same controller pressing again: no re-read
+    CHECK(generation() == gen);
+
+    set_active_controller(two.guid, two.name);
+    CHECK(generation() != gen);
+    const PromptStyle b = active_prompt_style();
+    CHECK(b.buttons == (std::array<int, 4>{0, 1, 3, 2}) && b.spots == hud_spots(view_for(m, 1)));
+
+    // the same model on another bus (GUID match) uses that profile; a controller without one, the shared
+    set_active_controller(one.guid, "Pad One (USB)");
+    CHECK(active_prompt_style().buttons == a.buttons);
+    set_active_controller("03000000000000000000000000000003", "Pad Three");
+    CHECK(active_prompt_style() == shared);
+    CHECK(active_view(m).pad == m.pad);
+
+    set_active_controller("", "");
+    set_current(previous, false);
+}
+
 static void test_v1_migration() {
     // a format 1 file: no profiles; Jump and the moon jump on whatever pressed the Wii U's L
     const char* v1 = R"({"version":1,"keyboard":{"L":["U"]},"controller":{"L":"LeftTrigger","ZL":"LeftShoulder"},"options":{"format":2}})";
@@ -1495,6 +1548,7 @@ int main() {
     test_play_buttons();
     test_displace_rules();
     test_profiles();
+    test_active_prompts();
     test_v1_migration();
     printf("input_map_test: %d passed, %d failed\n", g_pass, g_fail);
     return g_fail ? 1 : 0;

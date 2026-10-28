@@ -66,13 +66,15 @@ uint32_t signature(const PromptStyle& s) {
 
 PromptStyle style() {
     // Per guest thread: layouts can be recorded on multiple cores. Each set_current (and a new pad
-    // family) invalidates the cached choice, including transitions through custom bindings. No
-    // SDL/AppKit dependency, and nothing beyond a generation compare per call.
+    // family or controller in use) invalidates the cached choice, including transitions through
+    // custom bindings. The bindings are the controller in use's own when it has them
+    // (input_map::active_view). No SDL/AppKit dependency, and nothing beyond a generation compare
+    // per call.
     thread_local uint32_t generation = ~0u;
     thread_local PromptStyle current;
     const uint32_t now = input_map::generation();
     if (now != generation) {
-        current = input_map::prompt_style(input_map::current(), input_map::pad_family());
+        current = input_map::active_prompt_style();
         if (current.active()) labels_used.store(true, std::memory_order_relaxed);
         const uint32_t sig = signature(current);
         if (last_signature.exchange(sig, std::memory_order_relaxed) != sig && labels_used.load(std::memory_order_relaxed))

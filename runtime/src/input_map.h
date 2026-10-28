@@ -235,6 +235,10 @@ struct PromptStyle {
     bool operator==(const PromptStyle&) const = default;
 };
 PromptStyle prompt_style(const Mapping& m, PadFamily family);
+// The game's prompts: prompt_style of the bindings the controller in use plays with (active_view)
+// and the pad family. generation() bumps when the controller in use changes, so a cached style
+// follows a switch to a controller with other bindings.
+PromptStyle active_prompt_style();
 // Where each Wii U face's HUD button is drawn, so the cluster matches the pad: an action on a
 // host face button takes that button's spot (Xbox A south is where the game draws B, and so on);
 // any other action keeps its own spot if it is free, else takes the first free one (A, B, X, Y).
@@ -276,6 +280,9 @@ void remove_profile(Mapping& m, int index);
 // in pad (-1: the shared ones); store_view puts an edited view back (the profile gets pad, everything
 // else is shared)
 Mapping view_for(const Mapping& m, int index);
+// `m` with the bindings the controller in use (active_controller) plays with: its profile's, else the
+// shared ones; no controller in use (keyboard only) or none of its own: `m`'s shared bindings
+Mapping active_view(const Mapping& m);
 void store_view(Mapping& m, const Mapping& view, int index);
 // controller setup offer (controller_setup.h): a new controller (no profile, not declined, not virtual)
 bool setup_offer_due(const Mapping& m, const std::string& guid, const std::string& name, bool is_virtual);
@@ -330,7 +337,7 @@ void consume_shortcut_buttons(const Mapping& m, const float* raw, float* game);
 void load_startup();
 Mapping current();
 void set_current(const Mapping& m, bool save = true);  // applies immediately; saves to default_path()
-uint32_t generation();  // bumps on every set_current
+uint32_t generation();  // bumps on every set_current, a new pad family and a new controller in use
 bool skip_controller_selection();
 bool background_controllers();  // current().background_controllers, any thread (hosts poll it)
 bool file_select_quit();
