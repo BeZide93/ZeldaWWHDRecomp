@@ -195,6 +195,9 @@ void test_classification() {
     assert(gfx::program_kind(zeros, 416, false) == gfx::ProgramKind::Other);  // the chain's helpers' size
     assert(gfx::program_kind(nullptr, 768, false) == gfx::ProgramKind::Other);
     assert(gfx::size_request(gfx::ProgramKind::BloomHelper).claim == gfx::TargetSize::Internal);  // never claims
+    assert(gfx::size_request(gfx::ProgramKind::DepthDownsample).claim == gfx::TargetSize::Internal);
+    assert(gfx::size_request(gfx::ProgramKind::DepthDownsample).renews == gfx::TargetSize::Light);
+    assert(gfx::size_request(gfx::ProgramKind::PointLight).claim == gfx::TargetSize::Light);
 }
 }  // namespace
 

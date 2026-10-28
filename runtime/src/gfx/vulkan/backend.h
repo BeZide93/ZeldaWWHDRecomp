@@ -39,7 +39,6 @@ struct Surface {
  std::unordered_map<uint32_t,VkImageView> sampledViews;
  uint32_t addr=0,mipAddr=0,width=0,height=0,slices=1,pitch=0,mips=1,format=0,dim=1,tileMode=0,swizzle=0;
  bool isDepth=false,gpuWritten=false,dirty=true,bcDecoded=false;
- bool lightGrid=false;  // the half-size point-light buffer or its depth copy: screen-sized with Full-size torchlight (target_scale)
  gfx::SizeClaim sizeClaim; // a size other than the internal resolution, claimed by a pass (target_scale, gfx/target_size.h)
  bool linearFiltering=false; // device capability for the actual optimal-tiling image format
  uint64_t writeSeq=0,contentHash=0,lastCheckedFrame=~0ull,sparseHash=0;
@@ -63,7 +62,6 @@ struct Surface {
  std::vector<std::shared_ptr<Surface>> spares;
 };
 struct SurfaceDesc { uint32_t addr=0,mipAddr=0,width=0,height=0,slices=1,pitch=0,mips=1,format=0,dim=1,tileMode=0,swizzle=0; bool isDepth=false;
-                     bool lightGrid=false;  /* the point-light buffer (Surface::lightGrid) */
                      gfx::SizeRequest sizeRequest; /* from the drawing pass (Surface::sizeClaim) */ };
 struct Screen {
 #ifdef WWHD_SDL_HOST
@@ -308,7 +306,7 @@ VkImageView make_sampled_view(Surface*,uint32_t key); // a sampled view by its k
 void touch_image(Surface*); // dynamic resolution: clear an image made ahead once (surfaces.cpp)
 VkImageView sampled_texture_view(Surface*,const uint32_t* texWords);
 Surface* find_or_create_surface(const SurfaceDesc&,bool forRendering);
-Surface* color_target(const uint32_t*,int,uint32_t* slice=nullptr,gfx::SizeRequest claim={},bool lightGrid=false);
+Surface* color_target(const uint32_t*,int,uint32_t* slice=nullptr,gfx::SizeRequest claim={});
 Surface* depth_target(const uint32_t*,uint32_t* slice=nullptr);
 Surface* surface_from_color_buffer(uint32_t,uint32_t* firstSlice=nullptr,uint32_t* numSlices=nullptr);
 Surface* surface_from_depth_buffer(uint32_t,uint32_t* firstSlice=nullptr,uint32_t* numSlices=nullptr);

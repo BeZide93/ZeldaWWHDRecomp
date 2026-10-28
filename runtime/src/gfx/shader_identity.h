@@ -6,7 +6,9 @@
 
 namespace gfx {
 // PointLight: the passes that light the half-size point-light buffer (PS 44390C00, 44461F00); the buffer and
-// the depth copy they read get as many pixels as the screen with Full-size torchlight (gfx/area_sample.h)
+// the depth copy they read get as many pixels as the screen with Full-size torchlight (gfx/area_sample.h).
+// The depth copy is drawn by DepthDownsample every frame, also while no point light is drawn (the pause
+// menu), so that pass keeps the lights' claim but never makes one.
 // BloomChain: the bloom extract (PS 44F91200) and the chain's blur (PS 44FD6E00, 44FD7600); the
 // targets they draw keep the console's size at any internal resolution (issue #307).
 // BloomHelper: the copy passes that also draw the chain's levels (PS 44FD7E00, and 44FD8500, which
@@ -42,6 +44,8 @@ inline SizeRequest size_request(ProgramKind kind) {
     SizeRequest r;
     if (kind == ProgramKind::BloomChain) r.claim = TargetSize::Console;
     if (kind == ProgramKind::BloomHelper) r.renews = TargetSize::Console;
+    if (kind == ProgramKind::PointLight) r.claim = TargetSize::Light;
+    if (kind == ProgramKind::DepthDownsample) r.renews = TargetSize::Light;
     return r;
 }
 } // namespace gfx
