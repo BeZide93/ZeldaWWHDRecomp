@@ -539,6 +539,13 @@ extern "C" void hook_0286E9F0(Cpu* c) {
 // colours. Record the rendered style in bit 3 of the same private marker, so DrawSelf can detect
 // a stale vertex cache on the next setting change or save-state restore. Ordinary text and
 // unrelated icons are not styled; the optional outline pass uses the game's outline colours.
+// The marker byte quad+0x2F sits inside the word atlas_quad holds through shared_patch. Writing it
+// only when it changes keeps a second thread's identical marker write from landing between another
+// thread's hold and release, where shared_patch would take it for a game write (review of #319).
+static inline void set_flag_byte(uint32_t addr, uint8_t value) {
+    if (ld8(addr) != value) st8(addr, value);
+}
+
 extern "C" void hook_028F7C7C(Cpu* c) {
     const PromptStyle look = style();
     const bool active = look.active();
@@ -563,7 +570,7 @@ extern "C" void hook_028F7C7C(Cpu* c) {
     const bool shape_ready = needs_shape && shoulder_atlas(c) && !(names && hud_face >= 2);
     if (hud_shoulder >= 0 && original_count) {
         const uint32_t quad = list + 0xA4;
-        if (mark) st8(quad + 0x2F, button_glyphs::mark_shoulder(ld8(quad + 0x2F), hud_shoulder));
+        if (mark) set_flag_byte(quad + 0x2F, button_glyphs::mark_shoulder(ld8(quad + 0x2F), hud_shoulder));
         if (shoulder_ready) {
             float left = shared_patch::authored_float(quad + 8), right = left + shared_patch::authored_float(quad);
             for (uint32_t i = 1; i < original_count; i++) {
@@ -582,12 +589,12 @@ extern "C" void hook_028F7C7C(Cpu* c) {
         }
     }
     if (hud_face >= 0 && original_count && mark && !look.positions)
-        st8(list + 0xA4 + 0x2F, button_glyphs::mark(ld8(list + 0xA4 + 0x2F), hud_face));
+        set_flag_byte(list + 0xA4 + 0x2F, button_glyphs::mark(ld8(list + 0xA4 + 0x2F), hud_face));
     if (names && hud_face >= 2) {
         // "A1" / "A2" on the X / Y picture: a coverage glyph (the letter's own colours and dimming),
         // a little wider than the letter's height, centred on it
         const uint32_t quad = list + 0xA4;
-        if (mark) st8(quad + 0x2F, button_glyphs::mark(ld8(quad + 0x2F), hud_face));
+        if (mark) set_flag_byte(quad + 0x2F, button_glyphs::mark(ld8(quad + 0x2F), hud_face));
         const float w = shared_patch::authored_float(quad), h = shared_patch::authored_float(quad + 4);
         const float x = shared_patch::authored_float(quad + 8), y = shared_patch::authored_float(quad + 0x0C);
         const float side = h * 1.1f;
@@ -605,7 +612,7 @@ extern "C" void hook_028F7C7C(Cpu* c) {
         // Without colours the shape is a coverage glyph: the game's own letter colours and
         // dimming apply to it unchanged.
         const uint32_t quad = list + 0xA4;
-        if (mark) st8(quad + 0x2F, button_glyphs::mark(ld8(quad + 0x2F), hud_face));
+        if (mark) set_flag_byte(quad + 0x2F, button_glyphs::mark(ld8(quad + 0x2F), hud_face));
         const float w = shared_patch::authored_float(quad), h = shared_patch::authored_float(quad + 4);
         const float x = shared_patch::authored_float(quad + 8), y = shared_patch::authored_float(quad + 0x0C);
         const float side = h * 0.8f;
@@ -639,7 +646,7 @@ extern "C" void hook_028F7C7C(Cpu* c) {
                 });
         }
         if (face < 0 && shoulder < 0) continue;
-        if (mark) st8(quad + 0x2F, button_glyphs::rendered(ld8(quad + 0x2F), active));
+        if (mark) set_flag_byte(quad + 0x2F, button_glyphs::rendered(ld8(quad + 0x2F), active));
         if (face >= 0 && hud_face < 0) {  // dialog/icon-font glyphs; HUD letters keep their ink
             if (look.face == FaceStyle::kXbox && look.colours) {
                 tint_word(saved, quad + 0x10, look.buttons[face]);
