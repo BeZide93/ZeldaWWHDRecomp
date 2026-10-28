@@ -113,6 +113,16 @@ int main() {
     a = q.input(touch(true, kBackXc, kArrowYc), rows, 1);
     a = q.input(touch(false, kBackXc, kArrowYc), rows, 1);
     assert(a.closed);
+    // the Back prompt can be tapped
+    q.show(1);
+    for (int i = 0; i < 20; i++) q.tick(1.0f / 30);
+    q.input(pad(0), rows, 1);
+    {
+        const float bx = kWinX + kWinW - 80, by = kWinY + kWinH - 50;
+        q.input(touch(true, bx, by), rows, 1);
+        a = q.input(touch(false, bx, by), rows, 1);
+        assert(a.closed);
+    }
     // drawing: the page and the entry arrow produce commands, the window first after the dim
     q.show(1);
     for (int i = 0; i < 20; i++) q.tick(1.0f / 30);

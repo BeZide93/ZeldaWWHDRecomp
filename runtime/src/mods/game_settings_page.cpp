@@ -24,6 +24,8 @@
 #include <memory>
 
 #include "game_settings.h"
+#include "game_settings_text.h"
+#include "console_language.h"
 #include "game_look.h"
 #include "guest_hud.h"
 #include "story_notebook_game.h"
@@ -294,14 +296,21 @@ float frame_seconds() {
     return std::min(dt, 0.1f);
 }
 
+uint32_t language() { return console_language(); }
+std::string tr(const std::string& english) { return game_settings_text::tr(english, language()); }
+
 std::vector<Row> rows_of(const std::string& tab) {
     std::vector<Row> rows;
     for (const game_settings::Item* it : game_settings::items(tab)) {
         Row r;
-        r.id = it->id, r.label = it->label, r.help = it->help, r.value = game_settings::value_text(*it);
+        const std::string value = game_settings::value_text(*it);
+        const bool port = it->owner == "port";  // (mods' texts are shown as their manifests write them)
+        r.id = it->id, r.label = port ? tr(it->label) : it->label, r.help = port ? tr(it->help) : it->help;
+        if (it->next_start) r.help += " " + tr("(applies at the next start)");
+        r.value = it->kind == game_settings::Kind::Number || (!port && it->kind == game_settings::Kind::Choice) ? value : tr(value);
         r.number = it->kind == game_settings::Kind::Number, r.toggle = it->kind == game_settings::Kind::Toggle;
         r.choice = it->kind == game_settings::Kind::Choice;
-        r.on = r.toggle && r.value == "On";
+        r.on = r.toggle && value == "On";
         r.enabled = !it->enabled || it->enabled();
         rows.push_back(std::move(r));
     }
@@ -398,7 +407,8 @@ void pad(input::PadState& p, Cpu* c) {
     const bool other_page = story_notebook::page_open();
     const std::vector<std::string> tabs = game_settings::tabs();
     std::vector<std::string> labels;
-    for (const std::string& t : tabs) labels.push_back(game_settings::tab_label(t));
+    for (const std::string& t : tabs) labels.push_back(tr(game_settings::tab_label(t)));
+    g_page.texts = {tr("Settings"), tr("Change"), tr("Back"), tr("L / R: tabs"), tr("More in Settings (Esc / hold Select)")};
     Input in;
     in.buttons = p.buttons, in.lx = p.lx, in.ly = p.ly, in.touch = p.touch, in.dt = dt;
     in.x = p.tx * 1280.0f, in.y = p.ty * 720.0f;  // the GamePad picture as the page's 1280 x 720

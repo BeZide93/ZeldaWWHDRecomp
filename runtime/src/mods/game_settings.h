@@ -31,6 +31,7 @@ struct Item {
     std::function<std::string(float)> format;  // Number: the value as shown ("1.25x"); empty: "%.2f"
     std::function<bool()> enabled;     // false: shown dimmed (it depends on another item); empty: always
     std::string owner = "port";
+    bool next_start = false;  // a change applies at the next start (the page says so after the help)
 };
 
 // The tabs that have items, in their order (camera, controls, hud, mods, then others)

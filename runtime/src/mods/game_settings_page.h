@@ -86,6 +86,8 @@ class Page {
 public:
     float (*measure)(const std::string& text, float size) = nullptr;  // the game's font, when loaded
     ArrowPlace game_arrow;  // the game's right page arrow
+    // the page's own words (the driver translates them: game_settings_text.h)
+    struct Texts { std::string title = "Settings", change = "Change", back = "Back", tabs = "L / R: tabs", more = "More in Settings (Esc / hold Select)"; } texts;
 
     float entry_x() const { return 1280 - game_arrow.x; }
     bool on_arrow(float x, float y, bool entry) const {
@@ -181,6 +183,14 @@ public:
         track_touch(in, tap);
         if (tap) {
             if (on_arrow(in_x_, in_y_, false)) return close(act);
+            // the prompts can be tapped too (touch and mouse players): Back closes, Change acts as A
+            const Prompts pr = prompt_places();
+            const float py = kWinY + kWinH - 66 - 10, ph = 56;
+            if (inside(in_x_, in_y_, pr.back_x - 10, py, pr.back_w + 20, ph)) return close(act);
+            if (inside(in_x_, in_y_, pr.change_x - 10, py, pr.change_w + 20, ph) && !rows.empty()) {
+                change(act, rows[selected_], rows[selected_].stepped() ? +1 : 0);
+                return act;
+            }
             for (unsigned i = 0; i < kRowsShown && top_ + i < rows.size(); i++) {
                 const float y = kRowY + kRowH * float(i);
                 if (!inside(in_x_, in_y_, kRowX, y, kRowW, kRowH)) continue;
@@ -219,11 +229,11 @@ public:
         out.push_back(rect(0, 0, 1280, 720, 0x0A140A00u | uint32_t(std::lround(0x70 * slide_))));  // the items page dims
         const size_t from = out.size();
         out.push_back(box("nb:window", kWinX, kWinY, kWinW, kWinH));
-        out.push_back(text(kWinX + 56, kWinY + 30, 42, kInk, bold("Settings")));
+        out.push_back(text(kWinX + 56, kWinY + 30, 42, kInk, bold(texts.title)));
         // tabs (the game's tab plates)
         float tx = kWinX + kWinW - 56;
         // the tabs right of the title: as wide as their names (at least 110), narrower when many
-        const float room = kWinW - 112 - width(bold("Settings"), 42) - 24;
+        const float room = kWinW - 112 - width(bold(texts.title), 42) - 24;
         const float most = tab_labels.empty() ? room : room / float(tab_labels.size()) - 10;
         for (int i = int(tab_labels.size()) - 1; i >= 0; i--) {
             const float w = std::min(most, std::max(110.0f, width(bold(tab_labels[i]), 26) + 40));
@@ -233,7 +243,7 @@ public:
             out.push_back(text(tx + (w - width(bold(tab_labels[i]), 26)) / 2, kWinY + 42, 26, on ? kInk : kInkSoft, bold(tab_labels[i])));
             tx -= 10;
         }
-        if (tab_labels.size() > 1) out.push_back(text(kWinX + 56, kWinY + 82, 19, kInkSoft, "L / R: tabs"));
+        if (tab_labels.size() > 1) out.push_back(text(kWinX + 56, kWinY + 82, 19, kInkSoft, texts.tabs));
         out.push_back(box("nb:panel", kRowX - 20, kRowY - 16, kRowW + 40, kRowH * kRowsShown + 30));
         for (unsigned i = 0; i < kRowsShown && top_ + i < rows.size(); i++) {
             const Row& r = rows[top_ + i];
@@ -274,11 +284,13 @@ public:
             for (size_t i = 0; i < lines.size(); i++)
                 out.push_back(text(kWinX + 60, hy - 44 + 24 * float(i) - (lines.size() > 1 ? 12 : 0), 21, kInkSoft, lines[i]));
         }
-        float x = kWinX + kWinW - 60 - prompt_width("Back");
-        prompt(out, x, hy, false, "Back");
-        x -= 36 + prompt_width("Change");
-        prompt(out, x, hy, true, "Change");
-        out.push_back(text(kWinX + 60, hy + 6, 22, kInkSoft, "More in Settings (Esc / hold Select)"));
+        const Prompts pr = prompt_places();
+        prompt(out, pr.back_x, hy, false, texts.back.c_str());
+        prompt(out, pr.change_x, hy, true, texts.change.c_str());
+        const float x = pr.change_x;
+        // the hint, cut to the room left of the prompts
+        const std::vector<std::string> more = wrap(texts.more, 22, x - 30 - (kWinX + 60), 1);
+        if (!more.empty()) out.push_back(text(kWinX + 60, hy + 6, 22, kInkSoft, more[0]));
         // the arrow back to the items, right of the page
         arrow(out, game_arrow.x, game_arrow.y, 1.0f, false);
         for (size_t i = from; i < out.size(); i++) out[i].x += dx;
@@ -346,6 +358,14 @@ private:
             last += "...";
         }
         return lines;
+    }
+    struct Prompts { float back_x, back_w, change_x, change_w; };
+    Prompts prompt_places() const {
+        Prompts p;
+        p.back_w = prompt_width(texts.back.c_str()), p.change_w = prompt_width(texts.change.c_str());
+        p.back_x = kWinX + kWinW - 60 - p.back_w;
+        p.change_x = p.back_x - 36 - p.change_w;
+        return p;
     }
     float row_y(int index) const { return kRowY + kRowH * float(index - int(top_)); }
     float width(const std::string& s, float size) const {

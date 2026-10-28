@@ -49,6 +49,12 @@ Item builtin_toggle(const char* tab, const char* mod_id, const char* label, cons
     return it;
 }
 
+// a label as the page shows it: capitalised ("automatic" -> "Automatic")
+std::string capital(std::string s) {
+    if (!s.empty() && s[0] >= 'a' && s[0] <= 'z') s[0] = char(s[0] - 'a' + 'A');
+    return s;
+}
+
 std::string times(float v) {
     char b[32];
     std::snprintf(b, sizeof b, "%.2fx", v);
@@ -230,7 +236,7 @@ void register_controls() {
         it.id = "controls.prompts", it.tab = "controls", it.label = "Button prompts", it.kind = Kind::Choice;
         it.help = "How the game's button icons look: automatic follows the connected pad.";
         for (M::Prompts p : {M::Prompts::kAuto, M::Prompts::kOriginal, M::Prompts::kXbox, M::Prompts::kPlayStation})
-            it.choices.push_back(input_map::prompts_label(p));
+            it.choices.push_back(capital(input_map::prompts_label(p)));
         it.get = [] { return float(int(input_map::current().prompts)); };
         it.set = [](float v) { change_mapping([v](M& m) { m.prompts = M::Prompts(std::clamp(int(std::lround(v)), 0, 3)); }); };
         add(std::move(it));
@@ -240,7 +246,7 @@ void register_controls() {
         it.id = "controls.shoulder-names", it.tab = "controls", it.label = "Shoulder names", it.kind = Kind::Choice;
         it.help = "How prompts name the shoulder buttons: L / R, L1 / R1 or LB / RB.";
         for (M::ShoulderNames n : {M::ShoulderNames::kAuto, M::ShoulderNames::kNintendo, M::ShoulderNames::kNumbered, M::ShoulderNames::kXbox})
-            it.choices.push_back(input_map::shoulder_names_label(n));
+            it.choices.push_back(capital(input_map::shoulder_names_label(n)));
         it.get = [] { return float(int(input_map::current().shoulder_names)); };
         it.set = [](float v) { change_mapping([v](M& m) { m.shoulder_names = M::ShoulderNames(std::clamp(int(std::lround(v)), 0, 3)); }); };
         add(std::move(it));
@@ -331,11 +337,28 @@ void register_touch() {  // the Settings window's "Touch controls" (Android)
 #endif
 void register_game() {
     // the built-in gameplay mods (mods/manager.cpp), switched as the Mods tab switches them
-    for (const char* id : {"quick-doors", "fast-scenes", "fast-forward", "jump-anywhere", "wall-climb", "move-speed", "lock-on", "quick-use",
-                           "ladder-speed", "sidle-speed", "ivy-speed", "hang-speed", "sail-speed", "auto-wind"}) {
-        const auto* e = mods::manager::find(id);
+    // (short names and help lines of the page's own, translated in game_settings_text.h; the Settings window
+    // keeps the catalogue's longer descriptions)
+    static const struct { const char *id, *label, *help; } kGame[] = {
+        {"quick-doors", "Quick doors", "Doors open and close four times as fast."},
+        {"fast-scenes", "Fast scene changes", "Shorter waits when the game loads a new place."},
+        {"fast-forward", "Fast forward scenes and talks", "Hold the fast forward button to speed up cutscenes and dialogue."},
+        {"jump-anywhere", "Jump anywhere", "A button of its own makes Link jump, standing or running."},
+        {"wall-climb", "Climb any wall", "Grab and climb walls with a stamina wheel; A or B lets go."},
+        {"move-speed", "Run/swim speed", "A boost for running and swimming, with a stamina bar."},
+        {"lock-on", "Extended enemy lock-on", "Target enemies from further away; R3 cycles targets while locked on."},
+        {"quick-use", "Quick-use locked items", "One press readies and uses an item against a locked enemy."},
+        {"ladder-speed", "Faster ladders", "Link climbs ladders faster."},
+        {"sidle-speed", "Faster sidling", "Link sidles along walls faster."},
+        {"ivy-speed", "Faster ivy climbing", "Link climbs ivy and vines faster."},
+        {"hang-speed", "Faster ledge hanging", "Link moves along ledges faster while hanging."},
+        {"sail-speed", "Sailing speed", "The boat sails faster."},
+        {"auto-wind", "Automatic wind", "The wind follows the boat with the normal sail too."},
+    };
+    for (const auto& g : kGame) {
+        const auto* e = mods::manager::find(g.id);
         if (!e || e->restart_required) continue;  // (the page applies live only)
-        add(builtin_toggle("game", id, e->name, e->description));
+        add(builtin_toggle("game", g.id, g.label, g.help));
     }
 }
 // The options of the enabled mods that ask for the item menu ("menu": true, packages.h Option): the Mods
@@ -353,8 +376,8 @@ void register_mod_options() {
             Item it;
             it.id = "mod." + v.id + "." + o->id, it.tab = "mods", it.owner = v.id;
             it.label = o->name.empty() ? o->id : o->name;
-            it.help = (o->section.empty() ? v.name : v.name + " / " + o->section) + (o->description.empty() ? "" : ": " + o->description) +
-                      (o->live ? "" : " (applies at the next start)");
+            it.help = (o->section.empty() ? v.name : v.name + " / " + o->section) + (o->description.empty() ? "" : ": " + o->description);
+            it.next_start = !o->live;
             const std::string mod = v.id, option = o->id, type = o->type;
             const std::vector<std::string> choices = o->choices;
             // the value as the manager has it now (kept here: list() is too heavy for every frame)
