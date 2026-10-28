@@ -86,6 +86,10 @@ inline uint8_t b_label(const PlayContext& c) {
     return c.b_action;
 }
 
+// B's word goes back (Return, Cancel): where the rules hide the game's own buttons, a screen the game
+// lets Link leave by B keeps that B, also in an event (conducting runs in one) and with another actor
+inline bool back_word(uint8_t b) { return b == kActReturn || b == kActCancel; }
+
 inline Buttons context_buttons(const PlayContext& c, const Options& o = {}) {
     Buttons r;
     auto show = [&](Button i, Kind k = Kind::kPlain, uint8_t label = 0) { r.b[i] = {true, k, label}; };
@@ -114,15 +118,29 @@ inline Buttons context_buttons(const PlayContext& c, const Options& o = {}) {
         show(kB, Kind::kAction, b_label(c));
         return r;
     }
+    // conducting the Wind Waker: Link's own screen, but inside an event the game starts for it
+    // (procTactWait_init: dComIfGp_event_compulsory), so the cutscene rule below would hide everything.
+    // The game puts "Return" on B while the baton is up (procTactWait: setBStatus(RETURN); the B trigger,
+    // checkTactCancelTrigger, then puts it away); B shows exactly while the game offers it (a song
+    // lesson that can't be left keeps it off). The sticks conduct and change the time; nothing else
+    // does anything there. A song lesson's text goes by the talk rule below.
+    if (conducting(c) && c.has(kLink) && !talking(c)) {
+        if (c.b_action && c.b_action != kActHidden) show(kB, Kind::kAction, c.b_action);
+        return r;
+    }
     // a talk or a scene's text: A goes on (B does the same in the game's message box); with tap to
     // continue a tap anywhere is A, so A itself goes
     if (talking(c) || c.has(kEvent)) {
         r.tap_continues = c.has(kKeyIcon);
         if (talking(c) && !(o.tap_to_continue && r.tap_continues)) show(kA, Kind::kAction, a_label(c));
+        if (!talking(c) && back_word(c.b_action)) show(kB, Kind::kAction, c.b_action);  // a screen of its own
         if (ff) show(kZR, Kind::kFastForward);
         return r;
     }
-    if (!c.has(kLink)) return r;  // another actor is controlled (the Seagull, a possessed Moblin): its own rules (later)
+    if (!c.has(kLink)) {  // another actor is controlled (the Seagull, a possessed Moblin): its own rules (later)
+        if (back_word(c.b_action)) show(kB, Kind::kAction, c.b_action);  // ... but its way back stays
+        return r;
+    }
     // the Picto Box (aiming, its album): A takes the photo / chooses, B goes back, ZR switches album and finder,
     // the album pages by the d-pad; no targeting, first person or menu there
     if (picto_mode(c)) {

@@ -253,6 +253,75 @@ static void wind_compass() {
     action(b, kB, kActReturn);
 }
 
+// conducting the Wind Waker (d-pad up): the game runs it as an event (procTactWait_init) with
+// "Return" on B; B puts the baton away. It must not fall under the cutscene rule (no buttons).
+static void conducting_the_wind_waker() {
+    PlayContext c = walking();
+    c.flags = kInGame | kLink | kEvent | kHasWindWaker;  // dComIfGp_event_compulsory: not in play
+    c.player_status1 = kSt1Conduct;
+    c.a_action = kActNone;
+    c.b_action = kActReturn;
+    c.zr_action = kActNone;
+    Buttons b = context_buttons(c);
+    assert(b.active && !b.tap_continues);
+    only(b, {kB});
+    action(b, kB, kActReturn);
+    // the fast forward doesn't take over: the baton screen isn't a scene
+    only(context_buttons(c, {true, true}), {kB});
+    // on the boat too
+    c.player_status0 = kSt0ShipRide;
+    c.mode_flags = kModeInShip;
+    only(context_buttons(c), {kB});
+    // a song lesson the game doesn't let Link leave: no Return on B, no B
+    c.b_action = kActNone;
+    only(context_buttons(c), {});
+    c.b_action = kActHidden;
+    only(context_buttons(c), {});
+    // a lesson's text over the baton: the talk rule (A goes on)
+    c.b_action = kActReturn;
+    c.flags |= kMessage | kMsgWindow | kKeyIcon;
+    c.mesg_status = 6;
+    only(context_buttons(c), {kA});
+    char buf[64];
+    c = walking();
+    c.flags = kInGame | kLink | kEvent;
+    c.player_status1 = kSt1Conduct;
+    c.a_action = kActNone;
+    c.b_action = kActReturn;
+    format(context_buttons(c), buf, sizeof buf);
+    assert(!strcmp(buf, "B:07"));
+}
+
+// the same way back elsewhere: any event screen (no text) where the game puts Return / Cancel on B
+// keeps B, and so does another controlled actor (the Seagull...); a cutscene's leftover sword doesn't
+static void ways_back() {
+    PlayContext c = walking();
+    c.flags = kInGame | kLink | kEvent;
+    c.a_action = kActNone;
+    c.b_action = kActReturn;
+    only(context_buttons(c), {kB});
+    action(context_buttons(c), kB, kActReturn);
+    c.b_action = kActCancel;
+    action(context_buttons(c), kB, kActCancel);
+    c.b_action = kActSword;
+    only(context_buttons(c), {});
+    // a talk: the message box's own rule (A goes on), no B
+    c.b_action = kActReturn;
+    c.flags |= kMessage | kMsgWindow | kKeyIcon;
+    c.mesg_status = 6;
+    only(context_buttons(c), {kA});
+    // another actor controlled
+    c = walking();
+    c.flags = kInGame;
+    c.b_action = kActReturn;
+    only(context_buttons(c), {kB});
+    // a fade: nothing (a stale Return mustn't flash up)
+    c = walking();
+    c.flags = kInGame | kLink | kFade | kEvent;
+    c.b_action = kActReturn;
+    only(context_buttons(c), {});
+}
+
 static void trace_format() {
     char buf[160];
     format(context_buttons(PlayContext{}), buf, sizeof buf);
@@ -334,6 +403,8 @@ int main() {
     in_a_shop();
     cutscenes_and_fades();
     wind_compass();
+    conducting_the_wind_waker();
+    ways_back();
     item_rules();
     trace_format();
     return 0;
