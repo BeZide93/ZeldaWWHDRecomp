@@ -944,7 +944,7 @@ void tab_graphics() {
 
     float fovPercent=aspect::fov_scale()*100.0f;
     if(ImGui::SliderFloat("Gameplay FOV", &fovPercent,75.0f,250.0f,"%.0f%%",ImGuiSliderFlags_AlwaysClamp))
-        post_changed([fovPercent] { aspect::set_fov_scale(fovPercent/100.0f); hostui::set("gameplayFovScale",std::to_string(fovPercent/100.0f)); });
+        hostui::post([fovPercent] { game_settings::set_fov_scale(fovPercent / 100.0f); });  // (game_settings.h, as the item menu's page)
     help("100% keeps the original field of view. Higher values show more of the world and make Link\n"
          "appear smaller. Applies to gameplay and combat in 2D and 3D. Cutscenes, dialogue,\n"
          "scene transitions and menus keep their authored FOV. First-person view, item aiming and\n"
@@ -1693,7 +1693,7 @@ void builtin_options(const std::string& id) {
             hostui::post([cooldown] { mods::set_move_speed_cooldown_seconds(cooldown); hostui::set("mod.move-speed.cooldown", std::to_string(cooldown)); mods::packages::remember_option("move-speed.cooldown", cooldown); });
         bool bar = mods::move_speed_bar();
         if (ImGui::Checkbox("Show boost bar", &bar))
-            hostui::post([bar] { mods::set_move_speed_bar(bar); hostui::set("mod.move-speed.bar", bar ? "1" : "0"); mods::packages::remember_option("move-speed.bar", bar); });
+            hostui::post([bar] { game_settings::set_move_speed_bar(bar); });
         const char* names[] = {"L3", "R3", "L", "R", "ZL", "ZR"};
         const uint32_t buttons[] = {input::kStickL, input::kStickR, input::kL, input::kR, input::kZL, input::kZR};
         for (int i = 0; i < 6; ++i) {
@@ -2234,7 +2234,7 @@ void tab_controls() {
     if (changed & controls_options::kRumble) {
         const bool on = o.rumble;
         rumble::set_enabled(on);
-        hostui::post([on] { hostui::set("rumble", on ? "1" : "0"); });
+        hostui::post([on] { game_settings::set_rumble(on); });
     }
 #ifdef __ANDROID__
     if (changed & controls_options::kPhone) {

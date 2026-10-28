@@ -300,6 +300,7 @@ std::vector<Row> rows_of(const std::string& tab) {
         Row r;
         r.id = it->id, r.label = it->label, r.help = it->help, r.value = game_settings::value_text(*it);
         r.number = it->kind == game_settings::Kind::Number, r.toggle = it->kind == game_settings::Kind::Toggle;
+        r.choice = it->kind == game_settings::Kind::Choice;
         r.on = r.toggle && r.value == "On";
         r.enabled = !it->enabled || it->enabled();
         rows.push_back(std::move(r));

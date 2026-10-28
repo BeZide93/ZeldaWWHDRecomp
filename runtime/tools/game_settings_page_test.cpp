@@ -119,5 +119,27 @@ int main() {
     const auto cmds = q.draw(rows, {"Camera"});
     assert(cmds.size() > 10 && cmds[1].text.rfind("nb:window@", 0) == 0);
     assert(!q.draw_entry().empty());
+    // choices step like numbers; a long help is cut to two lines (valid UTF-8 kept)
+    {
+        std::vector<Row> c(1);
+        c[0].id = "ch", c[0].choice = true;
+        c[0].help = std::string(300, 'x') + " \xC3\xA9\xC3\xA9\xC3\xA9 end";
+        Page cp;
+        cp.show(1);
+        cp.input(pad(0), c, 1);
+        Action ca = cp.input(pad(kPadLeft), c, 1);
+        assert(ca.id == "ch" && ca.direction == -1);
+        for (int i = 0; i < 20; i++) cp.tick(1.0f / 30);
+        for (const Command& k : cp.draw(c, {"A"}))
+            if (k.kind == Command::Text) {
+                for (size_t i = 0; i < k.text.size();) {  // well-formed UTF-8 (the HUD store drops a list otherwise)
+                    const unsigned char b = (unsigned char)k.text[i];
+                    const size_t n = b < 0x80 ? 1 : b >= 0xF0 ? 4 : b >= 0xE0 ? 3 : b >= 0xC2 ? 2 : 0;
+                    assert(n && i + n <= k.text.size());
+                    for (size_t j = 1; j < n; j++) assert(((unsigned char)k.text[i + j] & 0xC0) == 0x80);
+                    i += n;
+                }
+            }
+    }
     std::puts("game_settings_page_test: ok");
 }

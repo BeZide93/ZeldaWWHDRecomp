@@ -1502,6 +1502,9 @@ void pad(input::PadState& p, Cpu* c) {
     if (++ticks % 15 == 0) declared_tick();
     action_rewards(c);
     chart_test_open(ticks);
+    // test aid WWHD_NOTEBOOK_TEST_OPEN=<read>: the page opens at that controller read (visual checks)
+    if (static const long at = getenv("WWHD_NOTEBOOK_TEST_OPEN") ? atol(getenv("WWHD_NOTEBOOK_TEST_OPEN")) : -1; at >= 0 && ticks == uint32_t(at))
+        open_page("WWHD_NOTEBOOK_TEST_OPEN");
     bag_icon();
     story_item_buttons::test_assign();
     story_item_buttons::tick();  // ours on X/Y/R: the item number the game reads this frame

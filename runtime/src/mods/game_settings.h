@@ -20,7 +20,7 @@ enum class Kind : uint8_t { Toggle, Choice, Number };
 
 struct Item {
     std::string id;     // stable key ("camera.invert-y"); also the settings key for mod items
-    std::string tab;    // "camera", "controls", "hud", "mods"
+    std::string tab;    // "camera", "controls", "screen", "game", "mods"
     std::string label;  // English for now (the language plan: the report)
     std::string help;   // one line under the list while the item is selected
     Kind kind = Kind::Toggle;
@@ -57,5 +57,8 @@ float pending(const std::string& id);
 void set_camera_speed(float speed);         // main thread
 void set_mouse_sensitivity(float degrees);  // main thread
 void set_invert_camera_y(bool on);          // main thread
+void set_fov_scale(float scale);            // main thread (1 = the original gameplay field of view)
+void set_rumble(bool on);                   // main thread
+void set_move_speed_bar(bool on);           // main thread
 
 }  // namespace game_settings

@@ -56,7 +56,8 @@ inline std::string bold(const std::string& s) { return kBold + s; }
 // One row as the driver gives it (from game_settings.h)
 struct Row {
     std::string id, label, value, help;
-    bool number = false, toggle = false, on = false, enabled = true;
+    bool number = false, toggle = false, choice = false, on = false, enabled = true;
+    bool stepped() const { return number || choice; }  // Left / Right step it (chevrons on its plate)
 };
 
 struct Input {
@@ -172,7 +173,7 @@ public:
         if (fire & kPadUp) move(-1);
         else if (fire & kPadDown) move(+1);
         else if ((fire & (kPadLeft | kPadRight)) && count) change(act, rows[selected_], (fire & kPadLeft) ? -1 : +1);
-        else if ((pressed & kPadA) && count) change(act, rows[selected_], rows[selected_].number ? +1 : 0);
+        else if ((pressed & kPadA) && count) change(act, rows[selected_], rows[selected_].stepped() ? +1 : 0);
         if (selected_ < int(top_)) top_ = unsigned(selected_);
         if (selected_ >= int(top_ + kRowsShown)) top_ = unsigned(selected_) - kRowsShown + 1;
         // touch: a tap (released near where it began)
@@ -188,7 +189,7 @@ public:
                 if (!was_selected) glide_from_ = row_y(selected_), glide_ = 0, selected_ = index, act.sound = Sound::Cursor;
                 if (on_value || was_selected) {
                     const Row& r = rows[index];
-                    change(act, r, r.number ? (in_x_ < kValueX + kValueW / 2 ? -1 : +1) : 0);
+                    change(act, r, r.stepped() ? (in_x_ < kValueX + kValueW / 2 ? -1 : +1) : 0);
                 }
                 break;
             }
@@ -229,7 +230,7 @@ public:
             out.push_back(text(tx + (w - width(bold(tab_labels[i]), 26)) / 2, kWinY + 42, 26, on ? kInk : kInkSoft, bold(tab_labels[i])));
             tx -= 10;
         }
-        if (tab_labels.size() > 1) out.push_back(text(kWinX + 56, kWinY + 88, 20, kInkSoft, "L / R: tabs"));
+        if (tab_labels.size() > 1) out.push_back(text(kWinX + 56, kWinY + 82, 19, kInkSoft, "L / R: tabs"));
         out.push_back(box("nb:panel", kRowX - 20, kRowY - 16, kRowW + 40, kRowH * kRowsShown + 30));
         for (unsigned i = 0; i < kRowsShown && top_ + i < rows.size(); i++) {
             const Row& r = rows[top_ + i];
@@ -245,7 +246,7 @@ public:
             out.push_back(box(on ? "nb:plate" : muted ? "nb:tab" : "nb:plate-on", kValueX, y + 6, kValueW, kRowH - 12));
             const float vw = width(bold(r.value), 26);
             out.push_back(text(kValueX + (kValueW - vw) / 2, y + 16, 26, on ? kWhite : !r.enabled ? kInkDim : muted ? kInkSoft : kInk, bold(r.value)));
-            if (r.number && r.enabled) {
+            if (r.stepped() && r.enabled) {
                 chevron(out, kValueX + 26, y + kRowH / 2, 9, false, kInk);
                 chevron(out, kValueX + kValueW - 26, y + kRowH / 2, 9, true, kInk);
             }
@@ -256,11 +257,20 @@ public:
             const float b = 4 + 2.0f + 2.0f * std::sin(time_ * 6.2831853f * 0.9f);
             out.push_back(box("nb:cursor", kRowX - b, y - b, kRowW + 2 * b, kRowH + 2 * b));
         }
-        if (top_ > 0) out.push_back(text(kRowX + kRowW / 2, kRowY - 40, 24, kInkSoft, "^"));
-        if (top_ + kRowsShown < rows.size()) out.push_back(text(kRowX + kRowW / 2, kRowY + kRowH * kRowsShown + 14, 24, kInkSoft, "v"));
+        if (rows.size() > kRowsShown) {  // a scroll bar at the list's right edge
+            const float x = kRowX + kRowW + 8, h = kRowH * kRowsShown - 8, y = kRowY + 4;
+            out.push_back(rect(x - 1, y, 9, h, 0x3C6B2E40));
+            const float th = std::max(24.0f, h * float(kRowsShown) / float(rows.size()));
+            const float ty = y + (h - th) * float(top_) / float(rows.size() - kRowsShown);
+            out.push_back(rect(x, ty, 7, th, kInk));
+        }
         // the selected row's help, and the prompts along the bottom
         const float hy = kWinY + kWinH - 66;
-        if (!rows.empty()) out.push_back(text(kWinX + 60, hy - 38, 22, kInkSoft, rows[size_t(selected_)].help));
+        if (!rows.empty()) {  // (two lines at most; a longer help ends with "...")
+            const std::vector<std::string> lines = wrap(rows[size_t(selected_)].help, 21, kWinW - 120, 2);
+            for (size_t i = 0; i < lines.size(); i++)
+                out.push_back(text(kWinX + 60, hy - 44 + 24 * float(i) - (lines.size() > 1 ? 12 : 0), 21, kInkSoft, lines[i]));
+        }
         float x = kWinX + kWinW - 60 - prompt_width("Back");
         prompt(out, x, hy, false, "Back");
         x -= 36 + prompt_width("Change");
@@ -295,6 +305,44 @@ private:
         if (in.touch) in_x_ = in.x, in_y_ = in.y;
         tap = !in.touch && touch_ && near(in_x_, in_y_, down_x_, down_y_, kTapSlop);
         touch_ = in.touch;
+    }
+    // `text` in lines of at most `w` page units (at most `max_lines`; the last one cut with "...")
+    std::vector<std::string> wrap(const std::string& text, float size, float w, size_t max_lines) const {
+        std::vector<std::string> lines;
+        std::string line;
+        size_t i = 0;
+        while (i < text.size()) {
+            size_t j = text.find(' ', i);
+            if (j == std::string::npos) j = text.size();
+            const std::string word = text.substr(i, j - i);
+            const std::string next = line.empty() ? word : line + " " + word;
+            if (!line.empty() && width(next, size) > w) {
+                lines.push_back(line);
+                line = word;
+                if (lines.size() == max_lines) break;
+            } else {
+                line = next;
+            }
+            i = j + 1;
+        }
+        if (lines.size() < max_lines && !line.empty()) {
+            lines.push_back(line);
+            line.clear();
+        }
+        if (i < text.size() || !line.empty()) {  // cut: the last line ends with "..."
+            std::string& last = lines.back();
+            while (!last.empty() && width(last + "...", size) > w) {  // whole words (or whole UTF-8 characters)
+                const size_t space = last.rfind(' ');
+                if (space != std::string::npos && space > 0) last.resize(space);
+                else {  // the last character: its continuation bytes, then its lead byte
+                    unsigned char c;
+                    do c = static_cast<unsigned char>(last.back()), last.pop_back();
+                    while (!last.empty() && (c & 0xC0) == 0x80);
+                }
+            }
+            last += "...";
+        }
+        return lines;
     }
     float row_y(int index) const { return kRowY + kRowH * float(index - int(top_)); }
     float width(const std::string& s, float size) const {

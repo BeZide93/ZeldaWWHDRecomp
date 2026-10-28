@@ -11,6 +11,12 @@
 #include "manager.h"
 #include "mods.h"
 #include "packages.h"
+#include "../aspect.h"
+#include "../input.h"
+#include "../rumble.h"
+#ifdef __ANDROID__
+#include "../gfx/display_modes.h"
+#endif
 #include "../overlay/hostui.h"
 
 namespace game_settings {
@@ -23,7 +29,7 @@ std::vector<Item>& registry() {
 }
 std::map<std::string, float> g_pending;  // id -> value posted, not yet applied (g_mu)
 
-const char* const kTabOrder[] = {"camera", "controls", "hud", "mods"};
+const char* const kTabOrder[] = {"camera", "controls", "screen", "game", "mods"};
 
 // a built-in mod's switch (mods/manager.cpp: the same entry the Mods tab switches)
 Item builtin_toggle(const char* tab, const char* mod_id, const char* label, const char* help) {
@@ -76,7 +82,8 @@ std::vector<std::string> tabs() {
 std::string tab_label(const std::string& tab) {
     if (tab == "camera") return "Camera";
     if (tab == "controls") return "Controls";
-    if (tab == "hud") return "HUD";
+    if (tab == "screen") return "Screen";
+    if (tab == "game") return "Game";
     if (tab == "mods") return "Mods";
     return tab;
 }
@@ -162,6 +169,170 @@ float apply(const Item& item, int direction) {
     return next;
 }
 
+void set_fov_scale(float scale) {
+    aspect::set_fov_scale(scale);
+    hostui::set("gameplayFovScale", std::to_string(scale));
+    hostui::graphics_changed();
+}
+void set_rumble(bool on) {
+    rumble::set_enabled(on);
+    hostui::set("rumble", on ? "1" : "0");
+}
+void set_move_speed_bar(bool on) {
+    mods::set_move_speed_bar(on);
+    hostui::set("mod.move-speed.bar", on ? "1" : "0");
+    mods::packages::remember_option("move-speed.bar", on);
+}
+
+namespace {
+// a change of the controls mapping (controls.json), as the Settings window's Controls tab makes it
+void change_mapping(const std::function<void(input_map::Mapping&)>& fn) {
+    input_map::Mapping m = input_map::current();
+    fn(m);
+    input_map::set_current(m);
+}
+std::string percent(float v) {
+    char b[32];
+    std::snprintf(b, sizeof b, "%.0f%%", v * 100.0f);
+    return b;
+}
+void register_controls() {
+    using M = input_map::Mapping;
+    {
+        Item it;
+        it.id = "controls.face-buttons", it.tab = "controls", it.label = "Face buttons", it.kind = Kind::Choice;
+        it.help = "Which button does A / B / X / Y: by position (right is A), by label, or automatic.";
+        it.choices = {"By position", "By label", "Automatic"};
+        it.get = [] {
+            const M m = input_map::current();
+            if (m.face_auto) return 2.0f;
+            return input_map::face_layout(m) == input_map::FaceLayout::kLabels ? 1.0f : 0.0f;
+        };
+        it.set = [](float v) {
+            change_mapping([v](M& m) {
+                const int i = int(std::lround(v));
+                if (i == 2) return input_map::set_face_auto(m, true);
+                if (m.face_auto) input_map::set_face_auto(m, false);
+                input_map::apply_face_layout(m, i == 1 ? input_map::FaceLayout::kLabels : input_map::FaceLayout::kPosition);
+            });
+        };
+        add(std::move(it));
+    }
+    {
+        Item it;
+        it.id = "controls.prompts", it.tab = "controls", it.label = "Button prompts", it.kind = Kind::Choice;
+        it.help = "How the game's button icons look: automatic follows the connected pad.";
+        for (M::Prompts p : {M::Prompts::kAuto, M::Prompts::kOriginal, M::Prompts::kXbox, M::Prompts::kPlayStation})
+            it.choices.push_back(input_map::prompts_label(p));
+        it.get = [] { return float(int(input_map::current().prompts)); };
+        it.set = [](float v) { change_mapping([v](M& m) { m.prompts = M::Prompts(std::clamp(int(std::lround(v)), 0, 3)); }); };
+        add(std::move(it));
+    }
+    {
+        Item it;
+        it.id = "controls.shoulder-names", it.tab = "controls", it.label = "Shoulder names", it.kind = Kind::Choice;
+        it.help = "How prompts name the shoulder buttons: L / R, L1 / R1 or LB / RB.";
+        for (M::ShoulderNames n : {M::ShoulderNames::kAuto, M::ShoulderNames::kNintendo, M::ShoulderNames::kNumbered, M::ShoulderNames::kXbox})
+            it.choices.push_back(input_map::shoulder_names_label(n));
+        it.get = [] { return float(int(input_map::current().shoulder_names)); };
+        it.set = [](float v) { change_mapping([v](M& m) { m.shoulder_names = M::ShoulderNames(std::clamp(int(std::lround(v)), 0, 3)); }); };
+        add(std::move(it));
+    }
+    {
+        Item it;
+        it.id = "controls.prompt-colours", it.tab = "controls", it.label = "Coloured face buttons", it.kind = Kind::Toggle;
+        it.help = "Xbox and PlayStation prompts in their buttons' colours.";
+        it.get = [] { return input_map::current().prompt_colours ? 1.0f : 0.0f; };
+        it.set = [](float v) { change_mapping([v](M& m) { m.prompt_colours = v >= 0.5f; }); };
+        add(std::move(it));
+    }
+    {
+        Item it;
+        it.id = "controls.rumble", it.tab = "controls", it.label = "Rumble", it.kind = Kind::Toggle;
+        it.help = "The controller rumbles when the game asks for it.";
+        it.get = [] { return rumble::enabled() ? 1.0f : 0.0f; };
+        it.set = [](float v) { set_rumble(v >= 0.5f); };
+        it.enabled = [] { return input::has_rumble(); };
+        add(std::move(it));
+    }
+    {
+        Item it;
+        it.id = "controls.deadzone", it.tab = "controls", it.label = "Stick dead zone", it.kind = Kind::Number;
+        it.help = "How far a stick moves before the game sees it.";
+        it.min = 0.0f, it.max = 0.5f, it.step = 0.05f;
+        it.get = [] { return input_map::current().deadzone; };
+        it.set = [](float v) { change_mapping([v](M& m) { m.deadzone = v; }); };
+        it.format = percent;
+        add(std::move(it));
+    }
+    {
+        Item it;
+        it.id = "controls.skip-controller-selection", it.tab = "controls", it.label = "Skip controller selection", it.kind = Kind::Toggle;
+        it.help = "At the title screen, choose the configured Wii U controller automatically.";
+        it.get = [] { return input_map::current().skip_controller_selection ? 1.0f : 0.0f; };
+        it.set = [](float v) { change_mapping([v](M& m) { m.skip_controller_selection = v >= 0.5f; }); };
+        add(std::move(it));
+    }
+}
+void register_screen() {
+    {
+        Item it;
+        it.id = "screen.fov", it.tab = "screen", it.label = "Gameplay field of view", it.kind = Kind::Number;
+        it.help = "100% is the original. Wider shows more of the world; cutscenes keep theirs.";
+        it.min = 0.75f, it.max = 2.5f, it.step = 0.05f;
+        it.get = [] { return aspect::fov_scale(); };
+        it.set = [](float v) { set_fov_scale(v); };
+        it.format = percent;
+        add(std::move(it));
+    }
+    {
+        Item it;
+        it.id = "screen.boost-bar", it.tab = "screen", it.label = "Show boost bar", it.kind = Kind::Toggle;
+        it.help = "The run/swim speed boost's stamina bar.";
+        it.get = [] { return mods::move_speed_bar() ? 1.0f : 0.0f; };
+        it.set = [](float v) { set_move_speed_bar(v >= 0.5f); };
+        it.enabled = [] { return mods::move_speed(); };
+        add(std::move(it));
+    }
+}
+#ifdef __ANDROID__
+void register_touch() {  // the Settings window's "Touch controls" (Android)
+    {
+        Item it;
+        it.id = "screen.touch-buttons", it.tab = "screen", it.label = "Touch buttons", it.kind = Kind::Choice;
+        it.help = "Automatic hides the floating buttons while a controller is connected.";
+        it.choices = {"Automatic", "Always show", "Hide"};
+        it.get = [] { return float(gfx::g_touch_buttons.load()); };
+        it.set = [](float v) {
+            gfx::g_touch_buttons = int(std::lround(v));
+            hostui::set("touchButtons", std::to_string(int(std::lround(v))));
+        };
+        add(std::move(it));
+    }
+    {
+        Item it;
+        it.id = "screen.touch-controls", it.tab = "screen", it.label = "On-screen controls", it.kind = Kind::Toggle;
+        it.help = "The sticks and buttons drawn over the picture.";
+        it.get = [] { return gfx::g_touch_controls.load() ? 1.0f : 0.0f; };
+        it.set = [](float v) {
+            gfx::g_touch_controls = v >= 0.5f;
+            hostui::set("touchControls", v >= 0.5f ? "1" : "0");
+        };
+        add(std::move(it));
+    }
+}
+#endif
+void register_game() {
+    // the built-in gameplay mods (mods/manager.cpp), switched as the Mods tab switches them
+    for (const char* id : {"quick-doors", "fast-scenes", "fast-forward", "jump-anywhere", "wall-climb", "move-speed", "lock-on", "quick-use",
+                           "ladder-speed", "sidle-speed", "ivy-speed", "hang-speed", "sail-speed", "auto-wind"}) {
+        const auto* e = mods::manager::find(id);
+        if (!e || e->restart_required) continue;  // (the page applies live only)
+        add(builtin_toggle("game", id, e->name, e->description));
+    }
+}
+}  // namespace
+
 void register_builtin() {
     static bool done = false;
     if (done) return;
@@ -211,6 +382,12 @@ void register_builtin() {
                        "R3 or the mouse wheel enters and leaves first person."));
     add(builtin_toggle("camera", "target-letterbox", "Letterbox while targeting",
                        "Black bars at the top and bottom while Link targets, as in the original."));
+    register_controls();
+    register_screen();
+#ifdef __ANDROID__
+    register_touch();
+#endif
+    register_game();
 }
 
 }  // namespace game_settings
