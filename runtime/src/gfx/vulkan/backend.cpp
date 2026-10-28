@@ -4998,6 +4998,44 @@ static void view_button_released() {
 #ifdef __ANDROID__
 static bool synthHeld = false;                 // a mouse press SDL made from a finger, kept from the game
 static SDL_FingerID touchFinger = 0, buttonFinger = 0;  // 0: none
+static SDL_FingerID modFinger = 0;  // a finger a code mod's touch claim has (0: none)
+// a finger at (x, y), 0..1 of the view, as a point of the TV picture for the talk or a code mod
+// (mods/touch_talk.cpp): down (0), moved (1), up (2), cancelled (3); off the picture a held finger lets go
+static void tv_picture_finger(int action, float x, float y) {
+  tv_pointer::State s;
+  if (!gfx::game_picture_hit(x, y, &s.x, &s.y, &s.aspect, action != 0)) {
+    if (action == 0) return;
+    action = 3;  // (no picture any more: let go)
+  }
+  float px, py;
+  tv_pointer::to_page(s, px, py);
+  mods::touch_talk_finger(action, px - 640.0f, 360.0f - py);
+}
+// Code mods' touches (Mod SDK, mods/guest_live.h) with the on-screen controls hidden or off: TouchControls
+// only asks nativeFreeTouch while they show, so a finger it passes on reaches SDL here. One landing on the
+// TV picture inside a mod's claim (not on the view button or the GamePad picture, the game's own touch areas)
+// is the mod's until it lifts.
+static bool android_mod_touch_event(const SDL_TouchFingerEvent& f, Uint32 type, bool dual) {
+  if (modFinger) {
+    if (f.fingerID != modFinger) return false;
+    if (type == SDL_EVENT_FINGER_DOWN) return true;
+    if (type != SDL_EVENT_FINGER_MOTION) modFinger = 0;
+    tv_picture_finger(type == SDL_EVENT_FINGER_MOTION ? 1 : type == SDL_EVENT_FINGER_UP ? 2 : 3, f.x, f.y);
+    return true;
+  }
+  if (type != SDL_EVENT_FINGER_DOWN || input::touch_from_controller(f.touchID) || overlay::captures()) return false;
+  if (dual && dual_display::active_swap) return false;  // the phone shows the GamePad
+  float tx, ty;
+  if (!dual && (gfx::view_button_hit(f.x, f.y) || gfx::overlay_hit(f.x, f.y, &tx, &ty, false))) return false;
+  tv_pointer::State s;
+  if (!gfx::game_picture_hit(f.x, f.y, &s.x, &s.y, &s.aspect)) return false;
+  float px, py;
+  tv_pointer::to_page(s, px, py);
+  if (!mods::guest_touch_claimed_at(px - 640.0f, 360.0f - py)) return false;
+  modFinger = f.fingerID;
+  mods::touch_talk_finger(0, px - 640.0f, 360.0f - py);
+  return true;
+}
 bool android_display_touch_event(const SDL_Event& event) {
   if (event.type != SDL_EVENT_FINGER_DOWN && event.type != SDL_EVENT_FINGER_MOTION &&
       event.type != SDL_EVENT_FINGER_UP && event.type != SDL_EVENT_FINGER_CANCELED)
@@ -5010,8 +5048,10 @@ bool android_display_touch_event(const SDL_Event& event) {
     touchGeneration = currentGeneration;
     touchFinger = buttonFinger = 0;
     buttonDown = 0;
+    if (modFinger) modFinger = 0, mods::touch_talk_finger(3, 0, 0);
   }
   const bool dual = gfx::g_has_drc_window;
+  if (android_mod_touch_event(f, event.type, dual)) return true;
   if (event.type == SDL_EVENT_FINGER_DOWN && SDL_GetHintBoolean("WWHD_DISPLAY_SMOKE_INPUT_TRACE", false)) {
     std::lock_guard<std::mutex> guard(secondaryMutex);
     LOG("[display smoke input] down layout=%llu fingerHeld=%lld capture=%d changed=%d viewport=%f,%f,%f,%f",
@@ -5099,14 +5139,7 @@ extern "C" JNIEXPORT jint JNICALL Java_org_wwhdrecomp_wwhd_TouchControls_nativeF
 // TouchControls.nativeTalkFinger: a finger nativeFreeTouch gave the talk (FreeTalk) went down (0), moved (1),
 // went up (2) or was cancelled (3) at (x, y), 0..1 of the view: as a point of the TV picture in layout units
 extern "C" JNIEXPORT void JNICALL Java_org_wwhdrecomp_wwhd_TouchControls_nativeTalkFinger(JNIEnv*, jclass, jint action, jfloat x, jfloat y) {
-  tv_pointer::State s;
-  if (!gfx::game_picture_hit(x, y, &s.x, &s.y, &s.aspect, action != 0)) {
-    if (action == 0) return;
-    action = 3;  // (no picture any more: let go)
-  }
-  float px, py;
-  tv_pointer::to_page(s, px, py);
-  mods::touch_talk_finger(action, px - 640.0f, 360.0f - py);
+  tv_picture_finger(action, x, y);
 }
 #endif
 static bool gamepad_touch(const SDL_Event& event) {

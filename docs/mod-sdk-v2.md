@@ -271,7 +271,8 @@ in their load order. One filter per mod; register 0 to remove it. The function m
 
 **Touches on the TV picture.** Register a callback with `wwhd_touch_register(fn)`, then claim rectangles with
 `wwhd_touch_claim(slot, x0, y0, x1, y1)`: layout units, 1280 x 720 around the picture's centre with +y up (a
-wider picture extends x), up to 8 slots. A finger (or a mouse click on the desktop) that lands in a claim goes
+wider picture extends x), up to 8 slots. A finger (on Android with the on-screen controls shown or hidden) or a
+mouse click on the desktop that lands in a claim goes
 to your callback as `WWHD_TOUCH_DOWN`, `_MOVE`, `_UP` or `_CANCEL` with its position, and to nothing else: no
 on-screen stick, no talk by touch. It stays yours until it lifts, even outside the rectangle. Where claims
 overlap the newest wins. Claim only while your feature shows something to touch, and remove the claim (an
@@ -1158,7 +1159,7 @@ from before 2026-10-17 load again.
   support (its **Code mods** switch, see [setup-code-mods.md](setup-code-mods.md)), and each mod is built
   on the device with the app's own compiler. Mod preparation tools written in Python run there too;
   other programs in a mod package don't run on Android.
-- Changing enabled mods or their options needs a restart.
+- Changing enabled mods or their options needs a restart, except options the manifest marks `"live": true`.
 - Mods live in a 16 MiB region of game memory (`0x7F000000`–`0x80000000`); each mod gets its
   own 64 KiB-aligned part.
 - No events or exports between mods yet. Audio streams support 48 kHz mono/stereo PCM.

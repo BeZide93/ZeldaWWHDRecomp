@@ -179,6 +179,7 @@ void guest_pad_filter(Cpu* c, input::PadState& p, bool repeat);
 void touch_talk_finger(int kind, float x, float y);
 bool touch_talk_claims();  // a finger landing on the picture is the talk's now
 bool touch_talk_claims_at(float x, float y);  // ... or a code mod's at this point (Android: nativeFreeTouch)
+bool guest_touch_claimed_at(float x, float y);  // a code mod's claim alone (Android: a finger the hidden controls pass on)
 bool touch_talk_on();
 void set_touch_talk_on(bool on);
 bool talk_hold_ff_on();

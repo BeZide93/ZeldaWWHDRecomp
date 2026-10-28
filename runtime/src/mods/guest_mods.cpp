@@ -1968,7 +1968,10 @@ void state_loaded() {
 }
 
 }  // namespace guestmods
-namespace mods { void guest_pad_filter(Cpu* c, input::PadState& p, bool repeat) { guestmods::pad_filter(c, p, repeat); } }
+namespace mods {
+void guest_pad_filter(Cpu* c, input::PadState& p, bool repeat) { guestmods::pad_filter(c, p, repeat); }
+bool guest_touch_claimed_at(float x, float y) { return guestmods::touch_claimed_at(x, y); }
+}  // namespace mods
 
 using namespace guestmods;
 
