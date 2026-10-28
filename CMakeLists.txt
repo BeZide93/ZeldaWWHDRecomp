@@ -3537,6 +3537,9 @@ endforeach()
 
 # Actual scheduler snapshot regression also uses the real monotonic game clock.
 target_sources(native_quiescence_test PRIVATE runtime/src/game_clock.cpp)
+# threads.cpp (included by the test) reads the calendar clock and the fixed-seed switch;
+# Windows' linker keeps those references, so link their sources.
+target_sources(native_quiescence_test PRIVATE runtime/src/hle/os_time.cpp runtime/src/fixed_seed.cpp)
 
 # Genuine model/native-observation-backed Stage renewal; no native ticks/writes.
 get_target_property(STORY_NATIVE_STAGE_RENEW_SOURCES story_native_wait_saved_turn_model_test SOURCES)
