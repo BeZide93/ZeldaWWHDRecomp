@@ -1,21 +1,36 @@
 package org.wwhdrecomp.wwhd;
 
+import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.Context;
+import android.content.Intent;
 import android.content.SharedPreferences;
 import android.graphics.Canvas;
 import android.graphics.Paint;
+import android.graphics.Path;
+import android.graphics.RectF;
 import android.hardware.input.InputManager;
+import android.net.Uri;
 import android.util.SparseArray;
 import android.view.InputDevice;
 import android.view.MotionEvent;
 import android.view.View;
+import android.widget.EditText;
+import android.widget.Toast;
 
 import org.libsdl.app.SDLActivity;
 import org.libsdl.app.SDLControllerManager;
 
+import java.io.ByteArrayOutputStream;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.HashSet;
+import java.util.Map;
 import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.TextView;
@@ -28,6 +43,16 @@ import android.view.ViewGroup;
 // on no control go on to the game as before (the GamePad picture, the view button), the way
 // SDLSurface passes them. While a game controller is connected they are hidden, and the next touch
 // brings the floating buttons back temporarily.
+//
+// Styles (the options are the C++ side's, platform/touch_style.h, polled with nativeTouchOptions):
+// Classic keeps both sticks where the layout puts them. Flexible keeps the buttons there, but a finger
+// landing on no control becomes a stick under the thumb (nativeFreeTouch decides: left half the
+// movement stick, right half a camera stick or the swipe camera through the mouse camera's path,
+// nativeSwipe; the game's own touch areas keep their touches). Each style has its own layout and saved
+// layouts (TouchLayout, TouchPresets); hold the controller button to edit them. Every finger loss
+// (up, cancel, focus, hiding, a controller, a style change) releases the sticks (TouchStick.release).
+// Flexible style, invisible and following sticks, swipe camera, per-control look, mirrored grid,
+// saved layouts and the Arc layout: idea from the GreenNaugahyde Android fork (MPL-2.0); reimplemented.
 public class TouchControls extends View implements InputManager.InputDeviceListener {
     private static native void nativeSetPad(int buttons, int face, float lx, float ly, float rx, float ry, float lt, float rt);
     private static native void nativeDetachPad();
@@ -49,16 +74,25 @@ public class TouchControls extends View implements InputManager.InputDeviceListe
     // from where it landed, in the button's radii (+y down). Native code decides when the ring opens and
     // what the drag picks, and draws the ring; this view only passes the finger on.
     private static native void nativeItemRingFinger(int button, boolean down, float dx, float dy);
+    private static native int nativeTouchOptions(int[] out);
+    private static native int nativeFreeTouch(float x, float y);
+    private static native void nativeSwipe(float dx, float dy, float dpi);
+
+    static final int EXPORT_REQUEST = 4973, IMPORT_REQUEST = 4974;  // WwhdActivity.onActivityResult
 
     // SDL_GamepadButton numbers
     private static final int BACK = 4, START = 6,
             LEFT_SHOULDER = 9, RIGHT_SHOULDER = 10, DPAD_UP = 11, DPAD_DOWN = 12, DPAD_LEFT = 13, DPAD_RIGHT = 14;
     private static final int KIND_BUTTON = 0, KIND_STICK = 1, KIND_TRIGGER = 2, KIND_TOGGLE = 3, KIND_FACE = 4,
-            KIND_VIRTUAL = 5;  // code: the virtual input bit (VIRT_JUMP, VIRT_MOON)
+            KIND_VIRTUAL = 5,  // code: the virtual input bit (VIRT_JUMP, VIRT_MOON)
+            KIND_SWIPE = 6, KIND_DEAD = 7;  // (the last two: finger owners only, never drawn)
     private static final int VIRT_JUMP = 1, VIRT_MOON = 2;
     // KIND_FACE codes: the Wii U button drawn on it (touch_face.h sends the pad button the controls
     // mapping binds to it, so the drawn A is the Wii U's A with either face-button preset)
     private static final int FACE_A = 0, FACE_B = 1, FACE_X = 2, FACE_Y = 3;
+    // touch_style.h
+    private static final int STYLE_CLASSIC = 0, STYLE_FLEXIBLE = 1, RIGHT_SWIPE = 0, RIGHT_STICK = 1;
+    private static final int FREE_GAME = 0, FREE_LEFT = 1, FREE_RIGHT = 2, FREE_SWIPE = 3;
 
     private static final class Control {
         final int kind, code;  // code: button number, stick 0/1, trigger 0/1
@@ -66,26 +100,35 @@ public class TouchControls extends View implements InputManager.InputDeviceListe
         final float fx, fy, fr;  // centre as a fraction of width / height, radius as a fraction of the short side
         float cx, cy, r;
         boolean pressed;
-        float sx, sy;  // stick position -1..1
         float downX, downY;  // where the finger landed (the item ring's drag)
+        int shape = TouchLayout.SHAPE_CIRCLE, opacity = TouchLayout.OPACITY_DEFAULT;
+        boolean filled = true;
+        final TouchStick stick;  // sticks only
         Control(int kind, int code, String label, float fx, float fy, float fr) {
             this.kind = kind; this.code = code; this.label = label; this.fx = fx; this.fy = fy; this.fr = fr;
+            stick = kind == KIND_STICK ? new TouchStick() : null;
         }
     }
 
     private final List<Control> controls = new ArrayList<>();
-    private final Control toggle;
+    private final Control toggle, leftStick, rightStick;
+    private final Control swipe = new Control(KIND_SWIPE, 0, "", 0, 0, 0), dead = new Control(KIND_DEAD, 0, "", 0, 0, 0);
     private final TouchLayout layout;
+    private final TouchPresets presets = new TouchPresets();
+    private final Map<String, Float> baseRadius = new HashMap<>();
     private final TouchLayout.EditSession editor = new TouchLayout.EditSession();
     private LinearLayout editorBar;
+    private TextView editorStatus;
     private Control selected;
     private int dragPointer = -1;
     private float dragOffsetX, dragOffsetY;
-    private boolean longPressConsumed;
+    private boolean longPressConsumed, grid, dialogOpen;
     private final Runnable editLongPress;
     private final SparseArray<Control> owner = new SparseArray<>();  // pointer -> control (null: the game's)
     private final Paint fill = new Paint(Paint.ANTI_ALIAS_FLAG), edge = new Paint(Paint.ANTI_ALIAS_FLAG),
-            text = new Paint(Paint.ANTI_ALIAS_FLAG);
+            text = new Paint(Paint.ANTI_ALIAS_FLAG), gridPaint = new Paint();
+    private final Path shapePath = new Path();
+    private final RectF shapeRect = new RectF();
     private final SharedPreferences prefs;
     private final InputManager inputs;
     private ControllerHintPolicy hintPolicy;
@@ -97,6 +140,12 @@ public class TouchControls extends View implements InputManager.InputDeviceListe
     private int lastButtons = -1, lastTouchDevice, lastVirtual = -1;
     private int jumpShown;  // nativeJumpButtons: the virtual buttons that show now
     private float lastLx, lastLy, lastRx, lastRy, lastLt, lastRt;
+    // the touch options (C++), as last polled
+    private final int[] options = new int[8];
+    private int style = STYLE_CLASSIC, rightMode = RIGHT_SWIPE;
+    private boolean showSticks = true, follow = true;
+    private int swipePointer = -1;
+    private float swipeX, swipeY, screenDpi = 400;
 
     public TouchControls(Context context) {
         super(context);
@@ -110,8 +159,10 @@ public class TouchControls extends View implements InputManager.InputDeviceListe
             SDLControllerManager.requestDeviceRefresh();
         }
         // the top left corner has the game's view button and the show/hide button: nothing else there
-        controls.add(new Control(KIND_STICK, 0, "", 0.14f, 0.70f, 0.13f));
-        controls.add(new Control(KIND_STICK, 1, "", 0.68f, 0.80f, 0.11f));
+        leftStick = new Control(KIND_STICK, 0, "", 0.14f, 0.70f, 0.13f);
+        rightStick = new Control(KIND_STICK, 1, "", 0.68f, 0.80f, 0.11f);
+        controls.add(leftStick);
+        controls.add(rightStick);
         // A B X Y where a Wii U GamePad has them
         final float ax = 0.86f, ay = 0.60f, d = 0.10f;
         controls.add(new Control(KIND_FACE, FACE_A, "A", ax + d * 0.75f, ay, 0.055f));
@@ -139,9 +190,14 @@ public class TouchControls extends View implements InputManager.InputDeviceListe
             }
         };
         HashSet<String> keys=new HashSet<>();
-        for (Control c : controls) keys.add(key(c));
+        for (Control c : controls) { keys.add(key(c)); baseRadius.put(key(c), c.fr); }
         layout=new TouchLayout(keys);
-        layout.decode(prefs.getString("touch_layout_v1", ""));
+        // format 1 layouts (one, for the only style there was) become the Classic layout; the old key stays
+        if (!prefs.contains(layoutKey(STYLE_CLASSIC)) && prefs.contains("touch_layout_v1"))
+            prefs.edit().putString(layoutKey(STYLE_CLASSIC), prefs.getString("touch_layout_v1", "")).apply();
+        presets.fromJson(prefs.getString("touch_layout_presets", null), null);
+        style = prefs.getInt("touch_style_seen", STYLE_CLASSIC) == STYLE_FLEXIBLE ? STYLE_FLEXIBLE : STYLE_CLASSIC;
+        layout.decode(prefs.getString(layoutKey(style), ""));
         setContentDescription(context.getString(R.string.touch_layout_access));
         refresh = new Runnable() {
             @Override public void run() {
@@ -170,6 +226,7 @@ public class TouchControls extends View implements InputManager.InputDeviceListe
 
     @Override protected void onAttachedToWindow() {
         super.onAttachedToWindow();
+        if (getContext() instanceof WwhdActivity) ((WwhdActivity) getContext()).touchControls = this;
         if (inputs != null) inputs.registerInputDeviceListener(this, null);
         removeCallbacks(refresh);
         post(refresh);
@@ -190,15 +247,26 @@ public class TouchControls extends View implements InputManager.InputDeviceListe
     }
 
     private static String key(Control c) { return c.kind+":"+c.code; }
+    private static String layoutKey(int style) { return style == STYLE_FLEXIBLE ? "touch_layout_flexible" : "touch_layout_classic"; }
+    private static String presetStyle(int style) { return style == STYLE_FLEXIBLE ? TouchPresets.FLEXIBLE : TouchPresets.CLASSIC; }
+    private boolean flexible() { return style == STYLE_FLEXIBLE; }
+
+    private TouchLayout.Placement placement(Control c) {
+        TouchLayout.Placement p = layout.get(key(c));
+        return p != null ? p : new TouchLayout.Placement(c.fx, c.fy, c.fr);
+    }
     private void place(Control c, int w, int h, float s) {
         TouchLayout.Placement p=layout.get(key(c));
         if (p==null && !editor.editing()) {
             c.cx=c.fx*w; c.cy=c.fy*h; c.r=c.fr*s; // unchanged default path
+            c.shape=TouchLayout.SHAPE_CIRCLE; c.opacity=TouchLayout.OPACITY_DEFAULT; c.filled=true;
         } else {
             if (p==null) p=new TouchLayout.Placement(c.fx,c.fy,c.fr);
             p=TouchLayout.fit(p,w,h,editor.editing() && editorBar!=null ? editorBar.getBottom():0);
             c.cx=p.x*w; c.cy=p.y*h; c.r=p.radius*s;
+            c.shape=p.shape; c.opacity=p.opacity; c.filled=p.filled;
         }
+        if (c.stick != null) c.stick.home(c.cx, c.cy, c.r);
     }
     private void placeControls() {
         for (Control c:controls) place(c,getWidth(),getHeight(),Math.min(getWidth(),getHeight()));
@@ -207,24 +275,74 @@ public class TouchControls extends View implements InputManager.InputDeviceListe
 
     @Override
     protected void onDraw(Canvas canvas) {
-        if (editor.editing() || active()) for (Control c : controls) if (editor.editing() || visible(c)) drawControl(canvas, c);
+        if (editor.editing() && grid) drawGrid(canvas);
+        if (editor.editing() || active())
+            for (Control c : controls) {
+                if (!editor.editing() && !visible(c)) continue;
+                // floating sticks: only under a thumb, and only when they are shown
+                if (c.stick != null && flexible() && !editor.editing() && (!showSticks || !c.stick.held())) continue;
+                drawControl(canvas, c);
+            }
         if (!editor.editing() && buttonsVisible && !settingsOpen) drawControl(canvas, toggle);
     }
 
+    private static int alpha(int a, int opacity) { return Math.round(a * opacity / 100f) << 24 | 0xFFFFFF; }
     private void drawControl(Canvas canvas, Control c) {
         final boolean on = (editor.editing() && c==selected) || c.pressed || (c.kind == KIND_TOGGLE && active());
-        fill.setColor(on ? 0x90FFFFFF : 0x38FFFFFF);
-        edge.setColor(0x80FFFFFF);
-        canvas.drawCircle(c.cx, c.cy, c.r, fill);
-        canvas.drawCircle(c.cx, c.cy, c.r, edge);
-        if (c.kind == KIND_STICK) {
-            fill.setColor(c.pressed ? 0xB0FFFFFF : 0x70FFFFFF);
-            canvas.drawCircle(c.cx + c.sx * c.r * 0.6f, c.cy + c.sy * c.r * 0.6f, c.r * 0.42f, fill);
+        final float x = c.stick != null ? c.stick.cx : c.cx, y = c.stick != null ? c.stick.cy : c.cy;
+        final int op = c.kind == KIND_TOGGLE ? TouchLayout.OPACITY_DEFAULT : c.opacity;
+        fill.setColor(alpha(on ? 0x90 : c.filled ? 0x38 : 0, op));
+        edge.setColor(alpha(0x80, op));
+        drawShape(canvas, c.kind == KIND_TOGGLE ? TouchLayout.SHAPE_CIRCLE : c.shape, x, y, c.r);
+        if (c.stick != null) {
+            fill.setColor(alpha(c.pressed ? 0xB0 : 0x70, op));
+            canvas.drawCircle(x + c.stick.sx * c.r * 0.6f, y + c.stick.sy * c.r * 0.6f, c.r * 0.42f, fill);
             return;
         }
-        text.setColor(0xE0FFFFFF);
+        text.setColor(alpha(0xE0, op));
         text.setTextSize(c.r * (c.label.length() > 2 ? 0.5f : 0.9f));  // "Jump", "Moon": smaller
-        canvas.drawText(c.label, c.cx, c.cy - (text.descent() + text.ascent()) / 2, text);
+        canvas.drawText(c.label, x, y - (text.descent() + text.ascent()) / 2, text);
+    }
+    private void drawShape(Canvas canvas, int shape, float x, float y, float r) {
+        if (shape == TouchLayout.SHAPE_CIRCLE) {
+            canvas.drawCircle(x, y, r, fill);
+            canvas.drawCircle(x, y, r, edge);
+            return;
+        }
+        shapePath.reset();
+        if (shape == TouchLayout.SHAPE_ROUNDED || shape == TouchLayout.SHAPE_SQUARE) {
+            final float h = r * 0.89f, corner = shape == TouchLayout.SHAPE_ROUNDED ? r * 0.35f : r * 0.08f;
+            shapeRect.set(x - h, y - h, x + h, y + h);
+            shapePath.addRoundRect(shapeRect, corner, corner, Path.Direction.CW);
+        } else {
+            final int n = shape == TouchLayout.SHAPE_DIAMOND ? 4 : shape == TouchLayout.SHAPE_HEXAGON ? 6 : 8;
+            final double start = shape == TouchLayout.SHAPE_OCTAGON ? Math.PI / 8 : shape == TouchLayout.SHAPE_HEXAGON ? 0 : -Math.PI / 2;
+            final float rr = shape == TouchLayout.SHAPE_DIAMOND ? r * 1.1f : r;
+            for (int i = 0; i < n; i++) {
+                double a = start + i * 2 * Math.PI / n;
+                float px = x + rr * (float) Math.cos(a), py = y + rr * (float) Math.sin(a);
+                if (i == 0) shapePath.moveTo(px, py); else shapePath.lineTo(px, py);
+            }
+            shapePath.close();
+        }
+        canvas.drawPath(shapePath, fill);
+        canvas.drawPath(shapePath, edge);
+    }
+    // the editor's mirrored grid: lines through the screen's centre, so places mirror left / right
+    private float gridCell() { return Math.min(getWidth(), getHeight()) / 14f; }
+    private void drawGrid(Canvas canvas) {
+        final float g = gridCell(), w = getWidth(), h = getHeight();
+        if (g < 4) return;
+        gridPaint.setStrokeWidth(Math.max(1f, getResources().getDisplayMetrics().density * 0.75f));
+        final int nx = (int) Math.ceil(w / 2 / g), ny = (int) Math.ceil(h / 2 / g);
+        for (int i = -nx; i <= nx; i++) {
+            gridPaint.setColor(i == 0 ? 0x60FFFFFF : (i & 1) == 0 ? 0x38FFFFFF : 0x18FFFFFF);
+            canvas.drawLine(w / 2 + i * g, 0, w / 2 + i * g, h, gridPaint);
+        }
+        for (int i = -ny; i <= ny; i++) {
+            gridPaint.setColor(i == 0 ? 0x60FFFFFF : (i & 1) == 0 ? 0x38FFFFFF : 0x18FFFFFF);
+            canvas.drawLine(0, h / 2 + i * g, w, h / 2 + i * g, gridPaint);
+        }
     }
 
     private Control hit(float x, float y) {
@@ -234,6 +352,7 @@ public class TouchControls extends View implements InputManager.InputDeviceListe
         float bestD = Float.MAX_VALUE;
         for (Control c : controls) {
             if (!visible(c)) continue;
+            if (c.stick != null && flexible()) continue;  // floating: no fixed place to hit
             float reach = c.kind == KIND_STICK ? 1.5f : 1.3f;
             float dx = x - c.cx, dy = y - c.cy, dd = (dx * dx + dy * dy) / (c.r * c.r);
             if (dd <= reach * reach && dd < bestD) { best = c; bestD = dd; }
@@ -246,10 +365,19 @@ public class TouchControls extends View implements InputManager.InputDeviceListe
         return dx * dx + dy * dy <= c.r * c.r * reach * reach;
     }
 
-    private static void moveStick(Control c, float x, float y) {
-        float dx = (x - c.cx) / c.r, dy = (y - c.cy) / c.r, len = (float) Math.sqrt(dx * dx + dy * dy);
-        if (len > 1f) { dx /= len; dy /= len; }
-        c.sx = dx; c.sy = dy;
+    // a finger on no control: the game's, a floating stick or the swipe camera (touch_style.h)
+    private Control freeTouch(float x, float y) {
+        if (!flexible() || !active()) return null;
+        int free;
+        try {
+            free = nativeFreeTouch(getWidth() > 1 ? x / (getWidth() - 1) : 0.5f, getHeight() > 1 ? y / (getHeight() - 1) : 0.5f);
+        } catch (UnsatisfiedLinkError e) { return null; }
+        switch (free) {
+            case FREE_LEFT: return leftStick.stick.held() ? dead : leftStick;  // one thumb per stick, others are ignored
+            case FREE_RIGHT: return rightStick.stick.held() ? dead : rightStick;
+            case FREE_SWIPE: return swipePointer >= 0 ? dead : swipe;
+            default: return null;
+        }
     }
 
     @Override
@@ -287,10 +415,13 @@ public class TouchControls extends View implements InputManager.InputDeviceListe
         switch (action) {
             case MotionEvent.ACTION_DOWN:
             case MotionEvent.ACTION_POINTER_DOWN: {
+                // a new gesture: no finger is down, so anything still held lost its up event
+                if (action == MotionEvent.ACTION_DOWN && owner.size() > 0) releaseFingers();
                 if (action==MotionEvent.ACTION_POINTER_DOWN) removeCallbacks(editLongPress);
                 final int id = event.getPointerId(index);
                 final float x = event.getX(index), y = event.getY(index);
                 Control c = hit(x, y);
+                if (c == null) c = freeTouch(x, y);
                 owner.put(id, c);
                 if (c == null && action == MotionEvent.ACTION_DOWN) {
                     // The first finger on no control: decline the gesture so the view under it takes it
@@ -308,9 +439,11 @@ public class TouchControls extends View implements InputManager.InputDeviceListe
                     longPressConsumed=false;
                     postDelayed(editLongPress, android.view.ViewConfiguration.getLongPressTimeout());
                     toggleTo = !wasActive;  // hidden for a controller: the button brings them back
-                } else {
+                } else if (c == swipe) {
+                    swipePointer = id; swipeX = x; swipeY = y;
+                } else if (c != dead) {
                     c.pressed = true;
-                    if (c.kind == KIND_STICK) moveStick(c, x, y);
+                    if (c.stick != null) c.stick.press(x, y, flexible());
                     c.downX = x; c.downY = y;
                     itemRingFinger(c, true, x, y);
                 }
@@ -321,10 +454,17 @@ public class TouchControls extends View implements InputManager.InputDeviceListe
                     final int id = event.getPointerId(i);
                     if (owner.indexOfKey(id) < 0) continue;
                     Control c = owner.get(id);
+                    final float x = event.getX(i), y = event.getY(i);
                     if (c == null) forward(event, i, MotionEvent.ACTION_MOVE);
-                    else if (c.kind == KIND_STICK) moveStick(c, event.getX(i), event.getY(i));
-                    else if (itemButton(c) >= 0) itemRingFinger(c, true, event.getX(i), event.getY(i));
-                    else if (c == toggle && !near(c,event.getX(i),event.getY(i),1.3f)) removeCallbacks(editLongPress);
+                    else if (c == swipe) {
+                        if (x != swipeX || y != swipeY) {
+                            try { nativeSwipe(x - swipeX, y - swipeY, screenDpi); } catch (UnsatisfiedLinkError ignored) {}
+                            swipeX = x; swipeY = y;
+                        }
+                    }
+                    else if (c.stick != null) c.stick.move(x, y, follow && c == leftStick);
+                    else if (itemButton(c) >= 0) itemRingFinger(c, true, x, y);
+                    else if (c == toggle && !near(c,x,y,1.3f)) removeCallbacks(editLongPress);
                 }
                 break;
             case MotionEvent.ACTION_UP:
@@ -338,8 +478,9 @@ public class TouchControls extends View implements InputManager.InputDeviceListe
                     Control c = owner.get(id);
                     owner.remove(id);
                     if (c == null) { forward(event, i, all ? MotionEvent.ACTION_CANCEL : action); continue; }
+                    if (c == swipe) { swipePointer = -1; continue; }
                     c.pressed = false;
-                    if (c.kind == KIND_STICK) { c.sx = 0; c.sy = 0; }
+                    if (c.stick != null) c.stick.release();
                     itemRingFinger(c, false, c.downX, c.downY);
                     if (c == toggle) {
                         removeCallbacks(editLongPress);
@@ -371,15 +512,24 @@ public class TouchControls extends View implements InputManager.InputDeviceListe
         catch (UnsatisfiedLinkError ignored) { /* not loaded yet */ }
     }
 
-    private void releaseInputs() {
+    // every control lets go: buttons up, sticks back to rest, no swipe (the pad itself is not touched)
+    private void resetControls() {
+        for (Control c : controls) { c.pressed = false; if (c.stick != null) c.stick.release(); }
+        swipePointer = -1;
+    }
+    // fingers that never got their up event: the controls let go, the game's touches are cancelled
+    private void releaseFingers() {
         removeCallbacks(editLongPress);
         try { nativeItemRingFinger(-1, false, 0, 0); } catch (UnsatisfiedLinkError ignored) {}
-        for (Control c:controls) { c.pressed=false; c.sx=c.sy=0; }
-        toggle.pressed=false;
+        resetControls();
+        toggle.pressed = false;
         for (int i=0;i<owner.size();++i) if (owner.valueAt(i)==null)
             try { SDLActivity.onNativeTouch(lastTouchDevice,owner.keyAt(i),MotionEvent.ACTION_CANCEL,0,0,0); }
             catch (UnsatisfiedLinkError ignored) {}
         owner.clear();
+    }
+    private void releaseInputs() {
+        releaseFingers();
         try { nativeDetachPad(); nativeSetVirtual(0); } catch (UnsatisfiedLinkError ignored) {}
         lastButtons=-1; lastVirtual=-1;
     }
@@ -397,39 +547,76 @@ public class TouchControls extends View implements InputManager.InputDeviceListe
         TextView hint=new TextView(getContext());hint.setText(R.string.touch_layout_hint);
         hint.setTextColor(0xFFFFFFFF);hint.setGravity(android.view.Gravity.CENTER);
         editorBar.addView(hint);
+        editorStatus=new TextView(getContext());
+        editorStatus.setTextColor(0xFFFFE08A);editorStatus.setGravity(android.view.Gravity.CENTER);
+        editorBar.addView(editorStatus);
+        LinearLayout look=new LinearLayout(getContext());
+        editorButton(look,R.string.touch_layout_smaller,()->resizeSelected(-1));
+        editorButton(look,R.string.touch_layout_larger,()->resizeSelected(1));
+        editorButton(look,R.string.touch_layout_shape,()->restyleSelected(p->p.look((p.shape+1)%TouchLayout.SHAPES,p.opacity,p.filled)));
+        editorButton(look,R.string.touch_layout_opacity,()->restyleSelected(p->p.look(p.shape,TouchLayout.nextOpacity(p.opacity),p.filled)));
+        editorButton(look,R.string.touch_layout_fill,()->restyleSelected(p->p.look(p.shape,p.opacity,!p.filled)));
+        editorBar.addView(look);
         LinearLayout actions=new LinearLayout(getContext());
-        editorButton(actions,R.string.touch_layout_smaller,()->resizeSelected(.9f));
-        editorButton(actions,R.string.touch_layout_larger,()->resizeSelected(1.1f));
-        editorButton(actions,R.string.touch_layout_reset,()->{ layout.reset();selected=null;saveLayout();placeControls(); });
+        editorButton(actions,R.string.touch_layout_grid,()->{ grid=!grid;invalidate(); });
+        editorButton(actions,R.string.touch_layout_presets,this::layoutsMenu);
+        editorButton(actions,R.string.touch_layout_reset,()->{ layout.reset();selected=null;saveLayout();placeControls();showStatus(); });
         editorButton(actions,R.string.touch_layout_done,this::endEditing);
         editorBar.addView(actions);
         RelativeLayout.LayoutParams lp=new RelativeLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,ViewGroup.LayoutParams.WRAP_CONTENT);
         lp.addRule(RelativeLayout.ALIGN_PARENT_TOP);
         ((RelativeLayout)getParent()).addView(editorBar,lp);
         editorBar.post(this::placeControls);
-        placeControls();announceForAccessibility(getContext().getString(R.string.touch_layout_hint));
+        placeControls();showStatus();
+        announceForAccessibility(getContext().getString(R.string.touch_layout_hint));
     }
     private void editorButton(LinearLayout bar,int label,Runnable action) {
         Button b=new Button(getContext());b.setText(label);b.setOnClickListener(v->action.run());
         b.setMinHeight((int)(48*getResources().getDisplayMetrics().density));
+        b.setAllCaps(false);
         bar.addView(b,new LinearLayout.LayoutParams(0,ViewGroup.LayoutParams.WRAP_CONTENT,1));
+    }
+    // the editor's second line: the style's layout, or the selected control's size and look
+    private void showStatus() {
+        if (editorStatus==null) return;
+        if (selected==null) {
+            editorStatus.setText(flexible() ? R.string.touch_layout_flexible : R.string.touch_layout_classic);
+            return;
+        }
+        TouchLayout.Placement p=placement(selected);
+        String name=selected==leftStick ? getContext().getString(R.string.touch_layout_left_stick)
+                : selected==rightStick ? getContext().getString(R.string.touch_layout_right_stick) : selected.label;
+        String[] shapes=getResources().getStringArray(R.array.touch_layout_shapes);
+        editorStatus.setText(getContext().getString(R.string.touch_layout_status,name,
+                TouchLayout.sizePercent(p.radius,selected.fr),shapes[Math.max(0,Math.min(shapes.length-1,p.shape))],p.opacity,
+                getContext().getString(p.filled ? R.string.touch_layout_filled : R.string.touch_layout_outline)));
     }
     private void endEditing() {
         if (!editor.editing()) return;
         saveLayout();editor.setEditing(false,this::releaseInputs);selected=null;dragPointer=-1;
         if (editorBar!=null && editorBar.getParent() instanceof ViewGroup)
             ((ViewGroup)editorBar.getParent()).removeView(editorBar);
-        editorBar=null;placeControls();
+        editorBar=null;editorStatus=null;placeControls();
     }
-    private void saveLayout() { prefs.edit().putString("touch_layout_v1",layout.encode()).apply(); }
+    private void saveLayout() { prefs.edit().putString(layoutKey(style),layout.encode()).apply(); }
+    private void savePresets() { prefs.edit().putString("touch_layout_presets",presets.toJson(null)).apply(); }
     private void moveSelected(float x,float y,float radius) {
         int w=getWidth(),h=getHeight();if (selected==null || w<=0 || h<=0) return;
-        TouchLayout.Placement p=TouchLayout.fit(new TouchLayout.Placement(x/w,y/h,radius/Math.min(w,h)),
+        TouchLayout.Placement p=TouchLayout.fit(placement(selected).at(x/w,y/h,radius/Math.min(w,h)),
                 w,h,editorBar!=null ? editorBar.getBottom():0);
-        if (layout.put(key(selected),p.x,p.y,p.radius)) placeControls();
+        if (layout.put(key(selected),p)) placeControls();
     }
-    private void resizeSelected(float scale) {
-        if (selected!=null) { moveSelected(selected.cx,selected.cy,selected.r*scale);saveLayout(); }
+    private void resizeSelected(int steps) {
+        if (selected==null) return;
+        TouchLayout.Placement p=placement(selected);
+        layout.put(key(selected),p.at(p.x,p.y,TouchLayout.resize(p.radius,selected.fr,steps)));
+        saveLayout();placeControls();showStatus();
+    }
+    private interface Restyle { TouchLayout.Placement apply(TouchLayout.Placement p); }
+    private void restyleSelected(Restyle change) {
+        if (selected==null) return;
+        layout.put(key(selected),change.apply(placement(selected)));
+        saveLayout();placeControls();showStatus();
     }
     private boolean editTouch(MotionEvent e) {
         int action=e.getActionMasked();
@@ -442,9 +629,14 @@ public class TouchControls extends View implements InputManager.InputDeviceListe
                 if (d<=1.69f && d<best) { best=d;selected=c; }
             }
             if (selected!=null) { dragPointer=e.getPointerId(0);dragOffsetX=e.getX()-selected.cx;dragOffsetY=e.getY()-selected.cy; }
+            showStatus();
         } else if (action==MotionEvent.ACTION_MOVE && selected!=null && dragPointer>=0) {
             int i=e.findPointerIndex(dragPointer);
-            if (i>=0) moveSelected(e.getX(i)-dragOffsetX,e.getY(i)-dragOffsetY,selected.r);
+            if (i>=0) {
+                float x=e.getX(i)-dragOffsetX,y=e.getY(i)-dragOffsetY;
+                if (grid) { x=TouchLayout.snap(x,getWidth()/2f,gridCell());y=TouchLayout.snap(y,getHeight()/2f,gridCell()); }
+                moveSelected(x,y,selected.r);
+            }
         } else if (action==MotionEvent.ACTION_UP || action==MotionEvent.ACTION_CANCEL ||
                 (action==MotionEvent.ACTION_POINTER_UP && e.getPointerId(e.getActionIndex())==dragPointer)) {
             dragPointer=-1;saveLayout();
@@ -453,7 +645,122 @@ public class TouchControls extends View implements InputManager.InputDeviceListe
     }
     @Override public void onWindowFocusChanged(boolean hasFocus) {
         super.onWindowFocusChanged(hasFocus);
-        if (!hasFocus) { endEditing();releaseInputs();editor.pointers(0); }
+        if (hasFocus) return;
+        if (!dialogOpen) endEditing();  // the layouts dialog over the editor keeps it open
+        releaseInputs();editor.pointers(0);
+    }
+
+    // ---- saved layouts, the Arc layout, export and import
+    private void applyLayout(String text) {
+        if (text==null) layout.reset(); else layout.decode(text);
+        selected=null;saveLayout();placeControls();showStatus();
+    }
+    private void dialog(AlertDialog.Builder b) {
+        dialogOpen=true;
+        AlertDialog d=b.create();
+        d.setOnDismissListener(x->dialogOpen=false);
+        d.show();
+    }
+    private void layoutsMenu() {
+        final String st=presetStyle(style);
+        final List<String> names=presets.names(st);
+        final List<String> items=new ArrayList<>();
+        items.add(getContext().getString(R.string.touch_layout_default));
+        items.add(getContext().getString(R.string.touch_layout_arc));
+        items.addAll(names);
+        items.add(getContext().getString(R.string.touch_layout_save));
+        if (!names.isEmpty()) items.add(getContext().getString(R.string.touch_layout_delete));
+        items.add(getContext().getString(R.string.touch_layout_export));
+        items.add(getContext().getString(R.string.touch_layout_import));
+        dialog(new AlertDialog.Builder(getContext())
+                .setTitle(flexible() ? R.string.touch_layout_flexible_title : R.string.touch_layout_classic)
+                .setItems(items.toArray(new String[0]),(d,which)->{
+                    if (which==0) applyLayout(null);
+                    else if (which==1) applyLayout(TouchPresets.arc(getWidth(),getHeight(),baseRadius));
+                    else if (which<2+names.size()) applyLayout(presets.get(st,names.get(which-2)));
+                    else {
+                        String item=items.get(which);
+                        if (item.equals(getContext().getString(R.string.touch_layout_save))) saveAsDialog(st);
+                        else if (item.equals(getContext().getString(R.string.touch_layout_delete))) deleteDialog(st,names);
+                        else if (item.equals(getContext().getString(R.string.touch_layout_export))) pickFile(true);
+                        else pickFile(false);
+                    }
+                }));
+    }
+    private void saveAsDialog(String st) {
+        final EditText name=new EditText(getContext());
+        name.setSingleLine(true);
+        name.setFilters(new android.text.InputFilter[] {new android.text.InputFilter.LengthFilter(TouchPresets.MAX_NAME)});
+        dialog(new AlertDialog.Builder(getContext()).setTitle(R.string.touch_layout_name).setView(name)
+                .setPositiveButton(android.R.string.ok,(d,w)->{
+                    boolean ok=presets.save(st,name.getText().toString(),layout.encode());
+                    if (ok) savePresets();
+                    Toast.makeText(getContext(),ok ? R.string.touch_layout_saved : R.string.touch_layout_save_failed,Toast.LENGTH_SHORT).show();
+                })
+                .setNegativeButton(android.R.string.cancel,null));
+    }
+    private void deleteDialog(String st,List<String> names) {
+        dialog(new AlertDialog.Builder(getContext()).setTitle(R.string.touch_layout_delete)
+                .setItems(names.toArray(new String[0]),(d,which)->{ presets.remove(st,names.get(which));savePresets(); }));
+    }
+    private void pickFile(boolean export) {
+        if (!(getContext() instanceof Activity)) return;
+        Intent i=new Intent(export ? Intent.ACTION_CREATE_DOCUMENT : Intent.ACTION_OPEN_DOCUMENT)
+                .addCategory(Intent.CATEGORY_OPENABLE).setType(export ? "application/json" : "*/*");
+        if (export) i.putExtra(Intent.EXTRA_TITLE,"wwhd-touch-layouts.json");
+        try { ((Activity)getContext()).startActivityForResult(i,export ? EXPORT_REQUEST : IMPORT_REQUEST); }
+        catch (android.content.ActivityNotFoundException e) {
+            Toast.makeText(getContext(),R.string.touch_layout_file_failed,Toast.LENGTH_SHORT).show();
+        }
+    }
+    /** WwhdActivity.onActivityResult: the file the player picked (null: none) */
+    void layoutFile(int request,Uri uri) {
+        if (uri==null) return;
+        try {
+            if (request==EXPORT_REQUEST) {
+                saveLayout();
+                Map<String,String> current=new LinkedHashMap<>();
+                current.put(TouchPresets.CLASSIC,prefs.getString(layoutKey(STYLE_CLASSIC),"2;"));
+                current.put(TouchPresets.FLEXIBLE,prefs.getString(layoutKey(STYLE_FLEXIBLE),"2;"));
+                try (OutputStream out=getContext().getContentResolver().openOutputStream(uri,"wt")) {
+                    if (out==null) throw new java.io.IOException("no output");
+                    out.write(presets.toJson(current).getBytes(StandardCharsets.UTF_8));
+                }
+                Toast.makeText(getContext(),R.string.touch_layout_exported,Toast.LENGTH_SHORT).show();
+                return;
+            }
+            ByteArrayOutputStream bytes=new ByteArrayOutputStream();
+            try (InputStream in=getContext().getContentResolver().openInputStream(uri)) {
+                if (in==null) throw new java.io.IOException("no input");
+                byte[] buf=new byte[8192];int n;
+                while ((n=in.read(buf))>0) {
+                    bytes.write(buf,0,n);
+                    if (bytes.size()>TouchPresets.MAX_FILE) throw new java.io.IOException("too large");
+                }
+            }
+            Map<String,String> current=new HashMap<>();
+            TouchPresets incoming=new TouchPresets();
+            int taken=incoming.fromJson(new String(bytes.toByteArray(),StandardCharsets.UTF_8),current);
+            if (taken<0) { Toast.makeText(getContext(),R.string.touch_layout_import_failed,Toast.LENGTH_LONG).show();return; }
+            presets.fromJson(incoming.toJson(null),null);
+            // the file's current layouts replace ours; ours stay as a saved layout "Before import"
+            SharedPreferences.Editor ed=prefs.edit();
+            for (int s : new int[] {STYLE_CLASSIC,STYLE_FLEXIBLE}) {
+                String text=current.get(presetStyle(s));
+                if (text==null) continue;
+                String mine=prefs.getString(layoutKey(s),"");
+                if (TouchLayout.valid(mine) && !mine.equals(text))
+                    presets.save(presetStyle(s),getContext().getString(R.string.touch_layout_before_import),mine);
+                ed.putString(layoutKey(s),text);
+            }
+            ed.apply();
+            savePresets();
+            layout.decode(prefs.getString(layoutKey(style),""));
+            selected=null;placeControls();showStatus();
+            Toast.makeText(getContext(),getContext().getString(R.string.touch_layout_imported,taken),Toast.LENGTH_SHORT).show();
+        } catch (Exception e) {
+            Toast.makeText(getContext(),R.string.touch_layout_file_failed,Toast.LENGTH_LONG).show();
+        }
     }
 
     // a touch for the game: the same call SDLSurface makes (coordinates 0..1 of the view)
@@ -468,7 +775,7 @@ public class TouchControls extends View implements InputManager.InputDeviceListe
     private void setShown(boolean on) {
         shown = on;
         prefs.edit().putBoolean("touch_controls", on).apply();
-        for (Control c : controls) { c.pressed = false; c.sx = 0; c.sy = 0; }
+        resetControls();
         for (int i = owner.size() - 1; i >= 0; i--) if (owner.valueAt(i) != null && owner.valueAt(i) != toggle) owner.removeAt(i);
         nativeShowControls(on);
         if (!on) { nativeDetachPad(); nativeSetVirtual(0); lastButtons = -1; lastVirtual = -1; }
@@ -477,19 +784,44 @@ public class TouchControls extends View implements InputManager.InputDeviceListe
     // shown, and not hidden for a connected controller
     private boolean active() { return !editor.editing() && shown && buttonsVisible && !settingsOpen; }
 
+    // the touch options (touch_style.h pack): a style change swaps the layout and lets every finger go
+    private void pollOptions() {
+        try {
+            if (nativeTouchOptions(options) < 1) return;
+        } catch (UnsatisfiedLinkError e) { return; }  // a game library from before the touch options: Classic
+        final int newStyle = options[1] == STYLE_FLEXIBLE ? STYLE_FLEXIBLE : STYLE_CLASSIC;
+        showSticks = options[2] != 0;
+        follow = options[3] != 0;
+        final int newRight = options[4] == RIGHT_STICK ? RIGHT_STICK : RIGHT_SWIPE;
+        if (newStyle == style && newRight == rightMode) return;
+        if (newStyle != style && editor.editing()) endEditing();
+        releaseFingers();
+        try { nativeDetachPad(); nativeSetVirtual(0); } catch (UnsatisfiedLinkError ignored) {}
+        lastButtons = -1; lastVirtual = -1;
+        if (newStyle != style) {
+            style = newStyle;
+            prefs.edit().putInt("touch_style_seen", style).apply();  // the next start draws the right layout at once
+            layout.decode(prefs.getString(layoutKey(style), ""));
+            placeControls();
+        }
+        rightMode = newRight;
+    }
+
     private void syncTouchState() {
         try {
             android.util.DisplayMetrics metrics = getResources().getDisplayMetrics();
             float dpi = Math.min(metrics.xdpi, metrics.ydpi);
             if (!Float.isFinite(dpi) || dpi < 72 || dpi > 1000) dpi = metrics.densityDpi;
+            screenDpi = dpi;
             nativeScreenDpi(dpi);
             nativeControllerConnected(controller);
+            pollOptions();
             final int state = nativeTouchState();
             final boolean visible = (state & 1) != 0, controlsShown = (state & 2) != 0, open = (state & 4) != 0;
             if (buttonsVisible == visible && shown == controlsShown && settingsOpen == open) return;
             buttonsVisible = visible; shown = controlsShown; settingsOpen = open;
             if (open && editor.editing()) endEditing();
-            for (Control c : controls) { c.pressed = false; c.sx = 0; c.sy = 0; }
+            resetControls();
             for (int i = owner.size() - 1; i >= 0; --i) {
                 if (owner.valueAt(i) != null) owner.removeAt(i);
                 else if (settingsOpen) {
@@ -537,7 +869,7 @@ public class TouchControls extends View implements InputManager.InputDeviceListe
         SDLControllerManager.requestDeviceRefresh();
         if (controller || !isController(InputDevice.getDevice(id))) return;
         controller = true;
-        for (Control c : controls) { c.pressed = false; c.sx = 0; c.sy = 0; }
+        resetControls();
         for (int i = owner.size() - 1; i >= 0; i--) if (owner.valueAt(i) != null && owner.valueAt(i) != toggle) owner.removeAt(i);
         if (shown) { nativeDetachPad(); nativeSetVirtual(0); lastButtons = -1; lastVirtual = -1; }
         invalidate();
@@ -565,11 +897,12 @@ public class TouchControls extends View implements InputManager.InputDeviceListe
             else if (c.kind == KIND_BUTTON && c.pressed) buttons |= 1 << c.code;
             else if (c.kind == KIND_FACE && c.pressed) face |= 1 << c.code;
             else if (c.kind == KIND_TRIGGER && c.pressed) { if (c.code == 0) lt = 1; else rt = 1; }
-            else if (c.kind == KIND_STICK) { if (c.code == 0) { lx = c.sx; ly = c.sy; } else { rx = c.sx; ry = c.sy; } }
         }
         if (virt != lastVirtual) {
             try { nativeSetVirtual(virt); lastVirtual = virt; } catch (UnsatisfiedLinkError e) { lastVirtual = -1; }
         }
+        lx = leftStick.stick.sx; ly = leftStick.stick.sy;
+        rx = rightStick.stick.sx; ry = rightStick.stick.sy;
         buttons |= face << 16;  // (only for the change check below)
         if (buttons == lastButtons && lx == lastLx && ly == lastLy && rx == lastRx && ry == lastRy && lt == lastLt && rt == lastRt)
             return;

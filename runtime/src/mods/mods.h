@@ -193,6 +193,9 @@ bool host_key_down(uint16_t code);
 // ---- mouse (mouse.mm -> camera.cpp) ----
 void mouse_add(float dx, float dy);  // points moved while captured (dy > 0 = down)
 void mouse_wheel(float dy);          // wheel / scroll (dy > 0 = forward)
+// swipe camera (Android touch controls): a finger moved by (dx, dy) pixels on a display of `dpi`
+// (dy > 0 = down); turned into degrees by camera_swipe.h with the touch options' swipe speed
+void swipe_add(float dx_px, float dy_px, float dpi);
 void mouse_button(int button, bool down);  // 0 left, 1 right
 bool mouse_captured();
 void mouse_init(void* tv_window);  // NSWindow* of the TV picture (menu.mm, main thread)

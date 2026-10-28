@@ -19,6 +19,7 @@
 #include "../platform/phone_rumble.h"
 #ifdef __ANDROID__
 #include "../gfx/display_modes.h"
+#include "../platform/touch_options.h"
 #endif
 #include "../overlay/hostui.h"
 #include "runtime.h"
@@ -355,6 +356,59 @@ void register_touch() {  // the Settings window's "Touch controls" (Android)
             gfx::g_touch_controls = v >= 0.5f;
             hostui::set("touchControls", v >= 0.5f ? "1" : "0");
         };
+        add(std::move(it));
+    }
+    // touch_style.h (the Settings window's same options, saved by touch_options::set)
+    using O = touch_style::Options;
+    auto option = [](const char* id, const char* label, const char* help, Kind kind, std::function<float(const O&)> get,
+                     std::function<void(O&, float)> put) {
+        Item it;
+        it.id = id, it.tab = "screen", it.label = label, it.help = help, it.kind = kind;
+        it.get = [get] { return get(touch_options::get()); };
+        it.set = [put](float v) {
+            O o = touch_options::get();
+            put(o, v);
+            touch_options::set(o);
+        };
+        return it;
+    };
+    auto flexible = [] { return touch_options::get().style == touch_style::Flexible; };
+    auto swiping = [] { const O o = touch_options::get(); return o.style == touch_style::Flexible && o.right == touch_style::RightSwipe; };
+    {
+        Item it = option("screen.touch-style", "Touch style", "Flexible: sticks appear where your thumbs land.", Kind::Choice,
+                         [](const O& o) { return float(o.style); }, [](O& o, float v) { o.style = int(std::lround(v)); });
+        it.choices = {"Classic", "Flexible"};
+        add(std::move(it));
+    }
+    {
+        Item it = option("screen.touch-right", "Right half", "Flexible: the right half turns the camera by swiping or as a stick.",
+                         Kind::Choice, [](const O& o) { return float(o.right); }, [](O& o, float v) { o.right = int(std::lround(v)); });
+        it.choices = {"Swipe camera", "Camera stick"};
+        it.enabled = flexible;
+        add(std::move(it));
+    }
+    {
+        Item it = option("screen.touch-show-sticks", "Show sticks", "Flexible: off, the floating sticks work without being drawn.",
+                         Kind::Toggle, [](const O& o) { return o.show_sticks ? 1.0f : 0.0f; }, [](O& o, float v) { o.show_sticks = v >= 0.5f; });
+        it.enabled = flexible;
+        add(std::move(it));
+    }
+    add(option("screen.touch-follow", "Left stick follows the thumb", "The stick comes along when your thumb slides past its edge.",
+               Kind::Toggle, [](const O& o) { return o.follow ? 1.0f : 0.0f; }, [](O& o, float v) { o.follow = v >= 0.5f; }));
+    {
+        Item it = option("screen.touch-swipe-speed", "Swipe speed", "How far a swipe turns the camera.", Kind::Number,
+                         [](const O& o) { return o.swipe_speed; }, [](O& o, float v) { o.swipe_speed = v; });
+        it.min = mods::camera_swipe::kSpeedMin, it.max = mods::camera_swipe::kSpeedMax, it.step = 0.25f;
+        it.format = percent;
+        it.enabled = swiping;
+        add(std::move(it));
+    }
+    {
+        Item it = option("screen.touch-swipe-boat", "Swipe speed on the boat", "Swiping turns the camera this much faster while Link sails.",
+                         Kind::Number, [](const O& o) { return o.swipe_boat; }, [](O& o, float v) { o.swipe_boat = v; });
+        it.min = mods::camera_swipe::kBoatMin, it.max = mods::camera_swipe::kBoatMax, it.step = 0.25f;
+        it.format = times;
+        it.enabled = swiping;
         add(std::move(it));
     }
 }

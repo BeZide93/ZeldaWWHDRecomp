@@ -18,6 +18,7 @@
 #include "platform/dual_display.h"
 #include "runtime.h"
 #include "platform/gaming_mode.h"
+#include "platform/touch_options.h"
 #include <SDL3/SDL.h>
 #include <algorithm>
 #include <atomic>
@@ -284,6 +285,7 @@ void load_saved_options() {
 #ifdef __ANDROID__
     if (saved("touchButtons", {})) gfx::g_touch_buttons = std::clamp((int)num("touchButtons"), 0, 2);
     if (saved("touchControls", {})) gfx::g_touch_controls = num("touchControls") != 0;
+    touch_options::load(v);
 #endif
     gfxvk::load_saved_stereo_hdr();  // shared with the AppKit host (init_appkit)
     if (saved("resScale", {"WWHD_RES_SCALE"})) gfxvk::set_res_scale((float)num("resScale"));

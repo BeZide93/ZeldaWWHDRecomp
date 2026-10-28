@@ -215,7 +215,7 @@ add_custom_command(OUTPUT ${WWHD_STORY_BAG_LAYOUT}
   DEPENDS ${CMAKE_SOURCE_DIR}/runtime/assets/story_bag/StoryBag_00.json ${CMAKE_SOURCE_DIR}/cmake/EmbedBytes.cmake
   COMMENT "Delivery Bag page layout" VERBATIM)
 list(APPEND RUNTIME_SOURCES ${WWHD_STORY_BAG_LAYOUT})
-list(APPEND RUNTIME_SOURCES runtime/src/platform/touch_pad.cpp)  # Android on-screen controls (no-op elsewhere)
+list(APPEND RUNTIME_SOURCES runtime/src/platform/touch_pad.cpp runtime/src/platform/touch_options.cpp)  # Android on-screen controls (no-op elsewhere; the options also feed the swipe camera)
 if(APPLE)
   list(APPEND RUNTIME_SOURCES runtime/src/platform/https.mm)
   set_source_files_properties(runtime/src/platform/https.mm PROPERTIES COMPILE_FLAGS "-fobjc-arc")
@@ -2556,6 +2556,11 @@ add_executable(camera_mouse_test runtime/tools/camera_mouse_test.cpp)
 target_include_directories(camera_mouse_test PRIVATE runtime/src)
 target_compile_options(camera_mouse_test PRIVATE -UNDEBUG)
 add_test(NAME camera_mouse COMMAND camera_mouse_test)
+
+add_executable(camera_swipe_test runtime/tools/camera_swipe_test.cpp)
+target_include_directories(camera_swipe_test PRIVATE runtime/src)
+target_compile_options(camera_swipe_test PRIVATE -UNDEBUG)
+add_test(NAME camera_swipe COMMAND camera_swipe_test)
 
 # Isolated structural native event image and ownership lease contracts.
 add_executable(story_native_event_image_test runtime/tools/story_native_event_image_test.cpp runtime/src/mods/story_native_event_image.cpp)

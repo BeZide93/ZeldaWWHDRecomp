@@ -7,6 +7,8 @@
 #include <mutex>
 #include "../runtime.h"
 #include "touch_face.h"
+#include "touch_options.h"
+#include "../mods/mods.h"
 #include "phone_rumble.h"
 #include "../gfx/display_modes.h"
 #include "../overlay/hostui.h"
@@ -90,5 +92,31 @@ extern "C" JNIEXPORT void JNICALL Java_org_wwhdrecomp_wwhd_TouchControls_nativeS
 #ifdef __ANDROID__
 extern "C" JNIEXPORT void JNICALL Java_org_wwhdrecomp_wwhd_TouchControls_nativeControllerConnected(JNIEnv*, jclass, jboolean connected) {
     gfx::g_touch_controller = connected;
+}
+#endif
+
+#ifdef __ANDROID__
+// TouchControls.nativeTouchOptions(int[] out): the touch options as touch_style.h pack() lays them out;
+// returns the layout's version
+extern "C" JNIEXPORT jint JNICALL Java_org_wwhdrecomp_wwhd_TouchControls_nativeTouchOptions(JNIEnv* env, jclass, jintArray out) {
+    int32_t v[touch_style::kPackLen];
+    touch_style::pack(touch_options::get(), v, touch_style::kPackLen);
+    if (out) {
+        const jsize n = env->GetArrayLength(out);
+        env->SetIntArrayRegion(out, 0, n < touch_style::kPackLen ? n : touch_style::kPackLen, reinterpret_cast<const jint*>(v));
+    }
+    return touch_style::kPackVersion;
+}
+// a finger landed on no control at (x, y), 0..1 of the view: what it does (touch_style::Free). The
+// game's own touch areas (the view button, the GamePad picture) keep their touches in every style.
+extern "C" JNIEXPORT jint JNICALL Java_org_wwhdrecomp_wwhd_TouchControls_nativeFreeTouch(JNIEnv*, jclass, jfloat x, jfloat y) {
+    float tx, ty;
+    const bool game = gfx::view_button_hit(x, y) || gfx::overlay_hit(x, y, &tx, &ty, false);
+    return touch_style::free_touch(touch_options::get(), x, game);
+}
+// the swipe camera: the finger moved by (dx, dy) pixels on a display of dpi
+extern "C" JNIEXPORT void JNICALL Java_org_wwhdrecomp_wwhd_TouchControls_nativeSwipe(JNIEnv*, jclass, jfloat dx, jfloat dy, jfloat dpi) {
+    phone_rumble::last_input_touch = true;
+    mods::swipe_add(dx, dy, dpi);
 }
 #endif

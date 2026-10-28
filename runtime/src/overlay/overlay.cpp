@@ -2,6 +2,7 @@
 #include "tooltip.h"
 #include "controls_options.h"
 #include "gfx/display_modes.h"
+#include "platform/touch_options.h"
 #include <mutex>
 // In-game settings overlay: the Dear ImGui user interface (see overlay.h). The renderers draw the
 // resulting ImDrawData (gfx/overlay_metal.mm, gfx/vulkan/overlay.cpp); the hosts feed input and apply
@@ -1489,6 +1490,38 @@ void tab_display() {
             gfx::g_touch_controls = v;
             hostui::set("touchControls", v ? "1" : "0");
         });
+    {
+        // touch_style.h; the same options as the item menu's settings page (game_settings.cpp)
+        const touch_style::Options to = touch_options::get();
+        auto apply = [](touch_style::Options o) { hostui::post([o] { touch_options::set(o); }); };
+        int style = to.style;
+        if (combo("Touch style", &style, "Classic\0Flexible\0")) { auto o = to; o.style = style; apply(o); }
+        help("Classic: sticks and buttons stay where the layout puts them. Flexible: a stick appears where "
+             "your thumb lands, the left half moves Link and the right half turns the camera. "
+             "Hold the controller button (top left) to edit the layout of either style.");
+        const bool flexible = to.style == touch_style::Flexible;
+        if (!flexible) ImGui::BeginDisabled();
+        int right = to.right;
+        if (combo("Right half", &right, "Swipe camera\0Camera stick\0")) { auto o = to; o.right = right; apply(o); }
+        if (check("Show sticks", to.show_sticks, &v)) { auto o = to; o.show_sticks = v; apply(o); }
+        help("Off: the floating sticks work without being drawn.");
+        if (!flexible) ImGui::EndDisabled();
+        if (check("Left stick follows the thumb", to.follow, &v)) { auto o = to; o.follow = v; apply(o); }
+        help("When your thumb slides past the stick's edge, the stick comes along, so a short slide back is enough.");
+        if (!flexible || to.right != touch_style::RightSwipe) ImGui::BeginDisabled();
+        float speed = to.swipe_speed * 100.0f, boat = to.swipe_boat;
+        if (ImGui::SliderFloat("Swipe speed", &speed, mods::camera_swipe::kSpeedMin * 100, mods::camera_swipe::kSpeedMax * 100,
+                               "%.0f%%", ImGuiSliderFlags_AlwaysClamp)) {
+            auto o = to; o.swipe_speed = std::round(speed / 5.0f) * 0.05f; apply(o);
+        }
+        if (ImGui::SliderFloat("Swipe speed on the boat", &boat, mods::camera_swipe::kBoatMin, mods::camera_swipe::kBoatMax,
+                               "%.2fx", ImGuiSliderFlags_AlwaysClamp)) {
+            auto o = to; o.swipe_boat = std::round(boat * 20.0f) / 20.0f; apply(o);
+        }
+        help("Swiping turns the camera this much faster while Link sails. The telescope and other "
+             "first-person views keep the normal speed.");
+        if (!flexible || to.right != touch_style::RightSwipe) ImGui::EndDisabled();
+    }
 #endif
     heading("Picture scaling");
     static const char *const f[] = {"Smooth", "Sharp", "Integer scale (pixel exact)"};
