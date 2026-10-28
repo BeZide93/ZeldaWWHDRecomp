@@ -167,6 +167,20 @@ bool auto_put_away_on();
 void set_auto_put_away_on(bool on);
 int zl_latch_mode();  // touchplay::ZlLatch: 0 off, 1 let go (default), 2 next target
 void set_zl_latch_mode(int mode);
+// ---- talks, answers, shops... by touch or mouse, and hold to go on (touch_talk.cpp; rules in touch_talk.h) ----
+// the active controller's pad read, after the touch controls' rules: the fingers' presses and stick pushes,
+// the held A; `repeat`: true 60's repeated read (the pushed stick stays)
+void touch_talk_pad(input::PadState& p, bool repeat);
+void touch_talk_reset();  // a state load
+// a finger on the TV picture (Finger::Kind: 0 down, 1 move, 2 up, 3 cancel), layout units (centre, +y up)
+void touch_talk_finger(int kind, float x, float y);
+bool touch_talk_claims();  // a finger landing on the picture is the talk's now (Android: nativeFreeTouch)
+bool touch_talk_on();
+void set_touch_talk_on(bool on);
+bool talk_hold_ff_on();
+void set_talk_hold_ff_on(bool on);
+bool pad_hold_a_on();
+void set_pad_hold_a_on(bool on);
 // ---- HUD fades (hud_fade.cpp; rules in hud_fade.h): the game's hearts, rupees, magic bar ----
 bool hud_fade_on(int element);  // hudfade::Element
 void set_hud_fade_on(int element, bool on);

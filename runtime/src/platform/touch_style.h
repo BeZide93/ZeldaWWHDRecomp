@@ -49,10 +49,14 @@ inline Options sanitize(Options o) {
 }
 
 // What a finger landing on no control does. x: 0..1 of the view's width; on_game_ui: the point is on
-// the game's own touch areas (view button, GamePad picture).
-enum Free : int { FreeGame = 0, FreeLeftStick = 1, FreeRightStick = 2, FreeSwipe = 3 };
-inline Free free_touch(const Options& o, float x, bool on_game_ui) {
-    if (o.style != Flexible || on_game_ui || !std::isfinite(x)) return FreeGame;
+// the game's own touch areas (view button, GamePad picture); talk: a talk, a choice, a shop... claims the
+// TV picture now (mods/touch_talk.h claims(): the finger goes there, TouchControls.nativeTalkFinger), in
+// either style.
+enum Free : int { FreeGame = 0, FreeLeftStick = 1, FreeRightStick = 2, FreeSwipe = 3, FreeTalk = 4 };
+inline Free free_touch(const Options& o, float x, bool on_game_ui, bool talk = false) {
+    if (on_game_ui || !std::isfinite(x)) return FreeGame;
+    if (talk) return FreeTalk;
+    if (o.style != Flexible) return FreeGame;
     if (x < 0.5f) return FreeLeftStick;
     return o.right == RightStick ? FreeRightStick : FreeSwipe;
 }

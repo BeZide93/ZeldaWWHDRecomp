@@ -5069,7 +5069,7 @@ bool android_display_touch_event(const SDL_Event& event) {
 // stick or the swipe camera in Flexible, the game in Classic).
 extern "C" JNIEXPORT jint JNICALL Java_org_wwhdrecomp_wwhd_TouchControls_nativeFreeTouch(JNIEnv*, jclass, jfloat x, jfloat y) {
   touch_style::GameTouch g;
-  float tx = 0, ty = 0;
+  float tx = 0, ty = 0, aspect = 0;
   g.dual = gfx::g_has_drc_window;
   g.swapped = dual_display::active_swap;
   if (g.dual) {
@@ -5079,7 +5079,21 @@ extern "C" JNIEXPORT jint JNICALL Java_org_wwhdrecomp_wwhd_TouchControls_nativeF
     g.view_button = gfx::view_button_hit(x, y);
     g.pip = gfx::overlay_hit(x, y, &tx, &ty, false);
   }
-  return touch_style::free_touch(touch_options::get(), x, touch_style::game_touch(g));
+  // a talk, a choice, a shop... (mods/touch_talk.h) claims the TV picture: only where the phone shows it
+  const bool talk = mods::touch_talk_claims() && !(g.dual && g.swapped) && gfx::tv_picture_hit(x, y, &tx, &ty, &aspect);
+  return touch_style::free_touch(touch_options::get(), x, touch_style::game_touch(g), talk);
+}
+// TouchControls.nativeTalkFinger: a finger nativeFreeTouch gave the talk (FreeTalk) went down (0), moved (1),
+// went up (2) or was cancelled (3) at (x, y), 0..1 of the view: as a point of the TV picture in layout units
+extern "C" JNIEXPORT void JNICALL Java_org_wwhdrecomp_wwhd_TouchControls_nativeTalkFinger(JNIEnv*, jclass, jint action, jfloat x, jfloat y) {
+  tv_pointer::State s;
+  if (!gfx::tv_picture_hit(x, y, &s.x, &s.y, &s.aspect, action != 0)) {
+    if (action == 0) return;
+    action = 3;  // (no picture any more: let go)
+  }
+  float px, py;
+  tv_pointer::to_page(s, px, py);
+  mods::touch_talk_finger(action, px - 640.0f, 360.0f - py);
 }
 #endif
 static bool gamepad_touch(const SDL_Event& event) {

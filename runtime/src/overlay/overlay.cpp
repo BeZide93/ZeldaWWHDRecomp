@@ -2332,6 +2332,30 @@ void item_ring_rows() {
     ImGui::PopID();
 }
 
+// talks, answers and shops by touch or mouse, hold to go on (mods/touch_talk.cpp): each applies at once
+void talk_rows() {
+    bool v;
+#ifdef __ANDROID__
+    const char* by = "Talks, answers and shops by touch";
+    const char* how = "Tap the picture to go on in a talk, or hold a finger on it to go on by itself. Tap an "
+                      "answer to choose it, a shop's item to look at it and again to ask its price; buying "
+                      "always needs a tap on the question's answer. Drag for the auction's bid and the wind's "
+                      "direction.";
+#else
+    const char* by = "Talks, answers and shops by mouse";
+    const char* how = "Click the picture to go on in a talk, or hold the button down to go on by itself. Click an "
+                      "answer to choose it, a shop's item to look at it and again to ask its price; buying "
+                      "always needs a click on the question's answer. Drag for the auction's bid and the wind's "
+                      "direction.";
+#endif
+    if (check(by, mods::touch_talk_on(), &v)) hostui::post([v] { mods::set_touch_talk_on(v); });
+    help(how);
+    if (check("Hold A to go on in talks", mods::pad_hold_a_on(), &v)) hostui::post([v] { mods::set_pad_hold_a_on(v); });
+    help("With a controller: keep A held in a talk and the text goes on by itself each time it waits. "
+         "It stops at every question, which waits for a new press.");
+    if (check("Fast forward while a talk is held", mods::talk_hold_ff_on(), &v)) hostui::post([v] { mods::set_talk_hold_ff_on(v); });
+    help("A talk held to go on (finger, mouse or A) also runs faster, as the fast forward button does.");
+}
 void tab_controls() {
     bool v;
     // a grey note after a row's choices: on the same line when it fits (flow_layout.h)
@@ -2380,6 +2404,7 @@ void tab_controls() {
          "game is focused.");
 #endif
     item_ring_rows();
+    talk_rows();
     // face-button preset (issue #78): which host face buttons drive A/B/X/Y
     const input_map::FaceLayout fl = input_map::face_layout(m);
     ImGui::AlignTextToFramePadding();

@@ -71,6 +71,7 @@ LockTracker g_lock;
 std::atomic<uint64_t> g_seen[kPaneSignalCount];
 std::atomic<int> g_choice_count{0}, g_zoom_kind{0};
 std::atomic<int> g_choice_y{0}, g_cursor_y{0}, g_msg_x{0}, g_msg_y{0}, g_msg_hw{0}, g_msg_hh{0};
+std::atomic<int> g_choice_x{0}, g_wind_x{0}, g_wind_y{0};
 
 constexpr uint32_t kPaneParent = 0x0C, kPaneChildren = 0x14, kPaneSize = 0x3C, kPaneFlags = 0x44, kPaneAlpha = 0x45,
                    kPaneGlobal = 0x48, kPaneName = 0x80;  // nw::lyt::Pane (aspect.cpp)
@@ -90,6 +91,11 @@ PaneSignals aged_panes() {
         p.choice_count = uint8_t(g_choice_count.load(std::memory_order_relaxed));
         p.choice_y = int16_t(g_choice_y.load(std::memory_order_relaxed));
         p.cursor_y = int16_t(g_cursor_y.load(std::memory_order_relaxed));
+        p.choice_x = int16_t(g_choice_x.load(std::memory_order_relaxed));
+    }
+    if (p.flags & kWindCompass) {
+        p.wind_x = int16_t(g_wind_x.load(std::memory_order_relaxed));
+        p.wind_y = int16_t(g_wind_y.load(std::memory_order_relaxed));
     }
     if (p.flags & kZoomBar) p.zoom_kind = uint8_t(g_zoom_kind.load(std::memory_order_relaxed));
     if (p.flags & kMsgWindow) {
@@ -128,6 +134,7 @@ void play_context_pane(uint32_t pane) {
             if (!pane_visible(pane)) return;
             g_choice_count.store(s == kPaneChoice2 ? 2 : 3, std::memory_order_relaxed);
             g_choice_y.store(clamp16(global_y(pane)), std::memory_order_relaxed);
+            g_choice_x.store(clamp16(global_x(pane)), std::memory_order_relaxed);
             note(kPaneChoice2);  // (one stamp for both: the choice box)
             return;
         case kPaneCursor:
@@ -159,6 +166,12 @@ void play_context_pane(uint32_t pane) {
             note(s);
             return;
         }
+        case kPaneWind:
+            if (!pane_visible(pane)) return;
+            g_wind_x.store(clamp16(global_x(pane)), std::memory_order_relaxed);
+            g_wind_y.store(clamp16(global_y(pane)), std::memory_order_relaxed);
+            note(s);
+            return;
         case kPaneFinder: case kPaneAlbum:
             note(s);  // (the screen's frame: drawn while the screen is up)
             return;

@@ -67,6 +67,9 @@ int main() {
     assert(free_touch(o, 0.9f, false) == FreeSwipe);
     assert(free_touch(o, 0.1f, true) == FreeGame && free_touch(o, 0.9f, true) == FreeGame);  // view button, GamePad picture
     assert(free_touch(o, nan, false) == FreeGame);
+    // a talk claims the picture (P5), in either style; the game's own areas stay the game's
+    assert(free_touch(o, 0.2f, false, true) == FreeTalk && free_touch(classic, 0.8f, false, true) == FreeTalk);
+    assert(free_touch(o, 0.2f, true, true) == FreeGame && free_touch(classic, nan, false, true) == FreeGame);
     o.right = RightStick;
     assert(free_touch(o, 0.9f, false) == FreeRightStick && free_touch(o, 0.2f, false) == FreeLeftStick);
     // the game's own touch areas, as the renderer routes a primary-screen finger (game_touch); the CI

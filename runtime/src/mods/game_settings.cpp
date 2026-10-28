@@ -296,6 +296,28 @@ void register_controls() {
         it.set = [](float v) { change_mapping([v](M& m) { m.l_turns_page = v >= 0.5f; }); };
         add(std::move(it));
     }
+    {
+        Item it;
+        it.id = "controls.talk-touch", it.tab = "controls", it.kind = Kind::Toggle;
+#ifdef __ANDROID__
+        it.label = "Talks and shops by touch";
+        it.help = "Tap to go on, hold to go on by itself, tap an answer or a shop's item.";
+#else
+        it.label = "Talks and shops by mouse";
+        it.help = "Click to go on, hold to go on by itself, click an answer or a shop's item.";
+#endif
+        it.get = [] { return mods::touch_talk_on() ? 1.0f : 0.0f; };
+        it.set = [](float v) { mods::set_touch_talk_on(v >= 0.5f); };
+        add(std::move(it));
+    }
+    {
+        Item it;
+        it.id = "controls.pad-hold-a", it.tab = "controls", it.label = "Hold A to go on in talks", it.kind = Kind::Toggle;
+        it.help = "Keep A held and the text goes on by itself; every question waits for a new press.";
+        it.get = [] { return mods::pad_hold_a_on() ? 1.0f : 0.0f; };
+        it.set = [](float v) { mods::set_pad_hold_a_on(v >= 0.5f); };
+        add(std::move(it));
+    }
 #ifdef __ANDROID__
     {
         Item it;

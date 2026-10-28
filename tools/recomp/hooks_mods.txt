@@ -84,3 +84,5 @@
 023D6B30  # daPy_lk_c::jointBeforeCB: additive sprint pose, restored by the native jointAfterCB
 # Calm water (mods/story_world_calm.cpp): a mod island's calm_water zone feeds the sea's own flat factor
 0246B848  # daSea_packet_c::CalcFlatInterTarget: min with the mods' calm-water zones around the player
+# Shops by touch (controls plan P5; mods/touch_talk.cpp): the shop's item choice runs, r4 = its ShopItems_c
+025BB698  # dShop_now_triggercheck(stick, ShopItems_c*, msg*, cb, arg): notes the ShopItems_c (read only)
