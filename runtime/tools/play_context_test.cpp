@@ -117,10 +117,12 @@ static void play_gates() {
     assert(read_at(f, lock).has(kInPlay));
     // each of the game's own screens takes Link out of the player's hands
     for (GameUiSignals ui : {GameUiSignals{true, false, false}, GameUiSignals{false, true, false}, GameUiSignals{false, false, true}}) {
+        f.s8(G + kMesgStatus, ui.message ? 1 : 0);  // a talk's own message status
         const PlayContext c = read_at(f, lock, ui);
         assert(c.has(kInGame) && c.has(kLink) && !c.has(kInPlay));
         assert(c.has(kEvent) == ui.event && c.has(kMessage) == ui.message && c.has(kMenu) == ui.menu);
     }
+    f.s8(G + kMesgStatus, 0);
     f.s32(kOverlap, 0x10200000);
     assert(!read_at(f, lock).has(kInPlay) && read_at(f, lock).has(kFade));
     f.s32(kOverlap, 0);
@@ -148,6 +150,29 @@ static void play_gates() {
     p.msg_hw = 450;
     c = read_at(f, lock, {false, true, false}, p);
     assert(c.has(kKeyIcon) && c.has(kChoice) && c.has(kMsgWindow) && c.choice_count == 3 && c.cursor_y == -120 && c.msg_hw == 450);
+}
+
+static void shops_and_scopes() {
+    Fixture f = outset();
+    LockTracker lock;
+    // Beedle's item choice (live trace): a talk prompting A Choose / B Cancel, no choice box
+    f.s8(G + kMesgStatus, 14);
+    f.s8(G + kDoStatus, kActChoose);
+    f.s8(G + kAStatus, kActCancel);
+    PlayContext c = read_at(f, lock, {true, true, false});
+    assert(c.has(kShop) && !c.has(kInPlay));
+    // a yes / no choice box is a choice, not a shop
+    PaneSignals p;
+    p.flags = kChoice;
+    assert(!read_at(f, lock, {true, true, false}, p).has(kShop));
+    // no talk: no shop
+    assert(!read_at(f, lock, {false, false, false}).has(kShop));
+    // the Picto Box (live: scope message status 11, hud_gate says message): still in play
+    f.s8(G + kMesgStatus, 0);
+    f.s8(G + kScopeMesgStatus, 11);
+    f.s8(G + kDoStatus, kActTakePhoto);
+    c = read_at(f, lock, {false, true, false});
+    assert(c.has(kMessage) && c.has(kInPlay) && !c.has(kShop) && !talking(c));
 }
 
 static void lock_on_and_defeats() {
@@ -274,6 +299,7 @@ int main() {
     title_screen();
     actions_and_items();
     play_gates();
+    shops_and_scopes();
     lock_on_and_defeats();
     panes();
     pack_and_trace();

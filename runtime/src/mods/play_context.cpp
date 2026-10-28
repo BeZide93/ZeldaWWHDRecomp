@@ -19,6 +19,7 @@
 // Idea from the GreenNaugahyde Android fork (GreenNaugahyde/ZeldaWWHDRecompAndroid, MPL-2.0),
 // mods/touch_state.cpp and hud.cpp; reimplemented, offsets re-verified (play_context.h).
 #include "play_context.h"
+#include "context_buttons.h"
 
 #include <algorithm>
 #include <atomic>
@@ -153,7 +154,7 @@ void play_context_pane(uint32_t pane) {
             note(s);
             return;
         }
-        case kPaneFinder: case kPaneAlbum: case kPaneShop:
+        case kPaneFinder: case kPaneAlbum:
             note(s);  // (the screen's frame: drawn while the screen is up)
             return;
         default:
@@ -174,9 +175,10 @@ void play_context_step() {
         g_last = c;
     }
     if (log_level() && (!same_for_log(previous, c) || previous.step == 0)) {
-        char buf[512];
+        char buf[512], buttons[160];
         format(c, buf, sizeof buf);
-        LOG("[playctx] %s", buf);
+        ctxbtn::format(ctxbtn::context_buttons(c), buttons, sizeof buttons);  // what the context buttons would show
+        LOG("[playctx] %s buttons=[%s]", buf, buttons);
     }
 }
 

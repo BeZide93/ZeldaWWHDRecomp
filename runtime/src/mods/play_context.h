@@ -104,7 +104,7 @@ enum AttnType : uint8_t {
 enum Flag : uint32_t {
     kInGame = 1u << 0,       // a Quest Log is played (not the title screen or the file select)
     kLink = 1u << 1,         // Link is the controlled actor (play mpPlayer[0] is a valid daPy_lk_c)
-    kInPlay = 1u << 2,       // Link is under the player's control: in game, no event / message / menu / fade / stage change
+    kInPlay = 1u << 2,       // Link is under the player's control: in game, no event / talk / menu / fade / stage change
     kEvent = 1u << 3,        // dComIfGp_event_runCheck: a talk, a cutscene, a get-item scene...
     kMessage = 1u << 4,      // dComIfGp_getMesgStatus or the telescope's: a message box is open
     kMenu = 1u << 5,         // a game menu (hud_gate.cpp's reading: dMenu_flag, the in-game UI's menu states)
@@ -119,7 +119,7 @@ enum Flag : uint32_t {
     kAlbum = 1u << 14,       // the picto album (N_PictographAll_00): the Picto Box's or the game's chooser
     kWindCompass = 1u << 15, // the wind compass after the Wind's Requiem (P_WindDirectionBase_00)
     kZoomBar = 1u << 16,     // the Picto Box's or the telescope's zoom bar (N_Zoom_00); zoom_kind says which
-    kShop = 1u << 17,        // a shop's item choice (see play_context.cpp: how it is told)
+    kShop = 1u << 17,        // a shop's item choice: A Choose / B Cancel in a talk without a choice box
     kHasWindWaker = 1u << 18,  // the Wind Waker is in the inventory (d-pad up conducts)
     kHasSwiftSail = 1u << 19,  // the HD Swift Sail in place of the sail
 };
@@ -178,7 +178,8 @@ inline bool item_in_hand(const PlayContext& c) {
     return h < 0xFF && h != kItemWindWaker && h != kItemDekuLeaf;
 }
 // a talk or a scene's text is up
-inline bool talking(const PlayContext& c) { return c.has(kMessage) || c.has(kKeyIcon) || c.has(kMsgWindow); }
+// (the message status, not kMessage: that one also holds the telescope's / Picto Box's scope status)
+inline bool talking(const PlayContext& c) { return c.mesg_status != 0 || c.has(kKeyIcon) || c.has(kMsgWindow); }
 
 // ---- the layout panes the observer notes (nw::lyt::Pane names, as the game's layouts have them) ----
 enum PaneSignal : int {
@@ -192,7 +193,6 @@ enum PaneSignal : int {
     kPaneAlbum,      // N_PictographAll_00: the picto album
     kPaneWind,       // P_WindDirectionBase_00 of ControlWind_00: the wind compass
     kPaneZoom,       // N_Zoom_00: the Picto Box's (first child P_Bar_00) or telescope's (P_TelescopeBar_00) zoom bar
-    kPaneShop,       // a shop's item choice (see classify_pane)
     kPaneSignalCount,
     kPaneNone = kPaneSignalCount,
 };
@@ -233,7 +233,6 @@ inline uint32_t pane_signal_flag(PaneSignal s) {
         case kPaneAlbum: return kAlbum;
         case kPaneWind: return kWindCompass;
         case kPaneZoom: return kZoomBar;
-        case kPaneShop: return kShop;
         default: return 0;
     }
 }
@@ -251,7 +250,7 @@ inline uint32_t aged_pane_flags(const uint64_t (&seen)[kPaneSignalCount], uint64
 // ---- the reader ----
 // Mem: u8 / u16 / u32(addr) (big-endian guest reads) and object(addr, size) (the range is guest heap)
 struct PaneSignals {  // from the Pane::Draw observer (play_context.cpp), already aged
-    uint32_t flags = 0;  // kKeyIcon, kChoice, kNumberEntry, kMsgWindow, kPictoFinder, kAlbum, kWindCompass, kZoomBar, kShop
+    uint32_t flags = 0;  // kKeyIcon, kChoice, kNumberEntry, kMsgWindow, kPictoFinder, kAlbum, kWindCompass, kZoomBar
     uint8_t choice_count = 0, zoom_kind = 0;
     int16_t choice_y = 0, cursor_y = 0, msg_x = 0, msg_y = 0, msg_hw = 0, msg_hh = 0;
 };
@@ -412,7 +411,14 @@ PlayContext read(const Mem& m, const Addresses& a, const GameUiSignals& ui, cons
         }
     }
     lock.step(m, link, link_attention(m, link), c);
-    if (link && !(c.flags & (kEvent | kMessage | kMenu | kFade | kStageChange))) c.flags |= kInPlay;
+    // a shop's item choice: in a talk the game prompts A Choose / B Cancel without a choice box
+    // (Beedle's shop, seen live: mesg status 14 while the stick picks an item)
+    if ((c.flags & kEvent) && c.mesg_status && c.a_action == kActChoose && c.b_action == kActCancel &&
+        !(c.flags & (kChoice | kNumberEntry)))
+        c.flags |= kShop;
+    // in play: the telescope's and the Picto Box's own message status (mScopeMesgStatus, set while
+    // they are up) is no talk; hud_gate counts it as a message for its HUD fade only
+    if (link && !c.mesg_status && !(c.flags & (kEvent | kMenu | kFade | kStageChange))) c.flags |= kInPlay;
     return c;
 }
 

@@ -3,6 +3,7 @@
 #include "mods/context_buttons.h"
 
 #include <cassert>
+#include <cstring>
 #include <initializer_list>
 
 using namespace mods::playctx;
@@ -151,7 +152,8 @@ static void picto_box() {
     c.zr_action = kActPictoAim;  // ZR: to the album
     c.b_action = kActReturn;
     c.a_action = kActNone;
-    c.flags |= kPictoFinder | kZoomBar;
+    c.flags |= kPictoFinder | kZoomBar | kMessage;  // (hud_gate's message: the scope status, seen live 11)
+    c.scope_mesg_status = 11;
     c.zoom_kind = 1;
     Buttons b = context_buttons(c);
     // A takes the photo (the game's byte is empty there), B goes back, ZR the album; nothing else
@@ -207,15 +209,18 @@ static void talking_to_someone() {
 }
 
 static void in_a_shop() {
+    // Beedle's shop as traced live: the item choice prompts A Choose / B Cancel, message status 14
     PlayContext c = walking();
-    c.flags = kInGame | kLink | kEvent | kShop;
-    c.a_action = kActNone;
-    c.b_action = kActReturn;
+    c.flags = kInGame | kLink | kEvent | kMessage | kMsgWindow | kShop;
+    c.mesg_status = 14;
+    c.a_action = kActChoose;
+    c.b_action = kActCancel;
+    c.zr_action = kActNone;
     const Buttons b = context_buttons(c);
     // choosing an item: A takes it, B leaves the shop; no items, sword or menu
     only(b, {kA, kB});
     action(b, kA, kActChoose);
-    action(b, kB, kActReturn);
+    action(b, kB, kActCancel);
 }
 
 static void cutscenes_and_fades() {
@@ -248,6 +253,19 @@ static void wind_compass() {
     action(b, kB, kActReturn);
 }
 
+static void trace_format() {
+    char buf[160];
+    format(context_buttons(PlayContext{}), buf, sizeof buf);
+    assert(!strcmp(buf, "all"));
+    PlayContext c = walking();
+    c.a_action = kActLift;
+    format(context_buttons(c), buf, sizeof buf);
+    assert(!strcmp(buf, "A:04 B:35 X:i27 Y:i23 R:i20 ZR:0F ZL + R3 Up"));
+    c.flags = kInGame | kLink | kEvent | kKeyIcon;
+    format(context_buttons(c, {true, true}), buf, sizeof buf);
+    assert(!strcmp(buf, "ZR:ff tap"));
+}
+
 static void item_rules() {
     PlayContext c = walking();
     assert(item_usable(c, kItemBow) && !item_usable(c, kItemNone));
@@ -273,5 +291,6 @@ int main() {
     cutscenes_and_fades();
     wind_compass();
     item_rules();
+    trace_format();
     return 0;
 }

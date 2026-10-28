@@ -13,6 +13,7 @@
 // ControlsView.shown() / aAction() / usable(); reimplemented in C++ for our design.
 #pragma once
 #include <cstdint>
+#include <cstdio>
 
 #include "play_context.h"
 
@@ -156,6 +157,25 @@ inline Buttons context_buttons(const PlayContext& c, const Options& o = {}) {
     if (c.has(kHasWindWaker) && !water_or_wall) show(kDpadUp);  // the Wind Waker conducts
     if (in_ship(c)) show(kDpadLeftRight);
     return r;
+}
+
+// for traces and tests: "A:02 B:35 X:i35 ZL -ZR..." (shown buttons; i = item, ff = fast forward; "all" without the rules)
+inline int format(const Buttons& b, char* buf, int size) {
+    static const char* const kNames[kCount] = {"A", "B", "X", "Y", "R", "ZR", "ZL", "+", "R3", "Up", "LR"};
+    if (!b.active) return snprintf(buf, size, "all");
+    int k = 0;
+    buf[0] = 0;
+    for (int i = 0; i < kCount && k < size; i++) {
+        const ButtonView& v = b.b[i];
+        if (!v.shown) continue;
+        const char* sep = k ? " " : "";
+        if (v.kind == Kind::kAction) k += snprintf(buf + k, size - k, "%s%s:%02X", sep, kNames[i], v.label);
+        else if (v.kind == Kind::kItem) k += snprintf(buf + k, size - k, "%s%s:i%02X", sep, kNames[i], v.label);
+        else if (v.kind == Kind::kFastForward) k += snprintf(buf + k, size - k, "%s%s:ff", sep, kNames[i]);
+        else k += snprintf(buf + k, size - k, "%s%s", sep, kNames[i]);
+    }
+    if (b.tap_continues && k < size) k += snprintf(buf + k, size - k, "%stap", k ? " " : "");
+    return k;
 }
 
 }  // namespace mods::ctxbtn
