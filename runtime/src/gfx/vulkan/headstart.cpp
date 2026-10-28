@@ -231,6 +231,7 @@ int warm_headstart_shaders() {
     std::vector<std::shared_ptr<PipelineRecipe>> portable;
     size_t known = 0, speculative = 0, failed = 0, metalPipelines = 0, vulkanPipelines = 0, skippedPipelines = 0;
     uint64_t count = 0, rawBytes = 0;
+    size_t shaderRecords = 0;
     std::array<uint8_t, 12> header;
     for (;;) {
       const long recordAt = std::ftell(file.get());
@@ -265,6 +266,14 @@ int warm_headstart_shaders() {
       if (type == 4) { ++vulkanPipelines; continue; } // Owned startup worker validates/compiles these.
       const auto record = decode_headstart_shader_record(raw, type);
       const bool vertex = record.vertex;
+      // debug: WWHD_HEADSTART_MAP=file lists per shader record (in file order) the shader it translates to
+      // ("V <record> <vertex> <pipeline id or 0 when it failed> <variant key>"), for template distilling
+      static FILE* map = [] { const auto p = path_environment_utf8("WWHD_HEADSTART_MAP"); return p && !p->empty() ? open_utf8_file(*p, "w") : nullptr; }();
+      const size_t shaderRecord = shaderRecords++;
+      auto mapLine = [&](const vk::Shader* s) {
+        if (map) std::fprintf(map, "V %zu %u %016llx %016llx\n", shaderRecord, vertex ? 1u : 0u,
+            s && s->ready() ? (unsigned long long)s->pipelineId : 0ull, s ? (unsigned long long)vk::last_translated_variant_key() : 0ull);
+      };
       const uint32_t codeSize = record.program.size(), fetchSize = record.fetch.size();
       const uint32_t nregs = record.registers.size() / 8, vsSize = record.linkedVertex.size();
       regs.fill(0);
@@ -289,15 +298,15 @@ int warm_headstart_shaders() {
       }
       uint64_t fetchKey = 0;
       auto* fetch = vk::get_fetch_shader(regs.data(), &fetchKey);
-      if (vertex && !fetch) { ++failed; continue; }
+      if (vertex && !fetch) { ++failed; mapLine(nullptr); continue; }
       const vk::Shader* linkedVs = nullptr;
       if (type == 6) {
         regs[mmSQ_PGM_START_VS] = pool.copy(record.linkedVertex.data(), vsSize) >> 8;
         regs[mmSQ_PGM_START_VS + 1] = vsSize >> 3;
-        if (!fetch) { ++failed; continue; }
+        if (!fetch) { ++failed; mapLine(nullptr); continue; }
         try { linkedVs = vk::translate(regs.data(), true, fetch, fetchKey); }
         catch (const std::exception& error) { linkedVs = nullptr; note_translation_failure(error); }
-        if (!linkedVs || !linkedVs->ready()) { ++failed; continue; }
+        if (!linkedVs || !linkedVs->ready()) { ++failed; mapLine(nullptr); continue; }
       }
       // A shader the translator cannot compile (an exception from the SPIR-V compiler) is one failed record, as in
       // play; it no longer ends the whole preparation (seen with a speculative record: "'cubeMapArrayIndex0' :
@@ -309,6 +318,7 @@ int warm_headstart_shaders() {
       static FILE* keyDump = [] { const char* p = std::getenv("WWHD_VK_RECIPE_KEY_DUMP"); return p && *p ? std::fopen(p, "a") : nullptr; }();
       if (keyDump && shader && shader->ready())
         std::fprintf(keyDump, "S %u %016llx\n", vertex ? 1u : 0u, (unsigned long long)shader->pipelineId);
+      mapLine(shader);
       if (!shader || !shader->ready()) ++failed;
       else if (type == 1 || type == 6) ++known;
       else ++speculative;

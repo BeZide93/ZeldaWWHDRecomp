@@ -19,6 +19,10 @@ Usage:
                                                                  template T (default: the release's) -> a code-free
                                                                  template a mod package ships with its stages
                                                                  (docs/mod-stages.md, "Shaders")
+  shaderprep.py distill  OUT T --state-map F --map M [--map M2]   maintainers: one state per distinct translated
+                                                                 shader (idea after SwitchWakerHD's shader manifest);
+                                                                 F from build --state-map, M from --warm-shaders
+                                                                 with WWHD_HEADSTART_MAP (one per renderer)
   shaderprep.py build    [OUT] [--template T] [--max N]          head start from the game files + template
                          [--no-pipelines] [--jobs N]             (default OUT: game/shadercache/headstart.bin);
                          [--progress]                            --jobs: archive scan workers (default: a few);
@@ -988,6 +992,94 @@ def read_legacy_template(path):
     return states, pipelines
 
 
+# ---------------------------------------------------------------- distill
+def read_headstart_map(path):
+    """WWHD_HEADSTART_MAP lines -> {record: (backend, vertex, shared key, own wide key or None)}.
+    Metal: "M record vertex shared wide"; Vulkan: "V record vertex pipeline-id variant". Key 0: the record failed.
+    The last field is the key pipeline recipes name the shader by: Metal the state's wide key, Vulkan its variant key."""
+    out = {}
+    with open(path) as source:
+        for line in source:
+            f = line.split()
+            if len(f) < 4 or f[0] not in ("M", "V"):
+                raise ValueError("not a head-start map line: %r" % line[:80])
+            out[int(f[1])] = (f[0], int(f[2]), int(f[3], 16), int(f[4], 16) if len(f) > 4 else None)
+    return out
+
+
+def distill(states, pipelines, record_states, maps):
+    """One state per distinct translated shader (per renderer and stage), and the Metal pipeline recipes renamed to
+    the kept states' keys (several recipes then become one).
+    states/pipelines: the template's; record_states: build --state-map (template state per head-start shader
+    record); maps: read_headstart_map results, one per renderer. A state no record came from (its program is not in
+    the game files) cannot be prepared and is left out. Returns (states, pipelines, report)."""
+    keep, report = set(), collections.Counter()
+    # the keys recipes name shaders by (Metal: a state's wide key, Vulkan: its variant key) -> the kept state's
+    rename = {"M": {}, "V": {}}
+    for m in maps:
+        if len(m) != len(record_states):
+            raise ValueError("a map covers %d shader records, the build wrote %d" % (len(m), len(record_states)))
+        first = {}
+        for record in sorted(m):
+            backend, vertex, shared, wide = m[record]
+            if not shared:
+                report["failed records (kept)"] += 1
+                keep.add(record_states[record])  # cannot tell what it shares: keep it
+                continue
+            if (vertex, shared) not in first:
+                first[(vertex, shared)] = record
+                keep.add(record_states[record])
+            if wide:
+                rename[backend][(vertex, wide)] = m[first[(vertex, shared)]][3]
+        report["%s shaders" % ("Metal" if next(iter(m.values()))[0] == "M" else "Vulkan")] = len(first)
+    # recipes are renamed to the keys of the kept (first) state of each shader, which the replay of the
+    # distilled head start gives again
+    kept_states = [states[i] for i in sorted(keep)]
+    out_pipelines, seen = [], set()
+    for kind, p in pipelines:
+        metal = p["backend"] == "metal"
+        names = rename["M" if metal else "V"]
+        q = dict(p)
+        # Metal: vertex, pixel, fetch keys; Vulkan: vertex, pixel ids (the third word is not a shader)
+        q["shader_hashes"] = [names.get((stage == 0, h), h) if stage < 2 else h
+                              for stage, h in enumerate(p["shader_hashes"])]
+        report["%s recipes renamed" % ("Metal" if metal else "Vulkan")] += q["shader_hashes"] != p["shader_hashes"]
+        p = q
+        key = _canonical(p)
+        if key in seen:
+            report["pipelines merged"] += 1
+            continue
+        seen.add(key)
+        out_pipelines.append((kind, p))
+    report["states"] = len(kept_states)
+    report["states left out (program not in the game files)"] = len(states) - len(set(record_states))
+    report["pipelines"] = len(out_pipelines)
+    return kept_states, out_pipelines, report
+
+
+def cmd_distill(out, template, state_map, maps):
+    states, pipelines = read_template(template)
+    with open(state_map) as source:
+        record_states = [int(line) for line in source]
+    kept, kept_pipelines, report = distill(states, pipelines, record_states, [read_headstart_map(m) for m in maps])
+    builder = TemplateBuilder()
+    for s in kept:
+        builder.add_state(_codefree_state(*s))
+    for kind, p in kept_pipelines:
+        builder.add_pipeline(_codefree_pipeline(kind, p))
+    doc = builder.document()
+    try:
+        data = write_template(doc, out, guarded=True)
+    except ValueError as error:
+        print("Not written: %s" % error)
+        return 1
+    for name, n in sorted(report.items()):
+        print("  %s: %d" % (name, n))
+    print("distilled template: %d of %d states, %d of %d pipelines, %d bytes -> %s" %
+          (len(doc["states"]), len(states), len(doc["pipelines"]), len(pipelines), len(data), out))
+    return 0
+
+
 # ---------------------------------------------------------------- commands
 def cmd_scan(game):
     shaders = game_shaders(game)
@@ -1024,8 +1116,10 @@ def cmd_coverage(game, cache):
 SCAN_SHARE = 0.85
 
 
-def cmd_build(game, out, template, limit, with_pipelines=True, progress=None, jobs=1, threads=False):
-    """progress(done, total, detail): done/total in thousandths, monotonic over the whole build.
+def cmd_build(game, out, template, limit, with_pipelines=True, progress=None, jobs=1, threads=False, state_map=None):
+    """state_map: a file that gets, per shader record written (types 1 and 6, in file order), the index of the
+    template state it came from (distill, below).
+    progress(done, total, detail): done/total in thousandths, monotonic over the whole build.
     jobs > 1 scans archives and compresses records in parallel; the output is byte-identical.
     threads=True scans on threads instead of processes (embedded Python, e.g. Android)."""
     import threading
@@ -1061,8 +1155,9 @@ def cmd_build(game, out, template, limit, with_pipelines=True, progress=None, jo
             h = hashes[code] = prog_hash(code)
         return h
     by_hash = collections.defaultdict(list)
-    for h, vertex, fs, regs, linked in states:
-        by_hash[(h, bool(vertex))].append((fs, regs, linked))
+    for index, (h, vertex, fs, regs, linked) in enumerate(states):
+        by_hash[(h, bool(vertex))].append((fs, regs, linked, index))
+    record_states = []
     # speculative states: those recorded for programs with an identical shader register block
     # (none are written with --max 0, which setup uses: skip the states x blocks pass then)
     by_family = collections.defaultdict(list)
@@ -1083,7 +1178,7 @@ def cmd_build(game, out, template, limit, with_pipelines=True, progress=None, jo
     def records():
         for (typ, code), (w, path) in shaders.items():
             vertex = typ == VS
-            for fs, regs, linked in by_hash.get((program_hash(code), vertex), []):
+            for fs, regs, linked, index in by_hash.get((program_hash(code), vertex), []):
                 r = dict(regs)
                 r[pgm[vertex] + 1] = len(code) >> 3  # the loader supplies the program address
                 if linked is not None:
@@ -1093,8 +1188,10 @@ def cmd_build(game, out, template, limit, with_pipelines=True, progress=None, jo
                         continue
                     companion=next(iter(matches))
                     r[mmSQ_PGM_START_VS+1]=len(companion)>>3
+                    record_states.append(index)
                     yield 6, linked_shader_record(code,template_format.fetch_payload(linked['fetch']),companion,sorted(r.items()))
                 else:
+                    record_states.append(index)
                     yield REC_SHADER, shader_record(1 if vertex else 0, code, template_format.fetch_payload(fs) if fs else b"", sorted(r.items()))
                 counts["known"] += 1
         for kind, p in pipelines:
@@ -1140,6 +1237,9 @@ def cmd_build(game, out, template, limit, with_pipelines=True, progress=None, jo
                 if written % 256 == 0:
                     wrote(written)
     report(1.0, "%s shader records" % format(written, ","))
+    if state_map:
+        with open(state_map, "w") as f:
+            f.write("".join("%d\n" % i for i in record_states))
     print("unresolved linked shader states: %d" % counts["unresolved_linked"])
     print("archive shaders %d; known records %d; pipeline records %d; speculative records %d -> %s (%d bytes)" %
           (len(shaders), counts["known"], len(pipelines), counts["spec"], out, os.path.getsize(out)))
@@ -1148,7 +1248,7 @@ def cmd_build(game, out, template, limit, with_pipelines=True, progress=None, jo
 def main():
     args = sys.argv[1:]
     opts = {"--game": os.path.join(ROOT, "game", "content"), "--max": "2", "--template": TEMPLATE, "--merge": None, "--from": None, "--base": None,
-            "--jobs": str(default_jobs())}
+            "--jobs": str(default_jobs()), "--state-map": None}
     no_pipelines = "--no-pipelines" in args
     if no_pipelines:
         args.remove("--no-pipelines")
@@ -1180,6 +1280,15 @@ def main():
         if len(args) < 3:
             sys.exit("usage: shaderprep.py merge OUT TEMPLATE1 [TEMPLATE2 ...]")
         sys.exit(cmd_merge(args[1], args[2:]))
+    elif cmd == "distill":
+        maps = []
+        while "--map" in args:
+            i = args.index("--map")
+            maps.append(args[i + 1])
+            del args[i:i + 2]
+        if len(args) < 3 or not opts["--state-map"] or not maps:
+            sys.exit("usage: shaderprep.py distill OUT TEMPLATE --state-map F --map M [--map M2 ...]")
+        sys.exit(cmd_distill(args[1], args[2], opts["--state-map"], maps))
     elif cmd == "build":
         out = args[1] if len(args) > 1 else os.path.join(ROOT, "game", "shadercache", "headstart.bin")
         def progress(done, total, detail):
@@ -1191,7 +1300,7 @@ def main():
             print("WWHD-PROGRESS %d %d %s" % (done, total, detail), flush=True)
         progress.last = 0.0
         cmd_build(game, out, opts["--template"], int(opts["--max"]), not no_pipelines,
-                  progress if machine_progress else None, max(1, int(opts["--jobs"])))
+                  progress if machine_progress else None, max(1, int(opts["--jobs"])), state_map=opts["--state-map"])
     else:
         print(__doc__)
 
