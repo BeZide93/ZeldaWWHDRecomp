@@ -222,8 +222,11 @@ public:
         out.push_back(text(kWinX + 56, kWinY + 30, 42, kInk, bold("Settings")));
         // tabs (the game's tab plates)
         float tx = kWinX + kWinW - 56;
+        // the tabs right of the title: as wide as their names (at least 110), narrower when many
+        const float room = kWinW - 112 - width(bold("Settings"), 42) - 24;
+        const float most = tab_labels.empty() ? room : room / float(tab_labels.size()) - 10;
         for (int i = int(tab_labels.size()) - 1; i >= 0; i--) {
-            const float w = std::max(150.0f, width(bold(tab_labels[i]), 26) + 48);
+            const float w = std::min(most, std::max(110.0f, width(bold(tab_labels[i]), 26) + 40));
             tx -= w;
             const bool on = i == tab_;
             out.push_back(box(on ? "nb:tab-on" : "nb:tab", tx, kWinY + 30, w, 50));

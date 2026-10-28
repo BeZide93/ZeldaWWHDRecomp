@@ -5,6 +5,8 @@
 #include <cmath>
 #include <cstdio>
 #include <map>
+#include <atomic>
+#include <memory>
 #include <mutex>
 
 #include "input_map.h"
@@ -18,8 +20,11 @@
 #include "../gfx/display_modes.h"
 #endif
 #include "../overlay/hostui.h"
+#include "runtime.h"
 
 namespace game_settings {
+namespace packages = mods::packages;
+namespace json = mods::json;
 namespace {
 
 std::mutex g_mu;
@@ -104,7 +109,8 @@ void add(Item item) {
     std::lock_guard lock(g_mu);
     for (Item& it : registry())
         if (it.id == item.id) { it = std::move(item); return; }
-    registry().reserve(64);  // the page keeps pointers between frames: no reallocation in play (prototype)
+    if (registry().capacity() < 256) registry().reserve(256);  // the page keeps pointers between frames: no reallocation
+    if (registry().size() >= 256) return;
     registry().push_back(std::move(item));
 }
 
@@ -130,7 +136,8 @@ std::string value_text(const Item& item) {
     case Kind::Number:
         if (item.format) return item.format(v);
         char b[32];
-        std::snprintf(b, sizeof b, "%.2f", v);
+        const bool whole = item.step >= 1 && std::fabs(item.step - std::round(item.step)) < 1e-4f && std::fabs(item.min - std::round(item.min)) < 1e-4f;
+        std::snprintf(b, sizeof b, whole ? "%.0f" : "%.2f", v);
         return b;
     }
     return "";
@@ -331,6 +338,50 @@ void register_game() {
         add(builtin_toggle("game", id, e->name, e->description));
     }
 }
+// The options of the enabled mods that ask for the item menu ("menu": true, packages.h Option): the Mods
+// tab, grouped by mod and section. Values are the manager's (packages::configure saves them in the profile,
+// as the Mods tab does); the mod reads them with wwhd_config_*.
+void register_mod_options() {
+    std::vector<packages::View> views = packages::list();
+    for (const packages::View& v : views) {
+        if (!v.enabled) continue;
+        std::vector<const packages::Option*> shown;
+        for (const packages::Option& o : v.options)
+            if (o.menu && (o.type == "bool" || o.type == "enum" || o.type == "number")) shown.push_back(&o);
+        std::stable_sort(shown.begin(), shown.end(), [](const packages::Option* a, const packages::Option* b) { return a->section < b->section; });
+        for (const packages::Option* o : shown) {
+            Item it;
+            it.id = "mod." + v.id + "." + o->id, it.tab = "mods", it.owner = v.id;
+            it.label = o->name.empty() ? o->id : o->name;
+            it.help = (o->section.empty() ? v.name : v.name + " / " + o->section) + (o->description.empty() ? "" : ": " + o->description) +
+                      (o->live ? "" : " (applies at the next start)");
+            const std::string mod = v.id, option = o->id, type = o->type;
+            const std::vector<std::string> choices = o->choices;
+            // the value as the manager has it now (kept here: list() is too heavy for every frame)
+            auto value = std::make_shared<std::atomic<float>>(0.0f);
+            const json::Value& cur = o->value;
+            if (type == "bool") it.kind = Kind::Toggle, value->store(cur.type == json::Value::Bool && cur.boolean ? 1.0f : 0.0f);
+            else if (type == "enum") {
+                it.kind = Kind::Choice, it.choices = choices;
+                const auto at = std::find(choices.begin(), choices.end(), cur.type == json::Value::String ? cur.text : std::string());
+                value->store(at == choices.end() ? 0.0f : float(at - choices.begin()));
+            } else {
+                it.kind = Kind::Number, it.min = float(o->minimum), it.max = float(o->maximum), it.step = float(o->step);
+                value->store(cur.type == json::Value::Number ? float(cur.number) : it.min);
+            }
+            it.get = [value] { return value->load(); };
+            it.set = [value, mod, option, type, choices](float v) {
+                json::Value j = type == "bool" ? json::Value(v >= 0.5f)
+                              : type == "enum" ? json::Value(choices[size_t(std::clamp(int(std::lround(v)), 0, int(choices.size()) - 1))])
+                                               : json::Value(double(v));
+                std::string error;
+                if (packages::configure(mod, option, j, error)) value->store(v);
+                else LOG("[game-settings] %s.%s not changed: %s", mod.c_str(), option.c_str(), error.c_str());
+            };
+            add(std::move(it));
+        }
+    }
+}
 }  // namespace
 
 void register_builtin() {
@@ -388,6 +439,7 @@ void register_builtin() {
     register_touch();
 #endif
     register_game();
+    register_mod_options();
 }
 
 }  // namespace game_settings
