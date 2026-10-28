@@ -65,6 +65,7 @@ struct Input {
     bool touch = false;
     float x = 0, y = 0;    // page coordinates
     float dt = 0;          // seconds since the last input
+    bool cursor_left = false;  // the game's cursor is in the items page's left column (Left from there opens the page)
 };
 
 enum class Sound : uint8_t { None, Cursor, Change, Decide, Cancel, Tab, Open, Close, Blocked };
@@ -104,13 +105,34 @@ public:
     void hide() { open_ = false; }
 
     // The closed page's input: true when it should open (the entry arrow tapped, or ZL)
+    // How the closed page opens: ZL; Left (the cross or the stick) while the game's cursor is in the left
+    // column; a tap on the entry arrow; or a swipe that starts on the arrow and pulls the page in (it
+    // follows the finger; let go past a quarter of the screen, or flicked, it opens, else it slides back).
     bool entry(const Input& in) {
-        const uint32_t pressed = in.buttons & ~prev_;
-        prev_ = in.buttons;
+        uint32_t buttons = in.buttons;
+        if (in.lx < -0.5f) buttons |= kPadLeft;  // the stick as the cross
+        const uint32_t pressed = buttons & ~prev_;
+        prev_ = buttons;
+        const bool was_touch = touch_;
         bool tap = false;
         track_touch(in, tap);
-        return (pressed & kPadZL) || (tap && on_arrow(down_x_, down_y_, true) && on_arrow(in_x_, in_y_, true));
+        if (in.touch && !was_touch) swipe_ = on_arrow(in.x, in.y, true), swipe_dx_ = 0, swipe_v_ = 0;
+        if (swipe_ && in.touch) {
+            const float dx = std::max(0.0f, in.x - down_x_);
+            if (in.dt > 0) swipe_v_ = (dx - swipe_dx_) / in.dt;
+            swipe_dx_ = dx;
+            slide_ = std::clamp(dx / (kWinX + kWinW + 100), 0.0f, 1.0f);  // the page follows the finger
+            return false;
+        }
+        if (swipe_ && !in.touch) {  // let go
+            swipe_ = false;
+            if (swipe_dx_ > 320 || (swipe_v_ > 1500 && swipe_dx_ > 40)) return true;
+            if (tap && on_arrow(in_x_, in_y_, true)) return true;
+            return false;  // (the page slides back: shown() until it is out)
+        }
+        return (pressed & kPadZL) || ((pressed & kPadLeft) && in.cursor_left);
     }
+    bool swiping() const { return swipe_; }
 
     Action input(const Input& in, const std::vector<Row>& rows, int tabs) {
         Action act;
@@ -256,7 +278,8 @@ private:
     unsigned top_ = 0;
     uint32_t prev_ = 0, held_ = 0, dirs_ = 0;
     float repeat_ = 0, time_ = 0, slide_ = 0, glide_ = 1, glide_from_ = 0, bump_ = 1, turn_ = 1;
-    bool touch_ = false;
+    bool touch_ = false, swipe_ = false;
+    float swipe_dx_ = 0, swipe_v_ = 0;
     float down_x_ = 0, down_y_ = 0, in_x_ = 0, in_y_ = 0;
 
     Action& close(Action& act) {

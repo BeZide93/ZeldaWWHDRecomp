@@ -35,8 +35,34 @@ int main() {
     assert(t.entry(touch(false, kEntryX, kArrowYc)));
     Page d;
     assert(!d.entry(touch(true, kEntryX, kArrowYc)));
-    assert(!d.entry(touch(true, kEntryX + 200, kArrowYc)));
-    assert(!d.entry(touch(false, kEntryX + 200, kArrowYc)));  // a drag is not a tap
+    assert(!d.entry(touch(true, kEntryX, kArrowYc + 200)));
+    assert(!d.entry(touch(false, kEntryX, kArrowYc + 200)));  // a drag (not to the right) is not a tap
+    // Left opens only from the game's left column
+    Page lc;
+    Input left = pad(kPadLeft);
+    assert(!lc.entry(left));
+    lc.entry(pad(0));
+    left.cursor_left = true;
+    assert(lc.entry(left));
+    Page st;
+    Input stick = pad(0);
+    stick.lx = -1, stick.cursor_left = true;
+    assert(st.entry(stick));
+    // a swipe from the arrow: the page follows; far enough it opens, a short one slides back
+    Page sw;
+    assert(!sw.entry(touch(true, kEntryX, kArrowYc)));
+    assert(!sw.entry(touch(true, kEntryX + 200, kArrowYc)) && sw.swiping() && sw.shown());
+    assert(!sw.entry(touch(true, kEntryX + 400, kArrowYc)));
+    assert(sw.entry(touch(false, kEntryX + 400, kArrowYc)));
+    Page sb;
+    sb.entry(touch(true, kEntryX, kArrowYc));
+    Input slow = touch(true, kEntryX + 100, kArrowYc);
+    slow.dt = 1;  // (slow: no flick)
+    sb.entry(slow);
+    Input up = touch(false, kEntryX + 100, kArrowYc);
+    assert(!sb.entry(up) && sb.shown());
+    for (int i = 0; i < 20; i++) sb.tick(1.0f / 30);
+    assert(!sb.shown());
     // open: the opening button acts only after its release
     q.show(1);
     for (int i = 0; i < 10; i++) q.tick(1.0f / 30);  // slid in

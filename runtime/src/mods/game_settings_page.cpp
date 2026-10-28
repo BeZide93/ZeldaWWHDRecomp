@@ -47,6 +47,10 @@ const uint32_t kStateMenu = GD(0x1049ECB0);      // l_ingameMenuState (::StateID
 const uint32_t kPlay = GD(0x1046F0B0);           // g_dComIfG_gameInfo.play
 constexpr uint32_t kUiCurrentState = 0x18, kUiPendingState = 0x14, kUiItemScreen = 0x17C, kMenuWindowMode = 0x54;
 constexpr uint32_t kPlayEventRun = 0x5292;
+const uint32_t kCursorMgr = GD(0x101F5A44);      // sCursorMgrInstance (hdCursorMgr_c*)
+// the items page's left column: ITEMS (-462), Save and Options (-397), the bottom left place (about
+// -380); the next column starts at about -154
+constexpr float kLeftColumnX = -300;
 
 bool trace() {
     static const bool on = getenv("WWHD_GAME_SETTINGS_TRACE") != nullptr;
@@ -57,7 +61,13 @@ bool object(uint32_t p, uint32_t size) { return (p & 3) == 0 && p >= mem::kMem2S
 struct Menu {
     uint32_t ui = 0, descriptor = 0, items = 0, window = ~0u;
     uint32_t selection_mode = ~0u, selected = ~0u;  // hdMenuMain_c::mSelectionMode (+0x50), mSelectedChild (+0x58)
-    float offset = 0;                                // hdMenuMain_c::mWindowOffset (+0x5C): the pages' slide
+    float offset = 0;                                // hdMenuMain_c::mWindowOffset (+0x5C) (research trace)
+    // the items page, standing still: its content (N_All_00) at 0 and the game's right page arrow in its
+    // place on the screen (the second page: -1280 and the arrow out at the right edge)
+    bool still = false;
+    float arrow_x = 0;    // the game's right arrow (L_MenuArrowR_00), layout units
+    float cursor_x = 0;   // the game's menu cursor (hdCursorMgr_c's active cursor screen), layout units
+    bool cursor = false;
     bool items_page = false;  // the + menu stands still with no bag window
 };
 Menu read_menu() {
@@ -71,6 +81,19 @@ Menu read_menu() {
     if (object(m.items, 0x64))
         m.selection_mode = ld32(m.items + 0x50), m.selected = ld32(m.items + 0x58), m.offset = u32_as_f32(ld32(m.items + 0x5C));
     m.items_page = m.descriptor == kStateMenu && m.window >= 3 && m.window != ~0u;
+    if (m.items_page) {
+        const uint32_t root = game_look::layout_root(m.items);
+        const uint32_t all = game_look::find_pane(root, "N_All_00"), arrow = game_look::find_pane(root, "L_MenuArrowR_00");
+        if (all && arrow) {
+            const float page_x = u32_as_f32(ld32(all + 0x1C));
+            m.arrow_x = u32_as_f32(ld32(arrow + 0x1C));
+            m.still = page_x == 0.0f && m.arrow_x > 0 && m.arrow_x < 640 - 40;  // (out: 686)
+        }
+        const uint32_t mgr = ld32(kCursorMgr);  // sCursorMgrInstance (hd_cursor_mgr.cpp)
+        const uint32_t active = object(mgr, 0x20) ? ld32(mgr + 0x18) : ~0u;
+        const uint32_t cursor = active < 2 ? ld32(mgr + 0x10 + 4 * active) : 0, croot = game_look::layout_root(cursor);
+        if (croot) m.cursor = true, m.cursor_x = u32_as_f32(ld32(croot + 0x1C));
+    }
     return m;
 }
 
@@ -325,6 +348,22 @@ void pad(input::PadState& p, Cpu* c) {
         if (m.items_page && (m.selected != last_selected || m.selection_mode != last_mode || m.offset != last_offset))
             LOG("[game-settings] item screen: selection mode %u, selected child %d, page offset %.1f", m.selection_mode, int(m.selected), m.offset);
         last_selected = m.selected, last_mode = m.selection_mode, last_offset = m.offset;
+        if (m.items_page && getenv("WWHD_GAME_SETTINGS_CURSOR_TRACE")) {  // research: the game's cursor and the pages
+            const uint32_t mgr = ld32(GD(0x101F5A44));
+            const uint32_t active = object(mgr, 0x20) ? ld32(mgr + 0x18) : 0, cur = object(mgr, 0x20) && active < 2 ? ld32(mgr + 0x10 + 4 * active) : 0;
+            const uint32_t wp = object(cur, 0x54) ? ld32(cur + 0x50) : 0, croot = game_look::layout_root(cur);
+            auto f = [](uint32_t a) { return game_look::guest_pointer(a) ? u32_as_f32(ld32(a)) : 0.0f; };
+            const uint32_t root = game_look::layout_root(m.items);
+            const uint32_t al = game_look::find_pane(root, "L_MenuArrowL_00"), ar = game_look::find_pane(root, "L_MenuArrowR_00");
+            const uint32_t n0 = game_look::find_pane(root, "N_All_00"), n1 = game_look::find_pane(root, "N_All_01");
+            char line[400];
+            snprintf(line, sizeof line, "cursor %d root (%.0f,%.0f) win (%.0f,%.0f %.0fx%.0f) | arrowL f%02X a%u/%u (%.0f) arrowR f%02X a%u/%u (%.0f) | N_All_00 %.0f N_All_01 %.0f",
+                     int(active), f(croot + 0x1C), f(croot + 0x20), f(wp + 0x1C), f(wp + 0x20), f(wp + 0x3C), f(wp + 0x40), al ? ld8(al + 0x44) : 0,
+                     al ? ld8(al + 0x45) : 0, al ? ld8(al + 0x46) : 0, f(al + 0x1C), ar ? ld8(ar + 0x44) : 0, ar ? ld8(ar + 0x45) : 0, ar ? ld8(ar + 0x46) : 0,
+                     f(ar + 0x1C), f(n0 + 0x1C), f(n1 + 0x1C));
+            static std::string last;
+            if (last != line) LOG("[game-settings] %s", line), last = line;
+        }
     }
     const bool other_page = story_notebook::page_open();
     const std::vector<std::string> tabs = game_settings::tabs();
@@ -339,7 +378,41 @@ void pad(input::PadState& p, Cpu* c) {
             g_swallow.store(s & p.buttons, std::memory_order_relaxed);
             p.buttons &= ~s;
         }
-        if (g_page.shown()) {  // sliding out
+        const bool eligible = m.items_page && m.still && !other_page && !tabs.empty();
+        if (eligible) {
+            load_art(m.items);
+            read_arrow_place(m.items);
+            g_page.game_arrow = {g_arrow.x, g_arrow.y, g_arrow.w, g_arrow.h};
+            if (story_notebook::game_ui().prompts) g_look.prompts = story_notebook::game_ui().prompts();
+            if (static bool dumped = false; !dumped && getenv("WWHD_GAME_SETTINGS_PANES") && story_notebook::game_ui().dump) {
+                dumped = true;  // research aid: the item screen's panes and textures, in the log
+                story_notebook::game_ui().dump(c, m.items, "");
+                for (uint32_t o = 0x100; o < 0x248; o += 4) {  // the in-game UI's other screens with a layout
+                    const uint32_t s = ld32(m.ui + o), lay = object(s, 0x48) ? ld32(s + 0x44) : 0, lyt = object(lay, 8) ? ld32(lay + 4) : 0;
+                    const uint32_t root = object(lyt, 0x10) ? ld32(lyt + 0xC) : 0;
+                    if (!object(root, 0x100) || s == m.items) continue;
+                    LOG("[notebook-panes] ---- sIngameUi+%X: screen %08X", o, s);
+                    story_notebook::game_ui().dump(c, s, "");
+                }
+            }
+        }
+        in.cursor_left = m.cursor && m.cursor_x < kLeftColumnX;
+        Input watched = in;
+        if (!eligible) watched.touch = false;  // (the buttons are followed: a ZL held into the menu does not open it)
+        const bool on_arrow_touch = eligible && p.touch && g_page.on_arrow(in.x, in.y, true);
+        if (g_page.entry(watched) && eligible) {
+            g_page.show(int(tabs.size()));
+            g_has_controller.store(true, std::memory_order_relaxed);
+            LOG("[game-settings] page opened (%s)", (p.buttons & kPadZL) ? "ZL" : (in.buttons & kPadLeft) || in.lx < -0.5f ? "Left from the left column"
+                                                                                                            : "the arrow");
+            play(c, Sound::Open);
+            shot_after(20);
+            g_swallow.store(0, std::memory_order_relaxed);
+            hide_game_pieces(m, true);
+            p = input::PadState{};
+            return;
+        }
+        if (g_page.shown() && (eligible || g_page.swiping() || m.items_page)) {  // sliding out, or following a swipe
             if (m.items_page) hide_game_pieces(m, true);
             const std::string tab = tabs.empty() ? "" : tabs[size_t(std::min<int>(g_page.tab(), int(tabs.size()) - 1))];
             publish(g_page.draw(rows_of(tab), labels), c);
@@ -348,39 +421,14 @@ void pad(input::PadState& p, Cpu* c) {
         }
         g_has_controller.store(false, std::memory_order_relaxed);
         hide_game_pieces(m, false);
-        if (!m.items_page || other_page || tabs.empty()) {
-            g_page.entry(in);  // (follows the buttons: a ZL held into the menu does not open it)
+        if (!eligible) {
             publish({}, c);
             return;
         }
-        load_art(m.items);
-        read_arrow_place(m.items);
-        g_page.game_arrow = {g_arrow.x, g_arrow.y, g_arrow.w, g_arrow.h};
-        if (static bool dumped = false; !dumped && getenv("WWHD_GAME_SETTINGS_PANES") && story_notebook::game_ui().dump) {
-            dumped = true;  // research aid: the item screen's panes and textures, in the log
-            story_notebook::game_ui().dump(c, m.items, "");
-            for (uint32_t o = 0x100; o < 0x248; o += 4) {  // the in-game UI's other screens with a layout
-                const uint32_t s = ld32(m.ui + o), lay = object(s, 0x48) ? ld32(s + 0x44) : 0, lyt = object(lay, 8) ? ld32(lay + 4) : 0;
-                const uint32_t root = object(lyt, 0x10) ? ld32(lyt + 0xC) : 0;
-                if (!object(root, 0x100) || s == m.items) continue;
-                LOG("[notebook-panes] ---- sIngameUi+%X: screen %08X", o, s);
-                story_notebook::game_ui().dump(c, s, "");
-            }
-        }
-        if (story_notebook::game_ui().prompts) g_look.prompts = story_notebook::game_ui().prompts();
-        if (g_page.entry(in)) {
-            g_page.show(int(tabs.size()));
-            g_has_controller.store(true, std::memory_order_relaxed);
-            LOG("[game-settings] page opened (%s)", (p.buttons & kPadZL) ? "ZL" : "the arrow");
-            play(c, Sound::Open);
-            shot_after(20);
-            g_swallow.store(0, std::memory_order_relaxed);
-            p = input::PadState{};
-        } else {
-            static bool shown_once = false;
-            if (!shown_once) shown_once = true, shot_after(20);
-            publish(g_page.draw_entry(), c);
-        }
+        if (on_arrow_touch) p.touch = false;  // a touch on our arrow is ours (a tap or the start of a swipe)
+        static bool shown_once = false;
+        if (!shown_once) shown_once = true, shot_after(20);
+        publish(g_page.draw_entry(), c);
         return;
     }
     // open: the page has the controller
