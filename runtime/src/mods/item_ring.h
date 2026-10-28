@@ -432,8 +432,8 @@ inline const char* item_name(uint8_t item) {
         case 0x31: return "Bombs";
         case 0x33: return "Skull Hammer";
         case 0x34: return "Deku Leaf";
-        case 0x35: return "Fire & Ice Arrows";
-        case 0x36: return "Light Arrows";
+        case 0x35: return "Bow (Fire & Ice)";
+        case 0x36: return "Bow (Light)";
         case 0x45: return "Skull Necklace";
         case 0x46: return "Boko Baba Seed";
         case 0x47: return "Golden Feather";
