@@ -107,6 +107,32 @@ R3) becomes the Jump input once. Saving writes `"version": 2` with `controllers`
 own buttons by `guid` and `name`), `controller_setup_declined`, and `l_turns_gamepad_page` (only
 when on).
 
+## The item ring
+
+Hold **X**, **Y** or **R** while you play and a ring of your items opens. Tilt the left stick towards an
+item (on a touch screen: slide the finger) and let go of the button: the item goes on that button, as
+in the game's item screen. An item already on another button swaps places with the old one.
+
+- **Bags** (spoils, bait, delivery) are not put on a button: rest on one for a moment and it opens as a
+  ring of its contents; rest on the arrow to go back.
+- The **Wind Waker** makes Link conduct at once (the game's d-pad up); it doesn't take the button.
+- On the **boat** the ring also has the cannon (with bombs) and the salvage arm (with the grappling
+  hook).
+- The **empty** entry (a struck-through circle) leaves the button empty.
+- Let go without pointing anywhere and nothing changes.
+- A short press still uses the item, a moment (0.2 s) later, when you let go. While Link aims or uses
+  an item (bow, hookshot, boomerang, telescope, Picto Box, Deku Leaf, conducting, the sail), and outside
+  play, the buttons work at once and the ring doesn't open.
+
+Controls → **Item ring**: **Touch only** (default: the on-screen X, Y and R), **Touch and controllers**,
+or **Off**. It is off for controllers by default because of that short wait on every press.
+
+**While the ring is open** the game runs on, runs in **slow motion** (default: a third of its speed) or
+is **paused** (the game's own short pause, as when a strong hit lands; the music plays on).
+
+**Item button names**: X Y R, A1 A2 A3, or **Automatic** (default: A1, A2, A3 while you play by touch).
+The ring shows them; the game's own HUD keeps its letters for now.
+
 ## Controllers while the game isn't focused
 
 Controls → **Controller input when the game isn't focused** keeps your controllers playing the game

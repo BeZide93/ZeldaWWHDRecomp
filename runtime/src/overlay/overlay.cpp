@@ -2231,6 +2231,38 @@ void jump_row(const input_map::Mapping& m) {
     }
 }
 
+// The item ring (mods/item_ring.h): hold X, Y or R to pick an item. One switch (on for touch by default,
+// off for controllers: it holds a tap back for a moment), the game's pace while it is open, and the item
+// buttons' names. Each applies at once.
+void item_ring_rows() {
+    ImGui::PushID("itemring");
+    auto row = [](const char* title, int cur, std::initializer_list<const char*> labels, void (*set)(int)) {
+        ImGui::AlignTextToFramePadding();
+        ImGui::TextUnformatted(title);
+        int i = 0;
+        for (const char* l : labels) {
+            flow::next(flow::check(l));
+            if (radio(l, cur == i)) hostui::post([set, i] { set(i); });
+            i++;
+        }
+    };
+    row("Item ring", mods::item_ring_mode(), {"Off", "Touch only", "Touch and controllers"}, mods::set_item_ring_mode);
+    help("Hold X, Y or R in play: a ring of your items opens. Tilt the left stick (or slide the finger) to an "
+         "item and let go: it goes on that button. Bags open as rings of their contents, the Wind Waker "
+         "conducts at once, on the boat the ring has the cannon and the salvage arm, and the empty entry "
+         "leaves the button empty. A short press still uses the item, a moment (0.2 s) later. Touch only "
+         "(default): with a controller the buttons stay as in the game.");
+    ImGui::BeginDisabled(mods::item_ring_mode() == 0);
+    row("While the ring is open", mods::item_ring_pace(), {"Normal", "Slow motion", "Paused"}, mods::set_item_ring_pace);
+    help("What the game does while you pick: runs on, runs at a third of its speed (default), or stands still "
+         "(the game's own pause, as when a strong hit lands).");
+    ImGui::EndDisabled();
+    row("Item button names", mods::item_button_names(), {"X Y R", "A1 A2 A3", "Automatic"}, mods::set_item_button_names);
+    help("How the item ring names the item buttons. Automatic (default): A1, A2, A3 while you play by touch, "
+         "else X, Y, R as in the game.");
+    ImGui::PopID();
+}
+
 void tab_controls() {
     bool v;
     // a grey note after a row's choices: on the same line when it fits (flow_layout.h)
@@ -2278,6 +2310,7 @@ void tab_controls() {
     help("For a second screen, streaming or remote play. Keyboard and mouse still only work while the "
          "game is focused.");
 #endif
+    item_ring_rows();
     // face-button preset (issue #78): which host face buttons drive A/B/X/Y
     const input_map::FaceLayout fl = input_map::face_layout(m);
     ImGui::AlignTextToFramePadding();

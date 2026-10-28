@@ -128,6 +128,23 @@ void jump_reset();                                  // game thread after a state
 // on-screen Jump / Moon jump buttons show (input::kVirt* bits)
 void pad_play_rules(input::PadState& p);
 uint32_t jump_touch_buttons();
+// ---- the item ring (item_ring.cpp; rules in item_ring.h) ----
+// the active controller's pad read (VPADRead, or KPADReadEx in Pro Controller mode), after the play rules:
+// X / Y / R held back or opening the ring; `repeat`: true 60's repeated buttons (only the stick is kept)
+void item_ring_pad(input::PadState& p, bool repeat);
+// frame boundary (interp.cpp, every pass): the equip, the pace, the ring drawn. `full`: a full logic step
+// follows; `half60`: true 60's half pass (Link's 60 Hz half step) follows
+void item_ring_service(Cpu* c, bool full, bool half60);
+void item_ring_reset();          // a state load
+bool item_ring_open();
+void item_ring_finger(int button, bool down, float dx, float dy);  // Android: the finger on X / Y / R
+int item_ring_mode();            // item_ring::Mode: 0 off, 1 touch only (default), 2 touch and controllers
+void set_item_ring_mode(int mode);
+int item_ring_pace();            // item_ring::Pace: 0 normal, 1 slow motion (default), 2 paused
+void set_item_ring_pace(int pace);
+int item_button_names();         // item_ring::Names: 0 X Y R, 1 A1 A2 A3, 2 auto (default)
+void set_item_button_names(int names);
+const char* item_button_name(int button);  // as the names are now: "X" or "A1" ...
 bool story_system();                      // letters, quests, the story notebook, mod charts (mods/required.h)
 void set_story_system(bool on);
 void set_auto_wind(bool on);

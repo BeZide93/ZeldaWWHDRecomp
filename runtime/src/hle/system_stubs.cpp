@@ -115,6 +115,7 @@ HLE(vpad, VPADRead) {
         live_virt = f.virt;  // a jump pressed on a half step reaches the next full step (jump_policy::Latch)
         live = true;
     }
+    if (!input::pro_controller()) mods::item_ring_pad(p, repeat);  // X / Y / R: tap, or hold for the item ring
     last_p = p;
     story_notebook::pad(p, c);  // the story notebook's page takes the controller while it is open
     story_scenes::mute(p);

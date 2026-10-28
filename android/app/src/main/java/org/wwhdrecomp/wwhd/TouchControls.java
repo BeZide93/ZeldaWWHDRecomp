@@ -45,6 +45,10 @@ public class TouchControls extends View implements InputManager.InputDeviceListe
     // a real game controller connected (ControllerHintPolicy): native code offers it the controller setup
     // on its first press
     private static native void nativeControllerSetupOffer();
+    // the item ring (runtime/src/mods/item_ring.cpp): the finger held on X (0), Y (1) or R (2) and its drag
+    // from where it landed, in the button's radii (+y down). Native code decides when the ring opens and
+    // what the drag picks, and draws the ring; this view only passes the finger on.
+    private static native void nativeItemRingFinger(int button, boolean down, float dx, float dy);
 
     // SDL_GamepadButton numbers
     private static final int BACK = 4, START = 6,
@@ -63,6 +67,7 @@ public class TouchControls extends View implements InputManager.InputDeviceListe
         float cx, cy, r;
         boolean pressed;
         float sx, sy;  // stick position -1..1
+        float downX, downY;  // where the finger landed (the item ring's drag)
         Control(int kind, int code, String label, float fx, float fy, float fr) {
             this.kind = kind; this.code = code; this.label = label; this.fx = fx; this.fy = fy; this.fr = fr;
         }
@@ -306,6 +311,8 @@ public class TouchControls extends View implements InputManager.InputDeviceListe
                 } else {
                     c.pressed = true;
                     if (c.kind == KIND_STICK) moveStick(c, x, y);
+                    c.downX = x; c.downY = y;
+                    itemRingFinger(c, true, x, y);
                 }
                 break;
             }
@@ -316,6 +323,7 @@ public class TouchControls extends View implements InputManager.InputDeviceListe
                     Control c = owner.get(id);
                     if (c == null) forward(event, i, MotionEvent.ACTION_MOVE);
                     else if (c.kind == KIND_STICK) moveStick(c, event.getX(i), event.getY(i));
+                    else if (itemButton(c) >= 0) itemRingFinger(c, true, event.getX(i), event.getY(i));
                     else if (c == toggle && !near(c,event.getX(i),event.getY(i),1.3f)) removeCallbacks(editLongPress);
                 }
                 break;
@@ -332,6 +340,7 @@ public class TouchControls extends View implements InputManager.InputDeviceListe
                     if (c == null) { forward(event, i, all ? MotionEvent.ACTION_CANCEL : action); continue; }
                     c.pressed = false;
                     if (c.kind == KIND_STICK) { c.sx = 0; c.sy = 0; }
+                    itemRingFinger(c, false, c.downX, c.downY);
                     if (c == toggle) {
                         removeCallbacks(editLongPress);
                         if (!all && !longPressConsumed) setShown(toggleTo);
@@ -347,8 +356,24 @@ public class TouchControls extends View implements InputManager.InputDeviceListe
         return true;
     }
 
+    // the item buttons: the drawn X and Y, and R (-1: another control)
+    private static int itemButton(Control c) {
+        if (c.kind == KIND_FACE && c.code == FACE_X) return 0;
+        if (c.kind == KIND_FACE && c.code == FACE_Y) return 1;
+        if (c.kind == KIND_BUTTON && c.code == RIGHT_SHOULDER) return 2;
+        return -1;
+    }
+
+    private static void itemRingFinger(Control c, boolean down, float x, float y) {
+        final int b = itemButton(c);
+        if (b < 0 || c.r <= 0) return;
+        try { nativeItemRingFinger(b, down, (x - c.downX) / c.r, (y - c.downY) / c.r); }
+        catch (UnsatisfiedLinkError ignored) { /* not loaded yet */ }
+    }
+
     private void releaseInputs() {
         removeCallbacks(editLongPress);
+        try { nativeItemRingFinger(-1, false, 0, 0); } catch (UnsatisfiedLinkError ignored) {}
         for (Control c:controls) { c.pressed=false; c.sx=c.sy=0; }
         toggle.pressed=false;
         for (int i=0;i<owner.size();++i) if (owner.valueAt(i)==null)
