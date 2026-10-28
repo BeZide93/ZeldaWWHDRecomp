@@ -764,6 +764,15 @@ void pipeline_worker_memory(PipelineWorkerMemory& out) {
   out.unusedWarm = w.ready.size(); out.unusedWarmLimit = w.device ? maxUnusedWarmPipelines : 0;
   out.evicted = g_evictions.load();
 }
+size_t drop_unused_warm_pipelines() {
+  auto& w = worker();
+  if (!w.device) return 0;
+  std::lock_guard lock(w.mutex);
+  const size_t dropped = w.ready.size();
+  for (auto& [key, entry] : w.ready) destroy(w.device, entry.handles);
+  w.ready.clear();
+  return dropped;
+}
 bool pipeline_recipe_known(const std::vector<uint8_t>& key) {
   auto& w = worker();
   if (!w.device) return false;

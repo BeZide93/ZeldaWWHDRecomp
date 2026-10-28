@@ -204,6 +204,15 @@ states from any platform; old builds reject v3 states.
 
 **Full-state save path:** In Save states, choose **Auto** (default), **Streaming** or **Fast**. Auto uses less-memory streaming on Android and the existing fast background-compression path on Windows, macOS and Linux, including Crash Recovery. The choice is stored as `auto`, `streaming` or `fast` in `full_save_path.cfg` beside `full_save_states.cfg` in the states folder. All new builds load v3 streaming states regardless of this setting; compatible legacy states remain readable.
 
+**What happens when my Android device runs low on memory?**
+The game frees memory it can rebuild, so Android is less likely to close it: spare upload buffers,
+graphics pipelines prepared ahead that nothing has drawn yet, and textures that haven't been drawn
+for a while. It does this when Android reports low memory, when you switch to another app, and
+when it sees that little memory is free while you play (Android 14 and newer no longer report this
+to running apps, so the game checks every two seconds). Anything freed comes back when it's needed
+again, which can cause a short stutter. The log shows each step as a `[memory]` line.
+`WWHD_TEST_MEMORY_TRIM=frame,...` triggers it at those render frames for testing.
+
 **Something doesn't work.**
 Please open an [issue](https://github.com/ZeldaWWHDRecomp/ZeldaWWHDRecomp/issues) with your Android device
 model, Android version and what happened. After a crash, the next start offers the crash report

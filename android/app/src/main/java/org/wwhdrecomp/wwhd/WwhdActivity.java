@@ -116,6 +116,7 @@ public class WwhdActivity extends SDLActivity {
     }
 
     private volatile PhoneRumble phoneRumble;
+    private MemoryPressure memoryPressure;  // UI thread (lifecycle callbacks)
     public static void phoneRumble(int level) {
         if (mSingleton instanceof WwhdActivity) {
             PhoneRumble output = ((WwhdActivity)mSingleton).phoneRumble;
@@ -242,6 +243,7 @@ public class WwhdActivity extends SDLActivity {
         super.onResume();
         if (isRedirectedActivity()) return;
         if (phoneRumble != null) phoneRumble.setActive(true);
+        if (memoryPressure != null) memoryPressure.start();
         applyFullScreen();
         // Only start after SDL successfully loaded the native game library.
         if (!mBrokenLibraries && usesSecondScreen()) {
@@ -265,9 +267,15 @@ public class WwhdActivity extends SDLActivity {
 
     @Override protected void onPause() {
         if (phoneRumble != null) phoneRumble.setActive(false);
+        if (memoryPressure != null) memoryPressure.stop();
         if (gamePadDisplay != null) gamePadDisplay.stop();
         super.onPause();
     }
+    @Override public void onTrimMemory(int level) {
+        super.onTrimMemory(level);
+        if (memoryPressure != null) memoryPressure.onTrimMemory(level);
+    }
+
     @Override
     protected String[] getLibraries() {
         return new String[] { "SDL3", "main" };
@@ -286,6 +294,8 @@ public class WwhdActivity extends SDLActivity {
         super.onCreate(savedInstanceState);
         if (isRedirectedActivity()) return;
         phoneRumble = new PhoneRumble(this);
+        // low memory: the renderer frees what it can make again (onTrimMemory below, and a free-memory check)
+        if (!mBrokenLibraries) memoryPressure = new MemoryPressure(this);
         // GamePad screen saved Off: known before onResume acquires a second display (AYN Thor, #222)
         if (!mBrokenLibraries && !isReusingNativeSession() && usesSecondScreen())
             GamePadDisplay.seedSavedOff(SavedSecondScreen.off(files));

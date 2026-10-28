@@ -31,6 +31,9 @@ bool pipeline_recipe_known(const std::vector<uint8_t>& key);
 // pipelines no draw has taken yet, its limit and how many it dropped.
 struct PipelineWorkerMemory { size_t recipes = 0, recipeBytes = 0, unusedWarm = 0, unusedWarmLimit = 0, evicted = 0; };
 void pipeline_worker_memory(PipelineWorkerMemory& out);
+// Low memory (platform/memory_trim.h): destroys the compiled pipelines no draw has taken yet (the pool above); a draw
+// that needs one later compiles it again, from the driver's cache. Returns how many went.
+size_t drop_unused_warm_pipelines();
 void pipeline_promotion_stats(uint64_t& promotions, uint64_t& hits, double& waitMs);
 // The setup's model sweep drew a model of archive group `group` with this (portable) key: file the recipe under it too.
 void note_pipeline_group(const std::vector<uint8_t>& key, uint32_t group);

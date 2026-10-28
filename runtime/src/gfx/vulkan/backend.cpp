@@ -54,6 +54,10 @@
 #include "android_driver.h"
 #include "stutter_trace.h"
 #include "pipeline_worker.h"
+#include "platform/memory_trim.h"
+#ifdef __ANDROID__
+#include <malloc.h>
+#endif
 #include "pipeline_demand.h"
 #include "buffer_cache.h"
 #include "render_prof.h"
@@ -111,6 +115,7 @@
 #include <string>
 #include <thread>
 #include <utility>
+#include <vector>
 #ifndef _WIN32
 #include <time.h>
 #endif
@@ -3365,8 +3370,72 @@ static void attach_gamepad_window() {
   gfx::g_has_drc_window = true;
 }
 #endif
+// Low memory (platform/memory_trim.h; Android: MemoryPressure.java): frees what can be made again. Upload blocks of
+// finished submissions beyond their first (each slot keeps the blocks its biggest frame needed, 32 MiB each; the
+// snapshot reuse caches never outlive a submission generation, and a retired slot's fence has completed), the compiled pipelines
+// no draw has taken yet, CPU textures unused for a while (full: all but the last few frames'), then free heap pages.
+static void trim_memory_step() {
+  // test switch: WWHD_TEST_MEMORY_TRIM=f[,f..] asks for a full trim at those render frames (headless checks)
+  static const std::vector<uint64_t> testFrames = [] {
+    std::vector<uint64_t> frames;
+    if (const char* e = std::getenv("WWHD_TEST_MEMORY_TRIM"))
+      for (const char* p = e; *p;) {
+        char* end = nullptr;
+        const uint64_t f = std::strtoull(p, &end, 10);
+        if (end == p) break;
+        frames.push_back(f);
+        p = *end == ',' ? end + 1 : end;
+      }
+    return frames;
+  }();
+  if (!testFrames.empty() && std::find(testFrames.begin(), testFrames.end(), R.frame) != testFrames.end())
+    memory_trim::request(memory_trim::kFull, -2);
+  int source = 0;
+  const auto level = memory_trim::take(source);
+  if (level == memory_trim::kNone) return;
+  const auto started = std::chrono::steady_clock::now();
+  const uint64_t rssBefore = resident_bytes();
+  uint64_t uploadBytes = 0, uploadBlocks = 0;
+  for (size_t i = 0; i < R.submissions.size(); ++i) {
+    auto& slot = R.submissions[i];
+    if (i == R.activeSubmission || slot.retainedUnsubmitted) continue;
+    // a slot stays pending until it is reused: retire it now if the GPU has finished it (never waits: the record
+    // worker must have handed it over, as before every fence query, and its fence must be signaled)
+    if (slot.pending) {
+      if (!try_record_submission(slot)) continue;
+      if (vkGetFenceStatus(R.device, slot.fence) != VK_SUCCESS) continue;
+      retire_submission(slot);
+    }
+    if (slot.pending || slot.recordWorkerSerial) continue;
+    while (slot.uploadBlocks.size() > 1) {
+      Buffer b = slot.uploadBlocks.back().buffer;
+      slot.uploadBlocks.pop_back();
+      uploadBytes += b.size;
+      ++uploadBlocks;
+      if (b.mapped) vkUnmapMemory(R.device, b.memory);
+      vkDestroyBuffer(R.device, b.buffer, nullptr);
+      vkFreeMemory(R.device, b.memory, nullptr);
+    }
+  }
+  const size_t pipelines = drop_unused_warm_pipelines();
+  uint64_t textures = 0;
+  const uint64_t textureBytes = trim_textures(
+      level == memory_trim::kFull ? memory_trim::kFullIdleFrames : memory_trim::kLightIdleFrames, textures);
+#ifdef __ANDROID__
+  // freed heap pages back to the system: everything (Android 14 and newer), else the usual purge
+  if (!mallopt(M_PURGE_ALL, 0)) mallopt(M_PURGE, 0);
+#endif
+  constexpr double mib = 1024.0 * 1024.0;
+  const uint64_t rssAfter = resident_bytes();
+  LOG("[memory] %s trim (request %d): %llu upload blocks %.0f MiB, %zu unused pipelines, %llu textures %.1f MiB; "
+      "resident %.0f -> %.0f MiB; %.1f ms",
+      level == memory_trim::kFull ? "full" : "light", source, (unsigned long long)uploadBlocks, uploadBytes / mib,
+      pipelines, (unsigned long long)textures, textureBytes / mib, rssBefore / mib, rssAfter / mib,
+      std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count());
+}
 void swap() {
   texture_budget_step();
+  trim_memory_step();
   fallback_stats::begin_frame(R.frame);
   if (handoff_trace::enabled()) handoff_trace::set_producer_frame(R.frame);
   if(active_deferred_commands) {

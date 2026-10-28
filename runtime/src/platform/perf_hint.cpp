@@ -22,6 +22,7 @@
 #include "../interp.h"
 #include "../interp_pacing.h"
 #include "heat_guard.h"
+#include "memory_trim.h"
 #include "../overlay/android_telemetry.h"
 
 namespace perf_hint {
@@ -302,6 +303,14 @@ void frame_done() {
 // The device class (HeatGuardDevice.java, from Build.MANUFACTURER / BRAND / MODEL), before the game starts.
 extern "C" JNIEXPORT void JNICALL Java_org_wwhdrecomp_wwhd_HeatGuardDevice_nativeSetDeviceClass(JNIEnv*, jclass, jint device) {
     heat_guard::device = heat_guard::to_device(device);
+}
+
+// Low memory (MemoryPressure.java): `level` is memory_trim::Level, `source` the Android trim level (or -1: the app's
+// own check of the system's free memory); the render thread frees at its next frame.
+extern "C" JNIEXPORT void JNICALL Java_org_wwhdrecomp_wwhd_MemoryPressure_nativeTrim(JNIEnv*, jclass, jint level, jint source) {
+    if (level <= memory_trim::kNone) return;
+    LOG("[memory] trim requested: %s (Android level %d)", level >= memory_trim::kFull ? "full" : "light", int(source));
+    memory_trim::request(level >= memory_trim::kFull ? memory_trim::kFull : memory_trim::kLight, source);
 }
 
 #else

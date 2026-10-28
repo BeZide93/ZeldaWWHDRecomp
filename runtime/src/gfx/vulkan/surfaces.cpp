@@ -1535,6 +1535,28 @@ static void restore_evicted(Surface* s) {
     ++g_surface_epoch; ++g_stat_tex_restores;
     rprof::add_texture_remake();
 }
+// Low memory (platform/memory_trim.h): every released-able texture not looked up within the last `idle` frames goes,
+// as with the texture budget (its next lookup makes it again from guest memory). Returns the bytes released.
+uint64_t trim_textures(uint64_t idle, uint64_t& released) {
+    std::vector<Surface*> surfaces;
+    std::vector<texture_budget::Candidate> candidates;
+    uint64_t total = 0, bytes = 0;
+    for (auto& [addr, owned] : R.surfaces) {
+        Surface* s = owned.get();
+        if (!evictable(s)) continue;
+        total += s->allocationBytes;
+        candidates.push_back({s->lastUsedFrame, s->allocationBytes, surfaces.size()});
+        surfaces.push_back(s);
+    }
+    released = 0;
+    const uint64_t pin = std::max<uint64_t>(idle, 1);
+    for (size_t i : texture_budget::select(std::move(candidates), total, R.frame, 0, pin, pin)) {
+        bytes += surfaces[i]->allocationBytes;
+        ++released;
+        release_texture_image(surfaces[i]);
+    }
+    return bytes;
+}
 void texture_budget_step() {
     static const bool on = [] { const char* e = getenv("WWHD_VK_TEXTURE_BUDGET"); return e && !strcmp(e, "1"); }();
     if (!on || R.frame % 30) return;

@@ -299,6 +299,8 @@ void reset_ao_private_cache();
 void destroy_surface_image(Surface*);
 // once per frame (swap): the texture budget's sweep (WWHD_VK_TEXTURE_BUDGET)
 void texture_budget_step();
+// low memory (platform/memory_trim.h): releases the CPU textures not looked up within `idle` frames; bytes released
+uint64_t trim_textures(uint64_t idle, uint64_t& released);
 // releases one texture's image as the budget does (smoke test); its next lookup makes it again
 void release_texture_image(Surface* s);
 // texture staging (surfaces.cpp): -1 as WWHD_VK_TEXTURE_STAGING says, 0 own buffers, 1 the upload arena (smoke test)

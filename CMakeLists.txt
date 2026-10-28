@@ -1385,6 +1385,10 @@ add_executable(heat_guard_test runtime/tools/heat_guard_test.cpp)
 target_include_directories(heat_guard_test PRIVATE runtime/src)
 target_compile_options(heat_guard_test PRIVATE -UNDEBUG)
 add_test(NAME heat_guard_policy COMMAND heat_guard_test)
+add_executable(memory_trim_test runtime/tools/memory_trim_test.cpp)
+target_include_directories(memory_trim_test PRIVATE runtime/src)
+target_compile_options(memory_trim_test PRIVATE -UNDEBUG)
+add_test(NAME memory_trim_requests COMMAND memory_trim_test)
 add_test(NAME state_groups COMMAND state_groups_test)
 add_test(NAME rumble COMMAND rumble_test)
 add_test(NAME motion COMMAND motion_test)
@@ -2106,6 +2110,10 @@ if(NOT ANDROID)
       "-DJAVAC=${Java_JAVAC_EXECUTABLE}" "-DJAVA=${Java_JAVA_EXECUTABLE}"
       "-DWORK=${CMAKE_BINARY_DIR}/heat_guard_java_test" "-DSOURCE=${CMAKE_SOURCE_DIR}"
       -P ${CMAKE_SOURCE_DIR}/runtime/tools/heat_guard_java_test.cmake)
+    add_test(NAME android_memory_pressure COMMAND ${CMAKE_COMMAND}
+      "-DJAVAC=${Java_JAVAC_EXECUTABLE}" "-DJAVA=${Java_JAVA_EXECUTABLE}"
+      "-DWORK=${CMAKE_BINARY_DIR}/memory_pressure_java_test" "-DSOURCE=${CMAKE_SOURCE_DIR}"
+      -P ${CMAKE_SOURCE_DIR}/runtime/tools/memory_pressure_java_test.cmake)
   endif()
 endif()
 
