@@ -7,6 +7,11 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Cheat: all Nintendo Gallery figurines.** Settings → Mods → Cheats → "All Nintendo Gallery figurines" marks
+  every figurine Carlov makes as done, for players who cannot or would rather not finish the collection. It needs
+  a gallery membership first (Carlov took one of your color pictos); without it the cheat does nothing and says
+  so. As when you finish the collection by playing, Carlov leaves his workshop the next time you enter and his own
+  figurine takes his place. Save in the game to keep it. Idea from centollOS/SwitchWakerHD#91.
 - **Faster, lighter shader preparation in setup.** The shader template that ships with the game is now distilled:
   one entry per distinct shader instead of every recorded state (447 KB instead of 8 MB). Setup's "Resolving
   shaders from your game files" step takes about 12 seconds instead of a minute on a Mac (more saved on phones)
