@@ -170,10 +170,8 @@ void calculate(bool dirty) {
     assert(c.r[3] == 0xC004);
 }
 
-void positions_test() {
-    aspect::set_mode(aspect::kOriginal);
-    aspect::on_swap();
-    // Actual CommandGuide hierarchy/authoring coordinates, including different nested parents.
+// Actual CommandGuide hierarchy/authoring coordinates, including different nested parents.
+void build_cluster() {
     pane(cluster, "N_All_00", 509, 238);
     pane(groups[0], "W_SetSeatA_00", 40, -35);
     pane(groups[1], "P_B_00", -9, -86);
@@ -189,6 +187,35 @@ void positions_test() {
     pane(trigger, "P_ZR_00", 66, 96); child(cluster, trigger);
     // Current aspect anchoring recognises world-positioned roots by their floating prompt.
     pane(base + 0x4A00, "L_CommandA_00", 0, -247); child(cluster, base + 0x4A00);
+}
+
+// Never restyled: both guides, a lone face included, run the stock matrix pass. A local move
+// without the game's dirty flag stays out of the cached matrices, so no refresh is forced.
+void stock_guide_test() {
+    aspect::set_mode(aspect::kOriginal);
+    aspect::on_swap();
+    build_cluster();
+    calculate(true);
+    std::array<Point, 4> drawn;
+    for (int i = 0; i < 4; ++i) drawn[i] = position(face_panes[i]);
+    const uint32_t guide = base + 0xA000;
+    const double x = ldf32(groups[1] + 0x1C);
+    stf32(groups[1] + 0x1C, x + 5);
+    for (uint32_t vtable : {0x100EE5F8u, 0x100EE378u})
+        for (uint8_t buttons : {1, 2, 4, 8, 3, 0x1F}) {
+            st32(guide + 4, vtable); st8(guide + 0xDD, buttons);
+            Cpu c{}; c.r[3] = guide;
+            button_glyphs::calculate_parts(&c, [](Cpu*) { calculate(false); });
+            for (int i = 0; i < 4; ++i) same_point(position(face_panes[i]), drawn[i]);
+        }
+    stf32(groups[1] + 0x1C, x);
+    std::memset(mem::ptr(guide), 0, 0x100);
+}
+
+void positions_test() {
+    aspect::set_mode(aspect::kOriginal);
+    aspect::on_swap();
+    build_cluster();
 
     const std::array<uint32_t, 12> nodes = {cluster, groups[0], groups[1], groups[2], groups[3], groups[4],
         face_panes[0], face_panes[2], face_panes[3], special_a, item_x, trigger};
@@ -294,7 +321,7 @@ void positions_test() {
         }
         st32(guide + 4, 0x100EE5F8); st8(guide + 0xDD, 3);
     }
-    // Every lone face uses the same anchor in both guides, for all bindings and icon styles.
+    // A lone face stays where the game draws it in both guides, for all bindings and icon styles.
     for (auto prompts : {input_map::Mapping::Prompts::kOriginal, input_map::Mapping::Prompts::kXbox,
                          input_map::Mapping::Prompts::kPlayStation}) {
         std::array<int, 4> buttons{0, 1, 2, 3};
@@ -310,7 +337,7 @@ void positions_test() {
                     for (uint32_t descriptor : {0x1049ECB0u, 0x1049EBD4u, 0x1049EC00u}) {
                         st32(state + 8, descriptor);
                         calculate_guide();
-                        same_point(position(face_panes[face]), original[0]);
+                        same_point(position(face_panes[face]), original[face]);
                     }
                     for (uint32_t i = 0; i < nodes.size(); ++i)
                         for (uint32_t j = 0; j < 8; ++j)
@@ -324,7 +351,7 @@ void positions_test() {
                     }
                 }
             }
-            // Unrelated layouts cannot inherit the previous guide's single-button anchor.
+            // Unrelated layouts cannot inherit the previous guide's single-button placement.
             st32(guide + 4, 0); st8(guide + 0xDD, 1);
             calculate_guide();
             for (int i = 0; i < 4; ++i) same_point(position(face_panes[i]), original[expected_spots[i]]);
@@ -1314,6 +1341,7 @@ int main() {
     button_glyphs::draw_text_box(&hint_draw, [](Cpu* c) { assert(c->r[3] == base + 0xC200); c->r[3] = 0x1234; });
     assert(hint_draw.r[3] == 0x1234);
     assert(!std::memcmp(stock_list.data(), mem::ptr(list), stock_list.size()));
+    stock_guide_test();
 
     // Selecting by label for the first time rebuilds each cached text box once: no markers
     // exist yet, so the game re-runs Print and the rebuilt quads are styled like any later

@@ -31,9 +31,9 @@ using input_map::FaceStyle;
 using input_map::PromptStyle;
 using input_map::ShoulderStyle;
 
-// Glyph gate: until a restyled look (by label, or a fixed shoulder name choice) has been on
-// once, text and picture hooks leave game memory untouched (no markers or composed texture).
-// Single-prompt placement is independent of this gate. The first activation latches this
+// Session gate: until a restyled look (by label, or a fixed shoulder name choice) has been on
+// once, the hooks must not write game memory at all (no glyph markers, no composed texture).
+// Players who never use it then run exactly the stock path. The first activation latches this
 // flag; marking then works as in any restyled session, so later changes still reach text cached
 // in either mode.
 std::atomic<bool> labels_used{false};
@@ -331,11 +331,11 @@ void button_glyphs::calculate_pane(Cpu* c, PpcFunc calculate) {
     // prompt or the item screen's linear row. Move the group root: labels, item art and effects
     // inherit the same transform. Force its tree's matrices in both modes so switching back or
     // restoring a state cannot leave the previous layout's cached global positions behind.
-    // Known guides also refresh when switching between a lone prompt and the full cluster.
-    if (marking() || guide_layout.known) c->r[5] = 1;
+    // Only once a restyled look has been used: until then the stock path stays untouched.
+    if (marking()) c->r[5] = 1;
     const auto look = style();
-    // A lone face prompt always uses the authored Confirm anchor, regardless of its binding.
-    const int spot = guide_layout.single_face == face ? 0 : look.spots[face];
+    // A lone face prompt stays where the game draws it, whatever its binding.
+    const int spot = guide_layout.single_face == face ? face : look.spots[face];
     const bool menu_pair = face < 2 && look.face != FaceStyle::kOriginal && guide_layout.menu_pair;
     if (spot == face && !menu_pair) return calculate(c);
     const Point from = button_centre(groups[face], pictures[face]);
