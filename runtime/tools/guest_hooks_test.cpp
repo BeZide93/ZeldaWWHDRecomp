@@ -127,6 +127,12 @@ namespace input {PadState read() {return {};}}
 namespace render {uint64_t frame_count() {return 0;}}
 namespace hostui {void post(std::function<void()> fn) {fn();}}
 namespace true60 {float dt() {return 0.5f;}}
+namespace interp { uint32_t last_camera() { return 0; } }  // screen points (QoL M2): no camera here
+namespace aspect { float layout_scale(float) { return 1.0f; } }
+namespace mic {  // microphone (QoL M2): never opened by these fixtures
+void want(int, bool) {} bool wanted(int) { return false; } State state() { return kUnavailable; }
+bool latest(Pitch&, uint64_t&) { return false; } void service() {} bool take_denied() { return false; }
+}
 namespace mem { std::string read_cstr(uint32_t) { return "option"; } uint32_t host_alloc(uint32_t,uint32_t) { return 0; } unsigned fixture_runtime_allocs=0; std::vector<uint32_t> fixture_alloc_sizes; uint32_t runtime_alloc(uint32_t size,uint32_t) {++fixture_runtime_allocs;fixture_alloc_sizes.push_back(size);
 #ifdef GUEST_HOOKS_TEST_EDITOR
  return 0x60000000u+0x10000u*fixture_runtime_allocs;  // the editor variant: real-looking guest objects
@@ -146,6 +152,7 @@ std::string story_cache_directory(){return {};}
 static bool in_startup_callback=false, inspected=false;
 std::string directory() { assert(!in_startup_callback); return {}; }
 void set_guest_builder(GuestInspect, GuestBuild, GuestCacheCheck) {}
+void post_toast(const std::string&) {}
 void set_option_observer(OptionObserver) {}  // live options (QoL M0): not used by these fixtures
 bool configure(const std::string&,const std::string&,const json::Value&,std::string&) {return false;}
 void start_guests(const GuestInspect& inspect, const GuestLoad&) {
