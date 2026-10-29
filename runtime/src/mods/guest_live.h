@@ -11,7 +11,10 @@
 // - Touches on the TV picture: a mod claims rectangles (layout units: 1280 x 720 around the centre, +y up);
 //   a finger landing in one goes to that mod (down, moves, up) and to nothing else (no stick, no talk); without a
 //   claim at that point the port's own rules decide. The newest claim wins where claims overlap.
+// - Pinches: a second finger next to a mod's finger (Android), or the mouse wheel over a claim (desktop), goes to
+//   that mod as pinch events: the spread now / at the pinch's start, and its end.
 #pragma once
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <map>
@@ -46,7 +49,7 @@ private:
 };
 
 // ---- touches
-enum Kind : uint32_t { kDown = 0, kMove = 1, kUp = 2, kCancel = 3 };
+enum Kind : uint32_t { kDown = 0, kMove = 1, kUp = 2, kCancel = 3, kPinch = 4, kPinchEnd = 5 };
 struct Event {
     uint32_t kind = kDown;
     float x = 0, y = 0;
@@ -70,6 +73,7 @@ public:
     void drop(int mod) {
         if (mod >= 0 && size_t(mod) < mods_.size()) mods_[size_t(mod)] = {};
         if (owner_ == mod) owner_ = -1;
+        if (pinch_owner_ == mod) pinch_owner_ = -1;
     }
     // the mod a finger landing at (x, y) belongs to, -1 none (the newest claim containing it)
     int owner_at(float x, float y) const {
@@ -98,6 +102,16 @@ public:
         return o;
     }
     int finger_owner() const { return owner_; }
+    // One pinch change (kPinch: x = the spread now / at its start; kPinchEnd). The pinch belongs to the mod that has
+    // the finger now, else to the one claiming its point (x, y: the desktop's wheel, where the pointer is), until it
+    // ends. Returns that mod, -1: not a mod's (the port's own pinch has it).
+    int route_pinch(uint32_t kind, float x, float y) {
+        if (pinch_owner_ < 0 && kind == kPinch) pinch_owner_ = owner_ >= 0 ? owner_ : owner_at(x, y);
+        const int o = pinch_owner_;
+        if (kind == kPinchEnd) pinch_owner_ = -1;
+        return o;
+    }
+    bool pinching() const { return pinch_owner_ >= 0; }
 
 private:
     struct Claim {
@@ -110,6 +124,43 @@ private:
     std::vector<ModClaims> mods_;
     uint64_t order_ = 0;
     int owner_ = -1;
+    int pinch_owner_ = -1;
+};
+
+// ---- the drawn camera as a projection to layout units (wwhd_screen_point): eye, center, up of the camera and k, layout units
+// per unit of x / z (aspect::layout_scale); +x right, +y up, 0 at the picture's centre
+struct V3 {
+    float x = 0, y = 0, z = 0;
+};
+inline V3 sub(V3 a, V3 b) { return {a.x - b.x, a.y - b.y, a.z - b.z}; }
+inline float dot(V3 a, V3 b) { return a.x * b.x + a.y * b.y + a.z * b.z; }
+inline V3 cross(V3 a, V3 b) { return {a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x}; }
+inline V3 norm(V3 a) {
+    const float l = std::sqrt(dot(a, a));
+    return l > 0 ? V3{a.x / l, a.y / l, a.z / l} : a;
+}
+struct View {
+    V3 eye, f, r, u;
+    float k = 0;
+    bool ok = false;
+    bool set(V3 e, V3 center, V3 up, float scale) {
+        eye = e;
+        f = norm(sub(center, e));
+        r = norm(cross(f, up));
+        u = cross(r, f);
+        k = scale;
+        ok = std::isfinite(k) && k > 0 && dot(f, f) > 0.5f && dot(r, r) > 0.5f;
+        return ok;
+    }
+    bool project(V3 p, float& x, float& y) const {
+        if (!ok) return false;
+        const V3 d = sub(p, eye);
+        const float z = dot(d, f);
+        if (!(z > 1)) return false;
+        x = dot(d, r) / z * k;
+        y = dot(d, u) / z * k;
+        return std::isfinite(x) && std::isfinite(y);
+    }
 };
 
 }  // namespace guestlive

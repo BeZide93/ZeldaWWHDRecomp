@@ -26,6 +26,11 @@ bool wanted();
 bool wanted(unsigned owner);
 void set(bool down, float x, float y, float aspect);  // hosts (main thread)
 State read();                                         // any thread
+// The mouse wheel over a code mod's claim on the TV picture (mods/touch_talk.cpp turns it into a pinch for that
+// mod, guest_live.h): hosts add notches (+ away from the player: spread / nearer) with the pointer's place;
+// take_wheel returns the notches since the last call and that place (false: none)
+void add_wheel(float notches, float x, float y, float aspect);  // hosts (main thread)
+bool take_wheel(float& notches, State& at);                     // game thread
 
 // The point in a 1280 x 720 page centred on the picture (the HUD's centre anchor: a wider picture
 // extends the canvas to both sides)

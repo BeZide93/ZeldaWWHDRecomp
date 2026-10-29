@@ -115,13 +115,22 @@ int wwhd_input_filter_register(wwhd_input_filter_fn filter);
 #define WWHD_TOUCH_MOVE 1
 #define WWHD_TOUCH_UP 2
 #define WWHD_TOUCH_CANCEL 3
+/* Pinches (newer hosts): a second finger next to the mod's finger (Android), or the mouse wheel over a claim (desktop).
+ * WWHD_TOUCH_PINCH: x = the spread now / at the pinch's start (> 1: fingers apart, wheel away from the player), y = 0;
+ * WWHD_TOUCH_PINCH_END: the pinch is over. A pinch goes to the mod that has the finger, else to the claim under it. */
+#define WWHD_TOUCH_PINCH 4
+#define WWHD_TOUCH_PINCH_END 5
 typedef struct {
     u32 kind;  /* WWHD_TOUCH_* */
-    f32 x, y;  /* layout units */
+    f32 x, y;  /* layout units (WWHD_TOUCH_PINCH: the spread, 0) */
 } wwhd_touch_event;
 typedef void (*wwhd_touch_fn)(const wwhd_touch_event* event);
 int wwhd_touch_register(wwhd_touch_fn callback);
 int wwhd_touch_claim(u32 slot, f32 x0, f32 y0, f32 x1, f32 y1);
+/* Where the drawn camera shows a point of the world (x, y, z of the current room): out[0], out[1] in the same layout
+ * units as touches, with the picture's shape and field of view as drawn. Returns 1, or 0 when the point is behind the
+ * camera or no camera is drawn (out unchanged). Read it on the logic step you use it (the camera moves). */
+int wwhd_screen_point(const f32* world, f32* out);
 /* Flat filenames in this mod's Data/<id> folder; no paths or symlinks. At most 1 MiB per call.
  * read returns bytes read (zero at EOF), write replaces the file; -1 indicates failure. */
 s32 wwhd_file_read(const char* filename, void* buffer, u32 size);

@@ -143,6 +143,9 @@ bool main_picture(float* x, float* y, float* w, float* h);
 bool tv_picture_hit(float nx, float ny, float* px, float* py, float* aspect, bool clamp_outside = false);
 // the same for the game's picture: the TV picture, or in One screen mode's Off-TV Play the GamePad picture
 bool game_picture_hit(float nx, float ny, float* px, float* py, float* aspect, bool clamp_outside = false);
+// the mouse wheel at (nx, ny) of the TV window is over a code mod's touch claim (guest_live.h): its point on the
+// picture as game_picture_hit gives it (the hosts hand the wheel to tv_pointer::add_wheel then)
+bool wheel_on_mod_claim(float nx, float ny, float* px, float* py, float* aspect);
 
 // Touch screens (Android; WWHD_VIEW_BUTTON=1 elsewhere for tests): a button in the TV window's top
 // left corner. A tap cycles the views offered there (picture-in-picture, GamePad only, TV only);

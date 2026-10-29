@@ -42,6 +42,8 @@
 #include "guest_settings.h"
 #include "guest_hud.h"
 #include "guest_live.h"
+#include "../aspect.h"
+#include "../interp.h"
 #include "../fixed_seed.h"
 #include "../gfx/renderer.h"
 #include "../overlay/hostui.h"
@@ -657,6 +659,20 @@ void svc_touch_claim(Cpu* c) {
     std::lock_guard lock(g_touch_mutex);
     g_touch.claim(int(&mod-g_loaded.data()),slot,r);c->r[3]=1;
 }
+// wwhd_screen_point(world xyz, out xy): a point of the world where the drawn camera shows it, in layout units (guest_live.h);
+// the camera_draw camera (interp::last_camera: eye +0xDC, center +0xE8, up +0xF4, fovy +0xD4) and the picture's aspect
+// and FOV as drawn (aspect::layout_scale). 1 when in front of the camera, 0 otherwise (out unchanged).
+void svc_project(Cpu* c) {
+    const uint32_t in=c->r[3],out=c->r[4];c->r[3]=0;
+    const uint32_t cam=interp::last_camera();
+    if(!in||!out||cam<0x10000000u||cam>=0x50000000u)return;
+    auto v3=[](uint32_t a){return guestlive::V3{float(ldf32(a)),float(ldf32(a+4)),float(ldf32(a+8))};};
+    guestlive::View view;
+    if(!view.set(v3(cam+0xDC),v3(cam+0xE8),v3(cam+0xF4),aspect::layout_scale(float(ldf32(cam+0xD4)))))return;
+    float x,y;
+    if(!view.project(v3(in),x,y))return;
+    stf32(out,x);stf32(out+4,y);c->r[3]=1;
+}
 void svc_config_int(Cpu* c) {
     const auto v=option(c);
     if(v.type==mods::json::Value::Number&&v.number>=INT32_MIN&&v.number<=INT32_MAX&&std::floor(v.number)==v.number)c->r[3]=uint32_t(int32_t(v.number));
@@ -1012,7 +1028,7 @@ const std::unordered_map<std::string, PpcFunc> kServices = {
     {"wwhd_log", svc_log},       {"wwhd_log_int", svc_log_int}, {"wwhd_log_hex", svc_log_hex},
     {"wwhd_log_float", svc_log_float}, {"wwhd_config_int", svc_config_int},
     {"wwhd_config_bool",svc_config_bool},{"wwhd_config_changed",svc_config_changed},
-    {"wwhd_input_filter_register",svc_input_filter_register},{"wwhd_touch_register",svc_touch_register},{"wwhd_touch_claim",svc_touch_claim},{"wwhd_config_float",svc_config_float},{"wwhd_config_string",svc_config_string},
+    {"wwhd_input_filter_register",svc_input_filter_register},{"wwhd_touch_register",svc_touch_register},{"wwhd_touch_claim",svc_touch_claim},{"wwhd_screen_point",svc_project},{"wwhd_config_float",svc_config_float},{"wwhd_config_string",svc_config_string},
     {"wwhd_malloc",svc_malloc},{"wwhd_free",svc_free},{"wwhd_input_read",svc_input},
     {"wwhd_file_read",svc_file_read},{"wwhd_file_write",svc_file_write},
     {"wwhd_hud_register",svc_hud_register},{"wwhd_hud_texture",svc_hud_texture},
@@ -1841,6 +1857,12 @@ int touch_route(uint32_t kind,float x,float y) {
     const guestlive::Event e{kind,x,y};
     const int owner=g_touch.route(e);
     if(owner>=0&&size_t(owner)<g_loaded.size()&&g_touch_queue.size()<64)g_touch_queue.push_back({owner,e});
+    return owner;
+}
+int touch_pinch(uint32_t kind,float scale,float x,float y) {
+    std::lock_guard lock(g_touch_mutex);
+    const int owner=g_touch.route_pinch(kind,x,y);
+    if(owner>=0&&size_t(owner)<g_loaded.size()&&g_touch_queue.size()<64)g_touch_queue.push_back({owner,guestlive::Event{kind,scale,0}});
     return owner;
 }
 bool touch_claimed_at(float x,float y) {std::lock_guard lock(g_touch_mutex);return g_touch.owner_at(x,y)>=0;}

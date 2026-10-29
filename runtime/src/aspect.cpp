@@ -132,6 +132,19 @@ void adjust_projection_args(Cpu* c, int fovyReg, int aspectReg, bool radians = f
 }
 }  // namespace
 
+float layout_scale(float fovyDeg) {
+    if (!(fovyDeg > 1.0f && fovyDeg < 170.0f)) return 0.0f;
+    float kx = 1.0f, ky = 1.0f, fov = 1.0f;
+    if (!original() || g_fov_game.load() != 1.0f) {  // (as adjust_projection_args: 16:9 at the authored FOV is the game's)
+        factors(g_game, kx, ky);
+        fov = gameplay_fov_scale();
+    }
+    float angle = vert_plus_fovy(fovyDeg, ky * fov);
+    if (fov != 1.0f) angle = std::min(angle, 110.0f);
+    const float t = std::tan(angle * (float)M_PI / 360.0f);
+    return t > 0 ? 360.0f * ky / t : 0.0f;
+}
+
 const char* mode_name(int m) {
     static const char* n[kModes] = {"16:9 (original)", "Match window", "16:10", "21:9", "32:9", "custom"};
     return m >= 0 && m < kModes ? n[m] : "?";

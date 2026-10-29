@@ -232,7 +232,8 @@ use object fields that are the same in both versions.
 | `wwhd_malloc`, `wwhd_free` | Per-mod heap, 16-byte aligned; size from `guest.heap_size` (default 256 KiB, max 8 MiB); null when full |
 | `wwhd_input_read` | Buttons, sticks and touch (read-only) |
 | `wwhd_input_filter_register` | Change the controller state the game reads, below |
-| `wwhd_touch_register`, `wwhd_touch_claim` | Touches (or mouse clicks) on parts of the TV picture your mod claims, below |
+| `wwhd_touch_register`, `wwhd_touch_claim` | Touches (or mouse clicks) on parts of the TV picture your mod claims, and pinches there, below |
+| `wwhd_screen_point` | Where the drawn camera shows a point of the world, in the touches' layout units, below |
 | `wwhd_file_read`, `wwhd_file_write` | Flat file names in your mod's own data folder, at most 1 MiB per call; write replaces the file; return bytes or -1 |
 | `wwhd_logic_dt`, `wwhd_logic_step` | Length of the current logic step in seconds (60 fps modes included) and the step counter |
 | `wwhd_setting_get`, `wwhd_setting_changed` | Read-only port settings, below |
@@ -278,6 +279,26 @@ on-screen stick, no talk by touch. It stays yours until it lifts, even outside t
 overlap the newest wins. Claim only while your feature shows something to touch, and remove the claim (an
 empty rectangle, x1 <= x0) when it doesn't, so the player's thumbs work the game again. Events arrive at the
 next controller read, before the input filters, so a touch can become a button in the same read.
+
+**Pinches.** A second finger next to your mod's finger (Android, with the on-screen controls shown or hidden), or the
+mouse wheel over one of your claims (desktop), comes as `WWHD_TOUCH_PINCH` with `x` = the spread now divided by the
+spread when the pinch began (above 1: the fingers moved apart, or the wheel turned away from the player; each notch is
+15 % more or less), then `WWHD_TOUCH_PINCH_END` (on the desktop 0.3 s after the last notch). The finger itself keeps
+its own events: its moves pause while the pinch lasts, and its `WWHD_TOUCH_UP` comes when it lifts. Hosts from before
+pinches never send them.
+
+**Points of the world on the picture.** `wwhd_screen_point(world, out)` takes a point of the current room (`world`:
+x, y, z) and writes where the drawn camera shows it into `out[0]`, `out[1]`, in the same layout units as touches,
+with the picture's shape and field of view as drawn (wider screens, the field-of-view setting). It returns 1, or 0
+when the point is behind the camera or no camera is drawn. Compare touches with it on the logic step you use it:
+the camera moves.
+
+```c
+f32 square[3] = {x, y, z}, at[2];
+if (wwhd_screen_point(square, at) && (e->x - at[0]) * (e->x - at[0]) + (e->y - at[1]) * (e->y - at[1]) < 40 * 40) {
+    /* the finger is on the square */
+}
+```
 
 ## Port settings
 

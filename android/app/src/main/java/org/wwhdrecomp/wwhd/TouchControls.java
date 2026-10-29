@@ -113,6 +113,9 @@ public class TouchControls extends View implements InputManager.InputDeviceListe
     // a pinch for the field of view (P7; runtime/src/mods/steer.h): 0 begins (returns 1 when the option is on),
     // 1 moves, 2 ends; the fingers' distance in pixels
     private static native int nativePinch(int phase, float distance);
+    // a code mod's pinch (Mod SDK): a second finger next to a talk finger a mod has; phase 0 begin (true: a mod has
+    // it), 1 move, 2 end; spread now / at the start; the fingers' middle, 0..1 of the view
+    private static native boolean nativeModPinch(int phase, float spread, float x, float y);
 
     static final int EXPORT_REQUEST = 4973, IMPORT_REQUEST = 4974;  // WwhdActivity.onActivityResult
 
@@ -565,7 +568,8 @@ public class TouchControls extends View implements InputManager.InputDeviceListe
                 Control c = hit(x, y);
                 final boolean free = c == null;
                 if (c == null) c = freeTouch(x, y);
-                if (free && c != null && c != talk && startPinch(event, id, x, y)) c = pinch;
+                if (free && c == talk && talkPointer >= 0 && startModPinch(event, id, x, y)) c = pinch;
+                else if (free && c != null && c != talk && startPinch(event, id, x, y)) c = pinch;
                 else if (free && c != null && c != talk) freeDown.put(id, SystemClock.uptimeMillis());
                 owner.put(id, c);
                 if (c == null && action == MotionEvent.ACTION_DOWN) {
@@ -606,7 +610,7 @@ public class TouchControls extends View implements InputManager.InputDeviceListe
                     Control c = owner.get(id);
                     final float x = event.getX(i), y = event.getY(i);
                     if (c == null) forward(event, i, MotionEvent.ACTION_MOVE);
-                    else if (c == talk) talkFinger(1, x, y);
+                    else if (c == talk) { if (modPinch) pinchMove(event, 1); else talkFinger(1, x, y); }
                     else if (c == pinch) pinchMove(event, 1);
                     else if (c == swipe) {
                         if (x != swipeX || y != swipeY) {
@@ -632,7 +636,12 @@ public class TouchControls extends View implements InputManager.InputDeviceListe
                     if (c == null) { forward(event, i, all ? MotionEvent.ACTION_CANCEL : action); continue; }
                     if (c == swipe) { swipePointer = -1; continue; }
                     freeDown.remove(id);
-                    if (c == talk) { talkPointer = -1; talkFinger(all ? 3 : 2, event.getX(i), event.getY(i)); continue; }
+                    if (c == talk) {
+                        if (modPinch) endPinch(event);
+                        talkPointer = -1;
+                        talkFinger(all ? 3 : 2, event.getX(i), event.getY(i));
+                        continue;
+                    }
                     if (c == pinch) { endPinch(event); continue; }
                     c.pressed = false;
                     if (c.stick != null) c.stick.release();
@@ -672,7 +681,11 @@ public class TouchControls extends View implements InputManager.InputDeviceListe
         for (Control c : controls) { c.pressed = false; if (c.stick != null) c.stick.release(); }
         swipePointer = -1;
         if (talkPointer >= 0) { talkPointer = -1; talkFinger(3, 0, 0); }
-        if (pinchA >= 0) { try { nativePinch(2, pinchD); } catch (UnsatisfiedLinkError ignored) {} pinchA = pinchB = -1; }
+        if (pinchA >= 0) {
+            try { if (modPinch) nativeModPinch(2, 1, 0.5f, 0.5f); else nativePinch(2, pinchD); } catch (UnsatisfiedLinkError ignored) {}
+            pinchA = pinchB = -1;
+            modPinch = false;
+        }
         freeDown.clear();
     }
     // a second free finger soon after the first: both become a pinch (the first one's stick lets go)
@@ -697,12 +710,40 @@ public class TouchControls extends View implements InputManager.InputDeviceListe
         final int a = event.findPointerIndex(pinchA), b = event.findPointerIndex(pinchB);
         if (a < 0 || b < 0) return;
         pinchD = (float) Math.hypot(event.getX(a) - event.getX(b), event.getY(a) - event.getY(b));
-        try { nativePinch(phase, pinchD); } catch (UnsatisfiedLinkError ignored) {}
+        try {
+            if (modPinch) nativeModPinch(phase, pinchD / pinchD0, midX(event, a, b), midY(event, a, b));
+            else nativePinch(phase, pinchD);
+        } catch (UnsatisfiedLinkError ignored) {}
     }
+    // a second finger while a code mod has the talk finger (its claim): a pinch for that mod; the talk finger stays the
+    // talk's (its moves pause during the pinch, its lift ends the pinch and then goes to the mod)
+    private boolean modPinch;
+    private float pinchD0 = 1;
+    private boolean startModPinch(MotionEvent event, int id, float x, float y) {
+        if (pinchA >= 0) return false;
+        final int ti = event.findPointerIndex(talkPointer);
+        if (ti < 0) return false;
+        final float d = Math.max(1, (float) Math.hypot(event.getX(ti) - x, event.getY(ti) - y));
+        final float mx = (event.getX(ti) + x) * 0.5f, my = (event.getY(ti) + y) * 0.5f;
+        try {
+            if (!nativeModPinch(0, 1, getWidth() > 1 ? mx / (getWidth() - 1) : 0.5f, getHeight() > 1 ? my / (getHeight() - 1) : 0.5f)) return false;
+        } catch (UnsatisfiedLinkError e) { return false; }
+        pinchA = talkPointer; pinchB = id; pinchD = pinchD0 = d;
+        modPinch = true;
+        return true;
+    }
+    private float midX(MotionEvent e, int a, int b) { return getWidth() > 1 ? (e.getX(a) + e.getX(b)) * 0.5f / (getWidth() - 1) : 0.5f; }
+    private float midY(MotionEvent e, int a, int b) { return getHeight() > 1 ? (e.getY(a) + e.getY(b)) * 0.5f / (getHeight() - 1) : 0.5f; }
     // either finger lifted: the pinch ends there, the other finger does nothing until it lifts
     private void endPinch(MotionEvent event) {
         if (pinchA < 0) return;
         pinchMove(event, 2);
+        if (modPinch) {  // (the talk finger stays the talk's; the second does nothing until it lifts)
+            if (owner.indexOfKey(pinchB) >= 0) owner.put(pinchB, dead);
+            pinchA = pinchB = -1;
+            modPinch = false;
+            return;
+        }
         final int rest = owner.indexOfKey(pinchA) >= 0 && owner.get(pinchA) == pinch ? pinchA : pinchB;
         if (owner.indexOfKey(rest) >= 0) owner.put(rest, dead);
         pinchA = pinchB = -1;
