@@ -1,3 +1,4 @@
+#include "mods/camera_distance.h"
 #include "interp.h"
 #include "dsweep.h"
 #include "mods/story_native_restore_resume.h"
@@ -574,7 +575,7 @@ void exact_prerun(Cpu* c) {
     const Cpu saved = *c;
     g_cam_prerun = true;
     g_cam_blended = true;  // (the sound engine keeps the record pass's camera)
-    f_024FFC40_orig(c);
+    enhanced::draw_camera_distance(c, f_024FFC40_orig);
     memcpy(g_exact_view, ppc_ptr(GD(0x104B45F8)), sizeof g_exact_view);
     {   // (the exact camera's process for the shadow cascades of a 40 fps blended record pass)
         g_exact_cam_addr = saved.r[3];
@@ -962,7 +963,8 @@ static void camera_draw_body(Cpu* c) {
         // (also on a snap: the sound listener keeps following only the record pass's camera)
         g_cam_blended = p->valid;
         cam_trace(cam, "blended");
-        f_024FFC40_orig(c);
+        { const auto eye = enhanced::draw_camera_distance(c, f_024FFC40_orig);
+          std::copy(eye.begin(), eye.end(), p->drawn.eye); }
         capture_projection(*p);
         g_cam_blended = false;
         g_view_pass = g_passes;
@@ -996,7 +998,8 @@ static void camera_draw_body(Cpu* c) {
     if (g_hold && true60::enabled()) {  // true 60: the half pass's camera is a preview (true60.cpp)
         p->drawn_pass = ~0ull;  // (drawn with the preview: the stars keep the camera as it is)
         true60::camera_draw_preview(true);
-        f_024FFC40_orig(c);
+        { const auto eye = enhanced::draw_camera_distance(c, f_024FFC40_orig);
+          std::copy(eye.begin(), eye.end(), p->drawn.eye); }
         capture_projection(*p);
         true60::camera_draw_preview(false);
         return;
@@ -1008,7 +1011,8 @@ static void camera_draw_body(Cpu* c) {
         static int n = 0;
         const uint32_t lo = GD(0x10100000), hi = 0x10500000;
         before.assign((uint32_t*)ppc_ptr(lo), (uint32_t*)ppc_ptr(hi));
-        f_024FFC40_orig(c);
+        { const auto eye = enhanced::draw_camera_distance(c, f_024FFC40_orig);
+          std::copy(eye.begin(), eye.end(), p->drawn.eye); }
         capture_projection(*p);
         const uint32_t* cur = (const uint32_t*)ppc_ptr(lo);
         for (size_t i = 0; i < before.size(); i++)
@@ -1028,7 +1032,8 @@ static void camera_draw_body(Cpu* c) {
         }
         return;
     }
-    f_024FFC40_orig(c);
+    { const auto eye = enhanced::draw_camera_distance(c, f_024FFC40_orig);
+          std::copy(eye.begin(), eye.end(), p->drawn.eye); }
     capture_projection(*p);
     g_view_pass = g_passes;
 }

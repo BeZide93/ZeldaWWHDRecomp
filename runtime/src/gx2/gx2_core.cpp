@@ -401,7 +401,7 @@ static void render_thread_main() {
     // retires the copies (gfx/depth_peek.h)
     gfx::depth_peek::set_render_wake([] { { std::lock_guard<std::mutex> lk(g_q_mutex); } g_q_cv.notify_all(); });
     if (!r5_slow_render::apply("GX2 render")) host::boost_thread_priority();
-    perf_hint::add_current_thread();
+    perf_hint::add_current_thread(enhanced::affinity::Role::Render);
     thread_sampler::add_current_thread("render");
     for (;;) {
         {

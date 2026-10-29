@@ -6,6 +6,7 @@
 // setting or native surface change. The system may choose another mode. Actual refresh is read
 // back for interpolation's cap, never used as the request (which would trap 120 fps at 60 Hz).
 #include "display_rate.h"
+#include "frame_generation.h"
 
 #include <SDL3/SDL.h>
 
@@ -67,7 +68,10 @@ void request(SDL_Window* tv, int actualHz) {
     static android_display_rate::Resend resend;
     auto* window = tv ? static_cast<ANativeWindow*>(SDL_GetPointerProperty(
         SDL_GetWindowProperties(tv), SDL_PROP_WINDOW_ANDROID_WINDOW_POINTER, nullptr)) : nullptr;
-    const int hz = android_display_rate::requested_hz(interp::mode(), interp::fps(), disabled);
+    const int generated = enhanced::frame_generation::multiplier.load();
+    const int base = interp::mode() == 0 ? 30 : interp::output_fps();
+    const int hz = !disabled && generated > 1 ? base * generated :
+        android_display_rate::requested_hz(interp::mode(), interp::fps(), disabled);
     if (window) interp::set_requested_display_hz(hz);  // for the performance report
     const int64_t now = (int64_t)SDL_GetTicks();
     const bool again = window && resend.due(now, actualHz);

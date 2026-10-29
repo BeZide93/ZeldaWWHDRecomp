@@ -3,9 +3,10 @@
 // falls behind (without it, a phone left the render thread's prime core at about 1 GHz).
 // No-ops elsewhere.
 #pragma once
+#include "cpu_affinity.h"
 
 namespace perf_hint {
-void add_current_thread();  // a thread whose work makes the frames (render thread, game main thread, record worker)
+void add_current_thread(enhanced::affinity::Role role = enhanced::affinity::Role::Worker);  // a thread whose work makes the frames (render thread, game main thread, record worker)
 void remove_current_thread();  // such a thread before it ends (the hint session is made anew without it)
 void frame_done();          // render thread, once per presented frame
 // Android: 60 fps (frame interpolation) as chosen by the player. frame_done() pauses and resumes the

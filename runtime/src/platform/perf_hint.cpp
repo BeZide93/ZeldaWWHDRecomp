@@ -239,7 +239,7 @@ static cpu_set_t fastest_cores(int& count) {
     return set;
 }
 
-void add_current_thread() {
+void add_current_thread(enhanced::affinity::Role role) {
     static const bool pin = [] { const char* e = getenv("WWHD_FAST_CORES"); return !e || atoi(e) != 0; }();
     if (pin) {
         int n = 0;
@@ -250,6 +250,7 @@ void add_current_thread() {
             LOG("[perf] thread %d on the %d fastest cores: %s", gettid(), n, ok ? "yes" : "refused");
         }
     }
+    enhanced::affinity::add(role);
     if (!enabled()) return;
     std::lock_guard<std::mutex> lk(g_mu);
     g_tids.push_back((int32_t)gettid());
@@ -257,6 +258,7 @@ void add_current_thread() {
 }
 
 void remove_current_thread() {
+    enhanced::affinity::remove();
     if (!enabled()) return;
     std::lock_guard<std::mutex> lk(g_mu);
     const auto tid = (int32_t)gettid();
@@ -315,7 +317,7 @@ extern "C" JNIEXPORT void JNICALL Java_org_wwhdrecomp_wwhd_MemoryPressure_native
 
 #else
 namespace perf_hint {
-void add_current_thread() {}
+void add_current_thread(enhanced::affinity::Role role) {}
 void remove_current_thread() {}
 void frame_done() {}
 bool fps60_chosen() { return false; }

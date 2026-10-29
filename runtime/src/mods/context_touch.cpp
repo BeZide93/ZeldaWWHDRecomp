@@ -35,6 +35,7 @@
 #include "msbt_text.h"
 #include "play_context.h"
 #include "touch_play.h"
+#include "enhanced_touch.h"
 #include "../gfx/display_modes.h"
 #include "../input.h"
 #include "../overlay/hostui.h"
@@ -262,7 +263,13 @@ void context_touch_pad(input::PadState& p, bool repeat) {
     touchplay::In in;
     in.buttons = p.buttons, in.lx = p.lx, in.ly = p.ly, in.touch = touch, in.step = step();
     const uint32_t before = p.buttons;
-    p.buttons = g_machine.filter(in, c, play_options());
+    auto options = play_options();
+    // Macro/recenter ZL pulses must remain timed holds, rather than toggling the touch ZL latch.
+    // Input still travels through the upstream virtual pad, mapping and crash-recording path.
+    const bool sequence = enhanced::sequence_active.load();
+    if (sequence) { options.zl_latch = touchplay::kLatchOff; options.auto_put_away = false; }
+    p.buttons = g_machine.filter(in, c, options);
+    if (sequence) p.buttons |= before & input::kZL;
     if (log_on()) {
         if (g_machine.latched() != was_latched)
             LOG("[touchplay] item tap: %s (step %llu)", g_machine.latched() >= 0 ? "latched" : "let go", (unsigned long long)step());

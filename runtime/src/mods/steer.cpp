@@ -14,6 +14,8 @@
 //
 // Idea from the GreenNaugahyde Android fork (GreenNaugahyde/ZeldaWWHDRecompAndroid, MPL-2.0); reimplemented.
 #include "steer.h"
+#include "camera_distance.h"
+#include "enhanced_touch.h"
 
 #include <algorithm>
 #include <atomic>
@@ -163,6 +165,7 @@ void steer_reset() {
 
 // the pinch: 0 begins (returns whether the pinch is on), 1 moves, 2 ends (saves); d: the fingers' distance
 bool steer_pinch(int phase, float d) {
+    if (enhanced::distance_pinch.get()) return enhanced::distance_gesture(phase, d);
     if (!pinch_fov_on()) return false;
     if (phase == 0) {
         g_pinch_start.store(aspect::fov_scale());

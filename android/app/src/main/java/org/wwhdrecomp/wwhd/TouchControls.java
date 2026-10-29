@@ -77,6 +77,8 @@ import android.view.ViewGroup;
 public class TouchControls extends View implements InputManager.InputDeviceListener {
     private static native void nativeSetPad(int buttons, int face, float lx, float ly, float rx, float ry, float lt, float rt);
     private static native void nativeDetachPad();
+    private static native int nativeEnhancedOptions();
+    private static native void nativeEnhancedSequence(boolean active);
     private static native int nativeTouchState();
     private static native void nativeControllerConnected(boolean connected);
     private static native void nativeScreenDpi(float dpi);
@@ -125,6 +127,21 @@ public class TouchControls extends View implements InputManager.InputDeviceListe
     private static final int KIND_BUTTON = 0, KIND_STICK = 1, KIND_TRIGGER = 2, KIND_TOGGLE = 3, KIND_FACE = 4,
             KIND_VIRTUAL = 5,  // code: the virtual input bit (VIRT_JUMP, VIRT_MOON)
             KIND_SWIPE = 6, KIND_DEAD = 7, KIND_TALK = 8, KIND_PINCH = 9;  // (the last four: finger owners only, never drawn)
+    private static final int KIND_COMBAT = 10;
+    private final CombatMacro combatMacro = new CombatMacro();
+    private int enhancedOptions;
+    private long centerUntil;
+    private final CameraTap cameraTap = new CameraTap();
+    private final Runnable macroTick = new Runnable() {
+        @Override public void run() {
+            if (!active()) { combatMacro.cancel(); centerUntil = 0; return; }
+            syncTouchState();
+            update();
+            long now = SystemClock.uptimeMillis();
+            if (combatMacro.active(now) || now < centerUntil) postDelayed(this, 16);
+        }
+    };
+    private void tickMacro() { removeCallbacks(macroTick); post(macroTick); }
     private static final int VIRT_JUMP = 1, VIRT_MOON = 2;
     // KIND_FACE codes: the Wii U button drawn on it (touch_face.h sends the pad button the controls
     // mapping binds to it, so the drawn A is the Wii U's A with either face-button preset)
@@ -241,6 +258,9 @@ public class TouchControls extends View implements InputManager.InputDeviceListe
         controls.add(new Control(KIND_BUTTON, START, "+", 0.58f, 0.92f, 0.04f));
         controls.add(new Control(KIND_VIRTUAL, VIRT_JUMP, "Jump", 0.41f, 0.15f, 0.05f));
         controls.add(new Control(KIND_VIRTUAL, VIRT_MOON, "Moon", 0.52f, 0.15f, 0.045f));
+        String[] macroNames = {"Jump atk", "Slash", "Spin", "Dodge"};
+        for (int i = 0; i < 4; i++)
+            controls.add(new Control(KIND_COMBAT, i, macroNames[i], .64f + i * .09f, .34f, .045f));
         toggle = new Control(KIND_TOGGLE, 0, "🎮", 0f, 0f, 0.04f);  // placed in onSizeChanged
         editLongPress = () -> {
             if (toggle.pressed && owner.size()==1 && !settingsOpen) {
@@ -571,6 +591,9 @@ public class TouchControls extends View implements InputManager.InputDeviceListe
                 if (free && c == talk && talkPointer >= 0 && startModPinch(event, id, x, y)) c = pinch;
                 else if (free && c != null && c != talk && startPinch(event, id, x, y)) c = pinch;
                 else if (free && c != null && c != talk) freeDown.put(id, SystemClock.uptimeMillis());
+                if (free && (c == swipe || c == rightStick) && (enhancedOptions & 32) != 0) {
+                    cameraTap.down(id, x, y, SystemClock.uptimeMillis());
+                } else if (c == pinch) { cameraTap.reset(); }
                 owner.put(id, c);
                 if (c == null && action == MotionEvent.ACTION_DOWN) {
                     // The first finger on no control: decline the gesture so the view under it takes it
@@ -597,6 +620,12 @@ public class TouchControls extends View implements InputManager.InputDeviceListe
                     // (a pinch's finger, or one more thumb on a half that already has its stick)
                 } else if (c != dead) {
                     c.pressed = true;
+                    if (c.stick == null && (enhancedOptions & 16) != 0)
+                        performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP);
+                    if (c.kind == KIND_COMBAT) {
+                        combatMacro.start(c.code, SystemClock.uptimeMillis(), leftStick.stick.sx, leftStick.stick.sy);
+                        tickMacro();
+                    }
                     if (c.stick != null) c.stick.press(x, y, flexible());
                     c.downX = x; c.downY = y;
                     itemRingFinger(c, true, x, y);
@@ -609,6 +638,7 @@ public class TouchControls extends View implements InputManager.InputDeviceListe
                     if (owner.indexOfKey(id) < 0) continue;
                     Control c = owner.get(id);
                     final float x = event.getX(i), y = event.getY(i);
+                    cameraTap.move(id, x, y, android.view.ViewConfiguration.get(getContext()).getScaledTouchSlop());
                     if (c == null) forward(event, i, MotionEvent.ACTION_MOVE);
                     else if (c == talk) { if (modPinch) pinchMove(event, 1); else talkFinger(1, x, y); }
                     else if (c == pinch) pinchMove(event, 1);
@@ -633,6 +663,11 @@ public class TouchControls extends View implements InputManager.InputDeviceListe
                     if (owner.indexOfKey(id) < 0) continue;
                     Control c = owner.get(id);
                     owner.remove(id);
+                    freeDown.remove(id);
+                    if (cameraTap.up(id, SystemClock.uptimeMillis(), android.view.ViewConfiguration.get(getContext()).getScaledDoubleTapSlop(), all)) {
+                        centerUntil = SystemClock.uptimeMillis() + 150; tickMacro();
+                    }
+                    if (all) { combatMacro.cancel(); centerUntil = 0; removeCallbacks(macroTick); }
                     if (c == null) { forward(event, i, all ? MotionEvent.ACTION_CANCEL : action); continue; }
                     if (c == swipe) { swipePointer = -1; continue; }
                     freeDown.remove(id);
@@ -678,6 +713,9 @@ public class TouchControls extends View implements InputManager.InputDeviceListe
 
     // every control lets go: buttons up, sticks back to rest, no swipe (the pad itself is not touched)
     private void resetControls() {
+        combatMacro.cancel(); centerUntil = 0; cameraTap.reset();
+        try { nativeEnhancedSequence(false); } catch (UnsatisfiedLinkError ignored) {}
+        removeCallbacks(macroTick);
         for (Control c : controls) { c.pressed = false; if (c.stick != null) c.stick.release(); }
         swipePointer = -1;
         if (talkPointer >= 0) { talkPointer = -1; talkFinger(3, 0, 0); }
@@ -1032,6 +1070,10 @@ public class TouchControls extends View implements InputManager.InputDeviceListe
         try {
             if (nativeTouchOptions(options) < 1) return;
         } catch (UnsatisfiedLinkError e) { return; }  // a game library from before the touch options: as seen last
+        final int nextEnhanced = nativeEnhancedOptions();
+        if ((enhancedOptions & 15) != (nextEnhanced & 15)) combatMacro.cancel();
+        if ((nextEnhanced & 32) == 0) { centerUntil = 0; cameraTap.reset(); }
+        enhancedOptions = nextEnhanced;
         final int newStyle = options[1] == STYLE_FLEXIBLE ? STYLE_FLEXIBLE : STYLE_CLASSIC;
         showSticks = options[2] != 0;
         follow = options[3] != 0;
@@ -1080,6 +1122,7 @@ public class TouchControls extends View implements InputManager.InputDeviceListe
     // a Jump / Moon jump button shows only while its mod is on and it does something (native rules)
     // ... and a context button only while it does something (ContextPack: native rules)
     private boolean visible(Control c) {
+        if (c.kind == KIND_COMBAT) return (enhancedOptions & (1 << c.code)) != 0;
         if (c.kind == KIND_VIRTUAL) return (jumpShown & c.code) != 0;
         if (c.pressed && ringOpen && itemButton(c) >= 0) return true;  // its finger picks in the item ring
         return c.kind == KIND_TOGGLE || contextPack.visible(key(c));
@@ -1215,6 +1258,11 @@ public class TouchControls extends View implements InputManager.InputDeviceListe
         }
         lx = leftStick.stick.sx; ly = leftStick.stick.sy;
         rx = rightStick.stick.sx; ry = rightStick.stick.sy;
+        final long now = SystemClock.uptimeMillis();
+        try { nativeEnhancedSequence(combatMacro.active(now) || now < centerUntil); } catch (UnsatisfiedLinkError ignored) {}
+        face |= combatMacro.face(now);
+        if (combatMacro.target(now) || now < centerUntil) lt = 1;
+        if (combatMacro.dodge(now)) { lx = combatMacro.x(); ly = combatMacro.y(); }
         buttons |= face << 16;  // (only for the change check below)
         if (buttons == lastButtons && lx == lastLx && ly == lastLy && rx == lastRx && ry == lastRy && lt == lastLt && rt == lastRt)
             return;

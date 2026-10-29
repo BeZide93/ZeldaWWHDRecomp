@@ -27,7 +27,7 @@ namespace ss {
 uint32_t snap_ld32(uint32_t) { unreachable("ss::snap_ld32"); return 0; }
 }  // namespace ss
 namespace perf_hint {
-void add_current_thread() { unreachable("perf_hint::add_current_thread"); }
+void add_current_thread(enhanced::affinity::Role) { unreachable("perf_hint::add_current_thread"); }
 }  // namespace perf_hint
 namespace thread_sampler {
 void add_current_thread(const char*) { unreachable("thread_sampler::add_current_thread"); }
