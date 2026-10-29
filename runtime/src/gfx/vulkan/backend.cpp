@@ -5263,9 +5263,13 @@ static bool gamepad_touch(const SDL_Event& event) {
     } else if (event.button.windowID == tvId && !overlay::captures()) {
       float nx, ny;
       tv_window_point(event.button.x, event.button.y, nx, ny);
+      // a left button bound to a game button wins over the pointer's other users (tv_pointer.h, issue #315)
+      const bool bound = event.button.which != SDL_TOUCH_MOUSEID && tv_pointer::left_button_bound();
+      const bool picture = tv_pointer::picture_takes_click(bound, mods::mouse_camera());
+      if (!tv_pointer::gamepad_takes_click(bound, mods::mouse_captured())) return false;
       {  // One screen's Off-TV Play: the GamePad picture is the game's; a talk by mouse takes it first (touch_talk.h)
         float px, py, aspect;
-        if (gfx::g_one_screen_off_tv.load() && tv_pointer::wanted(tv_pointer::kOwnerTalk) && gfx::game_picture_hit(nx, ny, &px, &py, &aspect)) {
+        if (picture && gfx::g_one_screen_off_tv.load() && tv_pointer::wanted(tv_pointer::kOwnerTalk) && gfx::game_picture_hit(nx, ny, &px, &py, &aspect)) {
           tv_pointer::set(true, px, py, aspect);
           touchHeld = TouchIn::TvPicture;
           return true;
@@ -5273,7 +5277,7 @@ static bool gamepad_touch(const SDL_Event& event) {
       }
       if (!gfx::overlay_hit(nx, ny, &tx, &ty)) {
         float px, py, aspect;  // a port page on the TV that wants the pointer (tv_pointer.h)
-        if (tv_pointer::wanted() && gfx::game_picture_hit(nx, ny, &px, &py, &aspect)) {
+        if (picture && tv_pointer::wanted() && gfx::game_picture_hit(nx, ny, &px, &py, &aspect)) {
           tv_pointer::set(true, px, py, aspect);
           touchHeld = TouchIn::TvPicture;
           return true;

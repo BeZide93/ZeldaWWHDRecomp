@@ -2,6 +2,8 @@
 #include <cassert>
 #include <cstdio>
 #include <cstring>
+#include <tuple>
+#include <utility>
 
 static void view_routing() {
     using namespace file_select_quit;
@@ -75,9 +77,83 @@ static void dialog_routing() {
     assert(event.dismiss && pad.buttons == original.buttons);
 }
 
+
+// Quit in the game's selection (issue #315): Down from Quest Log 3 and Up from Quest Log 1 select Quit, Down /
+// Up from Quit go on to Quest Log 1 / 3, A on Quit asks, and the game sees none of those presses.
+static void selector_routing() {
+    using namespace file_select_quit;
+    using R = Routing;
+    auto step = [](Routing &r, uint32_t buttons, int focus, float ly = 0, bool shown = true, bool eligible = true,
+                   bool confirming = false) {
+        input::PadState pad{buttons, 0, ly};
+        auto event = r.route(pad, eligible, shown, confirming, focus);
+        return std::make_pair(event, pad);
+    };
+    Routing r;
+    // the game moves between the slots itself
+    auto [e, pad] = step(r, input::kDown, 0);
+    assert(e.focus == R::kKeep && pad.buttons == input::kDown && !r.quit_selected());
+    step(r, 0, 1);
+    // Down on Quest Log 3: Quit, and the press stays from the game (no wrap to Quest Log 1)
+    std::tie(e, pad) = step(r, input::kDown, 2);
+    assert(e.focus == R::kClear && e.moved && r.quit_selected() && pad.buttons == 0);
+    std::tie(e, pad) = step(r, input::kDown, 2);  // held, the guest side not there yet
+    assert(e.focus == R::kKeep && r.quit_selected() && pad.buttons == 0);
+    std::tie(e, pad) = step(r, 0, R::kClear);
+    assert(r.quit_selected() && pad.buttons == 0);
+    // A on Quit asks (and is the dialog's); B still goes back in the game's menu
+    std::tie(e, pad) = step(r, input::kA, R::kClear);
+    assert(e.open && pad.buttons == 0);
+    std::tie(e, pad) = step(r, input::kA, R::kClear, 0, true, true, true);
+    assert(!e.open && pad.buttons == 0);
+    std::tie(e, pad) = step(r, 0, R::kClear, 0, true, true, true);
+    std::tie(e, pad) = step(r, 0, R::kClear);  // answered No: Quit keeps the selector
+    assert(r.quit_selected());
+    std::tie(e, pad) = step(r, input::kB, R::kClear);
+    assert(pad.buttons == input::kB && r.quit_selected());
+    step(r, 0, R::kClear);
+    // Down from Quit: Quest Log 1; the held press stays from the game until released
+    std::tie(e, pad) = step(r, input::kDown, R::kClear);
+    assert(e.focus == 0 && e.moved && !r.quit_selected() && pad.buttons == 0);
+    std::tie(e, pad) = step(r, input::kDown, 0);
+    assert(e.focus == R::kKeep && pad.buttons == 0);
+    std::tie(e, pad) = step(r, 0, 0);
+    // Up on Quest Log 1 (the stick too): Quit; Up from Quit: Quest Log 3
+    std::tie(e, pad) = step(r, 0, 0, .9f);
+    assert(e.focus == R::kClear && r.quit_selected() && pad.ly == 0);
+    step(r, 0, R::kClear);
+    std::tie(e, pad) = step(r, input::kUp, R::kClear);
+    assert(e.focus == 2 && !r.quit_selected() && pad.buttons == 0);
+    step(r, 0, 2);
+    // a stick held down through the slots stops on Quest Log 3 (the game's repeat would wrap past Quit)
+    std::tie(e, pad) = step(r, 0, 1, -.9f);
+    assert(pad.ly < 0);
+    std::tie(e, pad) = step(r, 0, 2, -.9f);
+    assert(e.focus == R::kKeep && !r.quit_selected() && pad.ly == 0);
+    step(r, 0, 2);
+    // the game's selector taking a slot itself (a click on a Quest Log) ends Quit's selection
+    std::tie(e, pad) = step(r, input::kDown, 2);
+    assert(r.quit_selected());
+    step(r, 0, R::kClear);
+    std::tie(e, pad) = step(r, 0, 1);
+    assert(!r.quit_selected() && e.focus == R::kKeep);
+    // a presentation stall keeps Quit's selection and its inputs; losing the context gives the game its selector back
+    step(r, input::kDown, 2);
+    step(r, 0, R::kClear);
+    std::tie(e, pad) = step(r, input::kDown | input::kA, R::kClear, 0, false);
+    assert(r.quit_selected() && pad.buttons == 0 && !e.dismiss);
+    std::tie(e, pad) = step(r, 0, R::kClear, 0, true, false);
+    assert(e.dismiss && e.focus == 2 && !r.quit_selected());
+    // without the selector's state (kUnknown) nothing changes: the X / mouse Quit only
+    Routing plain;
+    input::PadState down{input::kDown};
+    assert(plain.route(down, true, true, false).focus == R::kKeep && down.buttons == input::kDown);
+}
+
 int main() {
     view_routing();
     dialog_routing();
+    selector_routing();
     using namespace file_select_quit;
     for (bool setting : {false, true})
         for (bool idle : {false, true}) {

@@ -90,7 +90,7 @@ static void set_dock_icon() {
     NSApp.applicationIconImage = image;
 }
 
-namespace mods { bool mouse_captured(); }
+namespace mods { bool mouse_captured(); bool mouse_camera(); }
 
 namespace gfx {
 // the picture's size at the full internal resolution (dynamic resolution renders it smaller; the layout stays)
@@ -267,15 +267,23 @@ static void load_options() {
 - (void)mouseDown:(NSEvent*)e {
     float x, y;
     if ((e.modifierFlags & NSEventModifierFlagOption) && [self pipBegin:e]) return;
+    // a left button bound to a game button wins over the pointer's other users (tv_pointer.h, issue #315; the
+    // mouse camera's event monitor, mods/mouse.mm, sees the click first and normally keeps it from here)
+    const bool bound = tv_pointer::left_button_bound();
+    const bool picture = tv_pointer::picture_takes_click(bound, mods::mouse_camera());
+    if (!tv_pointer::gamepad_takes_click(bound, mods::mouse_captured())) {
+        [super mouseDown:e];
+        return;
+    }
     // One screen's Off-TV Play: the GamePad picture is the game's; a talk by mouse takes it first (touch_talk.h)
-    if (gfx::g_one_screen_off_tv.load() && tv_pointer::wanted(tv_pointer::kOwnerTalk) && [self picture:e down:true clamp:false]) {
+    if (picture && gfx::g_one_screen_off_tv.load() && tv_pointer::wanted(tv_pointer::kOwnerTalk) && [self picture:e down:true clamp:false]) {
         self.pointing = true;
         return;
     }
     if ([self map:e x:&x y:&y clamp:false]) {
         self.touching = true;
         input::set_touch(true, x, y);
-    } else if (tv_pointer::wanted() && [self picture:e down:true clamp:false]) {
+    } else if (picture && tv_pointer::wanted() && [self picture:e down:true clamp:false]) {
         self.pointing = true;
     } else {
         [super mouseDown:e];

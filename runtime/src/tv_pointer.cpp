@@ -1,6 +1,8 @@
 // The mouse on the TV picture for the port's own pages (tv_pointer.h).
 #include "tv_pointer.h"
 
+#include "input_map.h"
+
 #include <mutex>
 
 namespace tv_pointer {
@@ -23,6 +25,7 @@ void set(bool down, float x, float y, float aspect) {
     std::lock_guard lock(g_mu);
     g_state = {down, x, y, aspect};
 }
+bool left_button_bound() { return !input_map::key_users(input_map::current(), input_map::kMouse1).empty(); }
 State read() {
     std::lock_guard lock(g_mu);
     return g_state;

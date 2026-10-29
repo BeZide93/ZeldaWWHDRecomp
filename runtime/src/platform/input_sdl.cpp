@@ -745,11 +745,12 @@ bool touch_from_controller(SDL_TouchID id){
 // debug: WWHD_TEST_POST_KEYS=300:F1,410:Down,420:Return,430:K/30 (held 30 frames),500:Text=Tetra pushes key
 // presses (and typed text) at TV frames into SDL's event queue, as gfx/input.mm does on macOS: they take the
 // real path in hidden test runs and reach only the settings overlay and the game's text prompt.
-// Mouse1..Mouse5 click in the TV window (the mouse camera captures the pointer; needs host input).
+// Mouse1..Mouse5 click in the TV window (the mouse camera captures the pointer; needs host input);
+// Mouse1@0.04:0.5 clicks at that point of the TV window (0..1 from its top left; default its top left corner).
 static constexpr Uint64 kTestEventTime=4242;  // timestamp that marks them
 static bool test_event(const SDL_Event& e){return e.common.timestamp==kTestEventTime;}
 static void post_test_keys(){
- struct Post{uint64_t frame;SDL_Scancode code;bool down;std::string text;SDL_Keymod mods=SDL_KMOD_NONE;Uint8 button=0;};
+ struct Post{uint64_t frame;SDL_Scancode code;bool down;std::string text;SDL_Keymod mods=SDL_KMOD_NONE;Uint8 button=0;float fx=-1,fy=-1;};
  static std::vector<Post> posts=[]{
   std::vector<Post> v;const char* e=getenv("WWHD_TEST_POST_KEYS");
   for(const char* p=e;p&&*p;){
@@ -765,11 +766,12 @@ static void post_test_keys(){
     else if(k.rfind("Cmd+",0)==0){mods=SDL_Keymod(mods|SDL_KMOD_GUI);k=k.substr(4);}
     else break;
    }
+   float fx=-1,fy=-1;if(size_t at=k.find('@');at!=std::string::npos){if(sscanf(k.c_str()+at+1,"%f:%f",&fx,&fy)!=2)fx=fy=-1;k.resize(at);}
    int code=input_map::key_from_id(k);SDL_Scancode sc=SDL_SCANCODE_UNKNOWN;
    if(code>=input_map::kMouse1&&code<input_map::kMouse1+5){
     static constexpr Uint8 kButtons[]={SDL_BUTTON_LEFT,SDL_BUTTON_RIGHT,SDL_BUTTON_MIDDLE,SDL_BUTTON_X1,SDL_BUTTON_X2};
     const Uint8 button=kButtons[code-input_map::kMouse1];
-    v.push_back({f,sc,true,{},mods,button});v.push_back({f+hold,sc,false,{},mods,button});continue;
+    v.push_back({f,sc,true,{},mods,button,fx,fy});v.push_back({f+hold,sc,false,{},mods,button,fx,fy});continue;
    }
    for(int i=0;i<SDL_SCANCODE_COUNT&&code!=input_map::kNoKey;i++)if(keycode((SDL_Scancode)i)==code){sc=(SDL_Scancode)i;break;}
    if(sc==SDL_SCANCODE_UNKNOWN){LOG("[input] WWHD_TEST_POST_KEYS: unknown key %s",k.c_str());continue;}
@@ -785,7 +787,8 @@ static void post_test_keys(){
   else if(p.button){
    e.type=p.down?SDL_EVENT_MOUSE_BUTTON_DOWN:SDL_EVENT_MOUSE_BUTTON_UP;e.button.button=p.button;e.button.down=p.down;e.button.which=1;
    e.button.windowID=g_prompt_window?SDL_GetWindowID(g_prompt_window):0;
-   LOG("[input] test mouse button %d %s at frame %llu",p.button,p.down?"down":"up",(unsigned long long)render::frame_count());
+   if(p.fx>=0&&g_prompt_window){int w=0,h=0;SDL_GetWindowSize(g_prompt_window,&w,&h);e.button.x=p.fx*float(w);e.button.y=p.fy*float(h);}
+   LOG("[input] test mouse button %d %s at frame %llu (%.0f, %.0f)",p.button,p.down?"down":"up",(unsigned long long)render::frame_count(),double(e.button.x),double(e.button.y));
    SDL_PushEvent(&e);continue;
   }
   else{e.type=p.down?SDL_EVENT_KEY_DOWN:SDL_EVENT_KEY_UP;e.key.scancode=p.code;e.key.down=p.down;e.key.mod=p.mods;e.key.windowID=g_prompt_window?SDL_GetWindowID(g_prompt_window):0;}
