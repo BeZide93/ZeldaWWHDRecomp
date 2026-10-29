@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 // touch_talk.h: talks, answers, number entry, shops, the wind compass and menu pages by touch, and hold to
 // go on (finger and controller), decided read by read on fixture PlayContexts.
+#include "tv_pointer.h"
 #include "mods/touch_talk.h"
 
 #include <cassert>
@@ -91,6 +92,13 @@ int count_stick(const std::vector<Out>& v, float lx, float ly) {  // pushes to (
 }  // namespace
 
 int main() {
+    // issue #315: a left mouse button bound to a game button wins over the pages / talks on the TV picture
+    // (with the mouse camera, which the bindings need) and over the GamePad picture's touch (captured)
+    assert(tv_pointer::picture_takes_click(false, true) && tv_pointer::picture_takes_click(false, false));
+    assert(tv_pointer::picture_takes_click(true, false) && !tv_pointer::picture_takes_click(true, true));
+    assert(tv_pointer::gamepad_takes_click(false, true) && tv_pointer::gamepad_takes_click(true, false));
+    assert(!tv_pointer::gamepad_takes_click(true, true));
+
     // ---- claims
     {
         Options o;

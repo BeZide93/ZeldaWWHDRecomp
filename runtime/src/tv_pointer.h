@@ -27,6 +27,17 @@ bool wanted(unsigned owner);
 void set(bool down, float x, float y, float aspect);  // hosts (main thread)
 State read();                                         // any thread
 
+// Whose a left click on the TV window is (issue #315: "left mouse button bound to A stops working in menus").
+// A player who bound the left mouse button to a game button (controls: Mouse1) has the mouse camera on, since
+// mouse bindings apply only to its captured pointer (mouse_bindings.h): its clicks are the game's, as before the
+// pages and talks took clicks on the TV picture. Then an uncaptured click captures the pointer and a captured one
+// is the bound button. Unbound (or without the mouse camera), the pages and talks that want the pointer keep it.
+inline bool picture_takes_click(bool left_bound, bool mouse_camera) { return !(left_bound && mouse_camera); }
+// The GamePad picture on the TV (picture-in-picture) takes a click as a touch unless that click is a bound
+// button (the captured pointer is hidden: no one aims a touch with it)
+inline bool gamepad_takes_click(bool left_bound, bool captured) { return !(left_bound && captured); }
+bool left_button_bound();  // the left mouse button does a game button in the current controls (tv_pointer.cpp)
+
 // The point in a 1280 x 720 page centred on the picture (the HUD's centre anchor: a wider picture
 // extends the canvas to both sides)
 inline void to_page(const State& s, float& px, float& py) {
