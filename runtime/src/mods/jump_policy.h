@@ -4,6 +4,7 @@
 // Idea from GreenNaugahyde/ZeldaWWHDRecompAndroid (MPL-2.0), mods/jump.cpp.
 #pragma once
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 
 namespace mods::jump_policy {
@@ -42,6 +43,26 @@ constexpr int kGraceSteps = 6;
 // 23.7 at full run); the double jump keeps the game's.
 constexpr float kGroundBoost = 1.15f, kGroundMin = 16.f;
 inline float ground_speed_y(float game_speed_y) { return std::max(game_speed_y * kGroundBoost, kGroundMin); }
+
+// The speed along the ground. procAutoJump_init raises speedF to 9..17 (HD; USA 023F7958) and sets the air
+// step's timer (mProcVar0) to -1; with -1 procAutoJump speeds Link up to a full run (17, +0.4 a step) along his
+// facing whatever the stick says. Right for the game's jump off a ledge (he is running), but from standing it
+// carried him about 180 units forward (measured on the Outset pier), and a double jump as far again. Ours set
+// the timer to 0, the air step's stick rule in the same function: stick pushed keeps the run speed (or gains
+// it), back brakes, released slows down slowly; and with the stick released at the jump no speed along the
+// ground at all: straight up.
+constexpr float kStickDead = 0.05f;  // procAutoJump's own threshold on mStickDistance
+constexpr int16_t kAirStick = 0;     // mProcVar0 for procAutoJump's stick rule
+inline bool straight_up(float stick_distance) { return stick_distance <= kStickDead; }
+// The take-off animation (ANM_JMPST) also moves him: procAutoJump keeps posMove's root-motion mode 1, which
+// adds the animation's root translation (m3700, model space) turned by his facing; about 37 units forward in
+// its first steps, measured. A straight-up jump takes that step back: the world x/z posMove added for the
+// root translation's change (lx, lz) at facing `angle` (s16), as posMove computes it.
+struct Xz { float x, z; };
+inline Xz root_motion(float lx, float lz, int16_t angle) {
+    const float a = float(angle) * 3.14159265358979f / 32768.f, sn = std::sin(a), cs = std::cos(a);
+    return {lz * sn + lx * cs, lz * cs - lx * sn};
+}
 
 enum class Action { kNone, kJump, kGraceJump, kDoubleJump };
 
