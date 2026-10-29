@@ -5,6 +5,9 @@
 void log_msg(const char*, ...) {}
 namespace input { void set_touch(bool, float, float) {} }
 namespace aspect { void set_window_aspect(float) {} }
+// the mouse wheel over a mod's touch claim (QoL M2 pinches): no mods and no TV pointer owners in this test
+namespace tv_pointer { bool wanted(unsigned) { return false; } }
+namespace mods { bool guest_touch_claimed_at(float, float) { return false; } }
 
 static gfx::PresentPlan frame(unsigned i) {
     return gfx::display_plan(true, 1280, 720, true, 854, 480, 1920, 1080, i);
