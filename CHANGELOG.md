@@ -19,6 +19,26 @@ what is on `devel` and not released yet (also in the
 - **Cheat: all Nintendo Gallery figurines.** Settings → Mods → Cheats completes Carlov's collection for a save that
   is already a gallery member (give him a color picto first). As in the game's ending, Carlov then leaves his
   workshop the next time it loads. (#327, thanks @Pulpparty)
+- **File select: Quit is part of the game's selection.** Press Down on Quest Log 3 (or Up on Quest Log 1) and the
+  game's own selector moves onto Quit; A asks "Quit the game?" just like X. Keyboard, controller and mouse all work.
+  (#315, thanks @Eggtooth)
+- **Settings page: a Graphics tab.** The settings page in the pause menu gains internal resolution, frame rate (30 to
+  240 fps or True 60), dynamic resolution, bloom, FXAA, texture filtering, clouds, cloud shadows and full-size
+  torchlight. Changes apply at once and match the Esc menu. (#315)
+- **Fixed: a left mouse button bound to a button stopped working in menus** (Windows, Linux, Steam Deck). The
+  settings page grabbed the click first; a bound mouse button now always works as that button. (#315, thanks
+  @Eggtooth)
+- **Fixed: choosing a GPU that can't show the picture crashed the game** (seen on Linux laptops with an NVIDIA GPU
+  beside the built-in one). The game tries once more, then goes back to the automatic GPU choice and tells you why,
+  instead of crashing at every start. (#309, thanks @Froggjarl)
+- **Fixed: Picto Box quest stuck after importing a GameCube save.** On the GameCube the Deluxe Picto Box needs a Forest
+  Firefly after Lenzo's test; HD gives it with the third picto. The save converter now gives the HD result, and saves
+  converted earlier are repaired when the game loads them. (#306, thanks @pontesryan)
+- **For mod makers: points on the picture, pinches and the microphone.** `wwhd_screen_point` projects a world point
+  onto the drawn picture, touches get pinch events (two fingers, or the mouse wheel on desktop), and a mod can listen
+  to the microphone for pitch while one of its options marked `"permission": "microphone"` is on. The game only asks
+  for the microphone at that moment, never at the start, and turns the option off again if you decline; audio is
+  analysed live and never stored. A mod that needs a newer game now says so clearly. See docs/mod-sdk-v2.md.
 - **Talks, answers and shops by touch or mouse.** While a talk, a choice, a shop or the wind compass is up, tap
   the picture: a tap goes on, a held finger goes on by itself each time the text waits (never at a question), a
   tap on a line picks that answer, a tap on a shop item steers to it and a second tap asks its price (buying
