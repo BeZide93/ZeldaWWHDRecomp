@@ -2454,7 +2454,8 @@ void tab_controls() {
         m.file_select_quit = v;
         edit_set(m);
     }
-    help("Show a controller and mouse Quit button on the file selection screen.");
+    help("Show a Quit button on the file selection screen. Down from Quest Log 3 (or Up from Quest Log 1) selects it\n"
+         "like a Quest Log; X or a click works too.");
     if (check("Skip controller selection", m.skip_controller_selection, &v)) {
         m.skip_controller_selection = v;
         edit_set(m);

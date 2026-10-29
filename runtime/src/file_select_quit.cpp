@@ -9,6 +9,7 @@
 #include "imgui_internal.h"
 #include "input_map.h"
 #include "mods/game_layouts.h"
+#include "mods/story_notebook_game.h"
 #include "overlay/hostui.h"
 #include "overlay/overlay.h"
 #include "runtime.h"
@@ -34,6 +35,10 @@ Rect tv_region{0, 0, 0, 0};
 View presented_view;
 std::mutex input_mutex;
 Routing routing;
+// The game's selector and Quit (Routing): the slot it is on (guest side, observe), a move asked for by the
+// input side, and whether Quit has it (drawn selected)
+std::atomic<int> focus_slot{Routing::kUnknown}, focus_request{Routing::kKeep};
+std::atomic<bool> quit_focus{false}, cursor_sound{false};
 struct Letter {
     int width = 0, height = 0, left = 0, advance = 0;
 };
@@ -421,10 +426,43 @@ void observe(Cpu *cpu) {
                       !ld8(screen + 0x1CD) && !ld8(screen + 0x1DC);
     *cpu = saved;
     last_idle = idle ? now() : 0;
-    if (idle) {
-        load_font(cpu);
-        *cpu = saved;
+    if (!idle) {
+        focus_slot = Routing::kUnknown;
+        focus_request = Routing::kKeep;
+        cursor_sound = false;
+        return;
     }
+    // The selector: the input manager's selected receiver (EventMgr+0x70) against the three Quest Log
+    // panes (dFile_select_c mpPanes[6..8], their receiver at +0x50, as executeSelectSaveData focuses them)
+    const uint32_t manager = ld32(GD(0x101F4FF0));
+    const uint32_t panes = ld32(screen + 0x4C), count = ld32(screen + 0x48);
+    auto slot_receiver = [&](int i) -> uint32_t {
+        const uint32_t pane = count > uint32_t(6 + i) && object(panes) ? ld32(panes + 4 * (6 + i)) : 0;
+        return object(pane) ? ld32(pane + 0x50) : 0;
+    };
+    if (object(manager)) {
+        // a move asked for by the input side (Routing): the game's own setter, as the screen focuses a slot
+        const int request = focus_request.exchange(Routing::kKeep);
+        if (request == Routing::kClear || (request >= 0 && request < 3 && slot_receiver(request))) {
+            guest_call(cpu, GC(0x02615154), {manager, request == Routing::kClear ? 0u : slot_receiver(request)});
+            *cpu = saved;
+        }
+        const uint32_t selected = ld32(manager + 0x70);
+        int focus = Routing::kClear;
+        for (int i = 0; i < 3 && selected; i++)
+            if (slot_receiver(i) == selected)
+                focus = i;
+        focus_slot = focus;
+        if (cursor_sound.exchange(false))
+            if (const auto &ui = story_notebook::game_ui(); ui.sound) {
+                ui.sound(cpu, "SE_MENU_CURSOR");  // the sound of the game's buttons' cursor
+                *cpu = saved;
+            }
+    } else {
+        focus_slot = Routing::kUnknown;
+    }
+    load_font(cpu);
+    *cpu = saved;
 }
 static bool context_valid() {
     return input_map::file_select_quit() && !overlay::is_open() && tv_visible.load() && last_idle.load() > 0;
@@ -439,9 +477,29 @@ bool visible() {
     return bool(font);
 }
 bool confirming() { return modal.load(); }
+bool quit_selected() { return quit_focus.load(); }
 void filter(input::PadState &pad) {
     std::lock_guard lock(input_mutex);
-    const auto event = routing.route(pad, context_valid(), visible(), modal.load());
+    const bool eligible = context_valid(), shown = visible();
+    const int focus = focus_slot.load();
+    const input::PadState before = pad;
+    const auto event = routing.route(pad, eligible, shown, modal.load(), focus);
+    quit_focus = routing.quit_selected();
+    if (static const bool trace = std::getenv("WWHD_TEST_FILE_QUIT_TRACE"); trace) {
+        static uint64_t last = ~0ull;
+        const uint64_t key = uint64_t(eligible) | uint64_t(shown) << 1 | uint64_t(focus + 4) << 2 | uint64_t(quit_focus.load()) << 6 |
+                             uint64_t(before.buttons & 0xFF00) << 8 | uint64_t(before.ly > .5f) << 32 | uint64_t(before.ly < -.5f) << 33;
+        if (key != last)
+            LOG("[file-select-quit] input: eligible=%d shown=%d focus=%d quit=%d buttons=%04x ly=%.2f -> %04x ly=%.2f", eligible, shown,
+                focus, quit_focus.load(), before.buttons, before.ly, pad.buttons, pad.ly);
+        last = key;
+    }
+    if (event.focus != Routing::kKeep) {
+        focus_request = event.focus;
+        LOG("[file-select-quit] selector: %s", event.focus == Routing::kClear ? "Quit" : event.focus == 0 ? "Quest Log 1" : "Quest Log 3");
+    }
+    if (event.moved)
+        cursor_sound = true;
     if (event.dismiss) {
         ask = false;
         modal = false;
@@ -542,13 +600,15 @@ void frame(float width, float height) {
         LOG("[file-select-quit] asking");
     }
     if (!modal.load()) {
-        if (button(d, quit_box, "Quit", false, scale, ox, oy)) {
+        if (button(d, quit_box, "Quit", quit_focus.load(), scale, ox, oy)) {
             modal = true;
             yes = false;
             presses = 0;
             LOG("[file-select-quit] mouse: asking");
         }
-        prompt(d, ImVec2(ox + (quit_box.x - 30) * scale, oy + (quit_box.y + quit_box.h * .5f) * scale), 23 * scale);
+        // (left of the plate; a selected plate grows by a tenth of its width to each side)
+        const float grown = quit_focus.load() ? quit_box.w * .1f : 0;
+        prompt(d, ImVec2(ox + (quit_box.x - 30 - grown) * scale, oy + (quit_box.y + quit_box.h * .5f) * scale), 23 * scale);
     } else {
         d->AddRectFilled(ImVec2(view.tv.x, view.tv.y), ImVec2(view.tv.x + view.tv.w, view.tv.y + view.tv.h),
                          IM_COL32(0, 0, 0, 100));
