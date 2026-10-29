@@ -465,22 +465,22 @@ bool tv_picture_hit(float nx, float ny, float* px, float* py, float* aspect, boo
 // the game's picture under a point: the TV picture, or in One screen mode's Off-TV Play the GamePad picture
 // (which is the game then); 0..1 of it and its aspect
 bool game_picture_hit(float nx, float ny, float* px, float* py, float* aspect, bool clamp_outside) {
-    {
-        std::lock_guard<std::mutex> lk(g_layout_mu);
-        const Layout& L = g_tv_layout;
-        if (L.drc_only && g_one_screen_off_tv.load(std::memory_order_relaxed)) {
-            const Box& b = L.pip;
-            if (g_tv_dw <= 0 || g_tv_dh <= 0 || b.w <= 0 || b.h <= 0) return false;
-            float x = (nx * g_tv_dw - b.x) / b.w, y = (ny * g_tv_dh - b.y) / b.h;
-            if (x < 0 || y < 0 || x > 1 || y > 1) {
-                if (!clamp_outside) return false;
-                x = std::clamp(x, 0.0f, 1.0f), y = std::clamp(y, 0.0f, 1.0f);
-            }
-            *px = x, *py = y, *aspect = b.w / b.h;
-            return true;
-        }
+    std::lock_guard<std::mutex> lk(g_layout_mu);
+    const Layout& L = g_tv_layout;
+    Box b;
+    if (g_tv_dw <= 0 || g_tv_dh <= 0 ||
+        !game_picture_box(L.tv, L.pip, L.drc_only, g_one_screen_off_tv.load(std::memory_order_relaxed), &b))
+        return false;
+    float x = (nx * g_tv_dw - b.x) / b.w, y = (ny * g_tv_dh - b.y) / b.h;
+    if (x < 0 || y < 0 || x > 1 || y > 1) {
+        if (!clamp_outside) return false;
+        x = std::clamp(x, 0.0f, 1.0f), y = std::clamp(y, 0.0f, 1.0f);
     }
-    return tv_picture_hit(nx, ny, px, py, aspect, clamp_outside);
+    *px = x, *py = y, *aspect = b.w / b.h;
+    return true;
+}
+bool game_picture_box(const PresentPlan& p, Box* box) {
+    return game_picture_box(p.tv, p.pip, p.drc_only, g_one_screen_off_tv.load(std::memory_order_relaxed), box);
 }
 
 // ---------------------------------------------------------------- view button (touch screens)

@@ -3474,7 +3474,12 @@ void swap() {
     gfx::display_input_plan(inputPlan);
   }
   // Menu and host toasts: built once at the selected window size, including present dumps
-  overlay::guesthud::set_tv_region(inputPlan.tv.x,inputPlan.tv.y,inputPlan.tv.w,inputPlan.tv.h,!inputPlan.drc_only);
+  {
+    gfx::Box game;
+    const bool gameShown=gfx::game_picture_box(inputPlan,&game);
+    overlay::guesthud::set_regions(inputPlan.tv.x,inputPlan.tv.y,inputPlan.tv.w,inputPlan.tv.h,!inputPlan.drc_only,
+        game.x,game.y,game.w,game.h,gameShown);
+  }
   const float overlayWidth = (plan.dw > 0 ? plan.dw : layerW) /
       (stereo::frame.mode == stereo::FullSBS ? 2.0f : 1.0f);
   using overlay::window_target::Window;

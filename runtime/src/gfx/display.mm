@@ -1006,7 +1006,9 @@ void present_screens() {
     L.scale = P.scale;
     float dw = P.dw, dh = P.dh;
     bool pip = P.pip_wanted, drc_only = P.drc_only;
-    overlay::guesthud::set_tv_region(P.tv.x,P.tv.y,P.tv.w,P.tv.h,!P.drc_only);
+    Box game_box;
+    const bool game_shown = game_picture_box(P, &game_box);
+    overlay::guesthud::set_regions(P.tv.x,P.tv.y,P.tv.w,P.tv.h,!P.drc_only,game_box.x,game_box.y,game_box.w,game_box.h,game_shown);
     g_overlay_draw = overlay::frame(dw, dh, overlay_metal_init);  // settings overlay, drawn by compose_tv
     // Hidden test-only composition: one reused GPU target, no drawable/readback/disk.
     // Like Metal's other resources this target is process-lifetime; replace on device/format change.

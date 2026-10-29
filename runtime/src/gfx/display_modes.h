@@ -129,6 +129,18 @@ struct Layout { Box tv, pip; bool pip_on = false; bool drc_only = false; float s
 // the TV window's layout: TV picture (tw x th) scaled to fit dw x dh, GamePad picture (pw x ph) in
 // the selected anchor (pip_on) or alone, fitted (drc_only)
 Layout layout(float dw, float dh, float tw, float th, float pw, float ph, bool pip_on, bool drc_only = false);
+// The game's picture in a layout: the TV picture, or in One screen mode's Off-TV Play (one_screen.h) the GamePad
+// picture, which is the game then; false while the window shows the GamePad picture alone otherwise, or before a
+// layout. Touches (game_picture_hit) and the code mods' TV HUD layer (overlay/guest_hud.cpp) both use this box, so
+// a mod's drawing shows where its touch lands.
+inline bool game_picture_box(const Box& tv, const Box& pip, bool drc_only, bool one_screen_off_tv, Box* box) {
+    if (drc_only && !one_screen_off_tv) return false;
+    const Box& b = drc_only ? pip : tv;
+    if (b.w <= 0 || b.h <= 0) return false;
+    *box = b;
+    return true;
+}
+bool game_picture_box(const PresentPlan& plan, Box* box);  // the same for a plan, with the current One screen state
 // a point in the TV window (0..1 from top left) on the GamePad picture -> touch position (0..1),
 // from the last display_plan; clamp_outside: a drag that left the picture keeps touching its edge
 bool overlay_hit(float nx, float ny, float* tx, float* ty, bool clamp_outside = false);

@@ -19,6 +19,8 @@ struct CloneDelete {void operator()(ImDrawList* list)const {IM_DELETE(list);}};
 std::unique_ptr<ImDrawList,CloneDelete> scaled_gamepad;
 ImDrawData gamepad_data;
 ImU32 color(uint32_t rgba) {return IM_COL32(rgba>>24,(rgba>>16)&255,(rgba>>8)&255,rgba&255);}
+// where the TV layer goes: the game's picture (gfx::game_picture_box), which is the GamePad picture in One screen
+// mode's Off-TV Play, so drawings sit where the mod's touches land (game_picture_hit)
 float tv_x=0,tv_y=0,tv_width=0,tv_height=0;
 float gamepad_pixels=0;  // the largest GamePad presentation this frame (pixels per GamePad unit)
 bool tv_visible=true;
@@ -68,9 +70,9 @@ bool image_texture(uint64_t id) {
     for(const auto& [image,texture]:textures)if(uint64_t(texture->data.GetTexID())==id)return true;
     return false;
 }
-void set_tv_region(float x,float y,float width,float height,bool visible) {
+void set_regions(float tx,float ty,float tw,float th,bool tv_shown,float x,float y,float width,float height,bool visible) {
+    file_select_quit::set_tv_region(tx,ty,tw,th,tv_shown);
     tv_x=x;tv_y=y;tv_width=width;tv_height=height;tv_visible=visible;
-    file_select_quit::set_tv_region(x,y,width,height,visible);
     if(visible&&height>0&&active())store().note_pixels(0,height/720.f);
 }
 void backend_destroyed() {
