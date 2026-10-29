@@ -19,6 +19,37 @@ what is on `devel` and not released yet (also in the
 - **Cheat: all Nintendo Gallery figurines.** Settings → Mods → Cheats completes Carlov's collection for a save that
   is already a gallery member (give him a color picto first). As in the game's ending, Carlov then leaves his
   workshop the next time it loads. (#327, thanks @Pulpparty)
+- **Talks, answers and shops by touch or mouse.** While a talk, a choice, a shop or the wind compass is up, tap
+  the picture: a tap goes on, a held finger goes on by itself each time the text waits (never at a question), a
+  tap on a line picks that answer, a tap on a shop item steers to it and a second tap asks its price (buying
+  still needs "yes"), and the auction's numbers and the wind compass follow a drag. On by default on Android; for
+  the mouse on desktop it is an option. Controllers get "Hold A to go on in talks" (off by default). Idea from
+  GreenNaugahyde's Android fork.
+- **One screen (handheld) mode.** The game plays as on the GamePad in Off-TV Play from the start: no "GamePad or
+  Pro Controller?" question, Plus or Minus pauses, the Wii U leftovers (the Controller option, the slide-conducting
+  guide) are hidden, and your finger works the game's own GamePad touch in its menus. On by default on Android
+  (unless you chose the Pro Controller there), an option on desktop and the Steam Deck (Display; applies at the
+  next start). Idea from SwitchWakerHD (thanks @l0nkDev).
+- **Walking and camera options.** Walking direction (Controls) can stay as you pushed the stick while you turn the
+  camera; the camera can swing behind Link while he runs; the direct camera is as fast on the boat as on foot; on
+  Android a pinch changes the field of view. Idea from GreenNaugahyde's Android fork.
+- **First start on a phone** asks "Use the new touch controls?" (new ones recommended, classic fixed sticks
+  possible). New option: **Large Picto Box view** (Display → Screen (HUD)) drops the finder's black frame so the
+  picture fills the screen.
+- **Touch: B goes back while conducting the Wind Waker.** The song screen showed no way out by touch; B now shows
+  the game's own "Return" whenever the game offers it.
+- **Jump anywhere: a standing jump goes straight up.** It used to carry Link forward like the game's ledge jump,
+  which could throw him off a narrow pier on a double jump; a jump while moving keeps your run.
+- **Android: install a mod from a file.** Mods → More → Install from a file now works with the phone's file picker
+  (it couldn't read the picked file before). Folders can't be picked on Android; choose the mod's file.
+- **Android: less likely to be closed when memory runs low.** The game frees renderer caches it can rebuild when
+  the system asks for memory. Idea from GreenNaugahyde's Android fork.
+- **Meta Quest theater: 3D is Full SBS.** The theater's 3D button now gives each eye the full width, which looks
+  much cleaner on the big virtual screen at about the same cost (thanks @rhemfur for the measurements, #248).
+- **For mod makers: live options, input filters and touches.** Options marked `"live": true` change while the game
+  runs, a code mod can adjust the controller state of each read, and it can claim areas of the picture for
+  touches and clicks (also with the on-screen controls hidden, and drawn on the GamePad picture in One screen
+  mode). See docs/mod-sdk-v2.md, "Live options, input filters and touches".
 - **Meta Quest: no game icon offer.** The Quest's Library accepts a game icon but never shows it for a sideloaded
   app, so setup no longer offers one there and hides the "Add the game icon" button. Other Android launchers are
   unchanged. (#325, thanks @rhemfur)
