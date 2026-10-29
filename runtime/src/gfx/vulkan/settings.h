@@ -4,6 +4,7 @@
 struct SDL_Window;
 namespace gfxvk {
 void load_device_setting();
+void save_device_setting();  // the GPU setting now (not with WWHD_VK_DEVICE, not in test runs without a settings file)
 float res_scale();
 float requested_res_scale();
 void set_res_scale(float scale);

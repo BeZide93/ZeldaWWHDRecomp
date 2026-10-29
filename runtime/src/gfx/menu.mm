@@ -98,6 +98,11 @@ void load_device_setting() {
     if (g_prefs) if (id value = pref(@"vkDevice"))
         if ([value isKindOfClass:[NSString class]]) set_device_setting([value UTF8String]);
 }
+void save_device_setting() {
+    if (!g_prefs || env_set({"WWHD_VK_DEVICE"})) return;
+    set_pref(@"vkDevice", [NSString stringWithUTF8String:device_setting().c_str()]);
+    if (NSString* p = portable_prefs_path()) [g_portable_prefs writeToFile:p atomically:YES];
+}
 }
 #endif
 static void load_prefs() {
