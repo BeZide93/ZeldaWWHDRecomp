@@ -238,6 +238,7 @@ enum Cheat {
     // story progress (can change or break story events)
     kCheatSongs = 8, kCheatTriforce = 16, kCheatDungeon = 32, kCheatKey = 64,
     kCheatBags = 128,  // spoils and bait bag filled (not story progress)
+    kCheatFigurines = 256,  // every Nintendo Gallery figurine (Carlov then leaves, as in the game's ending)
 };
 void request_cheat(int which);  // any thread
 enum Infinite {

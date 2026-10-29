@@ -16,6 +16,9 @@ what is on `devel` and not released yet (also in the
 - **Quest Log dates are right again.** The file select showed today's date for every save, and saves were stamped
   with the time since the game started instead of the real date; both are fixed. A Quest Log saved with an older
   build shows the save file's date until you save it again. (thanks @koenada, #322)
+- **Cheat: all Nintendo Gallery figurines.** Settings → Mods → Cheats completes Carlov's collection for a save that
+  is already a gallery member (give him a color picto first). As in the game's ending, Carlov then leaves his
+  workshop the next time it loads. (#327, thanks @Pulpparty)
 - **Meta Quest: no game icon offer.** The Quest's Library accepts a game icon but never shows it for a sideloaded
   app, so setup no longer offers one there and hides the "Add the game icon" button. Other Android launchers are
   unchanged. (#325, thanks @rhemfur)

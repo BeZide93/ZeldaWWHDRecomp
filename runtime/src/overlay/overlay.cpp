@@ -1820,6 +1820,9 @@ void cheats() {
     cheat("Equip Master Sword + Mirror Shield (until reload)", mods::kCheatSword);
     cheat("20 hearts, double magic, 5000 rupees", mods::kCheatStats);
     cheat("Fill the bags (spoils and bait)", mods::kCheatBags);
+    cheat("All Nintendo Gallery figurines", mods::kCheatFigurines);
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Once you are a member (Carlov took a picto). Carlov then leaves his workshop, as in the game's ending; this can't be undone.");
     static const std::pair<const char*, int> inf[] = {{"Infinite health", mods::kInfHealth}, {"Infinite magic", mods::kInfMagic},
                                                       {"Infinite arrows and bombs", mods::kInfAmmo},
                                                       {"Infinite rupees", mods::kInfRupees},
