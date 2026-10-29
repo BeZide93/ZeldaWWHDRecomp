@@ -33,7 +33,6 @@
 #include "input.h"
 #include "runtime.h"
 
-namespace mods { bool guest_touch_claimed_at(float x, float y); }
 
 namespace gfx {
 
@@ -465,15 +464,6 @@ bool tv_picture_hit(float nx, float ny, float* px, float* py, float* aspect, boo
     return true;
 }
 
-// the game's picture under a point: the TV picture, or in One screen mode's Off-TV Play the GamePad picture
-// (which is the game then); 0..1 of it and its aspect
-bool wheel_on_mod_claim(float nx, float ny, float* px, float* py, float* aspect) {
-    if (!tv_pointer::wanted(tv_pointer::kOwnerTalk) || !game_picture_hit(nx, ny, px, py, aspect)) return false;
-    tv_pointer::State s{false, *px, *py, *aspect};
-    float lx, ly;
-    tv_pointer::to_page(s, lx, ly);
-    return mods::guest_touch_claimed_at(lx - 640.0f, 360.0f - ly);
-}
 bool game_picture_hit(float nx, float ny, float* px, float* py, float* aspect, bool clamp_outside) {
     std::lock_guard<std::mutex> lk(g_layout_mu);
     const Layout& L = g_tv_layout;
