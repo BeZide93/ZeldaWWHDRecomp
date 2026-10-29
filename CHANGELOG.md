@@ -7,6 +7,8 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+## v0.5.0
+
 - **Fixed: frame interpolation glitches.** With interpolation on (above 30 fps), the hookshot no longer leaves
   stray chain links from the last shot (#304, thanks @aaronlink127); the sun, moon and lens flare follow the drawn
   camera instead of juddering while you move (#320, thanks @CaptainLibrary); and the first loading screen runs at

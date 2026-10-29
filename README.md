@@ -20,13 +20,14 @@ The project has three parts:
 
 ## What's new
 
-**v0.4.0: the world editor and a big Android update.**
-- **World editor** (a preview for mod makers): start the game with `--editor` to place the game's villagers,
-  enemies, chests, switches, doors and your own models while the game runs, and to build quests, letters, scenes,
-  islands and levels of your own. It also works with AI assistants through MCP (off by default).
-- **Android:** two-screen handhelds, a heat guard for handhelds with a fan, even frame pacing at 60 fps, code mods
-  and dynamic resolution.
-- **Faster on every platform**, a 40 fps mode, toon clouds, more comfort options and many fixes.
+**v0.5.0: settings in the pause menu, new touch controls and a sharper picture.**
+- **Settings in the game's own pause menu**, drawn like the game's menus, with Camera, Controls, Screen, Graphics,
+  Game and Mods tabs.
+- **Touch and controllers:** floating touch sticks and context buttons on Android, an item wheel, a One screen
+  (handheld) mode, a setup for each controller, and button prompts that follow your own face buttons.
+- **Graphics:** smooth bloom and sharp torchlight at higher resolutions, sharper textures on the Mac, smoother frame
+  interpolation that plays exactly like 30 fps, and fewer shader stutters. HDR on Linux and a Meta Quest theater.
+- Many fixes, and more for mod makers and the world editor.
 
 The changes in each update are in [CHANGELOG.md](CHANGELOG.md) and in the release notes on the
 [Releases](https://github.com/ZeldaWWHDRecomp/ZeldaWWHDRecomp/releases) page.
