@@ -41,6 +41,12 @@ public class WwhdActivity extends SDLActivity {
         return HttpsDownload.download(url, destination, limit);
     }
 
+    /** Settings > Mods > More > Install from a file (runtime/src/platform/android_documents.cpp, game
+     *  thread): the picked content:// document copied to the app's cache. "ok:" + path or "error:" + message. */
+    public static String copyPickedDocument(String uri, long limit) {
+        return PickedDocuments.copy(mSingleton.getApplicationContext(), uri, limit);
+    }
+
     // Public thermal/battery APIs, sampled by the overlay/report via JNI at most once a second.
     public static String performanceThermals() { return PerformanceThermals.read(mSingleton); }
 
@@ -61,7 +67,7 @@ public class WwhdActivity extends SDLActivity {
             android.content.Context context = mSingleton.getApplicationContext();
             File job = SetupStore.current(context);
             if (job == null || !new File(job, "host.json").isFile() || !new File(AndroidGame.storage(context), "active.json").isFile())
-                return "This game was built on a computer: build it there again with code-mod support";
+                return "This game was built on a computer: build it there again " + (enabled ? "with" : "without") + " code-mod support";
             AndroidGame.chooseCodeMods(context, enabled);
             codeModRequest = System.currentTimeMillis();
             if (AndroidGame.needsRebuild(context)) SetupService.start(context, null);

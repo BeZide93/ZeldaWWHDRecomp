@@ -1,6 +1,7 @@
 // Jump anywhere: the per-step decision (jump_policy.h). No game files.
 #include "mods/jump_policy.h"
 #include <cassert>
+#include <cmath>
 
 using namespace mods::jump_policy;
 
@@ -102,5 +103,15 @@ int main() {
     // the ground jump is a little higher than the game's, at least the minimum
     assert(ground_speed_y(12.5f) == kGroundMin);
     assert(ground_speed_y(23.7f) > 23.7f);
+    // the stick released at the jump (procAutoJump's own threshold): straight up
+    assert(straight_up(0.f) && straight_up(kStickDead) && !straight_up(0.06f) && !straight_up(1.f));
+    // posMove's root motion turned by the facing (cM_ssin / cM_scos of the s16 angle)
+    {
+        auto near = [](Xz a, float x, float z) { return std::fabs(a.x - x) < 1e-4f && std::fabs(a.z - z) < 1e-4f; };
+        assert(near(root_motion(0, 10, 0), 0, 10));            // facing +z: forward is +z
+        assert(near(root_motion(0, 10, 0x4000), 10, 0));       // facing +x
+        assert(near(root_motion(0, 10, -0x8000), 0, -10));     // facing -z
+        assert(near(root_motion(10, 0, 0x4000), 0, -10));      // the model's x at facing +x: -z
+    }
     return 0;
 }

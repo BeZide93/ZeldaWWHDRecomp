@@ -260,13 +260,18 @@ static void load_options() {
     NSPoint p = [self convertPoint:e.locationInWindow fromView:nil];
     NSSize sz = self.bounds.size;
     float x, y, aspect;
-    if (sz.width <= 0 || sz.height <= 0 || !gfx::tv_picture_hit(p.x / sz.width, 1.0f - p.y / sz.height, &x, &y, &aspect, c)) return false;
+    if (sz.width <= 0 || sz.height <= 0 || !gfx::game_picture_hit(p.x / sz.width, 1.0f - p.y / sz.height, &x, &y, &aspect, c)) return false;
     tv_pointer::set(down, x, y, aspect);
     return true;
 }
 - (void)mouseDown:(NSEvent*)e {
     float x, y;
     if ((e.modifierFlags & NSEventModifierFlagOption) && [self pipBegin:e]) return;
+    // One screen's Off-TV Play: the GamePad picture is the game's; a talk by mouse takes it first (touch_talk.h)
+    if (gfx::g_one_screen_off_tv.load() && tv_pointer::wanted(tv_pointer::kOwnerTalk) && [self picture:e down:true clamp:false]) {
+        self.pointing = true;
+        return;
+    }
     if ([self map:e x:&x y:&y clamp:false]) {
         self.touching = true;
         input::set_touch(true, x, y);
@@ -1001,7 +1006,9 @@ void present_screens() {
     L.scale = P.scale;
     float dw = P.dw, dh = P.dh;
     bool pip = P.pip_wanted, drc_only = P.drc_only;
-    overlay::guesthud::set_tv_region(P.tv.x,P.tv.y,P.tv.w,P.tv.h,!P.drc_only);
+    Box game_box;
+    const bool game_shown = game_picture_box(P, &game_box);
+    overlay::guesthud::set_regions(P.tv.x,P.tv.y,P.tv.w,P.tv.h,!P.drc_only,game_box.x,game_box.y,game_box.w,game_box.h,game_shown);
     g_overlay_draw = overlay::frame(dw, dh, overlay_metal_init);  // settings overlay, drawn by compose_tv
     // Hidden test-only composition: one reused GPU target, no drawable/readback/disk.
     // Like Metal's other resources this target is process-lifetime; replace on device/format change.

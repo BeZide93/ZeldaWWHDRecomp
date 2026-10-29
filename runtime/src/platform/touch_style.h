@@ -49,10 +49,14 @@ inline Options sanitize(Options o) {
 }
 
 // What a finger landing on no control does. x: 0..1 of the view's width; on_game_ui: the point is on
-// the game's own touch areas (view button, GamePad picture).
-enum Free : int { FreeGame = 0, FreeLeftStick = 1, FreeRightStick = 2, FreeSwipe = 3 };
-inline Free free_touch(const Options& o, float x, bool on_game_ui) {
-    if (o.style != Flexible || on_game_ui || !std::isfinite(x)) return FreeGame;
+// the game's own touch areas (view button, GamePad picture); talk: a talk, a choice, a shop... claims the
+// TV picture now (mods/touch_talk.h claims(): the finger goes there, TouchControls.nativeTalkFinger), in
+// either style.
+enum Free : int { FreeGame = 0, FreeLeftStick = 1, FreeRightStick = 2, FreeSwipe = 3, FreeTalk = 4 };
+inline Free free_touch(const Options& o, float x, bool on_game_ui, bool talk = false) {
+    if (on_game_ui || !std::isfinite(x)) return FreeGame;
+    if (talk) return FreeTalk;
+    if (o.style != Flexible) return FreeGame;
     if (x < 0.5f) return FreeLeftStick;
     return o.right == RightStick ? FreeRightStick : FreeSwipe;
 }
@@ -70,6 +74,21 @@ struct GameTouch {
 inline bool game_touch(const GameTouch& g) {
     if (g.dual) return g.swapped && g.primary_gamepad;
     return g.view_button || g.pip;
+}
+
+// The first-start question (controls plan P8): "Use the new touch controls?" (Flexible, recommended) or the
+// classic ones, asked once on a touch device with the on-screen controls on, unless the player already chose a
+// style (settings.ini touchStyle) or answered it (touchStyleAsked). Flexible is the default either way; the
+// question tells the player, and lets them keep the classic fixed sticks. Idea from the GreenNaugahyde Android
+// fork (StarterQuestions), reimplemented.
+inline bool ask_first_start(bool touch_device, bool controls_on, bool style_saved, bool asked) {
+    return touch_device && controls_on && !style_saved && !asked;
+}
+// the answer: the new controls (Flexible with the swipe camera) or the classic ones
+inline Options first_start_answer(Options o, bool flexible) {
+    o.style = flexible ? Flexible : Classic;
+    if (flexible) o.right = RightSwipe;
+    return o;
 }
 
 // For Java (TouchControls.nativeTouchOptions): ints, speeds in percent.

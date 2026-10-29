@@ -167,12 +167,54 @@ bool auto_put_away_on();
 void set_auto_put_away_on(bool on);
 int zl_latch_mode();  // touchplay::ZlLatch: 0 off, 1 let go (default), 2 next target
 void set_zl_latch_mode(int mode);
+// ---- talks, answers, shops... by touch or mouse, and hold to go on (touch_talk.cpp; rules in touch_talk.h) ----
+// the active controller's pad read, after the touch controls' rules: the fingers' presses and stick pushes,
+// the held A; `repeat`: true 60's repeated read (the pushed stick stays)
+void touch_talk_pad(input::PadState& p, bool repeat);
+void touch_talk_reset();  // a state load
+// code mods (guest_mods.cpp, guest_live.h): the touches their claims got and their input filters, on the game's
+// controller reads after the port's own filters
+void guest_pad_filter(Cpu* c, input::PadState& p, bool repeat);
+// a finger on the TV picture (Finger::Kind: 0 down, 1 move, 2 up, 3 cancel), layout units (centre, +y up)
+void touch_talk_finger(int kind, float x, float y);
+bool touch_talk_claims();  // a finger landing on the picture is the talk's now
+bool touch_talk_claims_at(float x, float y);  // ... or a code mod's at this point (Android: nativeFreeTouch)
+bool guest_touch_claimed_at(float x, float y);  // a code mod's claim alone (Android: a finger the hidden controls pass on)
+bool touch_talk_on();
+void set_touch_talk_on(bool on);
+bool talk_hold_ff_on();
+void set_talk_hold_ff_on(bool on);
+bool pad_hold_a_on();
+void set_pad_hold_a_on(bool on);
+// ---- camera extras (steer.cpp; rules in steer.h): walking direction, camera swing, boat speed, pinch FOV ----
+int steer_mode();                  // steer::Mode: 0 as the game (default), 1 kept while the player turns the camera, 2 while the stick is held
+void set_steer_mode(int mode);
+bool camera_swing();               // the camera swings behind Link while he runs
+void set_camera_swing(bool on);
+bool direct_boat_speed();          // the direct camera as fast on the boat as on foot (default on)
+void set_direct_boat_speed(bool on);
+bool pinch_fov_on();               // Android: a pinch changes the field of view (default on)
+void set_pinch_fov_on(bool on);
+float steer_swing_degrees(bool player_camera);  // camera.cpp, once per logic step
+bool steer_pinch(int phase, float d);           // 0 begin (true: on), 1 move, 2 end
+void steer_reset();                // a state load
+bool camera_turned_by_player();    // camera.cpp: the right stick, the mouse or a swipe turned the camera in the last steps
+// ---- One screen (handheld) mode (one_screen.cpp; rules in ../one_screen.h) ----
+bool one_screen_enabled();         // on for this session (decided at start)
+bool one_screen_active();          // ... and the controller acts as the GamePad
+bool one_screen_off_tv();          // ... and the game plays Off-TV now
+bool one_screen_next();            // the choice for the next start
+void set_one_screen_next(bool on);
+void one_screen_pad(input::PadState& p);         // VPADRead full reads: Minus as Plus
+bool one_screen_hidden_pane(const char* name);   // the GamePad's slide-conducting guide in Off-TV Play
 // ---- HUD fades (hud_fade.cpp; rules in hud_fade.h): the game's hearts, rupees, magic bar ----
 bool hud_fade_on(int element);  // hudfade::Element
 void set_hud_fade_on(int element, bool on);
 void hud_fade_step(const playctx::PlayContext& c);  // each logic step, after the context was read
 float hud_fade_alpha_of(uint32_t pane);  // Pane::CalculateMtx: the alpha factor of a faded pane (1: none)
-int hud_pane_hide(uint32_t pane);  // Pane::Draw: 0 draw, 1 skip (a faded-out element), 2 skip in TV layouts (the hidden cluster)
+int hud_pane_hide(uint32_t pane);
+bool large_picto_on();  // the large Picto Box view: its finder's frame not drawn (hud_fade.cpp)
+void set_large_picto_on(bool on);  // Pane::Draw: 0 draw, 1 skip (a faded-out element), 2 skip in TV layouts (the hidden cluster)
 bool story_system();                      // letters, quests, the story notebook, mod charts (mods/required.h)
 void set_story_system(bool on);
 void set_auto_wind(bool on);

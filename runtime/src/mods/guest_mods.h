@@ -12,6 +12,7 @@ namespace story_game_pieces {struct BuiltSet;}
 #include "story_native_refresh_dispatch_guard.h"
 #include "story_native_manager_cancel_dispatch_guard.h"
 struct Cpu;
+namespace input { struct PadState; }
 namespace story_native_event_depth {class Tracker;struct Call;}
 namespace story_native_outer_return {class OuterReturn;}
 namespace story_native_restore_resume {class Boundary;}
@@ -54,6 +55,15 @@ bool install_native_wait_routes(NativeWaitDispatch);
 bool routes_owned();
 NativeWaitRouteCoverage native_wait_route_coverage();
 bool hooks_built();  // marker registered by the running generated game code, never the setting
+// Live features (guest_live.h; Mod SDK, QoL track M0)
+// a finger change on the TV picture (layout units): the mod whose claim has it (queued for the next pad read), -1
+// none (the port's own rules have it)
+int touch_route(uint32_t kind, float x, float y);
+bool touch_claimed_at(float x, float y);  // any thread
+bool touch_claims();                      // a mod claims some part of the picture now
+// the game's controller reads (VPADRead / KPADReadEx, after the port's own filters): the mods' touch callbacks
+// for the queued fingers, then their input filters in load order; `repeat`: true 60's repeated read (nothing)
+void pad_filter(Cpu* c, input::PadState& p, bool repeat);
 inline constexpr uint32_t kRegionStart=0x7F000000,kRegionSize=0x01000000;
 std::vector<ModIdentity> enabled_mods();
 void init(); // after dispatch::init, before guest threads start

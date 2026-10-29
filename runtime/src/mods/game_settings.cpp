@@ -304,6 +304,28 @@ void register_controls() {
         it.set = [](float v) { change_mapping([v](M& m) { m.l_turns_page = v >= 0.5f; }); };
         add(std::move(it));
     }
+    {
+        Item it;
+        it.id = "controls.talk-touch", it.tab = "controls", it.kind = Kind::Toggle;
+#ifdef __ANDROID__
+        it.label = "Talks and shops by touch";
+        it.help = "Tap to go on, hold to go on by itself, tap an answer or a shop's item.";
+#else
+        it.label = "Talks and shops by mouse";
+        it.help = "Click to go on, hold to go on by itself, click an answer or a shop's item.";
+#endif
+        it.get = [] { return mods::touch_talk_on() ? 1.0f : 0.0f; };
+        it.set = [](float v) { mods::set_touch_talk_on(v >= 0.5f); };
+        add(std::move(it));
+    }
+    {
+        Item it;
+        it.id = "controls.pad-hold-a", it.tab = "controls", it.label = "Hold A to go on in talks", it.kind = Kind::Toggle;
+        it.help = "Keep A held and the text goes on by itself; every question waits for a new press.";
+        it.get = [] { return mods::pad_hold_a_on() ? 1.0f : 0.0f; };
+        it.set = [](float v) { mods::set_pad_hold_a_on(v >= 0.5f); };
+        add(std::move(it));
+    }
 #ifdef __ANDROID__
     {
         Item it;
@@ -321,6 +343,14 @@ void register_controls() {
 #endif
 }
 void register_screen() {
+    {
+        Item it;
+        it.id = "screen.large-picto", it.tab = "screen", it.label = "Large Picto Box view", it.kind = Kind::Toggle;
+        it.help = "The finder fills the screen; the photo is what the corner marks frame.";
+        it.get = [] { return mods::large_picto_on() ? 1.0f : 0.0f; };
+        it.set = [](float v) { mods::set_large_picto_on(v >= 0.5f); };
+        add(std::move(it));
+    }
     {
         Item it;
         it.id = "screen.fov", it.tab = "screen", it.label = "Gameplay field of view", it.kind = Kind::Number;
@@ -536,6 +566,24 @@ void register_builtin() {
             return std::string(b);
         };
         it.enabled = [] { return mods::mouse_camera(); };
+        add(std::move(it));
+    }
+    {
+        Item it;
+        it.id = "camera.walk-direction", it.tab = "camera", it.label = "Walking direction", it.kind = Kind::Choice;
+        it.help = "Kept: Link walks on the way you pushed the stick while the camera turns.";
+        it.choices = {"As the game", "Kept while you turn", "Kept while held"};
+        it.get = [] { return float(mods::steer_mode()); };
+        it.set = [](float v) { mods::set_steer_mode(int(std::lround(v))); };
+        add(std::move(it));
+    }
+    {
+        Item it;
+        it.id = "camera.swing", it.tab = "camera", it.label = "Camera swings behind Link", it.kind = Kind::Toggle;
+        it.help = "While he runs and you leave the camera alone, it turns to look over his shoulder.";
+        it.get = [] { return mods::camera_swing() ? 1.0f : 0.0f; };
+        it.set = [](float v) { mods::set_camera_swing(v >= 0.5f); };
+        it.enabled = [] { return mods::steer_mode() != 0; };
         add(std::move(it));
     }
     add(builtin_toggle("camera", "first-person", "First person on R3 / wheel",

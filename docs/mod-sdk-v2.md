@@ -227,9 +227,12 @@ use object fields that are the same in both versions.
 | Service | What it does |
 | --- | --- |
 | `wwhd_log`, `_int`, `_hex`, `_float` | Log lines tagged with your mod's ID |
-| `wwhd_config_int`, `_bool`, `_float`, `_string` | Your mod's options (values from startup; fallback on missing or wrong type; strings copy into your buffer) |
+| `wwhd_config_int`, `_bool`, `_float`, `_string` | Your mod's options (values from startup, or as they are now for `"live"` options; fallback on missing or wrong type; strings copy into your buffer) |
+| `wwhd_config_changed` | A live option's revision, below |
 | `wwhd_malloc`, `wwhd_free` | Per-mod heap, 16-byte aligned; size from `guest.heap_size` (default 256 KiB, max 8 MiB); null when full |
 | `wwhd_input_read` | Buttons, sticks and touch (read-only) |
+| `wwhd_input_filter_register` | Change the controller state the game reads, below |
+| `wwhd_touch_register`, `wwhd_touch_claim` | Touches (or mouse clicks) on parts of the TV picture your mod claims, below |
 | `wwhd_file_read`, `wwhd_file_write` | Flat file names in your mod's own data folder, at most 1 MiB per call; write replaces the file; return bytes or -1 |
 | `wwhd_logic_dt`, `wwhd_logic_step` | Length of the current logic step in seconds (60 fps modes included) and the step counter |
 | `wwhd_setting_get`, `wwhd_setting_changed` | Read-only port settings, below |
@@ -241,6 +244,40 @@ use object fields that are the same in both versions.
 | `memcpy`, `memmove`, `memset` | As usual |
 
 Your mod can also call any game function. Original synthesized audio can use the PCM stream service below.
+
+## Live options, input filters and touches
+
+These let one package hold several small features that the player switches while playing (the QoL
+package in the mod repository is built this way).
+
+**Live options.** Mark an option `"live": true` in the manifest. `wwhd_config_*` then return its value as it is
+now, and `wwhd_config_changed(id)` returns its revision: 1 at start, one more each time the player changes it
+in Settings or on the item menu's page (0 for an option your mod doesn't have). Compare it with the last
+revision you saw, once per logic step, and read the value again when it changed. Keep your hooks installed and
+return early while a feature is off. Options without `"live"` keep their start value.
+
+```c
+static unsigned long long seen;
+void step(void) {
+    unsigned long long r = wwhd_config_changed("clothes");
+    if (r != seen) { seen = r; clothes_on = wwhd_config_bool("clothes", 0); }
+}
+```
+
+**Input filters.** `wwhd_input_filter_register(fn)` calls `fn(state)` on each of the game's controller reads
+(full logic steps, also at 60 fps), after the port's own rules (the touch controls, talks by touch) and before
+the game sees it. Change `buttons` and the sticks; the touch fields are read only. Filters of several mods run
+in their load order. One filter per mod; register 0 to remove it. The function must be your mod's own.
+
+**Touches on the TV picture.** Register a callback with `wwhd_touch_register(fn)`, then claim rectangles with
+`wwhd_touch_claim(slot, x0, y0, x1, y1)`: layout units, 1280 x 720 around the picture's centre with +y up (a
+wider picture extends x), up to 8 slots. A finger (on Android with the on-screen controls shown or hidden) or a
+mouse click on the desktop that lands in a claim goes
+to your callback as `WWHD_TOUCH_DOWN`, `_MOVE`, `_UP` or `_CANCEL` with its position, and to nothing else: no
+on-screen stick, no talk by touch. It stays yours until it lifts, even outside the rectangle. Where claims
+overlap the newest wins. Claim only while your feature shows something to touch, and remove the claim (an
+empty rectangle, x1 <= x0) when it doesn't, so the player's thumbs work the game again. Events arrive at the
+next controller read, before the input filters, so a touch can become a button in the same read.
 
 ## Port settings
 
@@ -1122,7 +1159,7 @@ from before 2026-10-17 load again.
   support (its **Code mods** switch, see [setup-code-mods.md](setup-code-mods.md)), and each mod is built
   on the device with the app's own compiler. Mod preparation tools written in Python run there too;
   other programs in a mod package don't run on Android.
-- Changing enabled mods or their options needs a restart.
+- Changing enabled mods or their options needs a restart, except options the manifest marks `"live": true`.
 - Mods live in a 16 MiB region of game memory (`0x7F000000`–`0x80000000`); each mod gets its
   own 64 KiB-aligned part.
 - No events or exports between mods yet. Audio streams support 48 kHz mono/stereo PCM.

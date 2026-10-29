@@ -62,8 +62,10 @@ static GamePadUiState gamepad_ui() {
     const unsigned bits = g_gamepad_ui.load();
     return {bool(bits & 1), bool(bits & 2), bool(bits & 4), bool(bits & 8), bool(bits & 16)};
 }
+bool gamepad_ui_menu() { return gamepad_ui().menu; }
 std::atomic<float> g_drc_aspect{854.0f / 480.0f};
 std::atomic<bool> g_has_drc_window{false};
+std::atomic<bool> g_one_screen{false}, g_one_screen_off_tv{false};
 std::atomic<bool> g_second_screen_off{false};
 std::atomic<bool> g_second_display_available{false};
 static std::mutex g_second_screen_seed_mu;
@@ -460,6 +462,27 @@ bool tv_picture_hit(float nx, float ny, float* px, float* py, float* aspect, boo
     return true;
 }
 
+// the game's picture under a point: the TV picture, or in One screen mode's Off-TV Play the GamePad picture
+// (which is the game then); 0..1 of it and its aspect
+bool game_picture_hit(float nx, float ny, float* px, float* py, float* aspect, bool clamp_outside) {
+    std::lock_guard<std::mutex> lk(g_layout_mu);
+    const Layout& L = g_tv_layout;
+    Box b;
+    if (g_tv_dw <= 0 || g_tv_dh <= 0 ||
+        !game_picture_box(L.tv, L.pip, L.drc_only, g_one_screen_off_tv.load(std::memory_order_relaxed), &b))
+        return false;
+    float x = (nx * g_tv_dw - b.x) / b.w, y = (ny * g_tv_dh - b.y) / b.h;
+    if (x < 0 || y < 0 || x > 1 || y > 1) {
+        if (!clamp_outside) return false;
+        x = std::clamp(x, 0.0f, 1.0f), y = std::clamp(y, 0.0f, 1.0f);
+    }
+    *px = x, *py = y, *aspect = b.w / b.h;
+    return true;
+}
+bool game_picture_box(const PresentPlan& p, Box* box) {
+    return game_picture_box(p.tv, p.pip, p.drc_only, g_one_screen_off_tv.load(std::memory_order_relaxed), box);
+}
+
 // ---------------------------------------------------------------- view button (touch screens)
 std::atomic<int> g_touch_buttons{touch_buttons::Automatic};
 std::atomic<bool> g_touch_controller{false}, g_touch_controls{true};
@@ -480,7 +503,8 @@ bool view_button_enabled() {
         return e && atoi(e) != 0;
 #endif
     }();
-    return on && touch_buttons_visible();
+    // (One screen in Off-TV Play: one picture, nothing to switch)
+    return on && touch_buttons_visible() && !g_one_screen_off_tv;
 }
 // a square of 9% of the window's shorter side in the top left corner (rhemfur's Android layout)
 static Box view_button(float dw, float dh) {
@@ -614,8 +638,9 @@ PresentPlan display_plan(bool have_tv, float tw, float th, bool have_drc, float 
     // that window returns, keep the GamePad accessible in the primary picture.
     bool window_fallback = g_mode == kDrcWindow && !g_has_drc_window && g_shown;
     bool pip = (g_pip_preview || ((g_mode == kDrcPip || g_mode == kDrcAuto) && pip_shown_now()) || window_fallback) && have_drc;
-    bool drc_only = !g_pip_preview && (g_mode == kDrcGamePad ||
-        (g_mode == kDrcAuto && gamepad_ui().available && gamepad_ui().off_tv)) && have_drc;
+    // One screen (handheld) mode (one_screen.h): the GamePad picture whenever the game plays Off-TV, whatever the mode
+    const bool off_tv = gamepad_ui().available && gamepad_ui().off_tv;
+    bool drc_only = !g_pip_preview && (g_mode == kDrcGamePad || (g_mode == kDrcAuto && off_tv) || g_one_screen_off_tv) && have_drc;
     // Releasing a connected Android display also suspends its single-screen
     // fallback (including a hidden GamePad-only or pinned automatic view).
     if (g_second_display_available && g_second_screen_off) pip = drc_only = false;

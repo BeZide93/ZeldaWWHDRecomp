@@ -68,6 +68,12 @@ import android.view.ViewGroup;
 // the auto put-away and the ZL latch are native: the fingers go to the pad as before. A control that
 // hides under a finger lets go. The layout editor shows every control.
 // Context buttons and the golden rings: idea from the GreenNaugahyde Android fork (MPL-2.0); reimplemented.
+//
+// Talks, answers, shops by touch (controls plan P5): while native code says a talk, a choice, the auction's
+// number entry, a shop's item choice or the wind compass claims the TV picture (nativeFreeTouch answers
+// FREE_TALK, in either style), a finger landing on no control goes to it (nativeTalkFinger) instead of
+// becoming a stick; native code decides what the finger does. Idea from the GreenNaugahyde Android fork
+// (MPL-2.0); reimplemented.
 public class TouchControls extends View implements InputManager.InputDeviceListener {
     private static native void nativeSetPad(int buttons, int face, float lx, float ly, float rx, float ry, float lt, float rt);
     private static native void nativeDetachPad();
@@ -100,6 +106,13 @@ public class TouchControls extends View implements InputManager.InputDeviceListe
     private static native int nativeTouchOptions(int[] out);
     private static native int nativeFreeTouch(float x, float y);
     private static native void nativeSwipe(float dx, float dy, float dpi);
+    // talks, answers, shops... by touch (P5; runtime/src/mods/touch_talk.h): a finger nativeFreeTouch gave the
+    // talk (FREE_TALK) goes there: 0 down, 1 move, 2 up, 3 cancel, at 0..1 of this view. Native code decides
+    // what it does (go on, choose a line, steer to a shop's item...).
+    private static native void nativeTalkFinger(int action, float x, float y);
+    // a pinch for the field of view (P7; runtime/src/mods/steer.h): 0 begins (returns 1 when the option is on),
+    // 1 moves, 2 ends; the fingers' distance in pixels
+    private static native int nativePinch(int phase, float distance);
 
     static final int EXPORT_REQUEST = 4973, IMPORT_REQUEST = 4974;  // WwhdActivity.onActivityResult
 
@@ -108,14 +121,14 @@ public class TouchControls extends View implements InputManager.InputDeviceListe
             LEFT_SHOULDER = 9, RIGHT_SHOULDER = 10, DPAD_UP = 11, DPAD_DOWN = 12, DPAD_LEFT = 13, DPAD_RIGHT = 14;
     private static final int KIND_BUTTON = 0, KIND_STICK = 1, KIND_TRIGGER = 2, KIND_TOGGLE = 3, KIND_FACE = 4,
             KIND_VIRTUAL = 5,  // code: the virtual input bit (VIRT_JUMP, VIRT_MOON)
-            KIND_SWIPE = 6, KIND_DEAD = 7;  // (the last two: finger owners only, never drawn)
+            KIND_SWIPE = 6, KIND_DEAD = 7, KIND_TALK = 8, KIND_PINCH = 9;  // (the last four: finger owners only, never drawn)
     private static final int VIRT_JUMP = 1, VIRT_MOON = 2;
     // KIND_FACE codes: the Wii U button drawn on it (touch_face.h sends the pad button the controls
     // mapping binds to it, so the drawn A is the Wii U's A with either face-button preset)
     private static final int FACE_A = 0, FACE_B = 1, FACE_X = 2, FACE_Y = 3;
     // touch_style.h
     private static final int STYLE_CLASSIC = 0, STYLE_FLEXIBLE = 1, RIGHT_SWIPE = 0, RIGHT_STICK = 1;
-    private static final int FREE_GAME = 0, FREE_LEFT = 1, FREE_RIGHT = 2, FREE_SWIPE = 3;
+    private static final int FREE_GAME = 0, FREE_LEFT = 1, FREE_RIGHT = 2, FREE_SWIPE = 3, FREE_TALK = 4;
 
     private static final class Control {
         final int kind, code;  // code: button number, stick 0/1, trigger 0/1
@@ -135,7 +148,14 @@ public class TouchControls extends View implements InputManager.InputDeviceListe
 
     private final List<Control> controls = new ArrayList<>();
     private final Control toggle, leftStick, rightStick;
-    private final Control swipe = new Control(KIND_SWIPE, 0, "", 0, 0, 0), dead = new Control(KIND_DEAD, 0, "", 0, 0, 0);
+    private final Control swipe = new Control(KIND_SWIPE, 0, "", 0, 0, 0), dead = new Control(KIND_DEAD, 0, "", 0, 0, 0),
+            talk = new Control(KIND_TALK, 0, "", 0, 0, 0);
+    private int talkPointer = -1;  // the finger the talk has (one at a time)
+    // a pinch: two fingers that landed on no control within PINCH_MS of each other (Flexible style)
+    private final Control pinch = new Control(KIND_PINCH, 0, "", 0, 0, 0);
+    private static final long PINCH_MS = 250;
+    private int pinchA = -1, pinchB = -1;
+    private final SparseArray<Long> freeDown = new SparseArray<>();  // fingers freeTouch gave a stick or the swipe: when
     private final TouchLayout layout;
     private final TouchPresets presets = new TouchPresets();
     private final Map<String, Float> baseRadius = new HashMap<>();
@@ -485,9 +505,10 @@ public class TouchControls extends View implements InputManager.InputDeviceListe
         return dx * dx + dy * dy <= c.r * c.r * reach * reach;
     }
 
-    // a finger on no control: the game's, a floating stick or the swipe camera (touch_style.h)
+    // a finger on no control: the game's, a floating stick, the swipe camera or the talk (touch_style.h; in
+    // Classic native code answers the game or the talk)
     private Control freeTouch(float x, float y) {
-        if (!flexible() || !active()) return null;
+        if (!active()) return null;
         int free;
         try {
             free = nativeFreeTouch(getWidth() > 1 ? x / (getWidth() - 1) : 0.5f, getHeight() > 1 ? y / (getHeight() - 1) : 0.5f);
@@ -496,6 +517,7 @@ public class TouchControls extends View implements InputManager.InputDeviceListe
             case FREE_LEFT: return leftStick.stick.held() ? dead : leftStick;  // one thumb per stick, others are ignored
             case FREE_RIGHT: return rightStick.stick.held() ? dead : rightStick;
             case FREE_SWIPE: return swipePointer >= 0 ? dead : swipe;
+            case FREE_TALK: return talkPointer >= 0 ? dead : talk;
             default: return null;
         }
     }
@@ -541,7 +563,10 @@ public class TouchControls extends View implements InputManager.InputDeviceListe
                 final int id = event.getPointerId(index);
                 final float x = event.getX(index), y = event.getY(index);
                 Control c = hit(x, y);
+                final boolean free = c == null;
                 if (c == null) c = freeTouch(x, y);
+                if (free && c != null && c != talk && startPinch(event, id, x, y)) c = pinch;
+                else if (free && c != null && c != talk) freeDown.put(id, SystemClock.uptimeMillis());
                 owner.put(id, c);
                 if (c == null && action == MotionEvent.ACTION_DOWN) {
                     // The first finger on no control: decline the gesture so the view under it takes it
@@ -561,6 +586,11 @@ public class TouchControls extends View implements InputManager.InputDeviceListe
                     toggleTo = !wasActive;  // hidden for a controller: the button brings them back
                 } else if (c == swipe) {
                     swipePointer = id; swipeX = x; swipeY = y;
+                } else if (c == talk) {
+                    talkPointer = id;
+                    talkFinger(0, x, y);
+                } else if (c == pinch || c == dead) {
+                    // (a pinch's finger, or one more thumb on a half that already has its stick)
                 } else if (c != dead) {
                     c.pressed = true;
                     if (c.stick != null) c.stick.press(x, y, flexible());
@@ -576,6 +606,8 @@ public class TouchControls extends View implements InputManager.InputDeviceListe
                     Control c = owner.get(id);
                     final float x = event.getX(i), y = event.getY(i);
                     if (c == null) forward(event, i, MotionEvent.ACTION_MOVE);
+                    else if (c == talk) talkFinger(1, x, y);
+                    else if (c == pinch) pinchMove(event, 1);
                     else if (c == swipe) {
                         if (x != swipeX || y != swipeY) {
                             try { nativeSwipe(x - swipeX, y - swipeY, screenDpi); } catch (UnsatisfiedLinkError ignored) {}
@@ -599,6 +631,9 @@ public class TouchControls extends View implements InputManager.InputDeviceListe
                     owner.remove(id);
                     if (c == null) { forward(event, i, all ? MotionEvent.ACTION_CANCEL : action); continue; }
                     if (c == swipe) { swipePointer = -1; continue; }
+                    freeDown.remove(id);
+                    if (c == talk) { talkPointer = -1; talkFinger(all ? 3 : 2, event.getX(i), event.getY(i)); continue; }
+                    if (c == pinch) { endPinch(event); continue; }
                     c.pressed = false;
                     if (c.stick != null) c.stick.release();
                     itemRingFinger(c, false, c.downX, c.downY);
@@ -636,6 +671,46 @@ public class TouchControls extends View implements InputManager.InputDeviceListe
     private void resetControls() {
         for (Control c : controls) { c.pressed = false; if (c.stick != null) c.stick.release(); }
         swipePointer = -1;
+        if (talkPointer >= 0) { talkPointer = -1; talkFinger(3, 0, 0); }
+        if (pinchA >= 0) { try { nativePinch(2, pinchD); } catch (UnsatisfiedLinkError ignored) {} pinchA = pinchB = -1; }
+        freeDown.clear();
+    }
+    // a second free finger soon after the first: both become a pinch (the first one's stick lets go)
+    private float pinchD;
+    private boolean startPinch(MotionEvent event, int id, float x, float y) {
+        if (!flexible() || pinchA >= 0 || freeDown.size() != 1) return false;
+        final int other = freeDown.keyAt(0);
+        if (SystemClock.uptimeMillis() - freeDown.valueAt(0) > PINCH_MS) return false;
+        final int oi = event.findPointerIndex(other);
+        if (oi < 0) return false;
+        final float d = (float) Math.hypot(event.getX(oi) - x, event.getY(oi) - y);
+        try { if (nativePinch(0, d) == 0) return false; } catch (UnsatisfiedLinkError e) { return false; }
+        final Control first = owner.get(other);
+        if (first != null && first.stick != null) { first.pressed = false; first.stick.release(); }
+        if (first == swipe) swipePointer = -1;
+        owner.put(other, pinch);
+        freeDown.clear();
+        pinchA = other; pinchB = id; pinchD = d;
+        return true;
+    }
+    private void pinchMove(MotionEvent event, int phase) {
+        final int a = event.findPointerIndex(pinchA), b = event.findPointerIndex(pinchB);
+        if (a < 0 || b < 0) return;
+        pinchD = (float) Math.hypot(event.getX(a) - event.getX(b), event.getY(a) - event.getY(b));
+        try { nativePinch(phase, pinchD); } catch (UnsatisfiedLinkError ignored) {}
+    }
+    // either finger lifted: the pinch ends there, the other finger does nothing until it lifts
+    private void endPinch(MotionEvent event) {
+        if (pinchA < 0) return;
+        pinchMove(event, 2);
+        final int rest = owner.indexOfKey(pinchA) >= 0 && owner.get(pinchA) == pinch ? pinchA : pinchB;
+        if (owner.indexOfKey(rest) >= 0) owner.put(rest, dead);
+        pinchA = pinchB = -1;
+    }
+    private void talkFinger(int action, float x, float y) {
+        try {
+            nativeTalkFinger(action, getWidth() > 1 ? x / (getWidth() - 1) : 0.5f, getHeight() > 1 ? y / (getHeight() - 1) : 0.5f);
+        } catch (UnsatisfiedLinkError ignored) { /* not loaded yet */ }
     }
     // fingers that never got their up event: the controls let go, the game's touches are cancelled
     private void releaseFingers() {

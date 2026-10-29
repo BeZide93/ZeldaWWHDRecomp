@@ -505,8 +505,11 @@ static void cam_trace(uint32_t cam, const char* what) {
 namespace editor { void camera_drawn(uint32_t camera); }  // editor/editor_game.cpp: the editor's overlays project with it
 static void camera_draw(Cpu* c);
 // camera_draw(camera_process_class*)
+static std::atomic<uint32_t> g_last_camera{0};
+uint32_t interp::last_camera() { return g_last_camera.load(std::memory_order_relaxed); }
 extern "C" void hook_024FFC40(Cpu* c) {
     const uint32_t cam = c->r[3];
+    g_last_camera.store(cam, std::memory_order_relaxed);
     camera_draw(c);
     editor::camera_drawn(cam);
 }

@@ -145,6 +145,8 @@ struct PlayContext {
     // message parts, layout units (centre origin, y up) as last drawn; 0 when not shown
     int16_t choice_y = 0, cursor_y = 0;            // the choice box's and the cursor's centre y
     int16_t msg_x = 0, msg_y = 0, msg_hw = 0, msg_hh = 0;  // the message window's centre and half size
+    int16_t choice_x = 0;            // the choice box's centre x
+    int16_t wind_x = 0, wind_y = 0;  // the wind compass's centre (kWindCompass)
 
     bool has(uint32_t f) const { return (flags & f) != 0; }
 };
@@ -251,6 +253,7 @@ struct PaneSignals {  // from the Pane::Draw observer (play_context.cpp), alread
     uint32_t flags = 0;  // kKeyIcon, kChoice, kNumberEntry, kMsgWindow, kPictoFinder, kAlbum, kWindCompass, kZoomBar
     uint8_t choice_count = 0, zoom_kind = 0;
     int16_t choice_y = 0, cursor_y = 0, msg_x = 0, msg_y = 0, msg_hw = 0, msg_hh = 0;
+    int16_t choice_x = 0, wind_x = 0, wind_y = 0;
 };
 struct GameUiSignals {  // hud_gate.cpp's reading (mods::GameUi)
     bool event = false, message = false, menu = false;
@@ -361,6 +364,9 @@ PlayContext read(const Mem& m, const Addresses& a, const GameUiSignals& ui, cons
     c.msg_y = panes.msg_y;
     c.msg_hw = panes.msg_hw;
     c.msg_hh = panes.msg_hh;
+    c.choice_x = panes.choice_x;
+    c.wind_x = panes.wind_x;
+    c.wind_y = panes.wind_y;
     if (!in_game(m, a)) {
         lock.step(m, 0, 0, c);
         return c;
@@ -424,7 +430,7 @@ PlayContext read(const Mem& m, const Addresses& a, const GameUiSignals& ui, cons
 
 // ---- export to Java and other flat consumers (nativePlayContext) ----
 // A fixed int array; the layout only grows (new fields at the end). Index 0 holds the version.
-constexpr int kPackVersion = 1, kPackLen = 32;
+constexpr int kPackVersion = 1, kPackLen = 35;
 inline void pack(const PlayContext& c, int32_t* out, int n) {
     int32_t v[kPackLen] = {
         kPackVersion, int32_t(c.flags), c.a_action, c.b_action, c.zr_action, c.x_item, c.y_item, c.r_item,
@@ -432,7 +438,7 @@ inline void pack(const PlayContext& c, int32_t* out, int n) {
         c.minigame, c.ready_item_button, c.lock_state, c.lock_reach, c.attention_type, int32_t(c.defeats),
         c.mesg_status, c.scope_mesg_status, c.choice_count, c.zoom_kind, c.choice_y, c.cursor_y, c.msg_x, c.msg_y,
         c.msg_hw, c.msg_hh, c.a_normal | c.b_normal << 8 | c.zr_normal << 16, c.a_forced | c.b_forced << 8 | c.zr_forced << 16,
-        int32_t(c.step & 0x7FFFFFFF),
+        int32_t(c.step & 0x7FFFFFFF), c.choice_x, c.wind_x, c.wind_y,
     };
     for (int i = 0; i < n; i++) out[i] = i < kPackLen ? v[i] : 0;
 }

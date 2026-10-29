@@ -63,6 +63,7 @@
 #include "../camera_invert.h"
 #include "camera_mouse.h"
 #include "camera_swipe.h"
+#include "steer.h"
 #include "play_context.h"
 #include "../platform/touch_options.h"
 #include "guest_addr.h"
@@ -92,6 +93,7 @@ std::mutex g_mu;
 float g_dx = 0, g_dy = 0;       // mouse movement awaiting the next input step (points)
 float g_swipe_dx = 0, g_swipe_dy = 0;    // swipe movement awaiting the next input step (degrees, before the boat factor)
 uint64_t g_swipe_step = ~0ull;  // logic step of the last swipe movement
+uint64_t g_user_swipe_step = ~0ull, g_user_mouse_step = ~0ull;  // the player's own swipe / mouse (not the swing)
 float g_direct_dx = 0, g_direct_dy = 0;  // this step's movement in degrees, reserved for direct camera sites
 float g_mouse_rx = 0, g_mouse_ry = 0;    // proportional fallback, stable across repeated pad reads
 uint64_t g_sample_step = ~0ull;
@@ -107,6 +109,9 @@ bool g_synth = false;                 // filter_pad fed the mouse to the right s
 uint64_t g_synth_step = ~0ull;
 
 bool recent(uint64_t s, uint64_t n) { return s != ~0ull && step() <= s + n; }
+// the swing's degrees -> the swipe path's (mouse right = +): the camera's angle grows the other way (measured:
+// runs/swing1, a swing of +1.3 degrees per step took the camera from -167 to -150 towards Link's -149)
+constexpr float kSwingSign = -1.0f;
 bool in_first_person() { return recent(g_subject_step, 2); }
 uint32_t link_proc() {
     uint32_t l = g_link.load(std::memory_order_relaxed);
@@ -209,7 +214,7 @@ void mouse_add(float dx, float dy) {
     std::lock_guard<std::mutex> lk(g_mu);
     g_dx += dx;
     g_dy += dy;
-    g_move_step = step();
+    g_move_step = g_user_mouse_step = step();
 }
 void swipe_add(float dx_px, float dy_px, float dpi) {
     const float speed = touch_options::get().swipe_speed;
@@ -218,7 +223,7 @@ void swipe_add(float dx_px, float dy_px, float dpi) {
         LOG("[input] swipe camera: %.1f degrees per inch", camera_swipe::degrees(camera_swipe::display_dpi(dpi), dpi, speed));
     g_swipe_dx += camera_swipe::degrees(dx_px, dpi, speed);
     g_swipe_dy += camera_swipe::degrees(dy_px, dpi, speed);
-    g_swipe_step = g_move_step = step();
+    g_swipe_step = g_move_step = g_user_swipe_step = step();
 }
 void mouse_wheel(float dy) {
     if (editor::take_wheel(dy)) return;  // the fly camera's speed
@@ -255,6 +260,21 @@ void filter_pad(input::PadState& s) {
     // the mouse as a gyro has the mouse while the game aims: no synthetic right stick then (the game
     // also ignores the gyro while the right stick is pushed)
     if (motion::mouse_drives_gyro()) g_dx = g_dy = 0;
+    // the camera swing behind Link (steer.h, P7): degrees through the swipe path, while the player leaves the
+    // camera alone (the right stick, the mouse, a swipe of their own)
+    {
+        static uint64_t swing_step = ~0ull;
+        const bool player = std::fabs(s.rx) > 0.2f || std::fabs(s.ry) > 0.2f || recent(g_user_swipe_step, 1) ||
+                            (mouse_camera() && recent(g_user_mouse_step, 1));
+        if (swing_step != now) {
+            swing_step = now;
+            const float deg = steer_swing_degrees(player);
+            if (deg != 0 && !player) {
+                g_swipe_dx += deg * kSwingSign;
+                g_swipe_step = g_move_step = now;
+            }
+        }
+    }
     // mouse camera, swipe camera
     const bool mouse_active = mouse_camera() && (mouse_captured() || test_mouse()) && !motion::mouse_drives_gyro();
     const bool swipe = recent(g_swipe_step, 8);
@@ -314,6 +334,10 @@ void filter_pad(input::PadState& s) {
     editor::filter_pad(s);  // the world editor's fly camera takes the controller (the game gets nothing)
 }
 
+// the camera turned by the player lately: the right stick's manual camera ran, or the mouse / a swipe (and the
+// swing, which counts as the player's: Link keeps his way while it turns) drove it
+bool camera_turned_by_player() { return recent(g_manual_step, 2) || (g_synth && g_synth_step + 1 >= step()); }
+
 }  // namespace mods
 
 using namespace mods;
@@ -339,13 +363,15 @@ static void manual_speed(Cpu* c) {
     } else if (direct_camera()) {
         float x = (float)ldf32(cam + kCamStickX);
         speed = std::fmax(-1.0f, std::fmin(1.0f, x)) * camera_speed();
+        // the boat's camera turns less per speed unit (its f25): as fast as on foot (steer.h, P7)
+        if (direct_boat_speed() && link_in_ship()) speed *= steer::boat_speed_factor(c->f[25].ps0);
     } else {
         return;
     }
     stf32(cam + kCamSpeed, speed);
     if (trace_on() && mouse) trace("mouse rate dx=%.3f f25=%.4f speed=%.6f", dx, c->f[25].ps0, speed);
     static uint64_t n = 0;
-    if (trace_on() && (n++ % 30) == 0) trace("manual camera speed %.3f (%s)", speed, mouse ? "mouse" : "stick");
+    if (trace_on() && (n++ % 30) == 0) trace("manual camera speed %.3f (%s) f25=%.3f ship=%d", speed, mouse ? "mouse" : "stick", c->f[25].ps0, int(link_in_ship()));
 }
 extern "C" void site_02510448(Cpu* c) { manual_speed(c); }
 extern "C" void site_025104A0(Cpu* c) { manual_speed(c); }

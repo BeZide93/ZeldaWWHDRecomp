@@ -123,6 +123,9 @@ std::optional<Value> read(const std::string& key) {
 }
 }
 namespace input {PadState read() {return {};}}
+// live options and scripted test options (QoL M0): the fixtures run no renderer or host UI
+namespace render {uint64_t frame_count() {return 0;}}
+namespace hostui {void post(std::function<void()> fn) {fn();}}
 namespace true60 {float dt() {return 0.5f;}}
 namespace mem { std::string read_cstr(uint32_t) { return "option"; } uint32_t host_alloc(uint32_t,uint32_t) { return 0; } unsigned fixture_runtime_allocs=0; std::vector<uint32_t> fixture_alloc_sizes; uint32_t runtime_alloc(uint32_t size,uint32_t) {++fixture_runtime_allocs;fixture_alloc_sizes.push_back(size);
 #ifdef GUEST_HOOKS_TEST_EDITOR
@@ -143,6 +146,8 @@ std::string story_cache_directory(){return {};}
 static bool in_startup_callback=false, inspected=false;
 std::string directory() { assert(!in_startup_callback); return {}; }
 void set_guest_builder(GuestInspect, GuestBuild, GuestCacheCheck) {}
+void set_option_observer(OptionObserver) {}  // live options (QoL M0): not used by these fixtures
+bool configure(const std::string&,const std::string&,const json::Value&,std::string&) {return false;}
 void start_guests(const GuestInspect& inspect, const GuestLoad&) {
     // Real start_guests holds the manager mutex while invoking callbacks. Its
     // directory accessor cannot be called recursively from the build bridge.

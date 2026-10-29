@@ -26,6 +26,7 @@
 #include "../file_select_quit.h"
 #include "gyro_popup.h"
 #include "controller_setup.h"
+#include "touch_question.h"
 #include "controller_details.h"
 #include "popup.h"
 #include "widgets.h"
@@ -91,6 +92,8 @@ namespace gfxvk { bool buffer_cache_enabled(); unsigned submission_pool_slots();
 #ifdef __ANDROID__
 #include "../platform/phone_rumble.h"
 #include "../platform/heat_guard.h"
+#include "../platform/android_documents.h"
+#include "../mods/mod_archive.h"
 #endif
 #include "../interp.h"
 #include "../interp_pacing.h"
@@ -1412,6 +1415,13 @@ static void pip_percent(const char* label, float value, float minimum, float max
 void tab_display() {
     bool v;
     heading("GamePad screen");
+    // One screen (handheld) mode (mods/one_screen.cpp): applies at the next start
+    if (check("One screen (handheld)", mods::one_screen_next(), &v)) hostui::post([v] { mods::set_one_screen_next(v); });
+    help("The game plays on one screen as on the Wii U GamePad alone (Off-TV Play) from the start: no GamePad "
+         "or Pro Controller question, Plus or Minus pauses, touches on the picture work the game's menus. "
+         "Off: the TV and GamePad pictures as on the Wii U. With the Pro Controller chosen in Controls it does "
+         "nothing. Applies at the next start.");
+    if (mods::one_screen_next() != mods::one_screen_enabled()) note("Restart the game to apply.");
 #ifdef __ANDROID__
     if (check("Swap TV and GamePad displays", hostui::displays_swapped(), &v))
         hostui::post([v] { hostui::set_displays_swapped(v); });
@@ -1559,6 +1569,9 @@ void tab_display() {
     help("The rupee counter shows for a few seconds after the count changed, and in shops.");
     if (check("Magic only while used", mods::hud_fade_on(2), &v)) hostui::post([v] { mods::set_hud_fade_on(2, v); });
     help("The magic bar shows for a moment whenever magic is used or refilled.");
+    if (check("Large Picto Box view", mods::large_picto_on(), &v)) hostui::post([v] { mods::set_large_picto_on(v); });
+    help("The Picto Box's finder fills the screen instead of its small window. The photo is still what the "
+         "corner marks frame.");
     heading("Picture scaling");
     static const char *const f[] = {"Smooth", "Sharp", "Integer scale (pixel exact)"};
     const bool fok = hostui::scale_filter_available();
@@ -1614,8 +1627,10 @@ void code_mod_dialog() {
             if(ImGui::Button("Cancel rebuild"))mods::code::cancel();
 #endif
         } else {
-            if(status.target)ImGui::TextWrapped("This mod needs code-mod support. Enable it now?");
-            ImGui::TextWrapped("Code mods need the game code to be rebuilt %s mod support, %s. Rebuild now?",status.target?"with":"without",mods::code::rebuild_duration());
+            // opened by the Use code mods switch (no mod) or for a mod that needs code mods (status.mod)
+            if(!status.mod.empty())ImGui::TextWrapped("This mod needs code mods turned on.");
+            if(status.target)ImGui::TextWrapped("To use code mods, the game code is rebuilt with mod support. This takes %s. Rebuild now?",mods::code::rebuild_duration());
+            else ImGui::TextWrapped("To turn code mods off, the game code is rebuilt without mod support. This takes %s. Rebuild now?",mods::code::rebuild_duration());
             if(!status.error.empty())ImGui::TextWrapped("%s",status.error.c_str());
             if(ImGui::Button("Rebuild now"))mods::code::begin();
             ImGui::SameLine();
@@ -1860,6 +1875,7 @@ modsui::Host& mods_host() {
         h.build_name = g_guest_build_name;
 #ifdef __ANDROID__
         h.android = true;
+        h.copy_document = [](const std::string& uri) { return host::android::copy_picked_document(uri, mods::archive::kArchiveLimit); };
 #endif
         h.test = g_no_host && getenv("WWHD_MOD_MANAGER_DIR");
         h.file_picker = ext::features().file_picker;
@@ -2197,6 +2213,43 @@ void controller_setup_frame() {
     }
 }
 
+// The first-start question (controls plan P8; touch_style.h ask_first_start): "Use the new touch controls?",
+// once, over the game's first pictures on a touch device. Test aid on the Mac: WWHD_TEST_TOUCH_QUESTION=1 asks it
+// there (never answered by the test: an answer is saved) and takes a screenshot of it.
+std::atomic<bool> g_touch_question{false}, g_question_opened_menu{false};
+void touch_question_check(bool open) {
+    static bool decided = false;
+    if (decided || render::frame_count() < 120) return;  // (the game's first pictures are up)
+    decided = true;
+#ifdef __ANDROID__
+    const bool touch = true;
+#else
+    const bool touch = getenv("WWHD_TEST_TOUCH_QUESTION") != nullptr;
+#endif
+    if (!touch_style::ask_first_start(touch, gfx::g_touch_controls.load(), touch_options::style_saved(), touch_options::first_start_asked()))
+        return;
+    LOG("[touch] first start: asking which touch controls to use");
+    g_touch_question = true;
+    if (!open) {
+        g_question_opened_menu = true;
+        set_open(true, OpenReason::API);
+    }
+}
+void touch_question_frame() {
+    if (!g_touch_question.load()) return;
+    const bool back = navigation_pressed(input_map::face_input(input_map::kB));
+    const touch_question::Answer answer = touch_question::frame(back);
+    if (back) g_pad_b_used = true;
+    static int test_frames = 0;
+    if (getenv("WWHD_TEST_TOUCH_QUESTION") && ++test_frames == 30) screenshot::request();
+    if (answer == touch_question::kNone) return;
+    const bool flexible = answer == touch_question::kNew;
+    hostui::post([flexible] { touch_options::answer_first_start(flexible); });
+    LOG("[touch] first start: %s touch controls", flexible ? "the new (Flexible)" : "the classic");
+    g_touch_question = false;
+    if (g_question_opened_menu.exchange(false)) set_open(false, OpenReason::API);
+}
+
 void start_controller_setup(const std::string& guid, const std::string& name) {
     setup_state().begin(guid, name, false);
 }
@@ -2335,6 +2388,50 @@ void item_ring_rows() {
     ImGui::PopID();
 }
 
+// camera extras (mods/steer.cpp): each applies at once
+void camera_extra_rows() {
+    bool v;
+    int mode = mods::steer_mode();
+    if (combo("Walking direction", &mode, "Follows the camera (as the game)\0Kept while you turn the camera\0Kept while the stick is held\0"))
+        hostui::post([mode] { mods::set_steer_mode(mode); });
+    help("Turning the camera while Link walks turns him with it in the game. Kept: he walks on the way you pushed "
+         "the stick until you move the stick. \"While you turn the camera\" keeps only your own turns; the camera "
+         "following by itself still turns him.");
+    if (mods::steer_mode() == 0) ImGui::BeginDisabled();
+    if (check("Camera swings behind Link", mods::camera_swing(), &v)) hostui::post([v] { mods::set_camera_swing(v); });
+    help("While Link runs and you leave the camera alone for a second, it turns slowly to look over his shoulder.");
+    if (mods::steer_mode() == 0) ImGui::EndDisabled();
+    if (check("Direct camera as fast on the boat", mods::direct_boat_speed(), &v)) hostui::post([v] { mods::set_direct_boat_speed(v); });
+    help("With the direct camera (Gameplay), the right stick turns the camera as fast while sailing as on foot.");
+#ifdef __ANDROID__
+    if (check("Pinch changes the field of view", mods::pinch_fov_on(), &v)) hostui::post([v] { mods::set_pinch_fov_on(v); });
+    help("Two fingers on the picture: apart for a closer view, together for a wider one (Graphics' field of view).");
+#endif
+}
+// talks, answers and shops by touch or mouse, hold to go on (mods/touch_talk.cpp): each applies at once
+void talk_rows() {
+    bool v;
+#ifdef __ANDROID__
+    const char* by = "Talks, answers and shops by touch";
+    const char* how = "Tap the picture to go on in a talk, or hold a finger on it to go on by itself. Tap an "
+                      "answer to choose it, a shop's item to look at it and again to ask its price; buying "
+                      "always needs a tap on the question's answer. Drag for the auction's bid and the wind's "
+                      "direction.";
+#else
+    const char* by = "Talks, answers and shops by mouse";
+    const char* how = "Click the picture to go on in a talk, or hold the button down to go on by itself. Click an "
+                      "answer to choose it, a shop's item to look at it and again to ask its price; buying "
+                      "always needs a click on the question's answer. Drag for the auction's bid and the wind's "
+                      "direction.";
+#endif
+    if (check(by, mods::touch_talk_on(), &v)) hostui::post([v] { mods::set_touch_talk_on(v); });
+    help(how);
+    if (check("Hold A to go on in talks", mods::pad_hold_a_on(), &v)) hostui::post([v] { mods::set_pad_hold_a_on(v); });
+    help("With a controller: keep A held in a talk and the text goes on by itself each time it waits. "
+         "It stops at every question, which waits for a new press.");
+    if (check("Fast forward while a talk is held", mods::talk_hold_ff_on(), &v)) hostui::post([v] { mods::set_talk_hold_ff_on(v); });
+    help("A talk held to go on (finger, mouse or A) also runs faster, as the fast forward button does.");
+}
 void tab_controls() {
     bool v;
     // a grey note after a row's choices: on the same line when it fits (flow_layout.h)
@@ -2383,6 +2480,8 @@ void tab_controls() {
          "game is focused.");
 #endif
     item_ring_rows();
+    talk_rows();
+    camera_extra_rows();
     // face-button preset (issue #78): which host face buttons drive A/B/X/Y
     const input_map::FaceLayout fl = input_map::face_layout(m);
     ImGui::AlignTextToFramePadding();
@@ -2980,6 +3079,7 @@ void settings_window() {
         }
         quit_row(open);
         controller_setup_frame();  // the controller setup and its offer, over any tab
+        touch_question_frame();    // the first-start touch controls question (P8)
     }
     ImGui::End();
     // B (not while choosing an input or in a list) or the close button closes the menu
@@ -3508,6 +3608,7 @@ ImDrawData* frame(float pw, float ph, void (*renderer_init)()) {
     setup_run_tick();
     modsui::tick(mods_host(), open);
     if (!open && !g_restart_notice.started()) restart_notice_frame(false);
+    touch_question_check(open);
     const int layer = open ? 0 : layer_mode();
     g_wants_text = (open || layer) && io.WantTextInput;
     guesthud::frame();

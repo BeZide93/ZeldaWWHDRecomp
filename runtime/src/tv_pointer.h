@@ -17,8 +17,13 @@ struct State {
     float aspect = 16.0f / 9.0f;  // its width / height as shown
 };
 
-void set_wanted(bool on);  // a page: while true, the hosts send clicks on the TV picture here
+// Several parts may want the pointer, each by its own owner bit (the settings page, the talks by touch,
+// mods/touch_talk.cpp); the hosts send it here while any does.
+enum Owner : unsigned { kOwnerPage = 1, kOwnerTalk = 2 };
+void set_wanted(bool on);  // the item menu's settings page (kOwnerPage): while true, clicks on the TV picture come here
+void set_wanted(unsigned owner, bool on);
 bool wanted();
+bool wanted(unsigned owner);
 void set(bool down, float x, float y, float aspect);  // hosts (main thread)
 State read();                                         // any thread
 

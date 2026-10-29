@@ -2,6 +2,7 @@
 // touch_options.h: the Android touch-control options, and their JNI getter for TouchControls.
 #include "touch_options.h"
 
+#include <atomic>
 #include <cstdlib>
 #include <mutex>
 
@@ -14,6 +15,7 @@ namespace touch_options {
 namespace {
 std::mutex g_mu;
 touch_style::Options g_options;
+std::atomic<bool> g_style_saved{false}, g_asked{false};
 std::string num(float v) {
     char b[32];
     snprintf(b, sizeof b, "%.2f", v);
@@ -42,11 +44,21 @@ void set(const touch_style::Options& in) {
     if (o.swipe_boat != was.swipe_boat) hostui::set("touchSwipeBoat", num(o.swipe_boat));
 }
 
+bool style_saved() { return g_style_saved.load(); }
+bool first_start_asked() { return g_asked.load(); }
+void answer_first_start(bool flexible) {
+    set(touch_style::first_start_answer(get(), flexible));
+    g_asked = true;
+    hostui::set("touchStyleAsked", "1");
+}
+
 void load(const std::map<std::string, std::string>& saved) {
     touch_style::Options o;
     auto has = [&](const char* k) { return saved.count(k) != 0; };
     auto f = [&](const char* k) { return float(atof(saved.at(k).c_str())); };
     if (has("touchStyle")) o.style = int(f("touchStyle"));
+    g_style_saved = has("touchStyle");
+    g_asked = has("touchStyleAsked") && f("touchStyleAsked") != 0;
     if (has("touchShowSticks")) o.show_sticks = f("touchShowSticks") != 0;
     if (has("touchFollow")) o.follow = f("touchFollow") != 0;
     if (has("touchRight")) o.right = int(f("touchRight"));
