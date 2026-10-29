@@ -7,6 +7,10 @@ what is on `devel` and not released yet (also in the
 
 ## Next update
 
+- **Fixed: frame interpolation glitches.** With interpolation on (above 30 fps), the hookshot no longer leaves
+  stray chain links from the last shot (#304, thanks @aaronlink127); the sun, moon and lens flare follow the drawn
+  camera instead of juddering while you move (#320, thanks @CaptainLibrary); and the first loading screen runs at
+  game speed instead of too fast (#300, thanks @CaptainLibrary).
 - **Button prompts follow your custom face buttons.** With Xbox or PlayStation prompts, the HUD button cluster and the
   prompts in menus and dialogue now show the button each action is really on, for any face-button setup, and each
   controller with buttons of its own gets its own prompts. The HUD cluster draws each button where it sits on your
