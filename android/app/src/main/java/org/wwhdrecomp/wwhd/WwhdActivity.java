@@ -67,7 +67,7 @@ public class WwhdActivity extends SDLActivity {
             android.content.Context context = mSingleton.getApplicationContext();
             File job = SetupStore.current(context);
             if (job == null || !new File(job, "host.json").isFile() || !new File(AndroidGame.storage(context), "active.json").isFile())
-                return "This game was built on a computer: build it there again with code-mod support";
+                return "This game was built on a computer: build it there again " + (enabled ? "with" : "without") + " code-mod support";
             AndroidGame.chooseCodeMods(context, enabled);
             codeModRequest = System.currentTimeMillis();
             if (AndroidGame.needsRebuild(context)) SetupService.start(context, null);

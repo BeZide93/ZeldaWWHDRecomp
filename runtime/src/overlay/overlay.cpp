@@ -1627,8 +1627,10 @@ void code_mod_dialog() {
             if(ImGui::Button("Cancel rebuild"))mods::code::cancel();
 #endif
         } else {
-            if(status.target)ImGui::TextWrapped("This mod needs code-mod support. Enable it now?");
-            ImGui::TextWrapped("Code mods need the game code to be rebuilt %s mod support, %s. Rebuild now?",status.target?"with":"without",mods::code::rebuild_duration());
+            // opened by the Use code mods switch (no mod) or for a mod that needs code mods (status.mod)
+            if(!status.mod.empty())ImGui::TextWrapped("This mod needs code mods turned on.");
+            if(status.target)ImGui::TextWrapped("To use code mods, the game code is rebuilt with mod support. This takes %s. Rebuild now?",mods::code::rebuild_duration());
+            else ImGui::TextWrapped("To turn code mods off, the game code is rebuilt without mod support. This takes %s. Rebuild now?",mods::code::rebuild_duration());
             if(!status.error.empty())ImGui::TextWrapped("%s",status.error.c_str());
             if(ImGui::Button("Rebuild now"))mods::code::begin();
             ImGui::SameLine();
