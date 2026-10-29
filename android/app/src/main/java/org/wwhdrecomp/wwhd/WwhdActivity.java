@@ -41,6 +41,12 @@ public class WwhdActivity extends SDLActivity {
         return HttpsDownload.download(url, destination, limit);
     }
 
+    /** Settings > Mods > More > Install from a file (runtime/src/platform/android_documents.cpp, game
+     *  thread): the picked content:// document copied to the app's cache. "ok:" + path or "error:" + message. */
+    public static String copyPickedDocument(String uri, long limit) {
+        return PickedDocuments.copy(mSingleton.getApplicationContext(), uri, limit);
+    }
+
     // Public thermal/battery APIs, sampled by the overlay/report via JNI at most once a second.
     public static String performanceThermals() { return PerformanceThermals.read(mSingleton); }
 

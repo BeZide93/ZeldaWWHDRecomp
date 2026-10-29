@@ -92,6 +92,8 @@ namespace gfxvk { bool buffer_cache_enabled(); unsigned submission_pool_slots();
 #ifdef __ANDROID__
 #include "../platform/phone_rumble.h"
 #include "../platform/heat_guard.h"
+#include "../platform/android_documents.h"
+#include "../mods/mod_archive.h"
 #endif
 #include "../interp.h"
 #include "../interp_pacing.h"
@@ -1868,6 +1870,7 @@ modsui::Host& mods_host() {
         h.build_name = g_guest_build_name;
 #ifdef __ANDROID__
         h.android = true;
+        h.copy_document = [](const std::string& uri) { return host::android::copy_picked_document(uri, mods::archive::kArchiveLimit); };
 #endif
         h.test = g_no_host && getenv("WWHD_MOD_MANAGER_DIR");
         h.file_picker = ext::features().file_picker;

@@ -26,6 +26,7 @@
 #include "../mods/compiler_notice.h"
 #include "../mods/manager.h"
 #include "../mods/packages.h"
+#include "../mods/picked_source.h"
 #include "imgui.h"
 #include "imgui_internal.h"
 #include "popup.h"
@@ -48,6 +49,7 @@ using namespace modsmodel;
 // ---------------------------------------------------------------- what the host supplies
 struct Host {
     std::function<void(bool folder, std::function<void(std::string)>)> choose_game_source, choose_mod_source;
+    mods::picked::CopyDocument copy_document;     // Android: a picked content:// document to a temporary file
     mods::catalogue::Fetch fetch;                 // HTTPS transport (empty: local catalogues only)
     std::function<bool()> can_restart;            // the game can relaunch itself
     std::function<void(bool code_build)> restart; // relaunch now
@@ -1432,7 +1434,11 @@ inline void install_picked(Host& h) {
     if (test_local) { picked = test_local; test_local = nullptr; }
     if (!picked.empty()) {
         std::string id, error;
-        if (install(picked, error, &id)) {
+        mods::picked::Local local;  // Android: a copy of the picked document, removed once it is installed
+        if (!mods::picked::resolve(picked, h.copy_document, local, error)) { s.error = error; return; }
+        const bool installed = install(local.path, error, &id);
+        mods::picked::release(local);
+        if (installed) {
             s.error.clear();
             for (const auto& v : list()) if (v.id == id) {
                 s.message = v.name + " was installed.";
@@ -1483,9 +1489,11 @@ inline void more(Host& h) {
         ImGui::EndDisabled();
         ImGui::Unindent();
     }
-    if (h.file_picker && section("Install from a file or folder")) {
+    if (h.file_picker && section(h.android ? "Install from a file" : "Install from a file or folder")) {
         ImGui::Indent();
-        muted("A mod package (.wwhdmod or ZIP), a mod folder, or a replacement .pack file.");
+        // Android's chooser has no folders (SDL answers a folder request with nothing)
+        if (h.android) muted("A mod package (.wwhdmod or ZIP) or a replacement .pack file.");
+        else muted("A mod package (.wwhdmod or ZIP), a mod folder, or a replacement .pack file.");
         auto pick = [&h](bool folder) {
             if (!h.choose_mod_source) return;
             h.choose_mod_source(folder, [](std::string path) {
@@ -1494,8 +1502,10 @@ inline void more(Host& h) {
             });
         };
         if (button("Choose file…##package")) pick(false);
-        same_line_if_fits("Choose folder…");
-        if (button("Choose folder…##package")) pick(true);
+        if (!h.android) {
+            same_line_if_fits("Choose folder…");
+            if (button("Choose folder…##package")) pick(true);
+        }
         ImGui::Unindent();
     }
     if (h.file_picker && section("GameCube game for mods")) {  // (chosen with a file picker)
