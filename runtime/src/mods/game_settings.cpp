@@ -13,7 +13,11 @@
 #include "manager.h"
 #include "mods.h"
 #include "packages.h"
+#include "game_settings_graphics.h"
 #include "../aspect.h"
+#include "../dynres.h"
+#include "../gfx/renderer.h"
+#include "../interp.h"
 #include "../input.h"
 #include "../rumble.h"
 #include "../platform/phone_rumble.h"
@@ -36,7 +40,7 @@ std::vector<Item>& registry() {
 }
 std::map<std::string, float> g_pending;  // id -> value posted, not yet applied (g_mu)
 
-const char* const kTabOrder[] = {"camera", "controls", "screen", "game", "mods"};
+const char* const kTabOrder[] = {"camera", "controls", "screen", "graphics", "game", "mods"};
 
 // a built-in mod's switch (mods/manager.cpp: the same entry the Mods tab switches)
 Item builtin_toggle(const char* tab, const char* mod_id, const char* label, const char* help) {
@@ -96,6 +100,7 @@ std::string tab_label(const std::string& tab) {
     if (tab == "camera") return "Camera";
     if (tab == "controls") return "Controls";
     if (tab == "screen") return "Screen";
+    if (tab == "graphics") return "Graphics";
     if (tab == "game") return "Game";
     if (tab == "mods") return "Mods";
     return tab;
@@ -363,6 +368,112 @@ void register_screen() {
         add(std::move(it));
     }
 }
+// The Settings window's main graphics options (overlay.cpp tab_graphics), through the same setters; like its
+// post_changed, each change then has the host save the graphics options (hostui::graphics_changed)
+void register_graphics() {
+    namespace g = game_settings_graphics;
+    static constexpr auto saved = [](auto fn) {
+        fn();
+        hostui::graphics_changed();
+    };
+    auto backend = [] { return render::g_backend != nullptr; };
+    {
+        Item it;
+        it.id = "graphics.resolution", it.tab = "graphics", it.label = "Internal resolution", it.kind = Kind::Choice;
+        it.help = "How sharp the game is drawn. Higher needs a faster graphics chip.";
+        it.choices.assign(std::begin(g::kScaleNames), std::end(g::kScaleNames));
+        it.get = [] { return float(g::scale_choice(hostui::res_scale())); };
+        it.set = [](float v) {
+            const float s = g::kScales[std::clamp(int(std::lround(v)), 0, int(g::kScaleCount) - 1)];
+            saved([s] { hostui::set_res_scale(s); });
+        };
+        add(std::move(it));
+    }
+    {
+        Item it;
+        it.id = "graphics.frame-rate", it.tab = "graphics", it.label = "Frame rate", it.kind = Kind::Choice;
+        it.help = "40 fps and more add in-between frames; the game logic keeps its 30 steps. True 60 runs it at 60.";
+        it.choices.assign(std::begin(g::kRateNames), std::end(g::kRateNames));
+        it.get = [] { return float(g::rate_choice(interp::mode(), interp::fps())); };
+        it.set = [](float v) {
+            const g::Rate r = g::rate_of(int(std::lround(v)));
+            saved([r] {
+                if (r.fps) interp::set_fps(r.fps);
+                interp::set_mode(r.mode);
+            });
+        };
+        add(std::move(it));
+    }
+    {
+        Item it;
+        it.id = "graphics.dynamic-resolution", it.tab = "graphics", it.label = "Dynamic resolution", it.kind = Kind::Choice;
+        it.help = "Lowers the resolution while the graphics chip cannot keep up, and raises it again when there is room.";
+        it.choices.assign(std::begin(g::kDynNames), std::end(g::kDynNames));
+        it.get = [] { return float(g::dyn_choice(dynres::min_factor())); };
+        it.set = [](float v) {
+            const float m = g::kDynMins[std::clamp(int(std::lround(v)), 0, 2)];
+            saved([m] {
+                dynres::set_min(m);
+                hostui::set("dynResMin", m > 0 ? std::to_string(m) : "0");
+            });
+        };
+        it.enabled = [] { return !dynres::min_from_env(); };
+        add(std::move(it));
+    }
+    {
+        Item it;
+        it.id = "graphics.bloom", it.tab = "graphics", it.label = "Bloom", it.kind = Kind::Number;
+        it.help = "Glow around bright areas. 100% is the original; 0% turns it off.";
+        it.min = 0.0f, it.max = 2.0f, it.step = 0.25f;
+        it.get = [] { return render::bloom_strength(); };
+        it.set = [](float v) { saved([v] { render::set_bloom_strength(v); }); };
+        it.format = percent;
+        add(std::move(it));
+    }
+    {
+        Item it;
+        it.id = "graphics.fxaa", it.tab = "graphics", it.label = "Edge smoothing (FXAA)", it.kind = Kind::Toggle;
+        it.help = "Softens jagged edges, at a small cost in sharpness.";
+        it.get = [backend] { return backend() && render::fxaa() ? 1.0f : 0.0f; };
+        it.set = [](float v) { saved([v] { render::set_fxaa(v >= 0.5f); }); };
+        it.enabled = [backend] { return backend() && render::feature_available(render::kFeatureFXAA); };
+        add(std::move(it));
+    }
+    {
+        Item it;
+        it.id = "graphics.aniso", it.tab = "graphics", it.label = "Anisotropic filtering (16x)", it.kind = Kind::Toggle;
+        it.help = "Sharper ground and walls seen at a slant or far away.";
+        it.get = [backend] { return backend() && render::aniso() ? 1.0f : 0.0f; };
+        it.set = [](float v) { saved([v] { render::set_aniso(v >= 0.5f); }); };
+        it.enabled = [backend] { return backend() && render::feature_available(render::kFeatureAniso); };
+        add(std::move(it));
+    }
+    {
+        Item it;
+        it.id = "graphics.clouds", it.tab = "graphics", it.label = "Clouds", it.kind = Kind::Choice;
+        it.help = "Original keeps the painted clouds; Toon draws puffy cel-shaded ones. Lite is lighter on the graphics chip.";
+        it.choices.assign(std::begin(g::kCloudNames), std::end(g::kCloudNames));
+        it.get = [] { return float(std::clamp(render::cloud_style(), 0, 2)); };
+        it.set = [](float v) { saved([v] { render::set_cloud_style(std::clamp(int(std::lround(v)), 0, 2)); }); };
+        add(std::move(it));
+    }
+    {
+        Item it;
+        it.id = "graphics.cloud-shadows", it.tab = "graphics", it.label = "Cloud shadows", it.kind = Kind::Toggle;
+        it.help = "Soft shadows of the drifting clouds on the sea, islands and characters.";
+        it.get = [] { return render::cloud_shadows() ? 1.0f : 0.0f; };
+        it.set = [](float v) { saved([v] { render::set_cloud_shadows(v >= 0.5f); }); };
+        add(std::move(it));
+    }
+    {
+        Item it;
+        it.id = "graphics.full-light", it.tab = "graphics", it.label = "Full-size torchlight", it.kind = Kind::Toggle;
+        it.help = "Torches and other lights at full resolution; off: half size, as the original (blocky outlines).";
+        it.get = [] { return render::full_light() ? 1.0f : 0.0f; };
+        it.set = [](float v) { saved([v] { render::set_full_light(v >= 0.5f); }); };
+        add(std::move(it));
+    }
+}
 #ifdef __ANDROID__
 void register_touch() {  // the Settings window's "Touch controls" (Android)
     {
@@ -587,6 +698,7 @@ void register_builtin() {
 #ifdef __ANDROID__
     register_touch();
 #endif
+    register_graphics();
     register_game();
     register_mod_options();
 }

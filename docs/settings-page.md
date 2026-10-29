@@ -43,6 +43,10 @@ same values.
   dead zone, skip controller selection.
 - **Screen:** gameplay field of view, the boost bar. On Android also the touch buttons and the
   on-screen controls.
+- **Graphics:** internal resolution, frame rate (30, 40, 60, 120, 240 fps or True 60), dynamic
+  resolution, bloom, edge smoothing (FXAA), anisotropic filtering, clouds, cloud shadows and
+  full-size torchlight. They apply at once. The rest (renderer, aspect ratio, HDR, ambient occlusion
+  and more) is in the Settings window's Graphics tab.
 - **Game:** the built-in gameplay mods that apply while the game runs: quick doors, fast scene
   changes, fast forward, jump anywhere, climbing, run/swim speed, enemy lock-on, quick-use items,
   ladders, sidling, ivy, ledges, sailing speed, automatic wind. Their finer options (speeds, buttons)
