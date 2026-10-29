@@ -30,6 +30,7 @@
 #include "../rtl_text.h"
 #include "save_root.h"
 #include "os_time.h"
+#include "picto_quest.h"
 
 namespace hle_fs {
 namespace {
@@ -186,8 +187,9 @@ void fill_stat(uint32_t out, const struct stat& st, uint64_t size = UINT64_MAX) 
     st32(out + 0x14, dir ? 0 : (uint32_t)size);
 }
 // Quest Logs that earlier builds stamped with the time since the start instead of the date (#322,
-// os_time.h) get the file's last-modified time as their date when the game reads them; the game
-// writes that date back with its next save.
+// os_time.h) get the file's last-modified time as their date when the game reads them, and
+// converted GameCube files stuck in Lenzo's Picto Box test get the Deluxe Picto Box (#306,
+// picto_quest.h); the game writes the result back with its next save.
 void repair_save_stamps(FILE* f, uint64_t start, uint32_t dst, size_t n) {
     struct stat st;
     if (fstat(fileno(f), &st) != 0) return;
@@ -195,8 +197,13 @@ void repair_save_stamps(FILE* f, uint64_t start, uint32_t dst, size_t n) {
     for (uint32_t k = 0; k < 3; k++) {
         const uint64_t block = (uint64_t)k * os_time::kSaveBlock;
         if (block < start || block + os_time::kSaveBlock > start + n) continue;
-        if (os_time::repair_save_stamp(mem::ptr(dst + (uint32_t)(block - start)), stamp))
+        uint8_t* data = mem::ptr(dst + (uint32_t)(block - start));
+        if (os_time::repair_save_stamp(data, stamp))
             LOG("[save] Quest Log %u had no save date (earlier builds): using the file's date", k + 1);
+        // a GameCube file converted while Lenzo waited for the Forest Firefly (#306, picto_quest.h)
+        if (picto_quest::repair(data))
+            LOG("[save] Quest Log %u (converted GameCube save): Lenzo's test passed without the Deluxe Picto Box, "
+                "given now as in HD", k + 1);
     }
 }
 
