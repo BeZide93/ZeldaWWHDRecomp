@@ -109,6 +109,7 @@ MAC_SETUP_PLIST = """<?xml version="1.0" encoding="UTF-8"?>
   <key>CFBundleVersion</key><string>%s</string>
   <key>LSMinimumSystemVersion</key><string>14.0</string>
   <key>NSHighResolutionCapable</key><true/>
+  <key>NSMicrophoneUsageDescription</key><string>Only when you turn on a code mod's singing option: the sound is analysed for its pitch while you play and never stored or sent.</string>
 </dict></plist>
 """
 LINUX_SETUP_DESKTOP = """[Desktop Entry]

@@ -16,7 +16,7 @@ inline constexpr const char* kLegacyGameId="wwhd-usa";
 inline bool game_id_supported(const std::string& id){return id==kGameId||id==kLegacyGameId;}
 // The game ID native mods (SDK v1) receive in their host table: unchanged, so libraries comparing it keep working.
 inline constexpr const char* kNativeHostGameId="wwhd-usa";
-inline constexpr const char* kManagerVersion="1.5.0"; // 1.4: "experimental" flag; 1.5: game_id "wwhd"
+inline constexpr const char* kManagerVersion="1.6.0"; // 1.4: "experimental" flag; 1.5: game_id "wwhd"; 1.6: Mod SDK wwhd_screen_point, touch pinches, the microphone (wwhd_mic_*, option "permission")
 struct Option {
     std::string id,name,description,type;
     // The item menu's settings page (game_settings.h): "menu": true shows the option there, in the Mods tab
@@ -25,6 +25,9 @@ struct Option {
     // is now and wwhd_config_changed(id) its revision (Mod SDK, QoL M0; guest_live.h). Optional.
     std::string section;
     bool menu=false,live=false;
+    // "permission": "microphone" (bool options): turning it on lets the mod ask for the microphone (mic.h); declined,
+    // the port turns it off again. Optional.
+    std::string permission;
     json::Value value,default_value;
     double minimum=0,maximum=1,step=1;
     std::vector<std::string> choices;
@@ -109,6 +112,9 @@ bool run_setup_tool(const std::string& id,const std::string& step,std::string& e
 std::vector<std::string> startup_problems();
 // Notices are consumed once by the Mods tab.
 std::vector<std::string> take_notices();
+// One-line notices over the game (overlay/mods_tab.h shows each for a few seconds): any thread.
+void post_toast(const std::string& text);
+std::vector<std::string> take_toasts();
 void disable_all();
 std::vector<std::string> profiles();
 std::string current_profile();
@@ -127,6 +133,7 @@ struct GuestPackage {
     json::Value options;
     uint32_t heap_size=256*1024;
     std::string name;  // the manifest's display name (the story notebook names the quest's mod)
+    std::vector<std::pair<std::string,std::string>> mic_options;  // {option id, option name} with "permission": "microphone"
 };
 using GuestInspect = std::function<uint32_t(const GuestPackage&)>; // reserved bytes, 64 KiB aligned
 using GuestLoad = std::function<void(const GuestPackage&, uint32_t base)>;

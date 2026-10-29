@@ -131,6 +131,22 @@ int wwhd_touch_claim(u32 slot, f32 x0, f32 y0, f32 x1, f32 y1);
  * units as touches, with the picture's shape and field of view as drawn. Returns 1, or 0 when the point is behind the
  * camera or no camera is drawn (out unchanged). Read it on the logic step you use it (the camera moves). */
 int wwhd_screen_point(const f32* world, f32* out);
+/* The microphone (newer hosts), for singing and the like. Only a mod with a bool option marked "permission":
+ * "microphone" in its manifest may open it, and only while that option is on: the first open asks the system for
+ * permission (Android's runtime permission, macOS's prompt); declined, the port turns the option off again with a
+ * notice. Close it when the option goes off (the port closes it then anyway). The sound is analysed for its pitch
+ * and dropped: mods get only the pitch, never samples. wwhd_mic_pitch writes out[0] the pitch in Hz (0: none),
+ * out[1] the loudness (RMS, 0..1), out[2] the clarity (0..1) of the newest analysed window (~21 ms) and returns how
+ * many windows were analysed so far (a new value: a new window; 0 while not listening). */
+#define WWHD_MIC_CLOSED 0
+#define WWHD_MIC_ASKING 1      /* waiting for the player's answer or the device */
+#define WWHD_MIC_OPEN 2
+#define WWHD_MIC_DENIED 3      /* the player declined (the option is being turned off) */
+#define WWHD_MIC_UNAVAILABLE 4 /* no microphone, or this mod may not open it now */
+int wwhd_mic_open(void);
+int wwhd_mic_close(void);
+int wwhd_mic_state(void);
+unsigned long long wwhd_mic_pitch(f32* out);
 /* Flat filenames in this mod's Data/<id> folder; no paths or symlinks. At most 1 MiB per call.
  * read returns bytes read (zero at EOF), write replaces the file; -1 indicates failure. */
 s32 wwhd_file_read(const char* filename, void* buffer, u32 size);
