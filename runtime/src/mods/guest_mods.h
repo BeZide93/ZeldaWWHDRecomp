@@ -59,6 +59,9 @@ bool hooks_built();  // marker registered by the running generated game code, ne
 // a finger change on the TV picture (layout units): the mod whose claim has it (queued for the next pad read), -1
 // none (the port's own rules have it)
 int touch_route(uint32_t kind, float x, float y);
+// a pinch change (guestlive::kPinch with the spread now / at its start, or kPinchEnd) at (x, y) (layout units: the
+// wheel's pointer; ignored while a mod has the finger): the mod that gets it, -1 none (the port's own pinch has it)
+int touch_pinch(uint32_t kind, float scale, float x, float y);
 bool touch_claimed_at(float x, float y);  // any thread
 bool touch_claims();                      // a mod claims some part of the picture now
 // the game's controller reads (VPADRead / KPADReadEx, after the port's own filters): the mods' touch callbacks

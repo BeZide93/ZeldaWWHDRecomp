@@ -45,6 +45,36 @@ int main() {
         assert(!t.any());
         assert((!Rect{10, 10, 5, 20}.contains(7, 15)));
     }
+    // ---- pinches: the mod with the finger, else the claim under the point (the wheel); held until the end
+    {
+        Touch t;
+        t.claim(0, 0, {-100, -100, 100, 100});
+        t.claim(1, 0, {200, -100, 400, 100});
+        assert(t.route({kDown, 0, 0}) == 0);
+        assert(t.route_pinch(kPinch, 300, 0) == 0 && t.pinching());   // mod 0 has the finger: its pinch
+        assert(t.route({kUp, 0, 0}) == 0);
+        assert(t.route_pinch(kPinch, 300, 0) == 0);                    // still mod 0's until its end
+        assert(t.route_pinch(kPinchEnd, 300, 0) == 0 && !t.pinching());
+        assert(t.route_pinch(kPinch, 300, 0) == 1);                    // no finger: the claim under the point
+        assert(t.route_pinch(kPinchEnd, 0, 0) == 1);
+        assert(t.route_pinch(kPinch, 600, 0) == -1 && !t.pinching());  // nobody's: the port's own pinch
+        assert(t.route_pinch(kPinchEnd, 600, 0) == -1);
+        assert(t.route_pinch(kPinch, 300, 0) == 1);
+        t.drop(1);
+        assert(!t.pinching());
+    }
+    // ---- projection: a camera at the origin looking down -z, 360 layout units per unit of x / z (fovy 90)
+    {
+        View v;
+        { float a, b; assert(!View{}.project({0, 0, -10}, a, b)); }
+        assert(v.set({0, 0, 0}, {0, 0, -1}, {0, 1, 0}, 360));
+        float x = 99, y = 99;
+        assert(v.project({0, 0, -10}, x, y) && x == 0 && y == 0);
+        assert(v.project({5, -2.5f, -10}, x, y) && std::fabs(x - 180) < 1e-3f && std::fabs(y + 90) < 1e-3f);
+        assert(!v.project({0, 0, 10}, x, y));  // behind
+        assert(!v.set({0, 0, 0}, {0, 0, 0}, {0, 1, 0}, 360));  // no direction
+        assert(!v.set({0, 0, 0}, {0, 0, -1}, {0, 1, 0}, 0));
+    }
     printf("guest_live_test: ok\n");
     return 0;
 }

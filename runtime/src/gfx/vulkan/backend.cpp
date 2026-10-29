@@ -5290,10 +5290,38 @@ static void tv_picture_finger(int action, float x, float y) {
 // only asks nativeFreeTouch while they show, so a finger it passes on reaches SDL here. One landing on the
 // TV picture inside a mod's claim (not on the view button or the GamePad picture, the game's own touch areas)
 // is the mod's until it lifts.
+// A second finger while a mod has one: a pinch for that mod (spread now / at its start, middle of the two), until
+// either lifts; the first finger's moves pause meanwhile (the mod sees its up when it lifts).
+static SDL_FingerID modPinch = 0;
+static float modAt[2][2], modSpread0 = 0;
+static void mod_pinch_send(int phase) {
+  const float dx = (modAt[0][0] - modAt[1][0]) * float(R.tv.swapExtent.width), dy = (modAt[0][1] - modAt[1][1]) * float(R.tv.swapExtent.height);
+  const float d = std::sqrt(dx * dx + dy * dy);
+  if (phase == 0) modSpread0 = std::max(d, 1.0f);
+  tv_pointer::State s;
+  float px = 0, py = 0;
+  if (gfx::game_picture_hit((modAt[0][0] + modAt[1][0]) * 0.5f, (modAt[0][1] + modAt[1][1]) * 0.5f, &s.x, &s.y, &s.aspect, true))
+    tv_pointer::to_page(s, px, py);
+  mods::touch_talk_mod_pinch(phase, d / modSpread0, px - 640.0f, 360.0f - py);
+}
 static bool android_mod_touch_event(const SDL_TouchFingerEvent& f, Uint32 type, bool dual) {
   if (modFinger) {
-    if (f.fingerID != modFinger) return false;
+    if (f.fingerID != modFinger && f.fingerID != modPinch) {
+      if (type != SDL_EVENT_FINGER_DOWN || modPinch) return false;
+      modPinch = f.fingerID;
+      modAt[1][0] = f.x, modAt[1][1] = f.y;
+      mod_pinch_send(0);
+      return true;
+    }
+    const int i = f.fingerID == modFinger ? 0 : 1;
     if (type == SDL_EVENT_FINGER_DOWN) return true;
+    modAt[i][0] = f.x, modAt[i][1] = f.y;
+    if (modPinch) {
+      if (type == SDL_EVENT_FINGER_MOTION) { mod_pinch_send(1); return true; }
+      mod_pinch_send(2);
+      modPinch = 0;
+      if (i == 1) return true;  // (the first finger stays the mod's)
+    }
     if (type != SDL_EVENT_FINGER_MOTION) modFinger = 0;
     tv_picture_finger(type == SDL_EVENT_FINGER_MOTION ? 1 : type == SDL_EVENT_FINGER_UP ? 2 : 3, f.x, f.y);
     return true;
@@ -5313,6 +5341,7 @@ static bool android_mod_touch_event(const SDL_TouchFingerEvent& f, Uint32 type, 
   tv_pointer::to_page(s, px, py);
   if (!mods::guest_touch_claimed_at(px - 640.0f, 360.0f - py)) return false;
   modFinger = f.fingerID;
+  modAt[0][0] = f.x, modAt[0][1] = f.y;
   mods::touch_talk_finger(0, px - 640.0f, 360.0f - py);
   return true;
 }
@@ -5328,6 +5357,7 @@ bool android_display_touch_event(const SDL_Event& event) {
     touchGeneration = currentGeneration;
     touchFinger = buttonFinger = 0;
     buttonDown = 0;
+    if (modPinch) mod_pinch_send(2), modPinch = 0;
     if (modFinger) modFinger = 0, mods::touch_talk_finger(3, 0, 0);
   }
   const bool dual = gfx::g_has_drc_window;
@@ -5420,6 +5450,14 @@ extern "C" JNIEXPORT jint JNICALL Java_org_wwhdrecomp_wwhd_TouchControls_nativeF
 // went up (2) or was cancelled (3) at (x, y), 0..1 of the view: as a point of the TV picture in layout units
 extern "C" JNIEXPORT void JNICALL Java_org_wwhdrecomp_wwhd_TouchControls_nativeTalkFinger(JNIEnv*, jclass, jint action, jfloat x, jfloat y) {
   tv_picture_finger(action, x, y);
+}
+// TouchControls.nativeModPinch: a second finger next to a talk finger a code mod has (guest_live.h pinches); the
+// fingers' middle, 0..1 of the view, as a point of the TV picture
+extern "C" JNIEXPORT jboolean JNICALL Java_org_wwhdrecomp_wwhd_TouchControls_nativeModPinch(JNIEnv*, jclass, jint phase, jfloat spread, jfloat x, jfloat y) {
+  tv_pointer::State s;
+  float px = 0, py = 0;
+  if (gfx::game_picture_hit(x, y, &s.x, &s.y, &s.aspect, true)) tv_pointer::to_page(s, px, py);
+  return mods::touch_talk_mod_pinch(phase, spread, px - 640.0f, 360.0f - py) ? JNI_TRUE : JNI_FALSE;
 }
 #endif
 static bool gamepad_touch(const SDL_Event& event) {
@@ -5519,6 +5557,14 @@ static bool gamepad_touch(const SDL_Event& event) {
     }
     if (up) touchHeld = TouchIn::None;
     input::set_touch(!up, tx, ty);
+    return true;
+  }
+  case SDL_EVENT_MOUSE_WHEEL: {  // over a code mod's touch claim: its pinch (tv_pointer::add_wheel)
+    if (event.wheel.windowID != tvId || overlay::captures()) return false;
+    float nx, ny, px, py, aspect;
+    tv_window_point(event.wheel.mouse_x, event.wheel.mouse_y, nx, ny);
+    if (!gfx::wheel_on_mod_claim(nx, ny, &px, &py, &aspect)) return false;
+    tv_pointer::add_wheel(event.wheel.direction == SDL_MOUSEWHEEL_FLIPPED ? -event.wheel.y : event.wheel.y, px, py, aspect);
     return true;
   }
   case SDL_EVENT_WINDOW_FOCUS_LOST:

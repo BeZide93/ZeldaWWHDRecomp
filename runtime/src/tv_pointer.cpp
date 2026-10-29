@@ -10,6 +10,8 @@ namespace {
 std::atomic<unsigned> g_wanted{0};
 std::mutex g_mu;
 State g_state;
+float g_wheel = 0;
+State g_wheel_at;
 }  // namespace
 
 void set_wanted(unsigned owner, bool on) {
@@ -29,6 +31,18 @@ bool left_button_bound() { return !input_map::key_users(input_map::current(), in
 State read() {
     std::lock_guard lock(g_mu);
     return g_state;
+}
+void add_wheel(float notches, float x, float y, float aspect) {
+    std::lock_guard lock(g_mu);
+    g_wheel += notches;
+    g_wheel_at = {false, x, y, aspect};
+}
+bool take_wheel(float& notches, State& at) {
+    std::lock_guard lock(g_mu);
+    if (g_wheel == 0) return false;
+    notches = g_wheel, at = g_wheel_at;
+    g_wheel = 0;
+    return true;
 }
 
 }  // namespace tv_pointer

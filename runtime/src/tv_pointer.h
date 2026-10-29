@@ -26,6 +26,11 @@ bool wanted();
 bool wanted(unsigned owner);
 void set(bool down, float x, float y, float aspect);  // hosts (main thread)
 State read();                                         // any thread
+// The mouse wheel over a code mod's claim on the TV picture (mods/touch_talk.cpp turns it into a pinch for that
+// mod, guest_live.h): hosts add notches (+ away from the player: spread / nearer) with the pointer's place;
+// take_wheel returns the notches since the last call and that place (false: none)
+void add_wheel(float notches, float x, float y, float aspect);  // hosts (main thread)
+bool take_wheel(float& notches, State& at);                     // game thread
 
 // Whose a left click on the TV window is (issue #315: "left mouse button bound to A stops working in menus").
 // A player who bound the left mouse button to a game button (controls: Mouse1) has the mouse camera on, since

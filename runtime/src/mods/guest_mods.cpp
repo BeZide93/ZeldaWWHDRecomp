@@ -42,6 +42,9 @@
 #include "guest_settings.h"
 #include "guest_hud.h"
 #include "guest_live.h"
+#include "../aspect.h"
+#include "../interp.h"
+#include "../mic.h"
 #include "../fixed_seed.h"
 #include "../gfx/renderer.h"
 #include "../overlay/hostui.h"
@@ -169,6 +172,7 @@ struct Loaded {
     const WWHDGuestModuleV1* m=nullptr;
     uint32_t region_size=0;
     mods::json::Value options;  // the start values; live options change here while the game runs (g_options_mutex)
+    std::vector<std::pair<std::string,std::string>> mic_options;  // its options with "permission": "microphone"
     uint32_t input_filter=0, touch_callback=0, scratch=0;  // live features (guest_live.h): callbacks, a 32-byte exchange area
     std::unique_ptr<Heap> heap;
     std::unique_ptr<Files> files;
@@ -657,6 +661,51 @@ void svc_touch_claim(Cpu* c) {
     std::lock_guard lock(g_touch_mutex);
     g_touch.claim(int(&mod-g_loaded.data()),slot,r);c->r[3]=1;
 }
+// wwhd_screen_point(world xyz, out xy): a point of the world where the drawn camera shows it, in layout units (guest_live.h);
+// the camera_draw camera (interp::last_camera: eye +0xDC, center +0xE8, up +0xF4, fovy +0xD4) and the picture's aspect
+// and FOV as drawn (aspect::layout_scale). 1 when in front of the camera, 0 otherwise (out unchanged).
+void svc_project(Cpu* c) {
+    const uint32_t in=c->r[3],out=c->r[4];c->r[3]=0;
+    const uint32_t cam=interp::last_camera();
+    if(!in||!out||cam<0x10000000u||cam>=0x50000000u)return;
+    auto v3=[](uint32_t a){return guestlive::V3{float(ldf32(a)),float(ldf32(a+4)),float(ldf32(a+8))};};
+    guestlive::View view;
+    if(!view.set(v3(cam+0xDC),v3(cam+0xE8),v3(cam+0xF4),aspect::layout_scale(float(ldf32(cam+0xD4)))))return;
+    float x,y;
+    if(!view.project(v3(in),x,y))return;
+    stf32(out,x);stf32(out+4,y);c->r[3]=1;
+}
+// ---- the microphone (mic.h): only a mod with a "permission": "microphone" option that is on now may open it
+int mod_index(const Loaded& mod) { return int(&mod - g_loaded.data()); }
+bool mic_option_on(const Loaded& mod) {
+    std::lock_guard lock(g_options_mutex);
+    for (const auto& [id, name] : mod.mic_options) {
+        const auto v = mod.options.get(id);
+        if (v.type == mods::json::Value::Bool && v.boolean) return true;
+    }
+    return false;
+}
+void svc_mic_open(Cpu* c) {
+    auto& mod = owner(c);
+    if (!mic_option_on(mod)) {
+        LOG("[guestmod:%s] microphone refused: no microphone option of this mod is on", mod.id.c_str());
+        c->r[3] = uint32_t(mic::kUnavailable);
+        return;
+    }
+    mic::want(mod_index(mod), true);
+    c->r[3] = uint32_t(mic::wanted(mod_index(mod)) && mic::state() == mic::kClosed ? mic::kAsking : mic::state());
+}
+void svc_mic_close(Cpu* c) { mic::want(mod_index(owner(c)), false); c->r[3] = 0; }
+void svc_mic_state(Cpu* c) { c->r[3] = uint32_t(mic::wanted(mod_index(owner(c))) ? mic::state() : mic::kClosed); }
+// wwhd_mic_pitch(f32 out[3]): hz (0 none), level, clarity of the newest window; returns the window count (u64)
+void svc_mic_pitch(Cpu* c) {
+    const uint32_t out = c->r[3];
+    mic::Pitch p;
+    uint64_t serial = 0;
+    if (!mic::wanted(mod_index(owner(c))) || mic::state() != mic::kOpen || !mic::latest(p, serial)) p = {}, serial = 0;
+    if (out) stf32(out, p.hz), stf32(out + 4, p.level), stf32(out + 8, p.clarity);
+    c->r[3] = uint32_t(serial >> 32), c->r[4] = uint32_t(serial);
+}
 void svc_config_int(Cpu* c) {
     const auto v=option(c);
     if(v.type==mods::json::Value::Number&&v.number>=INT32_MIN&&v.number<=INT32_MAX&&std::floor(v.number)==v.number)c->r[3]=uint32_t(int32_t(v.number));
@@ -1012,7 +1061,7 @@ const std::unordered_map<std::string, PpcFunc> kServices = {
     {"wwhd_log", svc_log},       {"wwhd_log_int", svc_log_int}, {"wwhd_log_hex", svc_log_hex},
     {"wwhd_log_float", svc_log_float}, {"wwhd_config_int", svc_config_int},
     {"wwhd_config_bool",svc_config_bool},{"wwhd_config_changed",svc_config_changed},
-    {"wwhd_input_filter_register",svc_input_filter_register},{"wwhd_touch_register",svc_touch_register},{"wwhd_touch_claim",svc_touch_claim},{"wwhd_config_float",svc_config_float},{"wwhd_config_string",svc_config_string},
+    {"wwhd_input_filter_register",svc_input_filter_register},{"wwhd_touch_register",svc_touch_register},{"wwhd_touch_claim",svc_touch_claim},{"wwhd_screen_point",svc_project},{"wwhd_mic_open",svc_mic_open},{"wwhd_mic_close",svc_mic_close},{"wwhd_mic_state",svc_mic_state},{"wwhd_mic_pitch",svc_mic_pitch},{"wwhd_config_float",svc_config_float},{"wwhd_config_string",svc_config_string},
     {"wwhd_malloc",svc_malloc},{"wwhd_free",svc_free},{"wwhd_input_read",svc_input},
     {"wwhd_file_read",svc_file_read},{"wwhd_file_write",svc_file_write},
     {"wwhd_hud_register",svc_hud_register},{"wwhd_hud_texture",svc_hud_texture},
@@ -1030,9 +1079,14 @@ const std::unordered_map<std::string, PpcFunc> kServices = {
     {"wwhd_item_give",svc_item_give},{"wwhd_item_take",svc_item_take},{"wwhd_item_count",svc_item_count},{"wwhd_item_used",svc_item_used},
     {"memcpy", svc_memcpy},      {"memmove", svc_memcpy},       {"memset", svc_memset},
 };
+// the first host service a module being loaded asked for and this port doesn't have (its load error names it)
+std::string g_missing_service;
 PpcFunc service(const char* name) {
     auto it = kServices.find(name);
-    if (it == kServices.end()) return nullptr;
+    if (it == kServices.end()) {
+        if (g_missing_service.empty()) g_missing_service = name ? name : "?";
+        return nullptr;
+    }
     if (!strcmp(name, "wwhd_actor_particle") || !strcmp(name, "wwhd_particle_at")) g_particle_import = true;  // particle scratch
     if (!strncmp(name, "wwhd_mail_", 10)) story_mail::note_import();  // the postbox hooks are needed
     if (!strncmp(name, "wwhd_chart_", 11)) {  // the sea chart hooks are needed, and the chart list's captions
@@ -1136,7 +1190,12 @@ bool load_one(const std::string& path, std::string& err,const mods::packages::Gu
         }
     } guard{lib};
     if (!init) { err = "not a guest mod module (no " WWHD_GUEST_INIT_SYMBOL ")"; return false; }
+    g_missing_service.clear();
     const WWHDGuestModuleV1* m = init(&kHost);
+    if (!m && !g_missing_service.empty()) {  // (a service of a newer port: rebuilding doesn't help)
+        err = "this mod needs a newer version of the game: it uses " + g_missing_service + ", which this version doesn't have";
+        return false;
+    }
     if (!m || m->size < sizeof(WWHDGuestModuleV1) || m->abi_version != WWHD_GUEST_ABI_VERSION) {
         err = "module ABI does not match this game version: rebuild the mod";
         return false;
@@ -1154,7 +1213,7 @@ bool load_one(const std::string& path, std::string& err,const mods::packages::Gu
             return false;
         }
     Loaded loaded;
-    loaded.path=path;loaded.package_path=pkg.path;loaded.data_path=pkg.data_path;loaded.id=pkg.id;loaded.name=pkg.name;loaded.version=pkg.version;loaded.m=m;loaded.region_size=reserved;loaded.options=pkg.options;
+    loaded.path=path;loaded.package_path=pkg.path;loaded.data_path=pkg.data_path;loaded.id=pkg.id;loaded.name=pkg.name;loaded.version=pkg.version;loaded.m=m;loaded.region_size=reserved;loaded.options=pkg.options;loaded.mic_options=pkg.mic_options;
     {std::lock_guard lock(g_options_mutex);for(const auto& [key,value]:pkg.options.object)g_revisions.declare(pkg.id,key);}
     loaded.files=std::make_unique<Files>(pkg.data_path);
     uint32_t heap_base=(m->mem_base+m->mem_size+15)&~15u;
@@ -1843,6 +1902,12 @@ int touch_route(uint32_t kind,float x,float y) {
     if(owner>=0&&size_t(owner)<g_loaded.size()&&g_touch_queue.size()<64)g_touch_queue.push_back({owner,e});
     return owner;
 }
+int touch_pinch(uint32_t kind,float scale,float x,float y) {
+    std::lock_guard lock(g_touch_mutex);
+    const int owner=g_touch.route_pinch(kind,x,y);
+    if(owner>=0&&size_t(owner)<g_loaded.size()&&g_touch_queue.size()<64)g_touch_queue.push_back({owner,guestlive::Event{kind,scale,0}});
+    return owner;
+}
 bool touch_claimed_at(float x,float y) {std::lock_guard lock(g_touch_mutex);return g_touch.owner_at(x,y)>=0;}
 bool touch_claims() {std::lock_guard lock(g_touch_mutex);return g_touch.any();}
 // test aid: WWHD_TEST_MOD_OPTION=frame:mod:option:json,... changes a mod's option at that (scripted) TV frame, as the
@@ -1877,8 +1942,28 @@ void test_option_changes() {
         });
     }
 }
+// the microphone each controller read: a mod whose option is off lets go (the device closes at once); a declined
+// permission turns the asking options off again, with a notice
+void mic_step() {
+    for(auto& mod:g_loaded) if(!mod.mic_options.empty()&&mic::wanted(mod_index(mod))&&!mic_option_on(mod)) mic::want(mod_index(mod),false);
+    mic::service();
+    if(!mic::take_denied())return;
+    for(auto& mod:g_loaded) {
+        if(!mic::wanted(mod_index(mod)))continue;
+        mic::want(mod_index(mod),false);
+        for(const auto& [id,name]:mod.mic_options) {
+            const std::string mod_id=mod.id,option=id,label=name;
+            hostui::post([mod_id,option,label] {
+                std::string error;
+                if(!mods::packages::configure(mod_id,option,mods::json::Value(false),error))LOG("[guestmods] %s.%s: %s",mod_id.c_str(),option.c_str(),error.c_str());
+                mods::packages::post_toast("\""+label+"\" is off again: the microphone was not allowed. You can allow it in the system settings and turn it on again.");
+            });
+        }
+    }
+}
 void pad_filter(Cpu* c,input::PadState& p,bool repeat) {
     if(!repeat)test_option_changes();
+    if(!repeat)mic_step();
     if(!c||repeat||g_loaded.empty())return;
     std::vector<std::pair<int,guestlive::Event>> events;
     {std::lock_guard lock(g_touch_mutex);events.swap(g_touch_queue);}

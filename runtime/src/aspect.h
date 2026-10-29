@@ -18,6 +18,10 @@ float on_swap();
 float game();
 float fov_scale();
 void set_fov_scale(float scale); // 1 = authored gameplay FOV; events keep their original FOV
+// game thread: layout units (720 across the 16:9 picture's height, the HUD's units) per unit of x / z in the main
+// camera's view, for the camera's authored fovy (degrees) as drawn now: the aspect's Vert+ and the gameplay FOV scale
+// (outside events), as adjust_projection_args draws it. 0 for a bad fovy.
+float layout_scale(float fovyDeg);
 uint64_t game_frame();                // swaps so far                      // aspect the game draws with this frame
 // HD layouts: the game thread marks uploads of layout projection matrices and the drawing of layout
 // roots; the render thread, which knows the target, narrows the projection for TV-shaped targets

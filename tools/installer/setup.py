@@ -1852,6 +1852,7 @@ def mac_app(app_path, exe_src, data_dir, version, runtime_files=()):
   <key>CFBundleVersion</key><string>%s</string>
   <key>LSMinimumSystemVersion</key><string>14.0</string>
   <key>NSHighResolutionCapable</key><true/>
+  <key>NSMicrophoneUsageDescription</key><string>Only when you turn on a code mod's singing option: the sound is analysed for its pitch while you play and never stored or sent.</string>
   <key>LSApplicationCategoryType</key><string>public.app-category.games</string>%s
 </dict></plist>
 """

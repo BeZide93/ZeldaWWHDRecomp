@@ -31,6 +31,7 @@
 
 #include "fast_forward.h"
 #include "game_settings_page.h"
+#include "guest_live.h"
 #include "guest_mods.h"
 #include "guest_addr.h"
 #include "mods.h"
@@ -180,6 +181,61 @@ void test_fingers() {
     }
 }
 
+// ---- pinches for code mods (guest_live.h): the desktop's mouse wheel over a mod's claim (tv_pointer::take_wheel), each
+// notch 15 % more or less spread, over 0.3 s without a notch; the test aid WWHD_TEST_PINCH=from-to:x:y:s0:s1,... (TV
+// frames, layout units, the spread going from s0 to s1); Android's two fingers (touch_talk_mod_pinch)
+void wheel_pinch() {
+#ifndef __ANDROID__
+    static float scale = 1.0f;
+    static int quiet = -1;  // pad reads without a notch (-1: no pinch)
+    float notches;
+    tv_pointer::State at;
+    if (tv_pointer::take_wheel(notches, at)) {
+        float px, py;
+        tv_pointer::to_page(at, px, py);
+        scale *= std::pow(1.15f, std::clamp(notches, -8.0f, 8.0f));
+        guestmods::touch_pinch(guestlive::kPinch, scale, px - 640.0f, 360.0f - py);
+        quiet = 0;
+    } else if (quiet >= 0 && ++quiet >= 9) {
+        guestmods::touch_pinch(guestlive::kPinchEnd, scale, 0, 0);
+        scale = 1.0f, quiet = -1;
+    }
+#endif
+}
+void test_pinches() {
+    struct Pinch {
+        uint64_t from, to;
+        float x, y, s0, s1;
+    };
+    static const std::vector<Pinch> pinches = [] {
+        std::vector<Pinch> v;
+        const char* e = getenv("WWHD_TEST_PINCH");
+        unsigned long long a, b;
+        float x, y, s0, s1;
+        int n = 0;
+        while (e && sscanf(e, "%llu-%llu:%f:%f:%f:%f%n", &a, &b, &x, &y, &s0, &s1, &n) == 6) {
+            v.push_back({a, b, x, y, s0, s1});
+            e += n;
+            if (*e != ',') break;
+            e++;
+        }
+        return v;
+    }();
+    if (pinches.empty()) return;
+    static int active = -1;
+    const uint64_t f = fixed_seed::script_frame(render::frame_count());
+    int now = -1;
+    for (size_t i = 0; i < pinches.size(); i++)
+        if (f >= pinches[i].from && f < pinches[i].to) now = int(i);
+    if (active >= 0 && active != now) guestmods::touch_pinch(guestlive::kPinchEnd, 1, 0, 0), active = -1;
+    if (now < 0) return;
+    const Pinch& p = pinches[size_t(now)];
+    const float t = p.to > p.from + 1 ? std::clamp(float(f - p.from) / float(p.to - 1 - p.from), 0.0f, 1.0f) : 0.0f;
+    const int owner = guestmods::touch_pinch(guestlive::kPinch, p.s0 + (p.s1 - p.s0) * t, p.x, p.y);
+    if (active != now && log_on()) LOG("[talktouch] test pinch at %.0f %.0f: mod %d (frame %llu)", p.x, p.y, owner, (unsigned long long)f);
+    active = now;
+}
+
 // ---- the shop (game thread): dShop_now_triggercheck notes its ShopItems_c each step the item choice runs
 std::atomic<uint32_t> g_shop_items{0};
 std::atomic<uint64_t> g_shop_step{0};
@@ -285,6 +341,12 @@ void touch_talk_finger(int kind, float x, float y) {
     if (kind < Finger::kDown || kind > Finger::kCancel || !std::isfinite(x) || !std::isfinite(y)) return;
     push_finger(Finger::Kind(kind), x, y);
 }
+// Android (TouchControls): a second finger next to a code mod's finger; phase 0 begin, 1 move, 2 end; scale = the spread
+// now / at the start; (x, y) the fingers' middle in layout units. True when a mod has the pinch.
+bool touch_talk_mod_pinch(int phase, float scale, float x, float y) {
+    if (!std::isfinite(scale) || !std::isfinite(x) || !std::isfinite(y)) return false;
+    return guestmods::touch_pinch(phase >= 2 ? guestlive::kPinchEnd : guestlive::kPinch, scale, x, y) >= 0;
+}
 bool touch_talk_claims() { return g_claims.load(std::memory_order_relaxed); }
 // a finger landing at (x, y) (layout units) is the talk's or a code mod's (its claim, guest_live.h)
 bool touch_talk_claims_at(float x, float y) { return g_claims.load(std::memory_order_relaxed) || guestmods::touch_claimed_at(x, y); }
@@ -307,6 +369,8 @@ void touch_talk_pad(input::PadState& p, bool repeat) {
     const bool claim = talk_claim || guestmods::touch_claims();  // (code mods' claims: their fingers first)
     pointer_fingers(claim);
     test_fingers();
+    wheel_pinch();
+    test_pinches();
     std::vector<Finger> fingers;
     {
         std::lock_guard<std::mutex> lk(g_finger_mu);

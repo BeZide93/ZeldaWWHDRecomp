@@ -166,7 +166,7 @@ Manifest manifest(const fs::path& path){
     m.experimental=experimental.boolean;
     if(!game_id_supported(string_field(v,"game_id",false,64)))m.problem="This package targets another game";
     auto minimum=string_field(v,"minimum_manager_version",true,64);
-    if(!minimum.empty()&&version(minimum)>version(kManagerVersion))m.problem="Requires mod manager "+minimum;
+    if(!minimum.empty()&&version(minimum)>version(kManagerVersion))m.problem="This mod needs a newer version of the game (mod manager "+minimum+"; this one has "+std::string(kManagerVersion)+")";
     bool world_declarations = false;
     // The manifest's story sections (story_manifest.h, story_world_manifest.h): present, even as an empty list
     const bool story_sections=std::any_of(std::begin(kStorySections),std::end(kStorySections),[&](const char* key){return v.get(key).type!=Value::Null;});
@@ -283,7 +283,7 @@ Manifest manifest(const fs::path& path){
     for(const auto& c:conflicts.array){require(c.type==Value::String&&(id_ok(c.text)||(c.text.starts_with("builtin:")&&manager::find(c.text.substr(8)))),"Invalid conflict ID");m.conflicts.push_back(c.text);}
     const auto& options=v.get("options");require(options.type==Value::Null||(options.type==Value::Array&&options.array.size()<=32),"Invalid options");std::set<std::string> option_ids;
     for(const auto& option:options.array){
-        Option o;o.id=string_field(option,"id",false,64);require(id_ok(o.id)&&option_ids.insert(o.id).second,"Invalid or duplicate option ID");o.name=string_field(option,"name",false,128);o.description=string_field(option,"description",true);o.type=string_field(option,"type",false,32);o.default_value=option.get("default");{const auto& sec=option.get("section");if(sec.type==Value::String&&sec.text.size()<=64)o.section=sec.text;const auto& menu=option.get("menu");o.menu=menu.type==Value::Bool&&menu.boolean;const auto& live=option.get("live");o.live=live.type==Value::Bool&&live.boolean;}
+        Option o;o.id=string_field(option,"id",false,64);require(id_ok(o.id)&&option_ids.insert(o.id).second,"Invalid or duplicate option ID");o.name=string_field(option,"name",false,128);o.description=string_field(option,"description",true);o.type=string_field(option,"type",false,32);o.default_value=option.get("default");{const auto& sec=option.get("section");if(sec.type==Value::String&&sec.text.size()<=64)o.section=sec.text;const auto& menu=option.get("menu");o.menu=menu.type==Value::Bool&&menu.boolean;const auto& live=option.get("live");o.live=live.type==Value::Bool&&live.boolean;const auto& permission=option.get("permission");if(permission.type!=Value::Null){require(permission.type==Value::String&&permission.text=="microphone"&&o.type=="bool","Invalid option permission (only \"microphone\" on a bool option)");o.permission=permission.text;}}
         if(o.type=="number"){const auto& lo=option.get("min");const auto& hi=option.get("max");const auto& step=option.get("step");require(lo.type==Value::Number&&hi.type==Value::Number&&lo.number<=hi.number,"Invalid numeric bounds");o.minimum=lo.number;o.maximum=hi.number;o.step=step.type==Value::Number?step.number:1;require(o.step>0&&std::isfinite(o.step),"Invalid numeric step");}
         if(o.type=="enum"){const auto& choices=option.get("choices");require(choices.type==Value::Array&&!choices.array.empty()&&choices.array.size()<=64,"Invalid enum choices");for(const auto& c:choices.array){require(c.type==Value::String&&c.text.size()<=128,"Invalid enum value");o.choices.push_back(c.text);}}
         require(valid_option(o,o.default_value),"Invalid default for "+o.id);o.value=o.default_value;m.options.push_back(o);
@@ -1084,6 +1084,9 @@ void set_option_observer(OptionObserver observer){g_option_observer=std::move(ob
 bool configure(const std::string& id,const std::string& option_id,const Value& value,std::string& error){bool live=false;const bool ok=configure_option(id,option_id,value,error,live);if(ok&&g_option_observer)g_option_observer(id,option_id,value,live);return ok;}
 bool configure_option(const std::string& id,const std::string& option_id,const Value& value,std::string& error,bool& live){return operation(error,[&]{require(records.contains(id),"Mod not found");require(!records.at(id).loading,"Wait for mod preparation to finish before changing options");auto& opts=records.at(id).manifest.options;auto it=std::find_if(opts.begin(),opts.end(),[&](const Option& o){return o.id==option_id;});require(it!=opts.end()&&valid_option(*it,value),"Invalid configuration value");live=it->live;auto previous=database;profile()["config"][id][option_id]=value;try{if(records.at(id).manifest.graphics)cemu::validate({{id,*records.at(id).manifest.graphics,config(records.at(id).manifest)}});bool was_enabled=wanted(id);auto messages=was_enabled?repair_graphics():std::vector<std::string>{};if(was_enabled){order(enabled_set());validate_conflicts(enabled_set());}save();notices.insert(notices.end(),messages.begin(),messages.end());}catch(...){database=previous;throw;}dirty=true;});}
 std::vector<std::string> startup_problems(){std::lock_guard guard(mutex);std::vector<std::string> out;for(const auto& [id,why]:skip_reasons)out.push_back(why);return out;}
+namespace {std::mutex g_toast_mutex;std::vector<std::string> g_toasts;}
+void post_toast(const std::string& text){std::lock_guard guard(g_toast_mutex);if(g_toasts.size()<8)g_toasts.push_back(text);}
+std::vector<std::string> take_toasts(){std::lock_guard guard(g_toast_mutex);auto result=std::move(g_toasts);g_toasts.clear();return result;}
 std::vector<std::string> take_notices(){std::lock_guard guard(mutex);auto result=std::move(notices);notices.clear();return result;}
 void disable_all(){std::string ignored;operation(ignored,[&]{auto previous=database;for(const auto& [id,r]:records)profile()["enabled"][id]=false;profile()["setup_pending"].object.clear();try{save();}catch(...){database=previous;throw;}dirty=true;});manager::disable_all();}
 std::vector<std::string> profiles(){std::lock_guard guard(mutex);std::vector<std::string> result;if(ready)for(const auto& [name,p]:database.get("profiles").object)result.push_back(name);return result;}
@@ -1173,7 +1176,7 @@ void start_guests(const GuestInspect& inspect,const GuestLoad& load) {
                         r.manifest.name+" needs "+dependency.manifest.name+", which could not start"+
                         (dependency.error.empty()?std::string("."):": "+dependency.error));
             }
-            GuestPackage pkg{id,r.manifest.version,r.path.string(),(root/"Data"/id).string(),r.manifest.fingerprint,r.startup_config,r.manifest.heap_size};pkg.name=r.manifest.name;
+            GuestPackage pkg{id,r.manifest.version,r.path.string(),(root/"Data"/id).string(),r.manifest.fingerprint,r.startup_config,r.manifest.heap_size};pkg.name=r.manifest.name;for(const auto& o:r.manifest.options)if(o.permission=="microphone")pkg.mic_options.push_back({o.id,o.name});
             uint32_t bytes=inspect(pkg);
             uint32_t base=assign_guest_region(id,bytes);
             load(pkg,base);

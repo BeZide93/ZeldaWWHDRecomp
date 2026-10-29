@@ -232,7 +232,9 @@ use object fields that are the same in both versions.
 | `wwhd_malloc`, `wwhd_free` | Per-mod heap, 16-byte aligned; size from `guest.heap_size` (default 256 KiB, max 8 MiB); null when full |
 | `wwhd_input_read` | Buttons, sticks and touch (read-only) |
 | `wwhd_input_filter_register` | Change the controller state the game reads, below |
-| `wwhd_touch_register`, `wwhd_touch_claim` | Touches (or mouse clicks) on parts of the TV picture your mod claims, below |
+| `wwhd_touch_register`, `wwhd_touch_claim` | Touches (or mouse clicks) on parts of the TV picture your mod claims, and pinches there, below |
+| `wwhd_screen_point` | Where the drawn camera shows a point of the world, in the touches' layout units, below |
+| `wwhd_mic_open`, `_close`, `_state`, `_pitch` | The microphone's pitch, for an option the player turned on (asks for permission then), below |
 | `wwhd_file_read`, `wwhd_file_write` | Flat file names in your mod's own data folder, at most 1 MiB per call; write replaces the file; return bytes or -1 |
 | `wwhd_logic_dt`, `wwhd_logic_step` | Length of the current logic step in seconds (60 fps modes included) and the step counter |
 | `wwhd_setting_get`, `wwhd_setting_changed` | Read-only port settings, below |
@@ -278,6 +280,52 @@ on-screen stick, no talk by touch. It stays yours until it lifts, even outside t
 overlap the newest wins. Claim only while your feature shows something to touch, and remove the claim (an
 empty rectangle, x1 <= x0) when it doesn't, so the player's thumbs work the game again. Events arrive at the
 next controller read, before the input filters, so a touch can become a button in the same read.
+
+**Pinches.** A second finger next to your mod's finger (Android, with the on-screen controls shown or hidden), or the
+mouse wheel over one of your claims (desktop), comes as `WWHD_TOUCH_PINCH` with `x` = the spread now divided by the
+spread when the pinch began (above 1: the fingers moved apart, or the wheel turned away from the player; each notch is
+15 % more or less), then `WWHD_TOUCH_PINCH_END` (on the desktop 0.3 s after the last notch). The finger itself keeps
+its own events: its moves pause while the pinch lasts, and its `WWHD_TOUCH_UP` comes when it lifts. Hosts from before
+pinches never send them.
+
+**Points of the world on the picture.** `wwhd_screen_point(world, out)` takes a point of the current room (`world`:
+x, y, z) and writes where the drawn camera shows it into `out[0]`, `out[1]`, in the same layout units as touches,
+with the picture's shape and field of view as drawn (wider screens, the field-of-view setting). It returns 1, or 0
+when the point is behind the camera or no camera is drawn. Compare touches with it on the logic step you use it:
+the camera moves.
+
+```c
+f32 square[3] = {x, y, z}, at[2];
+if (wwhd_screen_point(square, at) && (e->x - at[0]) * (e->x - at[0]) + (e->y - at[1]) * (e->y - at[1]) < 40 * 40) {
+    /* the finger is on the square */
+}
+```
+
+**The microphone.** For features like singing the songs. A mod may open the microphone only through an option
+the player turns on: mark a bool option `"permission": "microphone"` in the manifest, and call `wwhd_mic_open()`
+while it is on (the port refuses it otherwise). Nothing asks for the microphone before that: the first open asks
+the system (Android's runtime permission, the macOS prompt; Windows and Linux open the default recording device).
+If the player declines, the state becomes `WWHD_MIC_DENIED` and the port turns the option off again with a notice
+over the game; the player can allow the microphone in the system settings and turn the option on again. Call
+`wwhd_mic_close()` when you no longer listen (the port also closes it when the option goes off). Keep it closed
+when nothing listens: the QoL package opens it once when the option is turned on (for the question), then only
+while Link conducts.
+
+```json
+{"id": "sing", "type": "bool", "name": "Sing the songs", "default": false, "live": true, "permission": "microphone"}
+```
+
+The port analyses the sound for its pitch and drops it: a mod never gets samples, and nothing keeps, writes, logs
+or sends the sound. `wwhd_mic_pitch(out)` writes the newest analysed window's (about 21 ms, every 1024 samples at
+48 kHz) pitch in Hz to `out[0]` (0 when there is none: silence, noise), its loudness (RMS, 0..1) to `out[1]` and its
+clarity (0..1, how clean a tone it is) to `out[2]`, and returns how many windows were analysed so far; a new value
+means a new window. `wwhd_mic_state()` is one of `WWHD_MIC_CLOSED`, `_ASKING`, `_OPEN`, `_DENIED`, `_UNAVAILABLE`.
+Test aids for scripted runs: `WWHD_TEST_MIC=from-to:hz,...` (TV frames) feeds tones instead of a device without
+asking; `WWHD_TEST_MIC_DENY=1` answers the question with "declined".
+
+Hosts with these calls (and `wwhd_screen_point`, pinches and `"permission"`) have mod manager version 1.6.0: set
+`"minimum_manager_version": "1.6.0"` in a manifest that uses them, so older ports refuse the package up front ("needs
+a newer version of the game"). A module built for services the port doesn't have says which one when it fails to load.
 
 ## Port settings
 

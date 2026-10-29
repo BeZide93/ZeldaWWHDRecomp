@@ -620,6 +620,7 @@ inline void tick(const Host& h, bool menu_open) {
     auto& j = s.job;
     auto& f = j.flow;
     const double now = ImGui::GetTime();
+    for (const auto& t : mods::packages::take_toasts()) notify(t);
     if (startup_notice_pending() && !menu_open) {
         auto& n = startup_notice();
         n.shown = true;

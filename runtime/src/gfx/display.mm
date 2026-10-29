@@ -253,7 +253,9 @@ static void load_options() {
     float nx, ny;
     [self point:e x:&nx y:&ny];
     const float steps = e.hasPreciseScrollingDeltas ? e.scrollingDeltaY / 20.0f : e.scrollingDeltaY;
+    float px, py, aspect;
     if (gfx::pip_wheel(nx, ny, steps)) gfx::save_options();
+    else if (gfx::wheel_on_mod_claim(nx, ny, &px, &py, &aspect)) tv_pointer::add_wheel(steps, px, py, aspect);
     else [super scrollWheel:e];
 }
 - (bool)picture:(NSEvent*)e down:(bool)down clamp:(bool)c {

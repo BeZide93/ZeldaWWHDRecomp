@@ -219,7 +219,7 @@ int main(int argc, char** argv) {
         std::ofstream(old/"content"/"Common"/"fixture.bin")<<"synthetic replacement";
         std::ofstream(old/"manifest.json")<<R"({"format_version":1,"id":"content.old-import","name":"old-import","version":"1.0.0","game_id":"wwhd-usa","kind":"content","minimum_manager_version":"1.1.0","content_dir":"content"})";
         assert(install(old.string(),error)&&view("content.old-import").compatible);
-        // a new import is written with "wwhd" and requires 1.5.0 (older builds say "Requires mod manager 1.5.0")
+        // a new import is written with "wwhd" and requires 1.5.0 (older builds say they need a newer version of the game)
         auto fresh=root/"fresh-import";fs::create_directories(fresh/"content"/"Common");
         std::ofstream(fresh/"content"/"Common"/"fixture.bin")<<"synthetic replacement";
         std::string id;assert(install(fresh.string(),error,&id));
