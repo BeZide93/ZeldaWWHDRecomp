@@ -5026,7 +5026,12 @@ static bool android_mod_touch_event(const SDL_TouchFingerEvent& f, Uint32 type, 
   if (type != SDL_EVENT_FINGER_DOWN || input::touch_from_controller(f.touchID) || overlay::captures()) return false;
   if (dual && dual_display::active_swap) return false;  // the phone shows the GamePad
   float tx, ty;
-  if (!dual && (gfx::view_button_hit(f.x, f.y) || gfx::overlay_hit(f.x, f.y, &tx, &ty, false))) return false;
+  bool pip = !dual && gfx::overlay_hit(f.x, f.y, &tx, &ty, false);
+  // One screen in Off-TV Play: the whole picture is the GamePad's (drc_only), so the check above hits
+  // everywhere; outside the game's own GamePad menus a mod's claim on that picture takes the finger
+  // (as nativeFreeTouch does with the controls shown)
+  if (pip && gfx::g_one_screen_off_tv.load() && !gfx::gamepad_ui_menu()) pip = false;
+  if (!dual && (gfx::view_button_hit(f.x, f.y) || pip)) return false;
   tv_pointer::State s;
   if (!gfx::game_picture_hit(f.x, f.y, &s.x, &s.y, &s.aspect)) return false;
   float px, py;
