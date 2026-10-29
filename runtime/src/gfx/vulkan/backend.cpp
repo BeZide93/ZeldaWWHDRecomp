@@ -86,6 +86,9 @@
 #include "screenshot.h"
 #include "shaders.h"
 #include "settings.h"
+#include "gpu_start_guard.h"
+#include "gfx/renderer.h"
+#include "overlay/startup_notices.h"
 #include "savestate.h"
 #include "gfx/capture_schedule.h"
 #include "sparse_hash_memo.h"
@@ -2442,6 +2445,176 @@ static void update_secondary_surface() {
   gfx::g_has_drc_window = true;
 }
 #endif
+#ifndef __ANDROID__
+// A chosen GPU that cannot show the picture (issue #309; gpu_start_guard.h): before the first picture,
+// a lost surface is retried once with a new surface and swapchain, then the GPU setting goes back to
+// automatic and the game restarts. Render thread, except the main-thread jobs posted below.
+static gpu_guard::StartPlan gpuStartPlan;
+static gpu_guard::FirstPicture firstPicture;
+static std::string firstPictureIdentity;  // the chosen GPU being watched
+static int testSurfaceLosses = 0;         // WWHD_TEST_GPU_SURFACE_LOSS
+static bool firstPictureRetrying = false;
+struct SurfaceRetry {
+  std::atomic<bool> pending{false}, ready{false};
+  VkSurfaceKHR fresh = VK_NULL_HANDLE;  // published by `ready` (release/acquire)
+};
+static SurfaceRetry surfaceRetry[2];  // TV, GamePad
+static bool surface_class_failure(VkResult r) {
+  return r == VK_ERROR_SURFACE_LOST_KHR || r == VK_ERROR_NATIVE_WINDOW_IN_USE_KHR ||
+         r == VK_ERROR_INCOMPATIBLE_DISPLAY_KHR || r == VK_ERROR_INITIALIZATION_FAILED;
+}
+// Start-up, before the device is chosen (main thread): the saved choice for this start, the notice.
+static void plan_gpu_start() {
+  gpu_guard::StartInput in;
+  in.saved = device_setting();
+  hostui::get(gpu_guard::kStartingKey, in.starting);
+  hostui::get(gpu_guard::kFailedKey, in.failed);
+  if (const char* e = getenv(gpu_guard::kRelaunchEnv)) {
+    in.relaunchFailed = e;
+#ifndef _WIN32
+    unsetenv(gpu_guard::kRelaunchEnv);  // this relaunch only: a later restart may try the GPU again
+#endif
+  }
+  if (device_from_env()) in.saved.clear();  // WWHD_VK_DEVICE chooses; the guard watches the setting only
+  gpuStartPlan = gpu_guard::plan_start(in);
+  const auto& plan = gpuStartPlan;
+  if (plan.resetSetting) {
+    set_device_setting("");
+    save_device_setting();
+  }
+  if (plan.clearFailed) hostui::set(gpu_guard::kFailedKey, "");
+  if (!plan.notice.empty()) {
+    LOG("[vulkan] GPU setting: %s; using the automatic choice", plan.reason.c_str());
+    startup_notices::add(plan.notice);
+  }
+}
+// Start-up, once the device is chosen (main thread): watch a GPU chosen by the setting.
+static void arm_first_picture(const std::string& identity) {
+  const bool watch = !identity.empty() && gfx::hidden::mode().presents();
+  if (watch) {
+    hostui::set(gpu_guard::kStartingKey, identity);
+    firstPicture.armed = true;
+    firstPictureIdentity = identity;
+    if (const char* e = getenv(gpu_guard::kTestLossEnv)) testSurfaceLosses = std::max(0, atoi(e));
+    if (testSurfaceLosses)
+      LOG("[vulkan] test: the first %d image acquires report a lost surface (%s)", testSurfaceLosses, gpu_guard::kTestLossEnv);
+  } else if (gpuStartPlan.clearStarting) {
+    hostui::set(gpu_guard::kStartingKey, "");
+  }
+}
+static void first_picture_shown() {
+  firstPicture.armed = false;
+  LOG("[vulkan] the chosen GPU shows the picture");
+  hostui::post([] { hostui::set(gpu_guard::kStartingKey, ""); });
+}
+static void fall_back_to_automatic_gpu(const std::string& why) {
+  firstPicture.fallingBack = true;
+  LOG("[vulkan] the chosen GPU (%s) cannot show the picture (%s); the GPU setting goes back to automatic",
+      active_device.c_str(), why.c_str());
+  const std::string identity = firstPictureIdentity;
+  hostui::post([identity] {
+    set_device_setting("");
+    save_device_setting();
+    hostui::set(gpu_guard::kFailedKey, identity);
+    hostui::set(gpu_guard::kStartingKey, "");
+#ifndef _WIN32
+    if (render::can_restart()) {
+      // also kept for the relaunch, in case the settings file could not be written
+      setenv(gpu_guard::kRelaunchEnv, identity.c_str(), 1);
+      LOG("[vulkan] restarting with the automatic GPU choice");
+      render::restart();  // returns only when it failed
+      unsetenv(gpu_guard::kRelaunchEnv);
+    }
+#endif
+    // no restart here (Windows): end; the next start uses the automatic choice and says so
+    LOG("[vulkan] the game ends; the next start uses the automatic GPU choice");
+#ifdef WWHD_SDL_HOST
+    const char* hidden = getenv("WWHD_HIDDEN_WINDOWS");
+    if (!hidden || !*hidden || !strcmp(hidden, "0"))
+      SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_WARNING, "Wind Waker HD",
+                               "Your chosen GPU couldn't show the picture. The game now uses the automatic "
+                               "choice again: please start it again.", nullptr);
+#endif
+    hostui::quit();
+  });
+}
+// The screen's swapchain and surface go; the main thread makes a new surface for its window
+// (surface_retry_ready attaches it). AppKit host: no new surface there, the fallback runs instead.
+static void begin_surface_retry(Screen& s, const char* op) {
+#ifdef WWHD_SDL_HOST
+  const int k = &s == &R.tv ? 0 : 1;
+  LOG("[vulkan] %s: the chosen GPU's %s surface is lost before the first picture; trying a new surface",
+      op, &s == &R.tv ? "TV" : "GamePad");
+  firstPictureRetrying = true;  // failures of a held frame on the old swapchain are expected
+  if (&s == &R.tv) present_held(true);
+  if (active_deferred_commands) active_deferred_commands->finish_exact();
+  vk_check(device_wait_idle(), "surface retry device idle");
+  firstPictureRetrying = false;
+  reset_present_screen(s);
+  if (s.swapchain) vkDestroySwapchainKHR(R.device, s.swapchain, nullptr);
+  s.swapchain = VK_NULL_HANDLE;
+  s.images.clear();
+  s.layouts.clear();
+  s.imageUses.clear();
+  const VkSurfaceKHR old = s.surface;
+  s.surface = VK_NULL_HANDLE;
+  surfaceRetry[k].ready.store(false);
+  surfaceRetry[k].pending.store(true);
+  hostui::post([k, old] {
+    Screen& screen = k == 0 ? R.tv : R.drc;
+    if (old) SDL_Vulkan_DestroySurface(R.instance, old, nullptr);
+    VkSurfaceKHR fresh = VK_NULL_HANDLE;
+    SDL_Window* window = screen.window.load();
+    if (!window || !SDL_Vulkan_CreateSurface(window, R.instance, nullptr, &fresh)) {
+      LOG("[vulkan] new surface: %s", window ? SDL_GetError() : "no window");
+      fresh = VK_NULL_HANDLE;
+    }
+    surfaceRetry[k].fresh = fresh;
+    surfaceRetry[k].ready.store(true, std::memory_order_release);
+  });
+#else
+  fall_back_to_automatic_gpu(std::string(op) + ": surface lost");
+#endif
+}
+// present(): false while the screen waits for its new surface (or the fallback runs).
+static bool surface_retry_ready(Screen& s) {
+  if (firstPicture.fallingBack) return false;
+  SurfaceRetry& retry = surfaceRetry[&s == &R.tv ? 0 : 1];
+  if (!retry.pending.load()) return true;
+  if (!retry.ready.load(std::memory_order_acquire)) return false;
+  retry.pending.store(false);
+  const VkSurfaceKHR fresh = std::exchange(retry.fresh, VK_NULL_HANDLE);
+  if (!fresh) {
+    fall_back_to_automatic_gpu("no new surface");
+    return false;
+  }
+  s.surface = fresh;
+  VkBool32 supported = VK_FALSE;
+  const VkResult support = vkGetPhysicalDeviceSurfaceSupportKHR(R.physicalDevice, R.queueFamily, fresh, &supported);
+  if (support != VK_SUCCESS || !supported) {
+    fall_back_to_automatic_gpu("the new surface cannot be presented to (result " + std::to_string(int(support)) + ")");
+    return false;
+  }
+  s.resize = true;
+  LOG("[vulkan] new %s surface for the chosen GPU; presenting again", &s == &R.tv ? "TV" : "GamePad");
+  return true;
+}
+// A presentation error: true when the guard took it (nothing is presented this frame).
+static bool first_picture_failure(Screen& s, VkResult r, const char* op) {
+  if (firstPictureRetrying) return true;
+  const auto action = gpu_guard::on_failure(firstPicture, &s == &R.tv ? 0 : 1, surface_class_failure(r),
+                                            R.tv.presented.load() + R.drc.presented.load());
+  switch (action) {
+  case gpu_guard::FailureAction::Report: return false;
+  case gpu_guard::FailureAction::Wait: return true;
+  case gpu_guard::FailureAction::Retry: begin_surface_retry(s, op); return true;
+  case gpu_guard::FailureAction::FallBack:
+    fall_back_to_automatic_gpu(std::string(op) + ": Vulkan result " + std::to_string(int(r)) + " again after a new surface");
+    return true;
+  }
+  return false;
+}
+#endif
 static bool screen_has_window(const Screen& s) {
 #ifdef __ANDROID__
   if (&s == &R.drc) return secondaryWindow && s.surface;
@@ -2499,8 +2672,12 @@ static VkResult queue_present(Screen &s, VkSwapchainKHR swapchain, uint32_t inde
       present_observer::fail("observed TV queue presentation failed");
     poll_present_observer();
   }
-  if (pr == VK_SUCCESS || pr == VK_SUBOPTIMAL_KHR)
+  if (pr == VK_SUCCESS || pr == VK_SUBOPTIMAL_KHR) {
     ++s.presented;
+#ifndef __ANDROID__
+    if (firstPicture.armed) first_picture_shown();
+#endif
+  }
 #ifdef __ANDROID__
   // SUBOPTIMAL here only says the compositor rotates the picture (identity pre-transform, see
   // make_swapchain); size changes come as window events. Rebuilding would happen every frame.
@@ -2516,7 +2693,8 @@ static VkResult queue_present(Screen &s, VkSwapchainKHR swapchain, uint32_t inde
 #else
   if (pr == VK_ERROR_OUT_OF_DATE_KHR || pr == VK_SUBOPTIMAL_KHR)
     s.resize = true;
-  else
+  else if (pr != VK_SUCCESS && first_picture_failure(s, pr, "present scan buffer")) {
+  } else
     vk_check(pr, "present scan buffer");
 #endif
   return pr;
@@ -2628,8 +2806,15 @@ static bool present(Screen &s) {
     }
   }
 #else
-  if (s.resize || !s.swapchain)
-    make_swapchain(s);
+  if (!surface_retry_ready(s)) return false;
+  if (s.resize || !s.swapchain) {
+    try {
+      make_swapchain(s);
+    } catch (const VulkanFailure& failure) {
+      if (first_picture_failure(s, failure.result, "swapchain")) return false;
+      throw;
+    }
+  }
 #endif
   // Reserve the observer identity before even eager drawable acquisition.
   // Enqueue time is still recorded immediately before QueuePresent below.
@@ -2742,6 +2927,11 @@ static bool present(Screen &s) {
   ar = timed_call(timing.acquire, [&] {
 #ifdef __ANDROID__
     if(secondary && R.secondaryInjectAcquireLoss.exchange(false))return VK_ERROR_SURFACE_LOST_KHR;
+#else
+    if (!secondary && firstPicture.armed && testSurfaceLosses > 0) {
+      --testSurfaceLosses;
+      return VK_ERROR_SURFACE_LOST_KHR;  // WWHD_TEST_GPU_SURFACE_LOSS
+    }
 #endif
     if (handoff_trace::enabled()) handoff_trace::emit(handoff_trace::Lane::Producer, handoff_trace::Kind::AcquireBegin, 0, R.frame, &s == &R.tv ? 1 : 2, acquireIndex);
     const auto result = vkAcquireNextImageKHR(R.device, s.swapchain, present_acquire_timeout(secondary),
@@ -2763,6 +2953,9 @@ static bool present(Screen &s) {
     else secondary_surface_lost();
     return false;
   }
+#else
+  if (ar != VK_SUCCESS && ar != VK_SUBOPTIMAL_KHR && first_picture_failure(s, ar, "acquire scan image"))
+    return false;
 #endif
   if (ar != VK_SUBOPTIMAL_KHR)
     vk_check(ar, "acquire scan image");
@@ -4059,6 +4252,9 @@ static void log_instance_layers() {
 static void init_device(std::vector<const char *> extensions,
                         const std::function<void()> &create_surfaces) {
   load_device_setting();
+#ifndef __ANDROID__
+  plan_gpu_start();  // a chosen GPU that could not show the picture last time (gpu_start_guard.h)
+#endif
   reset_pipeline_lookup_cache();
 #ifdef __APPLE__
   // This draw-heavy workload is faster with direct Metal resource bindings.
@@ -4268,6 +4464,11 @@ static void init_device(std::vector<const char *> extensions,
     if (!device_fallback.empty()) LOG("[vulkan] %s (%s)", device_fallback.c_str(), deviceEnv ? "env" : "setting");
     LOG("[vulkan] chosen GPU: %s (%s)", active_device.c_str(), choice.reason.c_str());
   }
+#ifndef __ANDROID__
+  arm_first_picture(choice.index >= 0 && choice.reason == "setting" ? device_inventory[size_t(choice.index)].identity
+                                                                    : std::string());
+  if (!gpuStartPlan.notice.empty() && device_fallback.empty()) device_fallback = gpuStartPlan.notice;
+#endif
   if (!R.physicalDevice)
     exception_report::raise(
         devices.empty()

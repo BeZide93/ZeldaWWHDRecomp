@@ -2378,6 +2378,10 @@ add_executable(device_choice_test runtime/tools/device_choice_test.cpp)
 target_include_directories(device_choice_test PRIVATE runtime/src)
 target_compile_options(device_choice_test PRIVATE -UNDEBUG)
 add_test(NAME device_choice COMMAND device_choice_test)
+add_executable(gpu_start_guard_test runtime/tools/gpu_start_guard_test.cpp)
+target_include_directories(gpu_start_guard_test PRIVATE runtime/src)
+target_compile_options(gpu_start_guard_test PRIVATE -UNDEBUG)
+add_test(NAME gpu_start_guard COMMAND gpu_start_guard_test)
 
 # Synthetic native/semantic fetch parity, without guest memory or a GPU.
 add_executable(fetch_attributes_test runtime/tools/fetch_attributes_test.cpp

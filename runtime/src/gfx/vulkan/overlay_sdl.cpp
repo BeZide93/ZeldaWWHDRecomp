@@ -503,5 +503,6 @@ void open_folder(const std::string& path) {
 
 namespace gfxvk {
 void load_device_setting() { std::string value; if (hostui::get("vkDevice", value)) set_device_setting(value); }
+void save_device_setting() { if (!device_from_env()) hostui::set("vkDevice", device_setting()); }
 }
 #endif  // WWHD_SDL_HOST

@@ -20,6 +20,7 @@
 #include "hostui.h"
 #include "mods_model.h"
 #include "setup_flow.h"
+#include "startup_notices.h"
 #include "setup_test.h"
 #include "text_entry.h"
 #include "../mods/code_mods.h"
@@ -587,8 +588,9 @@ inline void keep_off_steps(Flow& f, const mods::packages::View& v, double now) {
     j.finished_at = now;
     fprintf(stderr, "[mods] %s updated; it stays off\n", f.id.c_str());
 }
-// Once per start, over the game: the code mods that couldn't start because the mod compiler is missing
-// (mods/compiler_notice.h) and the mods skipped because a requirement can't be met (packages.h
+// Once per start, over the game: start-up notices from before the overlay (startup_notices.h), the
+// code mods that couldn't start because the mod compiler is missing (mods/compiler_notice.h) and the
+// mods skipped because a requirement can't be met (packages.h
 // startup_problems); the Mods tab says each next to its mod. Read at the overlay's first frames, after
 // the mods started; pending until shown, so the overlay draws a frame for it.
 struct StartupNotice {
@@ -599,7 +601,9 @@ inline StartupNotice& startup_notice() {
     static StartupNotice n;
     if (!n.read) {
         n.read = true;
-        n.text = guestmods::compiler_notice_for(mods::packages::list());
+        n.text = startup_notices::text();  // the renderer's (a GPU fallback, for example)
+        const std::string compiler = guestmods::compiler_notice_for(mods::packages::list());
+        if (!compiler.empty()) n.text += (n.text.empty() ? "" : "\n") + compiler;
         for (const auto& line : mods::packages::startup_problems()) n.text += (n.text.empty() ? "" : "\n") + line;
     }
     return n;
