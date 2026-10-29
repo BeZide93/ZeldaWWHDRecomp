@@ -16,6 +16,9 @@ what is on `devel` and not released yet (also in the
 - **Quest Log dates are right again.** The file select showed today's date for every save, and saves were stamped
   with the time since the game started instead of the real date; both are fixed. A Quest Log saved with an older
   build shows the save file's date until you save it again. (thanks @koenada, #322)
+- **Meta Quest: no game icon offer.** The Quest's Library accepts a game icon but never shows it for a sideloaded
+  app, so setup no longer offers one there and hides the "Add the game icon" button. Other Android launchers are
+  unchanged. (#325, thanks @rhemfur)
 - **Android: new Flexible touch controls, now the default.** A stick appears where your thumb lands: the left half
   of the screen moves Link, the right half turns the camera by swiping (Swipe speed, with its own speed on the boat)
   or as a camera stick. The buttons stay where your layout puts them. Classic keeps both sticks at fixed places as
