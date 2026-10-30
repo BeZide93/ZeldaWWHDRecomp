@@ -115,9 +115,26 @@ int main(void) {
     next(); next(); assert(pad(0)==(0x80|0x8000)); assert(pad(0)==(0x80|0x8000));
     touch(2,-150,-180); assert(pad(0)==(0x80|0x8000));
     for(int i=0;i<7;++i) next(); assert(pad(0x1000)==0x1000);
-    touch(0,50,-180); assert(pad(0)==0x4000);
+    touch(0,50,-180); assert(pad(0)==0 && ldf32(SCRATCH+4)==1);
     st8(MENU_FLAG,1); assert(pad(0)==0); assert(claim[0][0]==claim[0][2]);
     st8(MENU_FLAG,0); next(); assert(pad(0)==0);
+    /* Full quick-spin circle, delayed B edge and neutral release through the
+     * actual translated input filter. Preserve unrelated physical buttons. */
+    touch(0,50,-180);
+    float previous_x=1,previous_y=0,angle=0;
+    for(int phase=0;phase<11;++phase) {
+        assert(pad(0x1000)==(0x1000u | (phase>=8 && phase<10 ? 0x4000u : 0)));
+        float x=ldf32(SCRATCH+4),y=ldf32(SCRATCH+8);
+        if(phase<=8) {
+            assert(fabsf(x*x+y*y-1)<.00001f);
+            angle+=atan2f(previous_x*y-previous_y*x,previous_x*x+previous_y*y);
+            previous_x=x;previous_y=y;
+        } else assert(x==0 && y==0);
+        if(phase==8) assert(fabsf(angle-6.2831853f)<.0001f);
+        next();
+    }
+    memset(ppc_ptr(SCRATCH),0,32); stf32(SCRATCH+4,.3f); stf32(SCRATCH+8,-.4f);
+    call(filter_fn,SCRATCH); assert(ldf32(SCRATCH+4)==.3f && ldf32(SCRATCH+8)==-.4f);
     /* Disable a live option during an attack. */
     touch(0,-150,-180); assert(pad(0)==0x80); jump_enabled=0; next(); assert(!pad(0));
     jump_enabled=1; next();
@@ -133,7 +150,7 @@ int main(void) {
     st8(PLAY+0x5292,1); camera(100); assert(ldf32(CAMERA+0xE4)==100);
     st8(PLAY+0x5292,0); st32(PLAY+0x5CD8,0x2000); camera(100); assert(ldf32(CAMERA+0xE4)==100);
     st32(PLAY+0x5CD8,0); pinch_enabled=0; next(); camera(100); assert(ldf32(CAMERA+0xE4)==100);
-    touch(0,50,-180); assert(pad(0)==0x4000); ++epoch; assert(!pad(0));
+    touch(0,50,-180); assert(pad(0)==0 && ldf32(SCRATCH+4)==1); ++epoch; assert(!pad(0));
     puts("Translated module: registration, claims, HUD, input, lifecycle and camera fixture passed");
     assert(munmap(memory,1ull<<32)==0);
 }

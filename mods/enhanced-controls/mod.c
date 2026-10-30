@@ -148,7 +148,7 @@ static void filter(wwhd_input_state* pad) {
     refresh(); if(!ready) return;
     /* Always preserve real buttons. The macro only supplies additional holds. */
     pad->buttons |= ec_buttons(&state);
-    if(ec_active(&state) && state.macro==EC_DODGE) { pad->lx=state.dodge_x; pad->ly=state.dodge_y; }
+    ec_stick(&state,&pad->lx,&pad->ly);
 }
 static void box(u32 list,EcRect r,const char* label,u32 color) {
     element=(wwhd_hud_element){.kind=WWHD_HUD_RECT,.anchor=WWHD_HUD_CENTER,

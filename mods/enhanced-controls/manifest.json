@@ -2,7 +2,7 @@
   "format_version": 1,
   "id": "enhanced-controls",
   "name": "Enhanced Controls",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "game_id": "wwhd",
   "minimum_manager_version": "1.6.0",
   "kind": "guest",
@@ -35,7 +35,7 @@
     },
     {
       "id": "spin",
-      "name": "Charged spin",
+      "name": "Quick spin (stick rotation)",
       "type": "bool",
       "default": true,
       "live": true,

@@ -10,7 +10,11 @@ the seven-feature runtime port, not a prerequisite.
 
 - Four separately switchable touch macro buttons: **Jump**, **Slash**, **Spin**,
   **Dodge**. Draw your sword first for the three attacks. Jump/slash/dodge send
-  a short ZL targeting hold, then A/B; Spin holds B for 1.1 seconds and releases.
+  a short ZL targeting hold, then A/B. **Spin** rotates the left stick through a
+  full circle in eight 45-degree steps (about 267 ms), taps B for about 67 ms,
+  then releases. It temporarily overrides the left stick and returns control
+  after about 367 ms. It uses the game's quick-spin input rather than charging
+  an attack; keep the physical attack button released so B has a rising edge.
   A dodge goes sideways with left/right stick input, otherwise backwards.
   Timing follows game logic time, including true-60 mode, rather than rendered
   frame count. A new macro replaces the previous one; real buttons are preserved.
@@ -41,7 +45,7 @@ macro's release; the mod does not forcibly release the player's inputs.
 
 1. Download the `enhanced-controls` artifact from the successful **Enhanced
    Controls mod** Actions run. Extract the outer GitHub artifact ZIP to obtain
-   `enhanced-controls-0.1.0.wwhdmod`; do **not** extract that file.
+   `enhanced-controls-0.1.1.wwhdmod`; do **not** extract that file.
 2. Enable **Code mods** in the app's setup or **Settings → Mods → More →
    Code-mod support**. If newly enabled, let the app rebuild the game code.
 3. **Settings → Mods → More → Install from a file**: choose the `.wwhdmod`.
@@ -71,7 +75,7 @@ python3 mods/enhanced-controls/build.py
 python3 mods/enhanced-controls/tests/run_tests.py
 ```
 
-Output: `build/enhanced-controls/enhanced-controls-0.1.0.wwhdmod` and
+Output: `build/enhanced-controls/enhanced-controls-0.1.1.wwhdmod` and
 `SHA256SUMS.txt`. `WWHD_PPC_CLANG`, `WWHD_PPC_LLD` and `CC` can select compilers.
 The build checks the real upstream package reader and PPC-to-C translator for
 both USA and EU. Tests exercise the pure policy and the translated module with
