@@ -1,0 +1,145 @@
+{
+  "format_version": 1,
+  "id": "enhanced-controls",
+  "name": "Enhanced Controls",
+  "version": "0.1.0",
+  "game_id": "wwhd",
+  "minimum_manager_version": "1.6.0",
+  "kind": "guest",
+  "experimental": true,
+  "author": "BeZide93",
+  "description": "Four combat macros and a dedicated right-hand gesture pad for camera-distance pinch and double-tap recenter. Experimental standalone guest mod for official main; no APK changes.",
+  "guest": {
+    "api_version": 1,
+    "elf": "mod.elf",
+    "heap_size": 262144
+  },
+  "options": [
+    {
+      "id": "jump",
+      "name": "Jump attack",
+      "type": "bool",
+      "default": true,
+      "live": true,
+      "menu": true,
+      "section": "Features"
+    },
+    {
+      "id": "slash",
+      "name": "Vertical slash",
+      "type": "bool",
+      "default": true,
+      "live": true,
+      "menu": true,
+      "section": "Features"
+    },
+    {
+      "id": "spin",
+      "name": "Charged spin",
+      "type": "bool",
+      "default": true,
+      "live": true,
+      "menu": true,
+      "section": "Features"
+    },
+    {
+      "id": "dodge",
+      "name": "Dodge",
+      "type": "bool",
+      "default": true,
+      "live": true,
+      "menu": true,
+      "section": "Features"
+    },
+    {
+      "id": "pinch",
+      "name": "Camera-distance pinch",
+      "type": "bool",
+      "default": true,
+      "live": true,
+      "menu": true,
+      "section": "Features"
+    },
+    {
+      "id": "double-tap",
+      "name": "Double-tap recenter",
+      "type": "bool",
+      "default": true,
+      "live": true,
+      "menu": true,
+      "section": "Features"
+    },
+    {
+      "id": "distance",
+      "name": "Starting / reset camera distance (%)",
+      "type": "number",
+      "default": 100,
+      "min": 50,
+      "max": 200,
+      "step": 10,
+      "live": true,
+      "menu": true,
+      "section": "Layout and camera"
+    },
+    {
+      "id": "buttons-x",
+      "name": "Macro row horizontal position",
+      "type": "number",
+      "default": 0,
+      "min": -350,
+      "max": 350,
+      "step": 10,
+      "live": true,
+      "menu": true,
+      "section": "Layout and camera"
+    },
+    {
+      "id": "buttons-y",
+      "name": "Macro row vertical position",
+      "type": "number",
+      "default": -180,
+      "min": -270,
+      "max": 270,
+      "step": 10,
+      "live": true,
+      "menu": true,
+      "section": "Layout and camera"
+    },
+    {
+      "id": "button-size",
+      "name": "Macro button size (%)",
+      "type": "number",
+      "default": 100,
+      "min": 60,
+      "max": 140,
+      "step": 10,
+      "live": true,
+      "menu": true,
+      "section": "Layout and camera"
+    },
+    {
+      "id": "gesture-x",
+      "name": "Gesture area horizontal position",
+      "type": "number",
+      "default": 420,
+      "min": 150,
+      "max": 480,
+      "step": 10,
+      "live": true,
+      "menu": true,
+      "section": "Layout and camera"
+    },
+    {
+      "id": "gesture-y",
+      "name": "Gesture area vertical position",
+      "type": "number",
+      "default": 120,
+      "min": -200,
+      "max": 250,
+      "step": 10,
+      "live": true,
+      "menu": true,
+      "section": "Layout and camera"
+    }
+  ]
+}

@@ -1,0 +1,56 @@
+name: Enhanced Controls mod
+
+on:
+  push:
+    branches: [enhanced-mod]
+    paths:
+      - 'mods/enhanced-controls/**'
+      - 'runtime/guest/include/**'
+      - 'runtime/include/**'
+      - 'tools/guestmod/**'
+      - 'tools/recomp/**'
+      - '.github/workflows/enhanced-mod.yml'
+      - 'LICENSE'
+  pull_request:
+    paths:
+      - 'mods/enhanced-controls/**'
+      - 'runtime/guest/include/**'
+      - 'runtime/include/**'
+      - 'tools/guestmod/**'
+      - 'tools/recomp/**'
+      - '.github/workflows/enhanced-mod.yml'
+      - 'LICENSE'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: enhanced-mod-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  package:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+      - name: Install PowerPC and host compilers
+        run: sudo apt-get update && sudo apt-get install -y clang lld
+      - name: Build and validate USA/EU guest package
+        run: python3 mods/enhanced-controls/build.py
+      - name: Test input policy and translated guest module
+        run: python3 mods/enhanced-controls/tests/run_tests.py
+      - name: Upload installable mod
+        uses: actions/upload-artifact@v5
+        with:
+          name: enhanced-controls
+          path: |
+            build/enhanced-controls/*.wwhdmod
+            build/enhanced-controls/SHA256SUMS.txt
+            build/enhanced-controls/validation.json
+          if-no-files-found: error
+          retention-days: 30
