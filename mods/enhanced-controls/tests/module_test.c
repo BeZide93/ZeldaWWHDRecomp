@@ -15,6 +15,7 @@ static Cpu cpu;
 static uint32_t touch_fn, filter_fn, hud_fn;
 static uint64_t step=1, epoch=1, revision=1;
 static int pinch_enabled=1, jump_enabled=1, claim_count, hud_count, rays;
+static int icons_enabled=1, texture_calls, image_count, releases, fail_texture;
 static float distance_option=100, wall_z=100000;
 static float claim[5][4];
 static volatile int preempt_flags[3];
@@ -52,6 +53,7 @@ static void s_log(Cpu* c) { assert(own(c->r[3],1)); }
 static void s_read(Cpu* c) { assert(own(c->r[3],32)); memset(ppc_ptr(c->r[3]),0,32); }
 static void s_emit(Cpu* c) {
     uint32_t a=c->r[4]; assert(own(a,72)); ++hud_count;
+    if(ld32(a)==2) { ++image_count; assert(ld32(a+60)>0); assert(ldf32(a+20)==ldf32(a+24)); }
     if(ld32(a)==1) { uint32_t text=ld32(a+64), bytes=ld32(a+68); assert(own(text,bytes)); }
     c->r[3]=1;
 }
@@ -61,7 +63,7 @@ static void s_epoch(Cpu* c) { u64(c,epoch); }
 static void s_dt(Cpu* c) { c->f[1].ps0=1./30; }
 static void s_bool(Cpu* c) {
     const char* name=string(c->r[3]); assert(own(c->r[3],1));
-    c->r[3]=!strcmp(name,"pinch")?pinch_enabled:!strcmp(name,"jump")?jump_enabled:c->r[4];
+    c->r[3]=!strcmp(name,"icons")?icons_enabled:!strcmp(name,"pinch")?pinch_enabled:!strcmp(name,"jump")?jump_enabled:c->r[4];
 }
 static void s_changed(Cpu* c) { assert(!strcmp(string(c->r[3]),"distance")); u64(c,revision); }
 static void s_number(Cpu* c) {
@@ -72,9 +74,15 @@ static void s_claim(Cpu* c) {
     for(int i=0;i<4;++i) claim[slot][i]=(float)c->f[i+1].ps0;
     c->r[3]=1;
 }
+static void s_texture(Cpu* c) {
+    assert(c->r[3]==0 && own(c->r[4],1));
+    assert(!strncmp(string(c->r[4]),"assets/combat_",14));
+    ++texture_calls; c->r[3]=fail_texture?0:texture_calls;
+}
+static void s_release(Cpu* c) { assert(c->r[3]); ++releases; }
 static PpcFunc service(const char* name) {
     struct { const char* name; PpcFunc fn; } all[]={
-        {"memset",s_memset},{"wwhd_touch_register",s_touch},{"wwhd_input_filter_register",s_filter},
+        {"wwhd_hud_texture",s_texture},{"wwhd_hud_release",s_release},{"memset",s_memset},{"wwhd_touch_register",s_touch},{"wwhd_input_filter_register",s_filter},
         {"wwhd_hud_register",s_hud},{"wwhd_log",s_log},{"wwhd_input_read",s_read},
         {"wwhd_hud_emit",s_emit},{"wwhd_logic_step",s_step},{"wwhd_hud_epoch",s_epoch},
         {"wwhd_logic_dt",s_dt},{"wwhd_config_bool",s_bool},{"wwhd_config_changed",s_changed},
@@ -108,7 +116,14 @@ int main(void) {
     st32(PLAY+0x5AF8,CAMERA); st8(CAMERA+0x248+4,1);
     hook(LINK_EXECUTE,LINK); assert(touch_fn && filter_fn && hud_fn && claim_count==5);
     assert(claim[4][0]==290 && claim[4][2]==550);
-    call(hud_fn,1); assert(hud_count==10);
+    call(hud_fn,1); assert(hud_count==6 && image_count==4 && texture_calls==4);
+    call(hud_fn,1); assert(texture_calls==4); /* cached, not decoded per frame */
+    ++epoch; call(hud_fn,1); assert(texture_calls==8 && releases==0);
+    icons_enabled=0; hud_count=0; call(hud_fn,1); assert(hud_count==10 && releases==4);
+    icons_enabled=1; fail_texture=1; hud_count=0; call(hud_fn,1);
+    assert(hud_count==10 && texture_calls==12); /* text fallback */
+    call(hud_fn,1); assert(texture_calls==12); /* no repeated failed loads */
+    fail_texture=0; ++epoch; call(hud_fn,1); assert(texture_calls==16);
     int n=claim_count; next(); call(hud_fn,1); assert(claim_count==n);
     /* Real Y survives the macro; repeated reads do not advance its clock. */
     touch(0,-150,-180); assert(pad(0x1000)==(0x1000|0x80));

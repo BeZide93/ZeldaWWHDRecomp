@@ -160,10 +160,44 @@ static void box(u32 list,EcRect r,const char* label,u32 color) {
     element.size=18; element.rgba=0xffffffff; element.text=label; element.text_bytes=n;
     wwhd_hud_emit(list,&element);
 }
+/* Package-owned images: four 1024x1024 RGBA icons fit the SDK's 16 MiB
+ * per-mod pixel limit. Retry missing images only after a HUD epoch change. */
+static const char* const icon_paths[] = {
+    "assets/combat_jump_attack.png", "assets/combat_vertical_slash.png",
+    "assets/combat_spin_attack.png", "assets/combat_dodge.png"
+};
+static u32 icons[4];
+static unsigned icon_attempts;
+static unsigned long long icon_epoch=~0ull;
+static void sync_icons(void) {
+    unsigned long long epoch=wwhd_hud_epoch();
+    if(epoch!=icon_epoch) {
+        for(int i=0;i<4;++i) icons[i]=0; /* old handles are already invalid */
+        icon_attempts=0; icon_epoch=epoch;
+    }
+    if(!wwhd_config_bool("icons",1)) {
+        for(int i=0;i<4;++i) { if(icons[i]) wwhd_hud_release(icons[i]); icons[i]=0; }
+        icon_attempts=0; return;
+    }
+    for(int i=0;i<4;++i) if((mask&(1<<i)) && !(icon_attempts&(1u<<i))) {
+        icons[i]=wwhd_hud_texture(WWHD_HUD_PACKAGE,icon_paths[i]);
+        icon_attempts|=1u<<i;
+    }
+}
+static void macro_button(u32 list,int i) {
+    if(!icons[i]) { box(list,rects[i],names[i],state.macro==i?0x397a96df:0x14222cb8); return; }
+    EcRect r=rects[i];
+    float side=r.w<r.h?r.w:r.h; /* preserve aspect ratio inside the existing hitbox */
+    element=(wwhd_hud_element){.kind=WWHD_HUD_IMAGE,.anchor=WWHD_HUD_CENTER,
+        .x=640+r.x-side/2,.y=360-r.y-side/2,.w=side,.h=side,
+        .thickness=1,.u1=1,.v1=1,.rgba=state.macro==i?0xB0D8FFFF:0xFFFFFFFF,.image=icons[i]};
+    wwhd_hud_emit(list,&element);
+}
 static char zoom_label[]="Pinch / double tap 100%";
 static void hud(u32 list) {
     refresh(); if(!ready) return;
-    for(int i=0;i<4;++i) if(mask&(1<<i)) box(list,rects[i],names[i],state.macro==i?0x397a96df:0x14222cb8);
+    sync_icons();
+    for(int i=0;i<4;++i) if(mask&(1<<i)) macro_button(list,i);
     if(pinch_on||tap_on) {
         unsigned n=(unsigned)(state.distance*100+.5f);
         zoom_label[19]='0'+n/100; zoom_label[20]='0'+(n/10)%10; zoom_label[21]='0'+n%10;

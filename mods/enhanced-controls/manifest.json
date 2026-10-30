@@ -2,7 +2,7 @@
   "format_version": 1,
   "id": "enhanced-controls",
   "name": "Enhanced Controls",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "game_id": "wwhd",
   "minimum_manager_version": "1.6.0",
   "kind": "guest",
@@ -137,6 +137,15 @@
       "min": -200,
       "max": 250,
       "step": 10,
+      "live": true,
+      "menu": true,
+      "section": "Layout and camera"
+    },
+    {
+      "id": "icons",
+      "name": "Combat icons",
+      "type": "bool",
+      "default": true,
       "live": true,
       "menu": true,
       "section": "Layout and camera"

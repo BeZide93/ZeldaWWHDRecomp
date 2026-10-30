@@ -23,6 +23,10 @@ the seven-feature runtime port, not a prerequisite.
   in. The distance is session state; changing the distance option resets it.
 - **Double-tap recenter** on the right-hand gesture pad: a short ZL pulse. As
   with the game's ZL button, a nearby target can be locked onto instead.
+- Four combat icons from the Enhanced fork replace the text labels. **Combat
+  icons** switches back to text. Missing/failed images fall back to text per
+  button. Icons retain their proportions, use the existing touch areas and
+  reload after a save-state/HUD reset.
 - Live toggles and numeric position/size settings in the mod's settings page.
 
 The visible rectangle on the upper right is a **dedicated gesture pad**, not
@@ -45,7 +49,7 @@ macro's release; the mod does not forcibly release the player's inputs.
 
 1. Download the `enhanced-controls` artifact from the successful **Enhanced
    Controls mod** Actions run. Extract the outer GitHub artifact ZIP to obtain
-   `enhanced-controls-0.1.1.wwhdmod`; do **not** extract that file.
+   `enhanced-controls-0.1.2.wwhdmod`; do **not** extract that file.
 2. Enable **Code mods** in the app's setup or **Settings → Mods → More →
    Code-mod support**. If newly enabled, let the app rebuild the game code.
 3. **Settings → Mods → More → Install from a file**: choose the `.wwhdmod`.
@@ -56,8 +60,8 @@ macro's release; the mod does not forcibly release the player's inputs.
 
 No special APK is needed. Do not enable the duplicate controls/zoom from the
 runtime PR at the same time. Mods that claim overlapping areas, change input or
-adjust the same camera can conflict. No game, shader, texture or image assets
-are included. Only package code, text and metadata are distributed.
+adjust the same camera can conflict. The package includes the four combat icons from the Enhanced fork (see
+`assets/NOTICE.md` for source attribution). No game files or shaders are included.
 
 ## Not included
 
@@ -75,7 +79,7 @@ python3 mods/enhanced-controls/build.py
 python3 mods/enhanced-controls/tests/run_tests.py
 ```
 
-Output: `build/enhanced-controls/enhanced-controls-0.1.1.wwhdmod` and
+Output: `build/enhanced-controls/enhanced-controls-0.1.2.wwhdmod` and
 `SHA256SUMS.txt`. `WWHD_PPC_CLANG`, `WWHD_PPC_LLD` and `CC` can select compilers.
 The build checks the real upstream package reader and PPC-to-C translator for
 both USA and EU. Tests exercise the pure policy and the translated module with

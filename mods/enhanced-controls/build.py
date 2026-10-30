@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build an asset-free .wwhdmod with the upstream guest SDK; no game required."""
+"""Build an guest .wwhdmod with the upstream guest SDK; no game required."""
 import argparse
 import hashlib
 import json
@@ -52,7 +52,10 @@ def build(out, clang, lld):
     # Explicit allowlist: no files from game directories or generated native modules.
     files = {'manifest.json': staging/'manifest.json', 'mod.elf': staging/'mod.elf',
              'README.md': HERE/'README.md', 'LICENSE': REPO/'LICENSE',
-             'src/mod.c': HERE/'mod.c', 'src/core.h': HERE/'core.h'}
+             'src/mod.c': HERE/'mod.c', 'src/core.h': HERE/'core.h',
+             'assets/NOTICE.md': HERE/'assets/NOTICE.md'}
+    for name in ('combat_jump_attack','combat_vertical_slash','combat_spin_attack','combat_dodge'):
+        files[f'assets/{name}.png']=HERE/'assets'/f'{name}.png'
     with zipfile.ZipFile(archive, 'w', compression=zipfile.ZIP_DEFLATED) as z:
         for name, path in sorted(files.items()):
             info = zipfile.ZipInfo(name, (2026,1,1,0,0,0))
