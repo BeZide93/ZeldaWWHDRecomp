@@ -1,4 +1,9 @@
 #include "render_objects.h"
+#include "enhanced_controls.h"
+#include "enhanced_hud.h"
+#ifdef WWHD_HAS_VULKAN
+#include "gfx/vulkan/lsfg.h"
+#endif
 #include "tooltip.h"
 #include "controls_options.h"
 #include "gfx/display_modes.h"
@@ -1149,8 +1154,13 @@ void tab_graphics() {
     ImGui::EndDisabled();
     note("This build has no Vulkan renderer.");
 #endif
+#ifdef WWHD_HAS_VULKAN
+    gfxvk::fg::settings();
+#endif
+    enhanced::cpu_rows();
     heading("Overlay");
     if (check("Performance overlay (FPS, frame time)", perf_shown(), &v)) set_perf_shown(v);
+    enhanced::hud::settings();
     if (ImGui::Button("Reset performance averages")) { g_average.reset(); perf::reset(); interp::reset_display_hz_seen(); }
     // the render-thread profiler (render_prof.h): its report is the detailed part of the performance report
     if (check("Detailed performance profiling", rprof::requested(), &v, !rprof::env_override())) {
@@ -2390,6 +2400,7 @@ void item_ring_rows() {
 
 // camera extras (mods/steer.cpp): each applies at once
 void camera_extra_rows() {
+    enhanced::touch_rows();
     bool v;
     int mode = mods::steer_mode();
     if (combo("Walking direction", &mode, "Follows the camera (as the game)\0Kept while you turn the camera\0Kept while the stick is held\0"))
@@ -2860,13 +2871,20 @@ void perf_window(bool menu_open) {
     }
     float worst = 0, sum = 0;
     for (float f : U.frame_ms) { worst = std::max(worst, f); sum += f; }
-    ImGui::SetNextWindowPos(ImVec2(10, 10), ImGuiCond_Always);
-    ImGui::SetNextWindowBgAlpha(0.55f);
+    using namespace enhanced::hud;
+    enhanced::hud::begin(menu_open);
     ImGuiWindowFlags fl = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings |
-                          ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoInputs;
+                          ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoMove;
+    if (!menu_open || !enhanced::hud::editing) fl |= ImGuiWindowFlags_NoInputs;
     if (ImGui::Begin("##perf", nullptr, fl)) {
-        ImGui::Text("%.0f fps   Render interval %.1f ms (worst %.1f)", U.fps, sum / 120.0f, worst);
-        ImGui::Text("Average %.1f fps   %.1f logic steps/s", g_average.fps, g_average.logic);
+        enhanced::hud::controls(menu_open);
+        if (show(Fps)) {
+            ImGui::Text("%.0f rendered fps", U.fps);
+            if (enhanced::frame_generation::multiplier.load()>1)
+                ImGui::Text("LSFG output %.0f fps", enhanced::frame_generation::output_fps.load());
+        }
+        if (show(Interval)) ImGui::Text("Render interval %.1f ms (worst %.1f)", sum / 120.0f, worst);
+        if (show(Average)) ImGui::Text("Average %.1f fps   %.1f logic steps/s", g_average.fps, g_average.logic);
         {
             // slow motion: frame interpolation without Keep game speed below its frame target
             // Shown from the second 2-second window in a row below 29 logic steps/s (the game's rate is
@@ -2881,23 +2899,25 @@ void perf_window(bool menu_open) {
                 slowWindows = rate > 1 && rate < 29.0 ? slowWindows + 1 : 0;
                 slow = slow ? rate > 1 && rate < 29.5 : slowWindows >= 2;
             }
-            if (slow && interp::mode() == 1 && !interp::paced_interpolation())
+            if (show(Average) && slow && interp::mode() == 1 && !interp::paced_interpolation())
                 ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.3f, 1.0f), "Slow motion: %.1f of 30 logic steps/s. Turn on Keep game speed", rate);
         }
 #ifdef __ANDROID__
-        ImGui::TextUnformatted(android_telemetry().c_str());
+        if (show(Thermal) || show(Gpu) || show(CpuTemp) || show(GpuTemp)) enhanced::hud::telemetry(android_telemetry());
 #endif
         ImGui::Separator();
-        ImGui::TextUnformatted(performance_device().c_str());
-        ImGui::TextUnformatted(perf::summary().c_str());
-        ImGui::PlotLines("##ft", U.frame_ms, 120, U.frame_i, nullptr, 0.0f, 50.0f, ImVec2(220, 36));
-        ImGui::TextDisabled("%s  %gx  %s", render::api_name(render::active()), hostui::res_scale(), interp::mode_name());
-        if (dynres::on()) ImGui::TextDisabled("%s", dynres::status().c_str());
-        if (float share = interp::paced_drawn_share(); share >= 0)
+        if (show(CpuUse)) enhanced::hud::cpu();
+        if (show(Device)) ImGui::TextUnformatted(performance_device().c_str());
+        if (show(Detail)) ImGui::TextUnformatted(perf::summary().c_str());
+        if (show(Graph)) ImGui::PlotLines("##ft", U.frame_ms, 120, U.frame_i, nullptr, 0.0f, 50.0f, ImVec2(220, 36));
+        if (show(Settings)) ImGui::TextDisabled("%s  %gx  %s", render::api_name(render::active()), hostui::res_scale(), interp::mode_name());
+        if (show(Settings) && dynres::on()) ImGui::TextDisabled("%s", dynres::status().c_str());
+        if (float share = interp::paced_drawn_share(); show(Settings) && share >= 0)
             ImGui::TextDisabled("in-between frames drawn: %.0f%%", share * 100.0f);
     }
+    enhanced::hud::end();
     ImGui::End();
-    (void)menu_open;
+    ImGui::PopFont();
 }
 
 void tab_audio() {

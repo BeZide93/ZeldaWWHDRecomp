@@ -27,6 +27,7 @@
 #include "platform/quest_theater.h"
 #endif
 #include "backend.h"
+#include "lsfg.h"
 #include "../../dsweep.h"
 #include "../hidden_presentation.h"
 #include "pass.h"
@@ -3785,7 +3786,14 @@ void swap() {
         std::chrono::steady_clock::now()-swapPhaseStarted).count();
   }
   evenPresentSwap = true;  // (repeated frames while a pipeline compiles are never held)
-  try { timed_call(swapPhaseTiming[1],[&] { present(R.tv);return VK_SUCCESS; }); } catch (...) { evenPresentSwap = false; throw; }
+  try { timed_call(swapPhaseTiming[1],[&] {
+    const bool generated = fg::present_frames([&] {
+      evenPresentSwap = false; // each generated output is paced by LSFG, not the guest-frame schedule
+      return present(R.tv);
+    });
+    if (!generated) { evenPresentSwap = true; present(R.tv); }
+    return VK_SUCCESS;
+  }); } catch (...) { evenPresentSwap = false; throw; }
   evenPresentSwap = false;
   if (plan.drc_window)
     timed_call(swapPhaseTiming[2],[&] { present(R.drc);return VK_SUCCESS; });
@@ -4702,6 +4710,7 @@ static void init_device(std::vector<const char *> extensions,
   // The game's BC1-BC5 textures need this core feature enabled, not just supported (Vulkan spec);
   // devices without it (many Mali/PowerVR GPUs) decode BC uploads with a compute shader (bc_decode).
   enabled.textureCompressionBC = available.textureCompressionBC;
+  enabled.shaderStorageImageExtendedFormats = available.shaderStorageImageExtendedFormats; // optional LSFG
   enabled.samplerAnisotropy = available.samplerAnisotropy;
   enabled.independentBlend = available.independentBlend;
   enabled.depthClamp = available.depthClamp;
@@ -5211,6 +5220,7 @@ void shutdown_renderer_caches() {
     throw;
   }
   stop_record_worker();
+  fg::shutdown();
   bc_decode_shutdown();
 #ifdef __ANDROID__
   collect_secondary_swapchains();

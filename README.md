@@ -1,3 +1,6 @@
+> **enhanced-on-main:** Selected Enhanced features on the official upstream base.
+> [Options, validation scope, LSFG limitations, and upstream merge notes](docs/enhanced-on-main.md).
+
 # The Legend of Zelda: The Wind Waker HD — native port (macOS, Linux, Windows, Android)
 
 A static recompilation of the Wii U version (USA or European) that runs natively on **macOS** (Apple Silicon),
