@@ -2,9 +2,7 @@
 #ifndef HS_CORE_H
 #define HS_CORE_H
 #define HS_ENEMIES 24
-#define HS_PROJECTILES 48
 #define HS_ORBS 64
-#define HS_EFFECTS 32
 #define HS_WEAPONS 4
 #define HS_WAVES 6
 #define HS_NONE 0xffffffffu
@@ -48,33 +46,18 @@ typedef struct {
     HsVec pos;
 } HsEnemy;
 typedef struct {
-    int active, kind, damage;
-    HsVec pos, velocity, origin;
-    float age, lifetime, radius;
-    unsigned hit_mask;
-    unsigned generations[HS_ENEMIES];
-} HsProjectile;
-typedef struct {
     int amount;
     HsVec pos;
 } HsOrb;
 typedef struct {
-    float remaining, duration, radius;
-    int kind;
-    HsVec pos;
-} HsEffect;
-typedef struct {
     int phase, wave, spawned, defeated, kills, level, xp, total_xp, hp, max_hp, spawn_failures;
-    int weapon[HS_WEAPONS], passive[5], choices[3], selected;
+    int weapon[HS_WEAPONS], passive[5], choices[3], selected, next_weapon;
     unsigned rng, serial;
     float elapsed, wave_time, spawn_timer, cooldown[HS_WEAPONS], grace;
     unsigned damage[HS_WEAPONS];
-    int last_damage_weapon;
     HsVec player;
     HsEnemy enemies[HS_ENEMIES];
-    HsProjectile projectiles[HS_PROJECTILES];
     HsOrb orbs[HS_ORBS];
-    HsEffect effects[HS_EFFECTS];
     const char *error;
 } HsRun;
 /* The adapter owns native process lifetime. observe: 0 gone, 1 creating, 2 alive,
@@ -83,7 +66,8 @@ typedef struct {
     HsId (*spawn)(int kind, int elite, HsVec *position);
     int (*observe)(HsId id, int kind, HsVec *position);
     void (*remove)(HsId id);
-    void (*burst)(HsVec position, int kind);
+    /* Accept one native animation; busy/failure leaves its cooldown due. */
+    int (*attack)(int weapon, HsId target, int damage, float reach);
 } HsBackend;
 extern const char *const hs_weapon_names[HS_WEAPONS];
 extern const char *const hs_upgrade_names[HS_UP_COUNT];
@@ -96,6 +80,8 @@ float hs_distance2(HsVec a, HsVec b);
 void hs_start(HsRun *run, unsigned seed);
 void hs_tick(HsRun *run, const HsBackend *backend, float dt);
 void hs_choose(HsRun *run, int choice);
+/* Called only for confirmed native contacts. Rewards/removal wait for hs_tick. */
+void hs_native_hit(HsRun *run, HsId target, int damage, int weapon);
 void hs_hurt(HsRun *run, int damage);
 void hs_stop(HsRun *run, const HsBackend *backend, int phase);
 void hs_fail(HsRun *run, const HsBackend *backend, const char *message);

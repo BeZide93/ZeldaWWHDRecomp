@@ -2,14 +2,14 @@
  * Engine-independent run rules. All capacities include pending native actors.
  * Time is simulation seconds; neither rendering nor a modal advances combat. */
 #include "core.h"
-const char *const hs_weapon_names[] = {"Spirit Sword", "Hero's Bow", "Boomerang", "Bombs"};
+const char *const hs_weapon_names[] = {"Spin Attack", "Hero's Bow", "Boomerang", "Bombs"};
 const char *const hs_wave_names[] = {"Wings in the dark", "Emerald tide", "Little devils",
                                      "Bokoblin assault",  "Moblin guard", "The labyrinth champion"};
-const char *const hs_upgrade_names[] = {"Spirit Sword", "Hero's Bow", "Boomerang", "Bombs",           "Power",
-                                        "Haste",        "Reach",      "Magnet",    "Heart Container", "Red Potion"};
-const char *const hs_upgrade_details[] = {"A sweeping pulse around Link. More damage per rank.",
-                                          "Unlock auto-aimed arrows. Extra ranks add damage and piercing.",
-                                          "Unlock a returning blade. Hits enemies on both journeys.",
+const char *const hs_upgrade_names[] = {"Spin Attack", "Hero's Bow", "Boomerang", "Bombs",           "Power",
+                                        "Haste",       "Reach",      "Magnet",    "Heart Container", "Red Potion"};
+const char *const hs_upgrade_details[] = {"Link's native spin attack. More damage per rank.",
+                                          "Unlock auto-aimed arrows. Extra ranks add damage.",
+                                          "Unlock a returning blade. Uses native flight and collision.",
                                           "Unlock timed bombs. Explosions hit every nearby enemy.",
                                           "+20% damage for every weapon.",
                                           "Shorter cooldowns for every weapon.",
@@ -60,17 +60,6 @@ static int occupied(HsRun *r) {
         n += r->enemies[i].state != HS_FREE;
     return n;
 }
-static void effect(HsRun *r, HsVec p, int kind, float radius) {
-    int slot = -1;
-    float shortest = 100;
-    for (int i = 0; i < HS_EFFECTS; i++)
-        if (r->effects[i].remaining < shortest) {
-            slot = i;
-            shortest = r->effects[i].remaining;
-        }
-    if (slot >= 0)
-        r->effects[slot] = (HsEffect){.remaining = .35f, .duration = .35f, .radius = radius, .kind = kind, .pos = p};
-}
 static void orb(HsRun *r, HsVec pos, int amount) {
     int nearest = 0;
     float best = 1e30f;
@@ -101,27 +90,30 @@ static void defeat(HsRun *r, const HsBackend *b, int i) {
     r->kills++;
     r->defeated++;
     orb(r, e->pos, e->elite ? 20 : 2 + e->kind);
-    effect(r, e->pos, 4, 90);
-    b->burst(e->pos, 4);
     e->state = HS_RETIRING;
     e->age = 0;
     b->remove(e->id);
 }
-static void hit(HsRun *r, const HsBackend *b, int i, int damage, int weapon) {
-    HsEnemy *e = &r->enemies[i];
-    if (e->state != HS_ALIVE || damage <= 0)
+void hs_native_hit(HsRun *r, HsId id, int damage, int weapon) {
+    if (r->phase != HS_RUN || damage <= 0 || weapon < 0 || weapon >= HS_WEAPONS)
         return;
-    int actual = damage < e->hp ? damage : e->hp;
-    r->damage[weapon] += (unsigned)actual;
-    e->hp -= damage;
-    effect(r, e->pos, weapon, 35);
-    if (e->hp <= 0)
-        defeat(r, b, i);
+    for (int i = 0; i < HS_ENEMIES; i++) {
+        HsEnemy *e = &r->enemies[i];
+        if (e->id != id || (e->state != HS_ALIVE && e->state != HS_PENDING) || e->hp <= 0)
+            continue;
+        /* A native contact proves that a pending creation has completed. */
+        if (e->state == HS_PENDING) {
+            e->state = HS_ALIVE;
+            e->age = 0;
+        }
+        int actual = damage < e->hp ? damage : e->hp;
+        e->hp -= actual;
+        r->damage[weapon] += (unsigned)actual;
+        return;
+    }
 }
 void hs_stop(HsRun *r, const HsBackend *b, int phase) {
     r->phase = phase;
-    for (int i = 0; i < HS_PROJECTILES; i++)
-        r->projectiles[i].active = 0;
     for (int i = 0; i < HS_ENEMIES; i++)
         if (r->enemies[i].state != HS_FREE) {
             r->enemies[i].state = HS_RETIRING;
@@ -213,111 +205,6 @@ static int nearest(HsRun *r, float range) {
         }
     return result;
 }
-static void shoot(HsRun *r, int weapon, int target) {
-    int slot = -1;
-    for (int i = 0; i < HS_PROJECTILES; i++)
-        if (!r->projectiles[i].active) {
-            slot = i;
-            break;
-        }
-    if (slot < 0)
-        return;
-    HsProjectile *p = &r->projectiles[slot];
-    zero(p, sizeof(*p));
-    p->active = 1;
-    p->kind = weapon;
-    p->damage = damage_for(r, weapon);
-    p->pos = r->player;
-    p->pos.y += 50;
-    p->origin = p->pos;
-    HsVec aim = r->enemies[target].pos;
-    aim.y += 40;
-    HsVec d = {aim.x - p->pos.x, aim.y - p->pos.y, aim.z - p->pos.z};
-    float length = root(d.x * d.x + d.y * d.y + d.z * d.z);
-    if (length < 1)
-        length = 1;
-    float speed = weapon == HS_BOW ? 1500 : weapon == HS_BOOMERANG ? 800 : 0;
-    p->velocity = (HsVec){speed * d.x / length, speed * d.y / length, speed * d.z / length};
-    p->lifetime = weapon == HS_BOW ? 1.6f : weapon == HS_BOOMERANG ? 2.2f : 1.2f;
-    p->radius = weapon == HS_BOMB ? 260 * reach(r) : 60;
-    if (weapon == HS_BOMB) {
-        p->velocity = (HsVec){(aim.x - p->pos.x) / 1.2f, 0, (aim.z - p->pos.z) / 1.2f};
-    }
-}
-static float segment_distance2(HsVec p, HsVec a, HsVec b) {
-    HsVec d = {b.x - a.x, b.y - a.y, b.z - a.z};
-    float length = d.x * d.x + d.y * d.y + d.z * d.z;
-    float t = length > 0 ? ((p.x - a.x) * d.x + (p.y - a.y) * d.y + (p.z - a.z) * d.z) / length : 0;
-    if (t < 0)
-        t = 0;
-    if (t > 1)
-        t = 1;
-    HsVec q = {a.x + t * d.x, a.y + t * d.y, a.z + t * d.z};
-    return hs_distance2(p, q);
-}
-static void projectiles(HsRun *r, const HsBackend *b, float dt) {
-    for (int j = 0; j < HS_PROJECTILES; j++) {
-        HsProjectile *p = &r->projectiles[j];
-        if (!p->active)
-            continue;
-        HsVec old = p->pos;
-        float before = p->age;
-        p->age += dt;
-        if (p->kind == HS_BOOMERANG && p->age >= 1.1f) {
-            if (before < 1.1f)
-                p->hit_mask = 0;
-            HsVec target = r->player;
-            target.y += 50;
-            float d = root(hs_distance2(p->pos, target));
-            if (d < 40) {
-                p->active = 0;
-                continue;
-            }
-            p->velocity = (HsVec){900 * (target.x - p->pos.x) / d, 900 * (target.y - p->pos.y) / d,
-                                  900 * (target.z - p->pos.z) / d};
-        }
-        p->pos.x += p->velocity.x * dt;
-        p->pos.y += p->velocity.y * dt;
-        p->pos.z += p->velocity.z * dt;
-        if (p->kind == HS_BOMB) {
-            float t = p->age / 1.2f;
-            p->pos.y = p->origin.y + 300 * t * (1 - t);
-            if (p->age >= p->lifetime) {
-                p->pos.y = p->origin.y;
-                effect(r, p->pos, HS_BOMB, p->radius);
-                b->burst(p->pos, HS_BOMB);
-                for (int i = 0; i < HS_ENEMIES; i++)
-                    if (hs_distance2(p->pos, r->enemies[i].pos) < p->radius * p->radius)
-                        hit(r, b, i, p->damage, p->kind);
-                p->active = 0;
-            }
-            continue;
-        }
-        for (int i = 0; i < HS_ENEMIES && p->active; i++) {
-            HsEnemy *e = &r->enemies[i];
-            if (e->state != HS_ALIVE)
-                continue;
-            if ((p->hit_mask & (1u << i)) && p->generations[i] == e->generation)
-                continue;
-            HsVec center = e->pos;
-            center.y += 40;
-            if (segment_distance2(center, old, p->pos) > p->radius * p->radius)
-                continue;
-            p->hit_mask |= 1u << i;
-            p->generations[i] = e->generation;
-            hit(r, b, i, p->damage, p->kind);
-            if (p->kind == HS_BOW) {
-                int hits = 0;
-                for (int k = 0; k < HS_ENEMIES; k++)
-                    hits += (p->hit_mask >> k) & 1u;
-                if (hits >= 1 + (r->weapon[HS_BOW] - 1) / 2)
-                    p->active = 0;
-            }
-        }
-        if (p->age >= p->lifetime)
-            p->active = 0;
-    }
-}
 void hs_tick(HsRun *r, const HsBackend *b, float dt) {
     if (!(dt > 0 && dt <= .1f))
         return;
@@ -352,7 +239,7 @@ void hs_tick(HsRun *r, const HsBackend *b, float dt) {
                 hs_fail(r, b, "An enemy could not be created. Retry the run.");
                 return;
             }
-        } else if (observed == 3)
+        } else if (observed == 3 || e->hp <= 0)
             defeat(r, b, i);
         else if (!observed) {
             hs_fail(r, b, "An enemy disappeared before its defeat. Retry the run.");
@@ -369,9 +256,6 @@ void hs_tick(HsRun *r, const HsBackend *b, float dt) {
     r->wave_time += dt;
     if (r->grace > 0)
         r->grace -= dt;
-    for (int i = 0; i < HS_EFFECTS; i++)
-        if (r->effects[i].remaining > 0)
-            r->effects[i].remaining -= dt;
     for (int i = 0; i < HS_ORBS; i++)
         if (r->orbs[i].amount) {
             HsOrb *o = &r->orbs[i];
@@ -445,25 +329,22 @@ void hs_tick(HsRun *r, const HsBackend *b, float dt) {
         }
     }
     for (int w = 0; w < HS_WEAPONS; w++)
-        if (r->weapon[w]) {
-            r->cooldown[w] -= dt;
-            if (r->cooldown[w] > 0)
-                continue;
-            float radius = 230 * reach(r);
-            int target = nearest(r, w == HS_SWORD ? radius : 1500);
-            if (target < 0)
-                continue;
-            if (w == HS_SWORD) {
-                effect(r, r->player, w, radius);
-                for (int i = 0; i < HS_ENEMIES; i++)
-                    if (hs_distance2(r->player, r->enemies[i].pos) < radius * radius)
-                        hit(r, b, i, damage_for(r, w), w);
-            } else
-                shoot(r, w, target);
-            const float base[] = {.85f, 1.15f, 2.6f, 3.4f};
-            r->cooldown[w] = base[w] / (1 + .12f * r->passive[1] + .06f * (r->weapon[w] - 1));
-        }
-    projectiles(r, b, dt);
+        r->cooldown[w] -= dt;
+    /* Round-robin prevents the short spin cooldown from starving item attacks.
+     * The adapter serializes Link's native animation state, including recovery. */
+    for (int n = 0; n < HS_WEAPONS; n++) {
+        int w = (r->next_weapon + n) % HS_WEAPONS;
+        if (!r->weapon[w] || r->cooldown[w] > 0)
+            continue;
+        float range = w == HS_SWORD ? 180 * reach(r) : w == HS_BOMB ? 650 : 1500;
+        int target = nearest(r, range);
+        if (target < 0 || !b->attack(w, r->enemies[target].id, damage_for(r, w), reach(r)))
+            continue;
+        const float base[] = {.85f, 1.15f, 2.6f, 3.4f};
+        r->cooldown[w] = base[w] / (1 + .12f * r->passive[1] + .06f * (r->weapon[w] - 1));
+        r->next_weapon = (w + 1) % HS_WEAPONS;
+        break;
+    }
     /* Prevent unreachable/frozen enemies from trapping an endless prototype run. */
     for (int i = 0; i < HS_ENEMIES; i++)
         if (r->enemies[i].state == HS_ALIVE && r->enemies[i].age > 180) {

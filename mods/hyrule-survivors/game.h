@@ -9,6 +9,8 @@ extern unsigned hs_best_kills, hs_wins;
 void hs_draw(u32 list);
 void hs_touch(const wwhd_touch_event *event);
 void hs_action(int action);
+int hs_enemy_slot(void *actor);
+int hs_in_arena(void);
 /* UI actions share one path for touch and controller. */
 enum {
     HS_ACTION_OPEN = 1,

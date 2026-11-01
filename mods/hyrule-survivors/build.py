@@ -71,7 +71,7 @@ def main():
              "-ffunction-sections", "-fdata-sections", "-Wall", "-Wextra", "-Werror",
              "-I", REPO / "runtime/guest/include", "-I", out]
     objects = []
-    for stem in ("core", "game", "hud"):
+    for stem in ("core", "game", "hud", "combat"):
         obj = out / (stem + ".o")
         run([clang] + flags + ["-c", HERE / (stem + ".c"), "-o", obj])
         objects.append(obj)
@@ -79,7 +79,8 @@ def main():
     package.mkdir(exist_ok=True)
     run([lld, "-m", "elf32ppc", "-r", *objects, "-o", package / "mod.elf"])
     (package / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
-    (package / "README.md").write_text((HERE / "README.md").read_text())
+    for name in ("README.md", "NATIVE_COMBAT.md"):
+        (package / name).write_text((HERE / name).read_text())
     # Exercise the exact install-time translator and host compiler on BOTH game
     # regions. No game dump is needed to translate a mod's own code.
     sys.path.insert(0, str(REPO / "tools/guestmod"))
@@ -98,9 +99,18 @@ def main():
                    for s in translated.elf.symbols if s["shndx"] in translated.sec_addr}
         addresses = {"ADDR_HS": symbols["hs"], "ADDR_ACTION": symbols["hs_action"],
                      "ADDR_SESSION": symbols["hs_session"], "DATA_SAVE": game_build.data(0x101F84DC)}
+        for name in ("attack", "step", "stop", "reset"):
+            addresses["COMBAT_" + name.upper()] = symbols["hs_combat_" + name]
         for name, address in {"LINK": 0x0240EBB0, "PLAY": 0x025200D4, "GROUND": 0x024F1350,
                               "SEARCH": 0x025D54C4, "DELETE": 0x025D57E4, "CREATE": 0x025D5834,
-                              "DAMAGE": 0x023F51D0, "SERIALIZE": 0x025BA9FC, "LOAD": 0x02721908}.items():
+                              "DAMAGE": 0x023F51D0, "SERIALIZE": 0x025BA9FC, "LOAD": 0x02721908,
+                              "DELETE_EQUIP": 0x023DC7AC, "SWORD_MODEL": 0x023DE0B4, "SPIN": 0x023E6380,
+                              "MAKE_ITEM": 0x023DF600, "BOW_RELOAD": 0x023EB080, "MAKE_ARROW": 0x023EB120,
+                              "UPPER_ANIM": 0x023DE7E8, "TEXTURE_ANIM": 0x023E7B24, "THROW_BOMB": 0x023E9E48,
+                              "ANGLE_Y": 0x0200F93C, "ANGLE_X": 0x0200F974,
+                              "ARROW_SHOOT": 0x02053814, "THROW_BOOM": 0x023FB10C, "RADIUS": 0x02018C8C,
+                              "ARROW_EXEC": 0x02053184, "BOOM_EXEC": 0x020CC454, "BOMB_EXEC": 0x020C506C,
+                              "CONTACT": 0x025192A8}.items():
             addresses["GAME_" + name] = game_build.code(address)
         (out / "test_addresses.h").write_text("".join(f"#define {name} 0x{address:08X}u\n"
                                                        for name, address in addresses.items()))
@@ -110,7 +120,7 @@ def main():
         print(region, "translation passed:", len(translated.hooks), "hooks", flush=True)
     archive = out / ("hyrule-survivors-" + manifest["version"] + ".wwhdmod")
     with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as z:
-        for name in ("manifest.json", "mod.elf", "README.md"):
+        for name in ("manifest.json", "mod.elf", "README.md", "NATIVE_COMBAT.md"):
             z.write(package / name, name)
     print(archive)
 

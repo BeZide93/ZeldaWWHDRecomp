@@ -40,15 +40,19 @@ static void remove_enemy(HsId id) {
     if (native[id].state != 1)
         native[id].state = 0;
 }
-static void burst(HsVec p, int kind) {
-    (void)p;
-    (void)kind;
+static int attack_busy, attack_count, attack_weapon[16];
+static int attack(int weapon, HsId target, int damage, float reach) {
+    assert(target && damage > 0 && reach >= 1);
+    if (attack_busy)
+        return 0;
+    attack_weapon[(attack_count++) % 16] = weapon;
+    return 1;
 }
-static const HsBackend backend = {spawn, observe, remove_enemy, burst};
+static const HsBackend backend = {spawn, observe, remove_enemy, attack};
 static void reset(HsRun *r) {
     memset(native, 0, sizeof(native));
     next_id = peak = spawn_calls = remove_calls = 0;
-    reject_spawn = delay_creation = 0;
+    reject_spawn = delay_creation = attack_busy = attack_count = 0;
     spawn_at = (HsVec){100, 0, 0};
     hs_start(r, 123);
     r->phase = HS_RUN;
@@ -137,6 +141,7 @@ static void test_pool_and_rewards(void) {
     for (int i = 0; i < HS_ORBS; i++)
         r.orbs[i] = (HsOrb){1, {1000, 0, 0}};
     enemy(&r, 0, 1, (HsVec){100, 0, 0});
+    hs_native_hit(&r, 1, 5, HS_SWORD);
     ticks(&r, 1);
     int amount = 0;
     for (int i = 0; i < HS_ORBS; i++)
@@ -204,53 +209,49 @@ static void test_upgrades(void) {
         assert(a.choices[i] == HS_UP_HEAL);
 }
 
-static void test_projectiles(void) {
+static void test_native_attacks(void) {
     HsRun r;
     reset(&r);
     suppress_spawning(&r);
-    r.weapon[0] = 0;
-    r.weapon[1] = 1;
-    r.cooldown[1] = 100;
-    enemy(&r, 0, 20, (HsVec){100, 0, 0});
-    /* A fast arrow crosses the whole target between updates. */
-    r.projectiles[0] = (HsProjectile){.active = 1,
-                                      .kind = HS_BOW,
-                                      .damage = 6,
-                                      .pos = {0, 40, 0},
-                                      .velocity = {2000, 0, 0},
-                                      .lifetime = 2,
-                                      .radius = 20};
-    hs_tick(&r, &backend, .1f);
-    assert(r.enemies[0].hp == 14 && !r.projectiles[0].active);
-    /* Returning boomerang can hit the same actor again on its return leg. */
-    r.player = (HsVec){-1000, 0, 0};
-    r.projectiles[0] = (HsProjectile){.active = 1,
-                                      .kind = HS_BOOMERANG,
-                                      .damage = 4,
-                                      .pos = {145, 40, 0},
-                                      .age = 1.09f,
-                                      .lifetime = 2.2f,
-                                      .radius = 60,
-                                      .hit_mask = 1};
-    r.projectiles[0].generations[0] = r.enemies[0].generation;
-    ticks(&r, 1);
-    assert(r.enemies[0].hp == 10);
-    /* Reused slots are new targets even when an old projectile remembers them. */
-    r.enemies[0].generation++;
-    r.projectiles[0].pos = (HsVec){145, 40, 0};
-    ticks(&r, 1);
-    assert(r.enemies[0].hp == 6);
-    r.projectiles[0] = (HsProjectile){.active = 1,
-                                      .kind = HS_BOMB,
-                                      .damage = 12,
-                                      .pos = {100, 50, 0},
-                                      .origin = {100, 50, 0},
-                                      .age = 1.19f,
-                                      .lifetime = 1.2f,
-                                      .radius = 260};
-    enemy(&r, 1, 10, (HsVec){200, 0, 0});
-    ticks(&r, 1);
-    assert(r.kills == 2 && r.damage[HS_BOMB] == 16);
+    enemy(&r, 0, 160, (HsVec){100, 0, 0});
+    for (int w = 0; w < HS_WEAPONS; w++)
+        r.weapon[w] = 1;
+    attack_busy = 1;
+    ticks(&r, 30);
+    assert(attack_count == 0 && r.enemies[0].hp == 160);
+    attack_busy = 0;
+    ticks(&r, 4);
+    assert(attack_count == 4);
+    for (int w = 0; w < 4; w++)
+        assert(attack_weapon[w] == w);
+    /* Starting native animations does not deal damage by itself. */
+    assert(r.enemies[0].hp == 160 && r.damage[0] == 0);
+    hs_native_hit(&r, 1, 17, HS_BOW);
+    assert(r.enemies[0].hp == 143 && r.damage[HS_BOW] == 17);
+    r.phase = HS_UPGRADE;
+    hs_native_hit(&r, 1, 30, HS_BOMB);
+    assert(r.enemies[0].hp == 143);
+    r.phase = HS_RUN;
+    hs_native_hit(&r, 999, 500, HS_BOMB);
+    hs_native_hit(&r, 1, 50, -1);
+    assert(r.enemies[0].hp == 143);
+    hs_native_hit(&r, 1, 500, HS_BOMB);
+    hs_native_hit(&r, 1, 500, HS_BOW);
+    assert(r.enemies[0].hp == 0 && r.damage[HS_BOMB] == 143 && r.kills == 0);
+    /* One queued reward even if the engine deletes the actor after the hit. */
+    native[1].state = 0;
+    ticks(&r, 2);
+    assert(r.kills == 1 && r.damage[HS_BOW] == 17);
+    /* A collision may arrive between native creation and our next observation. */
+    reset(&r);
+    suppress_spawning(&r);
+    enemy(&r, 0, 12, (HsVec){100, 0, 0});
+    r.enemies[0].state = HS_PENDING;
+    hs_native_hit(&r, 1, 20, HS_SWORD);
+    assert(r.enemies[0].state == HS_ALIVE && r.enemies[0].hp == 0);
+    native[1].state = 0;
+    ticks(&r, 2);
+    assert(r.kills == 1 && r.damage[HS_SWORD] == 12);
 }
 
 static void test_complete_run(void) {
@@ -292,8 +293,9 @@ int main(void) {
     test_pending_and_failure();
     test_pool_and_rewards();
     test_upgrades();
-    test_projectiles();
+    test_native_attacks();
     test_complete_run();
-    puts("Core: pause, damage, native lifetime, capacity, EXP, upgrades, projectiles, six-wave victory and restart "
+    puts("Core: pause, damage, native lifetime, capacity, EXP, upgrades, native attack scheduling, six-wave victory "
+         "and restart "
          "passed");
 }

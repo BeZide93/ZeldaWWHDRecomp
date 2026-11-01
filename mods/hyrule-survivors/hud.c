@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: MPL-2.0
- * Vector HUD: no packaged textures. Screen-projected spirit weapons are part
- * of the prototype; native enemy models/animations remain in the 3D world. */
+ * Vector HUD and EXP pickups only. Attacks, animations and weapon effects
+ * are rendered by the native game. No packaged textures. */
 #include "game.h"
 static wwhd_hud_element element;
 static char strings[48][160];
@@ -84,19 +84,6 @@ static void circle(u32 list, float x, float y, float radius, u32 color, int outl
                                  .rgba = color};
     wwhd_hud_emit(list, &element);
 }
-static void segment(u32 list, float x, float y, float dx, float dy, u32 color) {
-    element = (wwhd_hud_element){.kind = WWHD_HUD_LINE,
-                                 .anchor = WWHD_HUD_CENTER,
-                                 .x = x,
-                                 .y = y,
-                                 .w = dx,
-                                 .h = dy,
-                                 .thickness = 3,
-                                 .u1 = 1,
-                                 .v1 = 1,
-                                 .rgba = color};
-    wwhd_hud_emit(list, &element);
-}
 static int project(HsVec p, float *x, float *y) {
     world[0] = p.x;
     world[1] = p.y;
@@ -130,47 +117,8 @@ static void effects(u32 list) {
                 circle(list, x, y, hs.orbs[i].amount > 8 ? 7 : 4, hs.orbs[i].amount > 8 ? gold : teal, 0);
             }
         }
-    for (int i = 0; i < HS_PROJECTILES; i++)
-        if (hs.projectiles[i].active) {
-            HsProjectile *p = &hs.projectiles[i];
-            float x, y;
-            if (!project(p->pos, &x, &y))
-                continue;
-            u32 color = weapon_colors[p->kind];
-            if (p->kind == HS_BOMB) {
-                circle(list, x, y, 8, color, 0);
-                segment(list, x + 3, y - 8, 4, -6, gold);
-            } else if (p->kind == HS_BOOMERANG) {
-                segment(list, x - 9, y + 5, 9, -12, color);
-                segment(list, x, y - 7, 9, 12, color);
-            } else {
-                HsVec tail = {p->pos.x - p->velocity.x * .025f, p->pos.y - p->velocity.y * .025f,
-                              p->pos.z - p->velocity.z * .025f};
-                float a, b;
-                if (project(tail, &a, &b))
-                    segment(list, a, b, x - a, y - b, color);
-                circle(list, x, y, 3, color, 0);
-            }
-        }
-    const float sx[] = {1, .7071f, 0, -.7071f, -1, -.7071f, 0, .7071f, 1};
-    const float sz[] = {0, .7071f, 1, .7071f, 0, -.7071f, -1, -.7071f, 0};
-    for (int i = 0; i < HS_EFFECTS; i++) {
-        HsEffect *e = &hs.effects[i];
-        if (e->remaining <= 0)
-            continue;
-        float scale = 1 - e->remaining / e->duration;
-        unsigned alpha = (unsigned)(220 * (1 - scale));
-        u32 color = ((e->kind < 4 ? weapon_colors[e->kind] : teal) & 0xFFFFFF00u) | alpha;
-        float radius = e->radius * (.5f + .5f * scale);
-        for (int k = 0; k < 8; k++) {
-            HsVec a = {e->pos.x + sx[k] * radius, e->pos.y + 30, e->pos.z + sz[k] * radius};
-            HsVec b = {e->pos.x + sx[k + 1] * radius, e->pos.y + 30, e->pos.z + sz[k + 1] * radius};
-            float ax, ay, bx, by;
-            if (project(a, &ax, &ay) && project(b, &bx, &by))
-                segment(list, ax, ay, bx - ax, by - ay, color);
-        }
-    }
 }
+
 void hs_draw(u32 list) {
     string_count = 0;
     if (hs.phase == HS_IDLE) {
@@ -180,10 +128,10 @@ void hs_draw(u32 list) {
     }
     if (hs.phase == HS_MENU) {
         header(list, "HYRULE SURVIVORS / FIRST EXPEDITION", "The Savage Labyrinth",
-               "Six waves. Four spirit weapons. One champion.");
+               "Six waves. Four native abilities. One champion.");
         text(list, 140, 296, 22, teal, "MOVE TO SURVIVE. YOUR WEAPONS ATTACK AUTOMATICALLY.");
         text(list, 140, 345, 20, ink, "Gather green EXP, choose upgrades, and clear every wave.");
-        text(list, 140, 381, 18, muted, "Start with six hearts and Spirit Sword. Unlock the bow, boomerang and bombs.");
+        text(list, 140, 381, 18, muted, "Start with six hearts and Spin Attack. Unlock the bow, boomerang and bombs.");
         text(list, 140, 419, 18, muted, "A separate arena and run loadout. Return to where you started.");
         button(list, 140, 520, 280, "A  Begin expedition", 1);
         button(list, 450, 520, 220, "B  Back", 0);
@@ -247,7 +195,7 @@ void hs_draw(u32 list) {
                hs.phase == HS_READY ? "Your expedition is ready" : "Expedition paused",
                hs.phase == HS_READY ? "Clear all six waves to win. Collect EXP to build your loadout."
                                     : "Your run waits here. Choose when to continue.");
-        text(list, 140, 310, 22, teal, "Spirit Sword is ready.");
+        text(list, 140, 310, 22, teal, "Spin Attack is ready.");
         text(list, 140, 357, 20, ink, "Move with the left stick. Camera and roll use the normal controls.");
         text(list, 140, 397, 20, ink, "At level-up: left / right to select, A to confirm. Touch also works.");
         button(list, 140, 520, 280, hs.phase == HS_READY ? "A  Start wave 1" : "A  Resume", 1);
@@ -266,8 +214,8 @@ void hs_draw(u32 list) {
                  u < 4 ? (hs.weapon[u] ? "WEAPON UPGRADE" : "WEAPON UNLOCK") : "SURVIVAL UPGRADE");
             text(list, x + 18, 344, 25, ink, hs_upgrade_names[u]);
             /* Fixed short lines fit the cards without depending on font metrics. */
-            const char *a[] = {"Damage in a circle around Link.",  "Arrows seek the nearest foe.",
-                               "A blade that flies out and back.", "Timed area explosions.",
+            const char *a[] = {"Link performs a spin attack.",     "Arrows seek the nearest foe.",
+                               "Native throw, flight and return.", "Link throws a real bomb.",
                                "All weapon damage +20%.",          "Reduce weapon cooldowns.",
                                "Larger sword and bomb radius.",    "Pick up EXP from farther away.",
                                "One extra heart; heal one.",       "Restore three hearts."};

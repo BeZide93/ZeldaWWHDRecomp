@@ -6,10 +6,11 @@ Survivors expedition in a separate copy of **Savage Labyrinth floor 1
 assets come from the player's installed game. This repository contains only
 source code and configuration; no game models, textures or map archives.
 
-This is a first playable candidate, **not yet verified inside the game**. The
-build validates the simulation, stage manifest, PowerPC compilation, and USA/EU
-translation. These checks cannot establish native enemy behavior, collision,
-camera behavior, performance or save restoration in an actual game session.
+The **0.1.0 room/run prototype has been reported working in-game by the user**.
+Version **0.2.0 replaces its drawn spirit attacks with native abilities and Link
+animations**. This new combat integration still needs an in-game acceptance
+pass. Automated tests execute the translated adapter against synthetic game
+calls; they cannot verify animation appearance, actual physics or balancing.
 
 ## Install and start
 
@@ -17,7 +18,7 @@ camera behavior, performance or save restoration in an actual game session.
    touch/input services and the vector HUD from this repository.
 2. Download `hyrule-survivors-wwhdmod` from the **Hyrule Survivors mod** GitHub
    Actions run and extract the outer artifact ZIP. The contained
-   `hyrule-survivors-0.1.0.wwhdmod` is the installable package.
+   `hyrule-survivors-0.2.0.wwhdmod` is the installable package.
 3. In **Mods → Installed packages**, choose the package, install it and enable
    it. Allow the normal setup/rebuild and restart the game when requested.
 4. Load a Quest Log and stand in an ordinary playable area. Tap/click
@@ -27,7 +28,7 @@ camera behavior, performance or save restoration in an actual game session.
 
 Only the recompilation is supported: this package does not install into a Wii U
 or Cemu. No Dawnlight dependency or direct Dawnlight binary port is included.
-Use a backed-up Quest Log for this untested first candidate.
+Keep a Quest Log backup while testing the new native-combat integration.
 
 ## Included gameplay
 
@@ -46,10 +47,13 @@ pool. The champion is an ordinary native Moblin with **160 Survivors HP**;
 it has a boss health bar, but no new model or AI. Every cleared intermediate
 wave heals one heart and collects remaining EXP.
 
-- **Spirit Sword:** automatic radial strikes around Link.
-- **Hero's Bow:** automatically aims at the nearest enemy; higher ranks pierce.
-- **Boomerang:** hits on its outward and return journeys.
-- **Bombs:** timed area damage around the targeted location.
+- **Spin Attack:** Link performs his native spin, with sword animation, effects
+  and attack collision. Replaces Spirit Sword.
+- **Hero's Bow:** Link loads and fires a native arrow with the bow animations;
+  the launch direction aims at the selected enemy. Native walls and impacts apply.
+- **Boomerang:** native throwing animation, target lock, flight and return/catch.
+- **Bombs:** Link takes out and throws a native bomb; the game's fuse, explosion
+  and collision handle the result. Bombs can also hurt Link.
 - **EXP and levels:** collect green orbs; choose one of three upgrades while
   combat is paused. Weapon ranks, damage, cooldown, reach, pickup radius,
   heart containers and healing are available. The first three level-ups each
@@ -59,12 +63,22 @@ wave heals one heart and collects remaining EXP.
 - **Results:** victory/defeat, retry, return to the starting location, persistent
   best kill count and victory count in the mod's own `Data/records-v1.bin`.
 
-The four weapons use the mod's own hit/HP rules and screen-projected vector
-effects. They are **not native sword/bow animations or newly imported 3D
-weapons**. Arrows aim when fired, rather than homing afterward. Native enemies
-retain their normal movement and attacks; ordinary manual sword/item attacks
-are disabled during the run. Projectiles currently do not collide with room
-walls, and their overlay visuals are not depth-occluded by the world.
+Attacks start one at a time through a fair rotation of ready abilities. They
+wait while Link rolls, falls, takes damage or completes another attack. Bow and
+boomerang use native upper-body animations without forcing first-person aiming;
+spin and bomb throws use their normal full-body actions. Native projectile
+motion and bomb fuses pause during upgrades/pause, and owned items are cleaned
+up on results, retry and return. Up to 16 native weapon actors are tracked.
+
+Survivors HP, damage upgrades and the damage breakdown remain separate from
+vanilla enemy health. Damage is credited only when the native enemy damage path
+accepts a tracked attack's collision, once per cast/projectile and enemy. Native
+defenses, stun-only paths and wall collision can prevent damage; there is no
+fallback radius hit or invisible projectile simulation. Ranks increase damage;
+Haste reduces scheduling cooldowns, while animation duration remains native.
+Reach enlarges the spin collision and bomb blast. The old custom arrow piercing
+and guaranteed boomerang return-leg double hit are removed in favor of native
+projectile behavior. EXP pickups and the UI remain vector HUD elements.
 
 ## Controls
 
@@ -90,7 +104,9 @@ return position. The run has its own health, weapons, EXP and upgrades. On a
 normal return, it restores the payload and returns Link to the entry location.
 During a run, the native serializer is wrapped so that a save request writes
 the pre-run story payload. Loading a Quest Log cancels the old snapshot,
-including when reloading the same slot.
+including when reloading the same slot. Native attacks temporarily select the
+Hero's Sword and refill run arrow/bomb capacity and ammunition. Those bytes are
+covered by the same snapshot; pending run-ammo deltas are cleared on exit.
 
 This is not a full snapshot of every transient scene/event object. Enter from
 ordinary gameplay; avoid active quests/cutscenes or other mods that alter the
@@ -113,7 +129,7 @@ PowerPC support, and LLD:
 python3 mods/hyrule-survivors/build.py
 ```
 
-Output: `build/hyrule-survivors/hyrule-survivors-0.1.0.wwhdmod`.
+Output: `build/hyrule-survivors/hyrule-survivors-0.2.0.wwhdmod`.
 `CC`, `CXX`, `WWHD_PPC_CLANG`, and `WWHD_PPC_LLD` select compilers.
 The translated host module requires Clang; `WWHD_HOST_CC` overrides its path
 (otherwise the same Clang executable builds both targets).
@@ -121,19 +137,22 @@ The translated host module requires Clang; `WWHD_HOST_CC` overrides its path
 
 The build runs behavioral tests for pause/grace/defeat, bounded native actor
 lifetime, pending deletion, spawn failures, EXP overflow and duplicate rewards,
-upgrade selection, swept arrow hits, returning boomerangs, bombs, all six waves,
+upgrade selection, fair native attack scheduling, collision-fed damage, all six waves,
 victory and restart. It also parses the manifest with the runtime's actual
 stage parser and checks the generated stage-name agreement. Finally it builds
 the guest ELF and translates/compiles it for **USA and EU** using the actual
 install-time translator. A synthetic host executes both translated modules to
 check entry, floor validation, input capture, every HUD screen, damage routing,
-save serialization, normal return and Quest Log isolation. It supplies stubbed
+save serialization, normal return and Quest Log isolation. Combat checks cover
+all four native dispatch paths, non-walking/busy gates, projectile ownership,
+aiming, hit deduplication, scaled HP, blast radius, pause, failed item creation
+and cleanup. It supplies stubbed
 native game calls, so this is an adapter test, not an in-game test. A game dump
 is not used by these checks. This test harness currently requires Linux;
 the resulting guest package uses the cross-platform runtime ABI.
 
 Source layout: `core.c` owns simulation; `game.c` adapts native actors, input,
-damage, scene transitions and save handling; `hud.c` draws the vector UI;
+damage, scene transitions and save handling; `combat.c` integrates native Link/item/collision functions; `hud.c` draws the vector UI;
 `manifest.json` declares the borrowed room and options. The generated stage
 name uses the runtime allocator's first candidate; a hash collision with
 another installed custom stage is not handled by this prototype.
@@ -155,7 +174,10 @@ Before treating this as a stable release, test on a backed-up save:
 6. Exercise save requests, title/Quest Log reload, full save-state restore,
    widescreen and both game regions. Confirm the story save stays intact.
 
-These runtime checks are outstanding; compilation and simulation are not a
-substitute for them.
+The 0.1.0 prototype's basic room/run flow was reported working. Repeat these
+checks for the new 0.2.0 native attacks; compilation and simulation are not a
+substitute for that pass. In particular, check arrow release while moving,
+boomerang catch during another ability, bomb self-damage, upgrades mid-flight,
+and return with live bombs/arrows. See `NATIVE_COMBAT.md` for integration details.
 
 License: MPL-2.0, matching the repository. Native game assets are not distributed.

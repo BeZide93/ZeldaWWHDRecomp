@@ -4,6 +4,7 @@
  * models, textures, maps or code are included in the package.
  */
 #include "game.h"
+#include "combat.h"
 #include "wwhd/actor.h"
 #include "wwhd/objects.h"
 #include "wwhd/data.h"
@@ -25,7 +26,7 @@ HsRun hs;
 int hs_session, hs_can_open;
 unsigned hs_best_kills, hs_wins;
 static int registered, settled, returning, retrying, action, was_arena, result_saved;
-static int snapshot_slot = -1, stick_latched, burst_budget, pending_open;
+static int snapshot_slot = -1, stick_latched, pending_open;
 static unsigned previous_buttons, pressed, launch_serial, spawn_cursor;
 static unsigned long long option_revision, last_step = ~0ull;
 static float loading_time, modal_age;
@@ -104,13 +105,6 @@ static int observe(HsId id, int kind, HsVec *pos) {
     return a->health <= 0 ? 3 : 2;
 }
 static void remove_actor(HsId id) { wwhd_fopAcM_delete_id(id); }
-static void burst(HsVec p, int kind) {
-    if (burst_budget >= 2)
-        return;
-    burst_budget++;
-    wwhd_particle_at(kind == HS_BOMB ? "beacon-sparkle" : "auction-sparkle", p.x, p.y + 45, p.z,
-                     kind == HS_BOMB ? 1.6f : .6f, 230);
-}
 static float ground(float x, float z, float from) {
     ground_query = (HsVec){x, from, z};
     return wwhd_dBgS_ObjGndChk_Func((u32)&ground_query);
@@ -203,7 +197,7 @@ static HsId spawn_enemy(int kind, int elite, HsVec *position) {
     }
     return HS_NONE;
 }
-static const HsBackend backend = {spawn_enemy, observe, remove_actor, burst};
+static const HsBackend backend = {spawn_enemy, observe, remove_actor, hs_combat_attack};
 
 static void warp(u8 *p, const char *name, s16 point, s8 room, s8 layer) {
     u8 *n = p + 0x5140;
@@ -222,6 +216,8 @@ static void begin_run(u8 *p, fopAc_ac_c *link) {
     snapshot_slot = slot();
     memcpy(snapshot, save + 0x20, SAVE_BYTES);
     hs_session = 1;
+    hs_combat_reset();
+    hs_combat_provision();
     memset(children, 0, sizeof(children));
     spawn_cursor = 0;
     memcpy(return_stage, p + 0x5134, 8);
@@ -240,6 +236,7 @@ static void begin_run(u8 *p, fopAc_ac_c *link) {
     wwhd_log("entering Savage Labyrinth prototype");
 }
 static void exit_run(u8 *p) {
+    hs_combat_stop((void *)*(u32 *)(p + 0x5B2C));
     hs_stop(&hs, &backend, HS_RETURNING);
     restore_save();
     returning = 1;
@@ -247,6 +244,7 @@ static void exit_run(u8 *p) {
     warp(p, return_stage, return_point, return_room, return_layer);
 }
 static void retry_run(u8 *p) {
+    hs_combat_stop((void *)*(u32 *)(p + 0x5B2C));
     hs_stop(&hs, &backend, HS_LOADING);
     retrying = 1;
     settled = 0;
@@ -293,6 +291,7 @@ static void input_filter(wwhd_input_state *s) {
         s->buttons &= ~OPEN_CHORD;
 }
 static void clear_session(void) {
+    hs_combat_reset();
     hs_session = 0;
     snapshot_slot = -1;
     hs.phase = HS_IDLE;
@@ -339,24 +338,25 @@ static void retire_children(void) {
                 wwhd_fopAcM_delete_id(children[i].id);
         }
 }
-static int owned(void *actor) {
+int hs_enemy_slot(void *actor) {
     if (!hs_session || !actor)
-        return 0;
+        return -1;
     u32 id = *(u32 *)((u8 *)actor + 4);
     for (int i = 0; i < HS_ENEMIES; i++)
         if (hs.enemies[i].state != HS_FREE && hs.enemies[i].id == id &&
             *(u16 *)((u8 *)actor + 0xE) == profiles[hs.enemies[i].kind] &&
             ((fopAc_ac_c *)actor)->mParameters == parameters[hs.enemies[i].kind])
-            return 1;
-    return 0;
+            return i;
+    return -1;
 }
+static int owned(void *actor) { return hs_enemy_slot(actor) >= 0; }
+int hs_in_arena(void) { return hs_session && same_slot() && arena(wwhd_play_get()); }
 static void step(fopAc_ac_c *link) {
     u8 *p = wwhd_play_get();
     if (!p || !link)
         return;
     int here = arena(p), transition = p[WWHD_PLAY_ENABLE_NEXT_STAGE_OFFSET];
     int busy = event_busy(p);
-    burst_budget = 0;
     hs_can_open = !hs_session && !busy && !transition && slot() >= 0 && slot() < 3 &&
                   !same((char *)p + 0x5134, "sea_T") && !same((char *)p + 0x5134, "Name") &&
                   !(*(u32 *)((u8 *)link + 0x6A70) &
@@ -456,6 +456,7 @@ static void step(fopAc_ac_c *link) {
         return;
     }
     if (retrying) {
+        hs_combat_reset();
         hs_start(&hs, ++launch_serial * 0x9e3779b9u);
         hs.phase = HS_LOADING;
         retrying = 0;
@@ -503,6 +504,7 @@ static void step(fopAc_ac_c *link) {
     action = 0;
     if (busy)
         return;
+    hs_combat_step(link);
     int old_phase = hs.phase;
     hs_tick(&hs, &backend, dt);
     retire_children();
