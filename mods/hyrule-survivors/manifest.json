@@ -1,0 +1,31 @@
+{
+  "format_version": 1,
+  "id": "hyrule-survivors",
+  "name": "Hyrule Survivors: Savage Labyrinth",
+  "version": "0.2.0",
+  "author": "BeZide93",
+  "description": "An experimental six-wave Survivors expedition in a separate copy of Savage Labyrinth floor 1. Native automatic attacks and Link animations, EXP, upgrades, a champion and results. Tap the Survivors button during gameplay or press L + R + Minus.",
+  "game_id": "wwhd",
+  "minimum_manager_version": "1.6.0",
+  "kind": "guest",
+  "experimental": true,
+  "guest": {"api_version": 1, "elf": "mod.elf", "heap_size": 262144},
+  "options": [
+    {"id": "show_entry", "type": "bool", "name": "Show Survivors button", "default": true, "menu": true, "live": true, "section": "Hyrule Survivors"},
+    {"id": "open_menu", "type": "bool", "name": "Open Survivors", "default": false, "menu": true, "live": true, "section": "Hyrule Survivors",
+     "description": "Switch on, then close the game menu to open the expedition screen. Switch off and on again to reopen it."}
+  ],
+  "stages": [{
+    "id": "labyrinth",
+    "template": "Cave09",
+    "kind": "cave",
+    "music_like": "Cave09",
+    "entrance": {"stage": "sea", "room": 44, "point": 0},
+    "rooms": [{
+      "room": 0,
+      "kit": {"stage": "Cave09", "room": 1},
+      "ground": "kit",
+      "spawns": [{"point": 0, "position": {"x": 650, "y": 500, "z": 0}, "angle": 0, "start": "fall"}]
+    }]
+  }]
+}
