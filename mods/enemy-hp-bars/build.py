@@ -41,7 +41,8 @@ def main():
         return
     clang = os.environ.get("WWHD_PPC_CLANG", "clang")
     lld = os.environ.get("WWHD_PPC_LLD", "ld.lld")
-    host = shlex.split(os.environ.get("WWHD_HOST_CC", "cc"))
+    # The runtime's MUSTTAIL dispatch requires Clang (as in install-time setup).
+    host = shlex.split(os.environ.get("WWHD_HOST_CC", clang))
     objects = []
     for stem in ("core", "mod"):
         obj = out / (stem + ".o")
