@@ -107,11 +107,23 @@ static void tinted(void) {
         }
     }
 }
-static void prepare(int active) {
-    hook(0x027f4f1c,2,MODEL,0);
+/* Model the native mDoExt sequence: preparation completes first, followed by
+ * viewCalc/submission inside the same wrapper. The color must still be live at
+ * that later boundary. The 0.1.4 inner-entry-only scope cannot satisfy this. */
+static void submit(uint32_t wrapper, int active) {
+    hook(wrapper,2,MODEL,0);
     if (active) tinted(); else restored();
-    hook(0x027f4f1c,3,MODEL,0); restored();
+    /* Native modelEntry/modelUpdate has returned here; it is not a restore point. */
+    hook(0x027f55fc,2,MODEL,0);
+    if (active) tinted(); else restored();
+    hook(0x027f583c,2,MODEL,DATA);
+    if (active) tinted(); else restored();
+    hook(0x027f583c,3,MODEL,DATA);
+    hook(0x027f55fc,3,MODEL,0);
+    if (active) tinted(); else restored();
+    hook(wrapper,3,MODEL,0); restored();
 }
+static void prepare(int active) { submit(0x025e2e5c,active); }
 int main(int argc, char** argv) {
     assert(argc==2);
     void* memory=mmap(PPC_MEM_BASE,0x100000000ull,PROT_READ|PROT_WRITE,
@@ -127,7 +139,7 @@ int main(int argc, char** argv) {
     memcpy(ppc_ptr(module->mem_base),module->image,module->image_size);
     for (unsigned i=0; i<module->hook_count; ++i) {
         assert(module->hooks[i].kind!=WWHD_GUEST_REPLACE);
-        assert(module->hooks[i].target!=0x027f5018 && module->hooks[i].target!=0x027f583c && module->hooks[i].target!=0x027f55fc);
+        assert(module->hooks[i].target!=0x027f5018 && module->hooks[i].target!=0x027f4f1c && module->hooks[i].target!=0x027f4fe4);
     }
     st32(PLAY+0x5b2c,LINK); st32(LINK+4,42); st32(0x101f84dc,SAVE);
     st16(SAVE+0x20,80); st16(SAVE+0x22,80); st8(ENEMY+0x2da,2);
@@ -166,36 +178,42 @@ int main(int argc, char** argv) {
     }
     memcpy(original_materials,ppc_ptr(MATERIALS),sizeof original_materials);
     memcpy(original_instances,ppc_ptr(INSTANCES),sizeof original_instances);
-    prepare(1); assert(name_lookups==2);
+    prepare(1); assert(name_lookups==6);
+    submit(0x025e2de0,1);
+    /* Standalone view/joint calls also need their own bounded scopes. */
+    hook(0x027f55fc,2,MODEL,0); tinted();
+    hook(0x027f55fc,3,MODEL,0); restored();
+    hook(0x027f583c,2,MODEL,DATA); tinted();
+    hook(0x027f583c,3,MODEL,DATA); restored();
     /* Native changes between preparation calls require reapplying the tint,
      * without replacing the saved baseline with the already-tinted value. */
-    hook(0x027f4f1c,2,MODEL,0);
+    hook(0x025e2e5c,2,MODEL,0);
     stf32(color(0,4),0.75f);
-    hook(0x027f4fe4,2,MODEL,0); tinted();
-    hook(0x027f4fe4,3,MODEL,0); tinted();
-    hook(0x027f4f1c,3,MODEL,0); restored();
+    hook(0x027f55fc,2,MODEL,0); tinted();
+    hook(0x027f55fc,3,MODEL,0); tinted();
+    hook(0x025e2e5c,3,MODEL,0); restored();
     /* Restore our two mask bits, but retain unrelated native mask updates. */
-    hook(0x027f4f1c,2,MODEL,0);
+    hook(0x025e2e5c,2,MODEL,0);
     st32(MATERIALS+0xa0,ld32(MATERIALS+0xa0)|0x4000);
-    hook(0x027f4f1c,3,MODEL,0);
+    hook(0x025e2e5c,3,MODEL,0);
     assert(ld32(MATERIALS+0xa0)==0xa0004000u);
     st32(MATERIALS+0xa0,0xa0000000u); restored();
-    hook(0x027f4f1c,2,MODEL+0x400,0); restored();
-    hook(0x027f4f1c,3,MODEL+0x400,0); restored();
-    for (int i=0;i<20;++i) hook(0x027f4f1c,2,MODEL,0);
-    for (int i=0;i<20;++i) hook(0x027f4f1c,3,MODEL,0);
+    hook(0x025e2e5c,2,MODEL+0x400,0); restored();
+    hook(0x025e2e5c,3,MODEL+0x400,0); restored();
+    for (int i=0;i<20;++i) hook(0x025e2e5c,2,MODEL,0);
+    for (int i=0;i<20;++i) hook(0x025e2e5c,3,MODEL,0);
     restored();
     missing_color=1; prepare(0); missing_color=0;
     st32(DATA+0x0c,97); prepare(0); st32(DATA+0x0c,3);
     st32(LINK+0x3bc,0x800); prepare(0); st32(LINK+0x3bc,0);
     /* Both native eye names identify eyes even without animation controllers. */
     eye_indices[0]=-1; eye_indices[1]=3;
-    hook(0x027f4f1c,2,MODEL,0);
+    hook(0x025e2e5c,2,MODEL,0);
     assert((float)ldf32(color(1,4))==0.008f && (float)ldf32(color(2,4))==0.008f);
-    hook(0x027f4f1c,3,MODEL,0); restored();
+    hook(0x025e2e5c,3,MODEL,0); restored();
     st32(LINK+0x604,EYE_ANIM); st32(MATERIALS+0x39c+0x24,EYE_ANIM);
-    hook(0x027f4f1c,2,MODEL,0); assert((float)ldf32(color(1,4))==1.0f);
-    hook(0x027f4f1c,3,MODEL,0);
+    hook(0x025e2e5c,2,MODEL,0); assert((float)ldf32(color(1,4))==1.0f);
+    hook(0x025e2e5c,3,MODEL,0);
     st32(LINK+0x604,0); st32(MATERIALS+0x39c+0x24,0); restored();
     eye_indices[0]=1; eye_indices[1]=2;
     /* Cancellation must leave the next preparation untouched. */
@@ -226,10 +244,10 @@ int main(int argc, char** argv) {
     touch_visible=0; ++revision; tick(); buttons(0); assert(!claim_active);
     st16(SAVE+0x22,0); tick(); assert(damage(3)==3); prepare(0);
     st16(SAVE+0x22,80); tick(); buttons(0x60000); tick(); assert(damage(3)==6);
-    hook(0x027f4f1c,2,MODEL,0);
+    hook(0x025e2e5c,2,MODEL,0);
     enabled=0; ++revision; tick(); assert(damage(3)==3);
     /* Restore even when enabled changes between entry and return. */
-    hook(0x027f4f1c,3,MODEL,0); restored(); prepare(0);
+    hook(0x025e2e5c,3,MODEL,0); restored(); prepare(0);
     enabled=1; ++revision; tick(); buttons(0); buttons(0x60000); tick(); assert(damage(3)==6);
     hook(0x0240ee28,2,LINK,0); assert(damage(3)==3 && !claim_active); prepare(0);
     puts("Dark Link translated guest-hook tests passed");

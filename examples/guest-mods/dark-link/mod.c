@@ -12,7 +12,7 @@ static int dl_touch_x = 940, dl_touch_y = 560;
 static unsigned long long dl_step;
 static unsigned long long dl_revision[9];
 static wwhd_hud_element dl_element;
-static const char dl_title[] = "DARK LINK";
+static const char dl_title[] = "DARK LINK 0.1.5";
 static const char dl_ready_text[] = "READY - L3 + R3 / DARK";
 static const char dl_charge_text[] = "Charge with sword hits";
 static const char dl_active_text[] = "ACTIVE - sword damage boosted";

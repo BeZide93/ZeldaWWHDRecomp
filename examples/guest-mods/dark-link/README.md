@@ -1,9 +1,9 @@
-# Dark Link (prototype 0.1.4)
+# Dark Link (prototype 0.1.5)
 
 Standalone code mod for ZeldaWWHDRecomp: charge with sword hits, activate a damage
-boost and a partial body tint. Version 0.1.4 restores the original C0/K0 color
-approach after the diagnostic build, with corrected restoration of its override
-bits. **Complete shadow recoloring and visible red eyes are still unresolved.**
+boost and a partial body tint. Version 0.1.5 restores all four original hook pairs as well as the C0/K0
+palette. The tint now remains active through the complete model submission
+wrapper, with corrected restoration of its override bits. **Complete shadow recoloring and visible red eyes are still unresolved.**
 This is a recovery of the partial appearance, not a finished Dark Link skin.
 The package contains original code only: no textures, models or game binaries.
 
@@ -15,12 +15,15 @@ The package contains original code only: no textures, models or game binaries.
 3. Enable **Code mods** in setup if needed, complete the code-mod setup/build,
    and restart the game. Accept the normal code-mod trust prompt.
 
+With the gauge visible, the HUD title must read **DARK LINK 0.1.5**. This label
+comes from the running code module, not just the package manifest.
+
 The same package is translated for the installed USA or EU build and the host
 platform, including Android. It does not require a new APK/runtime feature.
 
 ### Upgrading from 0.1.0/0.1.1
 
-Replace the installed package with 0.1.4 and fully restart the game, then load a
+Replace the installed package with 0.1.5 and fully restart the game, then load a
 normal in-game save. Do not resume a full emulator/recomp save state made with the
 old visual effect active: 0.1.1 left extra material override flags set. The new
 version cannot infer those flags' original values from an already altered state.
@@ -61,10 +64,13 @@ dynamically rather than hard-coded.
 RGB values are saved once, reapplied in nested preparation, and restored bit for
 bit. The two override-mask bits are restored to their original values instead of
 being left enabled. Changes by native code to unrelated mask bits survive.
-Scopes now surround native model entry/update (material preparation), ending
-before viewCalc queues its asynchronous job. No visual hooks run around
-viewCalc, joint submission or the UBO worker. This is a narrower scope than
-0.1.0; its real-game behavior still requires confirmation.
+The scope uses the original mDoExt model entry/update wrappers, viewCalc and
+joint-entry hook pairs. In 0.1.4, the scope ended at the inner native preparation
+return, before the wrapper's subsequent viewCalc/submission. That was not the
+original timing. Version 0.1.5 keeps the palette active through the whole wrapper
+and supports standalone viewCalc/joint submissions too. These are submission
+boundaries, not immediate GPU draws; asynchronous rendering and the actual visual
+result are not validated by the host tests. No UBO worker hook is installed.
 
 There is no diagnostic mode/logging in this build. The ineffective local fog
 approach has been removed. There is no custom aura, eye bloom, White/Gold variant
@@ -82,7 +88,8 @@ armor-specific handlers can further override the native result.
 
 Automated checks compile the PowerPC ELF, translate and compile it for USA/EU,
 and execute gameplay and translated-hook tests. Checks cover both tint registers,
-all untouched registers/alpha, absent/partial/full original override masks,
+the preparation-to-submission interval, both wrappers, standalone view/joint
+scopes, all untouched registers/alpha, absent/partial/full original override masks,
 unrelated native mask changes, nested reapplication/restoration, name/controller
 eye detection, missing uniforms, foreign models, frozen state, scope bounds,
 controller/touch cancellation, Free transformation and lifecycle resets. These

@@ -95,10 +95,17 @@ static void dl_visual_end(void) {
     u32 depth = --dl_draw_depth;
     if (depth < DL_DRAW_DEPTH) dl_restore_colors(dl_draw_marks[depth]);
 }
-/* Apply the original palette during native material preparation. The user's
- * 0.1.3 trace confirms the entry path and model identities. End the scope before
- * viewCalc queues the UBO job; no writes around that job or joint packet queues. */
+/* Restore all four hook pairs from 0.1.0. The mDoExt wrappers encompass BOTH
+ * model preparation and viewCalc/submission. Restoring at the inner native
+ * entry return (0.1.4) removed the tint before that subsequent stage.
+ * viewCalc and joint entry are submission boundaries, not immediate GPU draws;
+ * this deliberately returns to the original, user-observed partial-tint path.
+ * Do not claim this validates the asynchronous renderer or shaded surfaces. */
 WWHD_HOOK(DL_MODEL_ENTRY, dl_entry_before, (void* model)) { dl_visual_begin(model); }
 WWHD_HOOK_RETURN(DL_MODEL_ENTRY, dl_entry_after, (void* model)) { (void)model; dl_visual_end(); }
-WWHD_HOOK(DL_MODEL_UPDATE, dl_update_before, (void* model)) { dl_visual_begin(model); }
-WWHD_HOOK_RETURN(DL_MODEL_UPDATE, dl_update_after, (void* model)) { (void)model; dl_visual_end(); }
+WWHD_HOOK(DL_MODEL_UPDATE, dl_update_before, (void* model, void* data)) { (void)data; dl_visual_begin(model); }
+WWHD_HOOK_RETURN(DL_MODEL_UPDATE, dl_update_after, (void* model, void* data)) { (void)model; (void)data; dl_visual_end(); }
+WWHD_HOOK(DL_MODEL_VIEW, dl_view_before, (void* model)) { dl_visual_begin(model); }
+WWHD_HOOK_RETURN(DL_MODEL_VIEW, dl_view_after, (void* model)) { (void)model; dl_visual_end(); }
+WWHD_HOOK(DL_JOINT_ENTRY, dl_joint_before, (void* model, void* joint)) { (void)joint; dl_visual_begin(model); }
+WWHD_HOOK_RETURN(DL_JOINT_ENTRY, dl_joint_after, (void* model, void* joint)) { (void)model; (void)joint; dl_visual_end(); }
