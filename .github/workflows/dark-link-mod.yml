@@ -1,0 +1,36 @@
+name: Dark Link mod
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'examples/guest-mods/dark-link/**'
+      - 'runtime/guest/include/**'
+      - 'tools/guestmod/**'
+      - 'tools/recomp/**'
+      - '.github/workflows/dark-link-mod.yml'
+  pull_request:
+    paths:
+      - 'examples/guest-mods/dark-link/**'
+      - 'runtime/guest/include/**'
+      - 'tools/guestmod/**'
+      - 'tools/recomp/**'
+      - '.github/workflows/dark-link-mod.yml'
+permissions:
+  contents: read
+jobs:
+  package:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+      - name: Install compiler
+        run: sudo apt-get update && sudo apt-get install -y clang
+      - name: Build, test and package (USA and EU)
+        run: python examples/guest-mods/dark-link/build.py --host-cc clang
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dark-link-wwhdmod
+          path: build/dark-link/dark-link.wwhdmod
+          if-no-files-found: error
