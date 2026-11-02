@@ -8,11 +8,25 @@ static int magic_images, magic_draws, magic_textures, magic_authored;
 static float magic_width, magic_x, magic_y;
 static void magic_release(Cpu* c) { c->r[3]=1; }
 static void magic_epoch(Cpu* c) { c->r[3]=(uint32_t)(magic_generation>>32); c->r[4]=(uint32_t)magic_generation; }
+static uint32_t magic_fill_handles[2];
+static int magic_writes,magic_base_fill;
+static void magic_write(Cpu* c) {
+    const char* path=(const char*)ppc_ptr(c->r[3]);
+    const uint8_t* png=ppc_ptr(c->r[4]);
+    assert(c->r[5]>100 && !memcmp(png,"\x89PNG\r\n\x1a\n",8));
+    /* First pixel of the uncompressed zlib stream: filter byte then RGBA.
+     * Validate output pixels, not only a red tint in an emitted HUD command. */
+    assert(png[24]==8 && png[25]==6 && png[48]==0);
+    if(strstr(path,"fill")) { assert(png[49]>200 && png[49]>png[50]*2 && png[52]==255); }
+    if(magic_base_fill && strstr(path,"frame")) assert(png[49]==0&&png[50]==0&&png[51]==0);
+    ++magic_writes;c->r[3]=c->r[5];
+}
 static void magic_texture(Cpu* c) {
-    assert(c->r[3]==2);
+    assert(c->r[3]==1); /* owned, recoloured native artwork in mod Data */
     const char* path=(const char*)ppc_ptr(c->r[4]);
-    assert(!strcmp(path,"MagicBar_00/frame#Frame") || !strcmp(path,"MagicBar_00/fill"));
+    assert(!strncmp(path,"magic-",6));
     ++magic_textures; c->r[3]=++magic_images;
+    if(strstr(path,"fill")) magic_fill_handles[path[6]=='1']=c->r[3];
 }
 static void magic_setting(Cpu* c) {
     const char* key=(const char*)ppc_ptr(c->r[3]);
@@ -33,9 +47,9 @@ static void magic_setting(Cpu* c) {
 static void magic_emit(uint32_t e) {
     ++magic_draws;
     assert(ld32(e+4)==(magic_authored ? 1u:0u)); /* follows native, already aspect-adjusted coordinates */
-    if (ld32(e+56)==0xff2020ff) {
+    if (ld32(e+60)==magic_fill_handles[0] || ld32(e+60)==magic_fill_handles[1]) {
         magic_width=ldf32(e+20); magic_x=ldf32(e+12); magic_y=ldf32(e+16);
-        float delta=(float)ldf32(e+48)-magic_width/96.0f; assert(delta>-0.00001f && delta<0.00001f);
+        float delta=(float)ldf32(e+48)-magic_width/(magic_base_fill?100.0f:96.0f); assert(delta>-0.00001f && delta<0.00001f);
     } else assert(ld32(e+56)==0xffffffff);
 }
 static void fixture_picture(uint32_t p,const char* name,unsigned mat) {
@@ -48,11 +62,23 @@ static void fixture_picture(uint32_t p,const char* name,unsigned mat) {
 static void fixture_magic(void) {
     uint32_t f=MAGIC_FLYT;
     st32(MAGIC_ARC,0x53415243); st16(MAGIC_ARC+4,0x14);
-    st32(MAGIC_ARC+8,0x400); st32(MAGIC_ARC+12,0x100);
-    st32(MAGIC_ARC+0x14,0x53464154); st16(MAGIC_ARC+0x18,12); st16(MAGIC_ARC+0x1a,1);
+    st32(MAGIC_ARC+8,0xc00); st32(MAGIC_ARC+12,0x100);
+    st32(MAGIC_ARC+0x14,0x53464154); st16(MAGIC_ARC+0x18,12); st16(MAGIC_ARC+0x1a,3);
     st32(MAGIC_ARC+0x24,0x01000000); st32(MAGIC_ARC+0x28,0); st32(MAGIC_ARC+0x2c,0x1f0);
-    st32(MAGIC_ARC+0x30,0x53464e54); st16(MAGIC_ARC+0x34,8);
-    strcpy((char*)ppc_ptr(MAGIC_ARC+0x38),"blyt/MagicBar_00.bflyt");
+    st32(MAGIC_ARC+0x34,0x01000006);st32(MAGIC_ARC+0x38,0x300);st32(MAGIC_ARC+0x3c,0x728);
+    st32(MAGIC_ARC+0x44,0x0100000b);st32(MAGIC_ARC+0x48,0x800);st32(MAGIC_ARC+0x4c,0xa28);
+    st32(MAGIC_ARC+0x50,0x53464e54); st16(MAGIC_ARC+0x54,8);
+    strcpy((char*)ppc_ptr(MAGIC_ARC+0x58),"blyt/MagicBar_00.bflyt");
+    strcpy((char*)ppc_ptr(MAGIC_ARC+0x70),"timg/frame.bflim");
+    strcpy((char*)ppc_ptr(MAGIC_ARC+0x84),"timg/fill.bflim");
+    /* RGBA frame and BC4 alpha fill, both native linear tiling (pitch 64). */
+    uint32_t frame=MAGIC_ARC+0x400,fill=MAGIC_ARC+0x900;
+    memset(ppc_ptr(frame),255,1024);memset(ppc_ptr(fill),0,512);st8(fill,255);
+    uint32_t trailers[2]={frame+1024,fill+512};
+    for(int i=0;i<2;++i) {
+        uint32_t t=trailers[i];st32(t,0x464c494d);st32(t+20,0x696d6167);
+        st16(t+28,4);st16(t+30,4);st8(t+34,i?0x10:9);st8(t+35,1);st32(t+36,i?512:1024);
+    }
     st32(f,0x464c5954); st16(f+4,0xfeff); st16(f+6,20); st16(f+16,4);
     uint32_t mat=f+20; st32(mat,0x6d617431); st32(mat+4,100); st16(mat+8,2);
     st32(mat+12,20); st32(mat+16,60);
@@ -61,7 +87,7 @@ static void fixture_magic(void) {
     fixture_picture(f+120,"P_MagicBase_00",0);
     fixture_picture(f+256,"P_MagicBase_01",0);
     fixture_picture(f+392,"P_Fill_00",1);
-    st32(MAGIC_ARC+0x2c,528); st32(MAGIC_ARC+8,0x100+528);
+    st32(MAGIC_ARC+0x2c,528); st32(MAGIC_ARC+8,0xc00);
     st32(0x101f7274,0x11430000); magic_archive=MAGIC_ARC;
     st32(MAGIC_CTRL+0x5c,MAGIC_PANE); st32(MAGIC_CTRL+0x60,MAGIC_PANE);
     stf32(MAGIC_PANE+0x3c,100); stf32(MAGIC_PANE+0x40,16);
@@ -78,6 +104,12 @@ static void test_magic(void) {
     magic_draws=0; read_hud(); assert(magic_draws==2);
     assert(magic_width>90 && magic_width<=96 && magic_x==62 && magic_y==98);
     int prior=magic_textures; read_hud(); assert(magic_textures==prior); /* reuse handles */
+    /* A coloured MagicBase is the full-width fill, not the smaller highlight. */
+    magic_base_fill=1;st32(MAGIC_FLYT+20+20+32,0x20ff20ff);++magic_generation;
+    read_hud();hook(0x02675414,3,MAGIC_CTRL,0);read_hud();
+    assert(magic_width>95 && magic_width<=100 && magic_x==60);
+    magic_base_fill=0;fixture_magic();++magic_generation;
+    read_hud();hook(0x02675414,3,MAGIC_CTRL,0);read_hud();
     /* The magic save values do not drive Dark Link's remaining duration. */
     st8(SAVE+0x33,32); st8(SAVE+0x34,0); read_hud(); assert(magic_width>90);
     for(int i=0;i<300;++i) tick();
@@ -103,7 +135,8 @@ static void test_aura(void) {
     st32(AURA_RS,7); st32(AURA_RS+0x14,0xcc0100); st32(AURA_RS+0x1c,0x20010101);
     for(int i=0;i<2;++i) {
         uint32_t b=LINK+(i ? 0x5704:0x5614),a=AURA_ANM+i*0x100,v=AURA_VALUE+i*0x100;
-        st32(b+0x10,a); st32(b+0x20,v); st16(b+0xa,30);
+        st32(b+0x10,a); st32(b+0x20,v); st16(b+0xa,0); /* native init(play=FALSE): no playback limit */
+        st32(a+4,AURA_ANM+0x300);st32(AURA_ANM+0x314,0x02000008);
         stf32(a,0); stf32(b+4,0); stf32(v,0); st32(v+0x10,0x02000004);
     }
     uint8_t original_save[0x40]; memcpy(original_save,ppc_ptr(SAVE),sizeof original_save);

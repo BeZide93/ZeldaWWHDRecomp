@@ -19,6 +19,7 @@ static int free_mode, enabled=1, paused, menu, touch_visible=1, claim_active, el
 static const char* eye_names[]={"eyeL","eyeR","eyeLdamA","eyeRdamA","eyeLdamB","eyeRdamB"};
 static int eye_indices[6]={1,2,3,4,5,6}, name_lookups, missing_color;
 static uint32_t missing_slots;
+static void magic_write(Cpu*);
 static void magic_setting(Cpu*);
 static void magic_texture(Cpu*);
 static void magic_epoch(Cpu*);
@@ -86,6 +87,7 @@ static PpcFunc service(const char* name) {
     if (!strcmp(name,"wwhd_touch_register")) return reg_touch;
     if (!strcmp(name,"wwhd_touch_claim")) return claim;
     if (!strcmp(name,"wwhd_hud_emit")) return emit;
+    if (!strcmp(name,"wwhd_file_write")) return magic_write;
     if (!strcmp(name,"wwhd_setting_get")) return magic_setting;
     if (!strcmp(name,"wwhd_hud_texture")) return magic_texture;
     if (!strcmp(name,"wwhd_hud_epoch")) return magic_epoch;
@@ -98,6 +100,7 @@ static void dispatch(Cpu* c) {
     switch (c->pc) {
         case 0x026fbb24: c->r[3]=magic_archive; return;
         case 0x027df40c: ++aura_notifications; return;
+        case 0x02000008: c->r[3]=30; return; /* BRK resource getFrameMax */
         case 0x02000004: return; /* synthetic frame interpolation: identity in f1 */
         case 0x025200d4: c->r[3]=PLAY; return;
         case 0x025986bc: c->r[3]=menu; return;

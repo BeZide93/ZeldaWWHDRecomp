@@ -8,6 +8,9 @@ import shutil
 import subprocess
 import sys
 import zipfile
+import struct
+import zlib
+import binascii
 
 SOURCE = Path(__file__).resolve().parent
 ROOT = SOURCE.parents[2]
@@ -35,6 +38,22 @@ def main():
     test = out / "test-state"
     subprocess.run(host + ["-std=c11", "-O2", "-UNDEBUG", "-Wall", "-Wextra", "-Werror", str(SOURCE / "test_state.c"), "-o", str(test)], check=True)
     subprocess.run([str(test)], check=True)
+    art_test, art_png = out / "test-art", out / "synthetic-art.png"
+    subprocess.run(host + ["-std=c11", "-O2", "-UNDEBUG", "-Wall", "-Wextra", "-Werror",
+        str(SOURCE / "test_art.c"), "-o", str(art_test)], check=True)
+    subprocess.run([str(art_test), str(art_png)], check=True)
+    # An independent standard-library PNG reader checks chunk CRCs and zlib.
+    png, at, compressed = art_png.read_bytes(), 8, b""
+    while at < len(png):
+        size = struct.unpack_from(">I", png, at)[0]
+        kind, data = png[at+4:at+8], png[at+8:at+8+size]
+        assert binascii.crc32(kind+data) == struct.unpack_from(">I", png, at+8+size)[0]
+        if kind == b"IDAT": compressed += data
+        at += size + 12
+    pixels = zlib.decompress(compressed)
+    assert len(pixels) == 4 * 17 and pixels[0] == 0
+    assert pixels[1:5] == bytes([255, 99, 99, 255])
+    assert pixels[5:9] == bytes([255, 99, 99, 0])
     sys.path.insert(0, str(ROOT / "tools/guestmod"))
     import build_guest_mod as builder
     from builds import by_name
@@ -47,7 +66,7 @@ def main():
         supported = {"wwhd_hud_register", "wwhd_touch_register", "wwhd_input_filter_register",
             "wwhd_config_changed", "wwhd_config_bool", "wwhd_config_int", "wwhd_logic_step",
             "wwhd_touch_claim", "wwhd_logic_dt", "wwhd_hud_emit", "wwhd_hud_epoch",
-            "wwhd_hud_texture", "wwhd_hud_release", "wwhd_setting_get", "memcpy", "memset"}
+            "wwhd_hud_texture", "wwhd_hud_release", "wwhd_file_write", "wwhd_setting_get", "memcpy", "memset"}
         unexpected = set(translated.services) - supported
         if unexpected:
             raise RuntimeError(f"Unsupported imports (check hard-float ABI): {sorted(unexpected)}")

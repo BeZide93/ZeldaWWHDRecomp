@@ -3,7 +3,7 @@
  * No shield flag, Tingle timer, magic, rupees or damage state is written. */
 #pragma once
 WWHD_GAME_FUNC(0x027DF40C, void, dl_animation_notify, (u32*));
-typedef struct { u32 brk, animation, channel; f32 frame, control, value; } DLAuraFrame;
+typedef struct { u32 brk, animation, channel; f32 frame, control, value, end; } DLAuraFrame;
 static DLAuraFrame dl_aura_update_frames[2], dl_aura_draw_frames[2];
 static u32 dl_aura_update_owner, dl_aura_draw_owner;
 typedef struct { u32 model, material, resource, state, before[3], ours[3]; } DLAuraBlend;
@@ -16,9 +16,16 @@ static int dl_aura_active(daPy_lk_c* link) {
 static int dl_aura_frame(u32 brk, DLAuraFrame* save) {
     u32 a = dl_word((void*)brk, 0x10), v = dl_word((void*)brk, 0x20);
     if (!dl_game_span(a, 8) || !dl_game_span(v, 0x18)) return 0;
-    s16 end = *(s16*)(brk + 0xa);
-    if (end < 2 || end > 10000) return 0;
-    *save = (DLAuraFrame){brk, a, v, *(f32*)a, *(f32*)(brk+4), *(f32*)v};
+    /* Magic Armor calls BRK init with play=FALSE. FrameCtrl.mEnd can be zero.
+     * Use the animation's getFrameMax virtual call, exactly as setAuraEffect. */
+    u32 table=dl_word((void*)a,4);
+    if (!dl_game_span(table,24)) return 0;
+    u32 get_end=dl_word((void*)table,20);
+    if (get_end<0x02000000 || get_end>=0x04000000) return 0;
+    typedef s32 (*GetEnd)(u32);
+    s32 end=((GetEnd)get_end)(a);
+    if (end < 2 || end > 10000 || dl_word((void*)brk,0x10)!=a) return 0;
+    *save = (DLAuraFrame){brk, a, v, *(f32*)a, *(f32*)(brk+4), *(f32*)v, (f32)end};
     return 1;
 }
 static void dl_aura_set(DLAuraFrame* f, f32 frame) {
@@ -95,7 +102,7 @@ WWHD_HOOK(0x0240B7F4, dl_aura_update_before, (daPy_lk_c* link)) {
         DLAuraFrame* f=&dl_aura_update_frames[i];
         /* Native inactive path subtracts one then updates all matrices/BTK.
          * Only its animation input is borrowed, never a protection flag. */
-        *(f32*)f->animation=(f32)*(s16*)(f->brk+0xa)+0.999f;
+        *(f32*)f->animation=f->end+0.999f;
     }
 }
 WWHD_HOOK_RETURN(0x0240B7F4, dl_aura_update_after, (daPy_lk_c* link)) {
@@ -113,7 +120,7 @@ WWHD_HOOK(WWHD_ADDR_daPy_Draw, dl_aura_draw_before, (daPy_lk_c* link)) {
         !dl_aura_frame((u32)link+0x5704,&dl_aura_draw_frames[1])) return;
     dl_aura_draw_owner=(u32)link;
     for (u32 i=0;i<2;++i) dl_aura_set(&dl_aura_draw_frames[i],
-        (f32)*(s16*)(dl_aura_draw_frames[i].brk+0xa)-0.001f);
+        dl_aura_draw_frames[i].end-0.001f);
 }
 WWHD_HOOK_RETURN(WWHD_ADDR_daPy_Draw, dl_aura_draw_after, (daPy_lk_c* link)) {
     if (dl_aura_draw_owner!=(u32)link) return;
