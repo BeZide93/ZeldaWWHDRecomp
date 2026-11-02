@@ -3,10 +3,28 @@
 # smoke test on Mesa's software Vulkan driver (lavapipe) with the Khronos validation layer.
 name: linux
 
+# Standalone mod packages have their own workflows. Keep SDK/runtime changes and
+# SDK example fixtures covered by this workflow, including mixed app/mod patches.
 on:
   push:
     branches: ["**"]   # not on tag pushes: a release tag points at a commit CI already tested
+    paths-ignore:
+      - 'mods/**'
+      - 'examples/guest-mods/dark-link/**'
+      - 'examples/guest-mods/README.md'
+      - '.github/workflows/dark-link-mod.yml'
+      - '.github/workflows/enemy-hp-bars.yml'
+      - '.github/workflows/enhanced-mod.yml'
+      - '.github/workflows/hyrule-survivors.yml'
   pull_request:
+    paths-ignore:
+      - 'mods/**'
+      - 'examples/guest-mods/dark-link/**'
+      - 'examples/guest-mods/README.md'
+      - '.github/workflows/dark-link-mod.yml'
+      - '.github/workflows/enemy-hp-bars.yml'
+      - '.github/workflows/enhanced-mod.yml'
+      - '.github/workflows/hyrule-survivors.yml'
 
 jobs:
   build:
