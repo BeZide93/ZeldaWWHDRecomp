@@ -161,3 +161,40 @@ three short actor-ID messages around a native fatal hit, waiting for death,
 and completed removal. The reported Android heap failure still requires an
 in-game retest; if it persists, the earlier allocation/free history is needed
 to identify the actual corruption.
+
+## Repeated crash: construction pressure and diagnostics (0.2.3)
+
+The second Android log (`2026-11-02 07:55:56`) faults at guest `000000AC`
+inside `02752A84`, reached through packet constructors `027F1278` and
+`027F1534`, model setup `027F4098`/`027F4404`, model creation `025E38E0`,
+and Moblin `createHeap` `021CC524` under `entrySolidHeap`.
+This is a construction stack, not the first log's destruction/unlink stack.
+It is consistent with an invalid construction pointer, potentially from a
+failed allocation; the log does not prove exhaustion, the faulty writer, or
+that both crashes share a cause.
+
+Previously wave 5 could keep 24 native Moblins resident. The generic tracking
+capacity was being used as the only admission limit, without a measured model
+memory budget. Version 0.2.3 conservatively limits Moblins to four, including
+pending creation, native death and queued removal. The selected next spawn
+waits without consuming its quota or accumulating spawn failures. Combat and
+cooldowns continue during that wait. The champion follows the same rule;
+other enemy types keep the existing overall limit. Four is a mitigation limit,
+not a hardware-derived safe memory budget or a confirmed root-cause fix.
+
+An owned-Moblin-only wrapper around `021CC524` logs begin/return and reads the
+current native heap through `02756140`. It queries the heap vtable's native
+`getFreeSize` slot `+0x74` before and after the original callback. Heap/vtable
+and function pointer ranges are checked. It performs no allocation probes,
+heap switching, forced deletion, or destructor bypass. The original callback
+still runs exactly once and its success/failure result is preserved. It also
+runs normally for unrelated Moblins and outside the arena.
+
+Regression coverage includes pending/alive/dying/retiring admission, continuing
+attacks while admission waits, champion admission and the complete 113-enemy
+run. Both translated regions test the diagnostic wrapper's ownership, ABI,
+callback return values and invalid-pointer skips. These tests stub the native
+allocator; they cannot reproduce native model allocation or heap corruption.
+For the next device test, verify **0.2.3** in the expedition menu and start a
+new run. If the crash persists, collect the full runtime log as well as the
+crash log so the last construction/free-byte measurements are available.

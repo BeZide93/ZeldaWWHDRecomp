@@ -157,7 +157,7 @@ static void test_pool_and_rewards(void) {
     assert(r.kills == 1);
     reset(&r);
     spawn_at = (HsVec){1000, 0, 0};
-    r.wave = 4;
+    r.wave = 3;
     ticks(&r, 500);
     assert(peak == HS_ENEMIES && r.spawned == HS_ENEMIES);
     hs_stop(&r, &backend, HS_LOSE);
@@ -280,18 +280,18 @@ static void test_moblin_death(void) {
     ticks(&r, 1);
     assert(r.enemies[0].state == HS_FREE && r.kills == 1 && !remove_calls);
 
-    /* Dying Moblins continue to occupy their slot at the full actor cap. */
+    /* Dying Moblins retain their resource slot until native removal. */
     reset(&r);
     spawn_at = (HsVec){1000, 0, 0};
     r.wave = 4;
     ticks(&r, 500);
-    assert(r.spawned == HS_ENEMIES);
+    assert(r.spawned == HS_MOBLIN_LIMIT);
     hs_native_hit(&r, 1, 10000, HS_SWORD);
     ticks(&r, 20);
-    assert(r.enemies[0].state == HS_DYING && r.spawned == HS_ENEMIES && !remove_calls);
+    assert(r.enemies[0].state == HS_DYING && r.spawned == HS_MOBLIN_LIMIT && !remove_calls);
     native[1].state = 0;
     ticks(&r, 1);
-    assert(r.spawned == HS_ENEMIES + 1 && peak == HS_ENEMIES);
+    assert(r.spawned == HS_MOBLIN_LIMIT + 1 && peak == HS_MOBLIN_LIMIT);
 
     /* The champion's reward is immediate; victory waits for native teardown. */
     reset(&r);
@@ -320,6 +320,39 @@ static void test_moblin_death(void) {
     hs_stop(&r, &backend, HS_RETURNING); /* explicit run exit still cleans up */
     ticks(&r, 1);
     assert(remove_calls == 1 && r.enemies[0].state == HS_FREE);
+}
+
+static void test_moblin_admission(void) {
+    HsRun r;
+    reset(&r);
+    spawn_at = (HsVec){1000, 0, 0};
+    r.wave = 4;
+    delay_creation = 1;
+    ticks(&r, 100);
+    assert(r.spawned == HS_MOBLIN_LIMIT && spawn_calls == HS_MOBLIN_LIMIT);
+    for (int i = 0; i < HS_MOBLIN_LIMIT; i++)
+        assert(r.enemies[i].state == HS_PENDING);
+    /* Admission waits are not spawn errors and must still allow attacks. */
+    for (unsigned i = 1; i <= next_id; i++)
+        native[i].state = 2;
+    delay_creation = 0;
+    r.weapon[HS_BOW] = 1;
+    ticks(&r, 500);
+    assert(r.phase == HS_RUN && !r.spawn_failures && attack_count > 0 && spawn_calls == HS_MOBLIN_LIMIT);
+
+    /* Retiring actors and the final champion use the same limit. */
+    r.wave = 5;
+    r.spawned = hs_wave_quota(5) - 1;
+    r.enemies[0].state = HS_RETIRING;
+    native[1].state = 1;
+    r.enemies[0].age = 0;
+    unsigned before = spawn_calls;
+    ticks(&r, 20);
+    assert(r.spawned == hs_wave_quota(5) - 1 && spawn_calls == before);
+    native[1].state = 0;
+    ticks(&r, 1);
+    assert(r.spawned == hs_wave_quota(5) && spawn_calls == before + 1);
+    assert(r.enemies[0].kind == HS_MOBLIN && r.enemies[0].elite);
 }
 
 static void test_complete_run(void) {
@@ -364,6 +397,7 @@ int main(void) {
     test_upgrades();
     test_native_attacks();
     test_moblin_death();
+    test_moblin_admission();
     test_complete_run();
     puts("Core: pause, damage, native lifetime, capacity, EXP, upgrades, native attack scheduling, six-wave victory "
          "and restart "

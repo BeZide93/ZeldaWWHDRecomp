@@ -7,7 +7,7 @@ assets come from the player's installed game. This repository contains only
 source code and configuration; no game models, textures or map archives.
 
 The **0.1.0 room/run prototype has been reported working in-game by the user**.
-Version **0.2.2 replaces its drawn spirit attacks with native abilities and Link
+Version **0.2.0 replaces its drawn spirit attacks with native abilities and Link
 animations**. Version 0.2.1 fixes the reported native-combat issues: automatic
 boomerang cleanup after catching, third-person automatic bow shots, and bombs
 that explode on ground contact without hitting Link. These fixes still need
@@ -18,13 +18,24 @@ teardown; this lifecycle correction is not proof that the original heap fault
 is eliminated. Automated tests execute the translated adapter against synthetic game
 calls; they cannot verify animation appearance, actual physics or balancing.
 
+**0.2.3 is a mitigation/diagnostic build for the repeated Android crash.**
+The second log fails during Moblin model construction, whereas the first failed
+during destruction. Moblins now have a separate limit of **four resident actors**,
+including pending, dying and retiring actors. Remaining wave enemies wait for a
+slot; the 113-enemy total is unchanged. This lowers resource pressure but does
+not prove the cause or a fix for either crash. Native construction logs include
+the actor ID and current heap's free bytes before/after model creation. The menu
+and entry log show 0.2.3 so the installed version can be checked. If it crashes
+again, include the full runtime log alongside the crash log: the latter alone
+does not include these measurements.
+
 ## Install and start
 
 1. Use a current ZeldaWWHDRecomp build with guest mods, custom stages, live
    touch/input services and the vector HUD from this repository.
 2. Download `hyrule-survivors-wwhdmod` from the **Hyrule Survivors mod** GitHub
    Actions run and extract the outer artifact ZIP. The contained
-   `hyrule-survivors-0.2.2.wwhdmod` is the installable package.
+   `hyrule-survivors-0.2.3.wwhdmod` is the installable package.
 3. In **Mods → Installed packages**, choose the package, install it and enable
    it. Allow the normal setup/rebuild and restart the game when requested.
 4. Load a Quest Log and stand in an ordinary playable area. Tap/click
@@ -49,7 +60,7 @@ Keep a Quest Log backup while testing the new native-combat integration.
 
 The run ends in victory after all **113 enemies** are defeated. At most **24
 native enemies**, including pending creations and removals, can occupy the
-pool. The champion is an ordinary native Moblin with **160 Survivors HP**;
+pool, with a separate limit of **four Moblins**. The champion is an ordinary native Moblin with **160 Survivors HP**;
 it has a boss health bar, but no new model or AI. Every cleared intermediate
 wave heals one heart and collects remaining EXP.
 

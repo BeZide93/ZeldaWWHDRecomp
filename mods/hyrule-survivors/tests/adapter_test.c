@@ -40,6 +40,11 @@ static unsigned shot_count, native_spin, native_reload, native_throw, native_ani
 static unsigned shot_alive[32], fail_item;
 static unsigned aim_calls, ground_calls, explosions, no_hit_calls, no_hit_result;
 static unsigned enemy_present, enemy_deletes, enemy_execs, reaction_hp;
+static unsigned heap_queries, heap_free_queries, heap_creates, heap_result;
+static uint32_t construction_heap;
+#define TEST_HEAP 0x19000000u
+#define TEST_HEAP_VTABLE 0x19000100u
+#define TEST_FREE_FUNCTION 0x02F00000u
 static float set_radius;
 static void clear_native_keep(uint32_t offset) {
     st32(LINK + offset, HS_NONE);
@@ -93,6 +98,17 @@ static void dispatch(Cpu *c) {
         }
     if (c->pc == GAME_PLAY) {
         c->r[3] = PLAY;
+        return;
+    }
+    if (c->pc == GAME_CURRENT_HEAP) {
+        heap_queries++;
+        c->r[3] = construction_heap;
+        return;
+    }
+    if (c->pc == TEST_FREE_FUNCTION) {
+        assert(c->r[3] == TEST_HEAP);
+        heap_free_queries++;
+        c->r[3] = 0x10000;
         return;
     }
     if (c->pc == GAME_GROUND) {
@@ -233,6 +249,11 @@ static void original(Cpu *c, uint32_t address) {
         return;
     } else if (address == GAME_MOBLIN_EXEC) {
         enemy_execs++;
+    } else if (address == GAME_MOBLIN_HEAP) {
+        assert(c->r[3] == ENEMY);
+        heap_creates++;
+        c->r[3] = heap_result;
+        return;
     } else
         assert(address == GAME_LINK);
     c->r[3] = 1;
@@ -684,6 +705,34 @@ static void test_native_moblin_death(void) {
     puts("Moblin death: native reaction HP, delayed deletion, pause, no revival and single reward passed");
 }
 
+static void test_moblin_heap_diagnostics(void) {
+    native_fixture();
+    construction_heap = TEST_HEAP;
+    st32(TEST_HEAP + 0xC, TEST_HEAP_VTABLE);
+    st32(TEST_HEAP_VTABLE + 0x74, TEST_FREE_FUNCTION);
+    st32(FIELD(enemies) + offsetof(HsEnemy, state), HS_PENDING);
+    for (heap_result = 0; heap_result <= 1; heap_result++) {
+        hook(GAME_MOBLIN_HEAP, ENEMY);
+        assert(cpu.r[3] == heap_result);
+    }
+    assert(heap_creates == 2 && heap_queries == 4 && heap_free_queries == 4);
+    construction_heap = 0;
+    hook(GAME_MOBLIN_HEAP, ENEMY);
+    assert(heap_creates == 3 && heap_queries == 6 && heap_free_queries == 4);
+    construction_heap = TEST_HEAP;
+    st32(TEST_HEAP_VTABLE + 0x74, 0xAC);
+    hook(GAME_MOBLIN_HEAP, ENEMY);
+    assert(heap_creates == 4 && heap_queries == 8 && heap_free_queries == 4);
+    st32(ENEMY + 4, 999);
+    hook(GAME_MOBLIN_HEAP, ENEMY);
+    assert(heap_creates == 5 && heap_queries == 8);
+    st32(ENEMY + 4, 20);
+    set_stage("sea\0\0\0\0");
+    hook(GAME_MOBLIN_HEAP, ENEMY);
+    assert(heap_creates == 6 && heap_queries == 8);
+    puts("Moblin heap diagnostics: ownership, pending construction, ABI, success/failure and pointer checks passed");
+}
+
 int main(int argc, char **argv) {
     assert(argc == 2);
     void *memory = mmap(PPC_MEM_BASE, 0x80000000ull, PROT_READ | PROT_WRITE,
@@ -753,6 +802,7 @@ int main(int argc, char **argv) {
     test_bow_camera();
     test_impact_bombs();
     test_native_moblin_death();
+    test_moblin_heap_diagnostics();
     puts("Combat regressions: automatic boomerang recovery, third-person bow and safe ground-impact bombs passed");
     dlclose(lib);
     munmap(memory, 0x80000000ull);

@@ -242,7 +242,7 @@ static void begin_run(u8 *p, fopAc_ac_c *link) {
     loading_time = 0;
     result_saved = 0;
     warp(p, HS_STAGE_NAME, 0, 0, -1);
-    wwhd_log("entering Savage Labyrinth prototype");
+    wwhd_log("Hyrule Survivors 0.2.3: entering Savage Labyrinth; Moblin limit 4");
 }
 static void exit_run(u8 *p) {
     hs_combat_stop((void *)*(u32 *)(p + 0x5B2C));
@@ -551,6 +551,38 @@ ENEMY_EXEC(0x0210DD3C, chuchu)
 ENEMY_EXEC(0x02446374, miniblin)
 ENEMY_EXEC(0x0209BD1C, bokoblin)
 ENEMY_EXEC(0x021C9B1C, moblin)
+
+/* Observe the actual native construction heap, inside entrySolidHeap's
+ * callback. Never allocate a probe, change heaps or bypass a destructor. */
+static void log_moblin_heap(void) {
+    u32 heap = wwhd_currentHeap();
+    wwhd_log_int("Moblin construction heap", heap);
+    if (!valid_ptr(heap, 0x10))
+        return;
+    u32 vtable = *(u32 *)(heap + 0xC);
+    if (!valid_ptr(vtable, 0x78))
+        return;
+    u32 function = *(u32 *)(vtable + 0x74); /* native getFreeSize */
+    if ((function & 3) || function < 0x02000000 || function >= 0x03000000)
+        return;
+    u32 free_bytes = ((u32(*)(void *))function)((void *)heap);
+    wwhd_log_int("Moblin construction heap free bytes", free_bytes);
+}
+WWHD_GAME_ORIGINAL(0x021CC524, s32, original_moblin_heap, (void *));
+WWHD_REPLACE(0x021CC524, s32, survivors_moblin_heap, (void *actor)) {
+    int slot = hs_in_arena() ? hs_enemy_slot(actor) : -1;
+    int track = slot >= 0 && hs.enemies[slot].kind == HS_MOBLIN;
+    if (track) {
+        wwhd_log_int("Moblin model construction begin; actor", hs.enemies[slot].id);
+        log_moblin_heap();
+    }
+    s32 result = original_moblin_heap(actor);
+    if (track) {
+        wwhd_log_int("Moblin model construction returned", result);
+        log_moblin_heap();
+    }
+    return result;
+}
 
 /* Ordinary Bokoblin/Moblin weapons are child actors. Retire orphaned weapons
  * after their owner is gone, and keep pending children until lookup resolves. */

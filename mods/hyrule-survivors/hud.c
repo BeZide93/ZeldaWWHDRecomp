@@ -127,7 +127,7 @@ void hs_draw(u32 list) {
         return;
     }
     if (hs.phase == HS_MENU) {
-        header(list, "HYRULE SURVIVORS / FIRST EXPEDITION", "The Savage Labyrinth",
+        header(list, "HYRULE SURVIVORS / 0.2.3", "The Savage Labyrinth",
                "Six waves. Four native abilities. One champion.");
         text(list, 140, 296, 22, teal, "MOVE TO SURVIVE. YOUR WEAPONS ATTACK AUTOMATICALLY.");
         text(list, 140, 345, 20, ink, "Gather green EXP, choose upgrades, and clear every wave.");

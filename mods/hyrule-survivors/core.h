@@ -2,6 +2,7 @@
 #ifndef HS_CORE_H
 #define HS_CORE_H
 #define HS_ENEMIES 24
+#define HS_MOBLIN_LIMIT 4
 #define HS_ORBS 64
 #define HS_WEAPONS 4
 #define HS_WAVES 6

@@ -60,6 +60,16 @@ static int occupied(HsRun *r) {
         n += r->enemies[i].state != HS_FREE;
     return n;
 }
+static int can_spawn(HsRun *r, int kind) {
+    if (kind != HS_MOBLIN)
+        return 1;
+    int count = 0;
+    for (int i = 0; i < HS_ENEMIES; i++)
+        count += r->enemies[i].kind == HS_MOBLIN && r->enemies[i].state != HS_FREE;
+    /* Creating, dying and retiring actors still own native resources. The
+     * bookkeeping pool is not a measured native model-memory budget. */
+    return count < HS_MOBLIN_LIMIT;
+}
 static void orb(HsRun *r, HsVec pos, int amount) {
     int nearest = 0;
     float best = 1e30f;
@@ -325,26 +335,28 @@ void hs_tick(HsRun *r, const HsBackend *b, float dt) {
         int elite = r->wave == HS_WAVES - 1 && r->spawned == hs_wave_quota(r->wave) - 1;
         if (elite)
             kind = 4;
-        HsVec pos = r->player;
-        HsId id = b->spawn(kind, elite, &pos);
-        if (id != HS_NONE) {
-            int hp = elite ? 160 : 8 + kind * 5 + r->wave * 2;
-            r->enemies[slot] = (HsEnemy){.id = id,
-                                         .generation = ++r->serial,
-                                         .state = HS_PENDING,
-                                         .kind = kind,
-                                         .elite = elite,
-                                         .hp = hp,
-                                         .max_hp = hp,
-                                         .pos = pos};
-            r->spawned++;
-            r->spawn_timer = .8f;
-            r->spawn_failures = 0;
-        } else {
-            r->spawn_timer = .5f;
-            if (++r->spawn_failures >= 40) {
-                hs_fail(r, b, "No reachable enemy spawn was found.");
-                return;
+        if (can_spawn(r, kind)) {
+            HsVec pos = r->player;
+            HsId id = b->spawn(kind, elite, &pos);
+            if (id != HS_NONE) {
+                int hp = elite ? 160 : 8 + kind * 5 + r->wave * 2;
+                r->enemies[slot] = (HsEnemy){.id = id,
+                                             .generation = ++r->serial,
+                                             .state = HS_PENDING,
+                                             .kind = kind,
+                                             .elite = elite,
+                                             .hp = hp,
+                                             .max_hp = hp,
+                                             .pos = pos};
+                r->spawned++;
+                r->spawn_timer = .8f;
+                r->spawn_failures = 0;
+            } else {
+                r->spawn_timer = .5f;
+                if (++r->spawn_failures >= 40) {
+                    hs_fail(r, b, "No reachable enemy spawn was found.");
+                    return;
+                }
             }
         }
     }

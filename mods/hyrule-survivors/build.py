@@ -113,6 +113,7 @@ def main():
                               "BOW_MODE": 0x023E8984, "BOOM_MODE": 0x023E8F2C,
                               "BOMB_GROUND": 0x020C7C34, "BOMB_EXPLODE": 0x020C5EF8, "NO_HIT": 0x0200CE78,
                               "REACTION": 0x02041F94, "MOBLIN_EXEC": 0x021C9B1C,
+                              "MOBLIN_HEAP": 0x021CC524, "CURRENT_HEAP": 0x02756140,
                               "CONTACT": 0x025192A8}.items():
             addresses["GAME_" + name] = game_build.code(address)
         (out / "test_addresses.h").write_text("".join(f"#define {name} 0x{address:08X}u\n"
