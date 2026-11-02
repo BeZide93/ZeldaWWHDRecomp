@@ -1,8 +1,8 @@
-# Native combat integration (0.2.0)
+# Native combat integration (0.2.1)
 
 This adapter replaces the prototype's vector attacks with the game's own Link
 animations, sword collision and item actors. It does not ship game assets.
-The 0.1.0 room/run was reported working by the user; 0.2.0's new combat needs
+The 0.1.0 room/run was reported working by the user; 0.2.1's native-combat fixes need
 in-game acceptance testing. Synthetic host tests verify dispatch and ownership,
 not the appearance or complete behavior of the actual game functions.
 
@@ -22,7 +22,7 @@ untranslated EU addresses.
 | Spin Attack | `procCutTurn_init` (`023E6380`), `setSwordModel` (`023DE0B4`), proc `55`. The normal spin drives its animation, sword cylinder and effects. Reach scales `m35A4`, the spin's target cylinder radius. |
 | Hero's Bow | `makeItemType` (`023DF600`), `setBowReloadAnime` (`023EB080`), `makeArrow` (`023EB120`). Normal ready-action processing progresses upper animations `0C → 36 → 0E` and releases the arrow. No first-person aiming proc is entered. |
 | Boomerang | `makeItemType`, upper `BOOMTHROW` (`34`) via `setActAnimeUpper` (`023DE7E8`). Native item-action processing calls `throwBoomerang` (`023FB10C`) at frame 7. It uses the selected enemy as its temporary native lock target, then restores the prior lock pointer. |
-| Bomb | `makeItemType` creates a held bomb; `procGrabThrow_init` (`023E9E48`), proc `71`, plays the full throw. The game releases it at the animation's normal frame and owns velocity, fuse, explosion and self-damage. |
+| Bomb | `makeItemType` creates a held bomb; `procGrabThrow_init` (`023E9E48`), proc `71`, plays the full throw. The game releases it at the animation's normal frame and owns velocity, fuse and explosion. Run bombs additionally explode on ground contact and cannot hit Link. |
 
 `arrowShooting` (`02053814`) receives the selected enemy's current eye position
 before native launch velocity and collision setup. This adjusts the real arrow's
@@ -89,7 +89,38 @@ the existing progression/return tests remain in place.
 
 Before accepting the new combat in-game, check bow release while walking,
 boomerang catches during another ability, spin reach, native enemy defenses,
-bomb throwing/self-damage, upgrades mid-flight, and leaving with live items.
+bomb ground impact/self-hit exclusion, upgrades mid-flight, and leaving with live items.
 Also compare story inventory before/after entry and return, including a Quest
 Log without the sword, bow or bomb bag. Timing and balance may need adjustment
 after this pass; the automated checks cannot establish these properties.
+
+## Native-combat corrections in 0.2.1
+
+- A native throw marks its tracked boomerang as released. `returnBoomerang`
+  (`02442ED8`) later transfers that same actor from the thrown keep back into
+  the equipped keep, often after the throw scheduler is already idle. Cleanup
+  now runs independently of that scheduler: it waits for Link's pending catch
+  flag (`3B8 & 20`), upper catch animation (`33`) and full-body catch proc (`82`)
+  to finish before calling native `deleteEquipItem`. It never deletes a newly
+  created, not-yet-thrown boomerang through this return path.
+- Native `checkNextMode` treats the upper bow/boomerang animation as an aiming
+  request even without item input. `checkNextBowMode` (`023E8984`) and
+  `checkNextBoomerangMode` (`023E8F2C`) now decline that transition only for our
+  active/held/thrown automatic items. Native loading, release and catch still
+  execute; ordinary item aiming outside the run passes through unchanged.
+- `checkExplodeBg_norm` (`020C7C34`) runs after native `bgCrrPos` and before
+  bouncing. A tracked free bomb with `mAcch.m_flags & GROUND_HIT` calls native
+  `procExplode_init` (`020C5EF8`). The flags are at `67C + 28`; `GROUND_HIT` is
+  `20`, and actor carry status (`2E0 & 2000`) excludes held bombs. Wall/ceiling
+  contacts alone retain normal behavior. Native proc switching prevents
+  repeated detonation and the ordinary fuse still provides its normal fallback.
+- Collision rejection happens in `cCcS::ChkNoHitAtTg` (`0200CE78`) before hit
+  registration. Only a tracked run bomb attacking the current Link returns
+  no-hit; bomb-to-enemy, enemy-to-Link and untracked bomb pairs pass through the
+  original function. This removes self-damage and hit reactions without blanket
+  immunity or suppressing unrelated simultaneous enemy attacks. Actor ownership
+  is read from the collider's `mStts` (`44`) and status `mp_actor` (`0C`).
+
+Both translated-region test hosts exercise these regression paths. Actual
+camera appearance, animation timing and collision geometry still require the
+in-game pass described above.

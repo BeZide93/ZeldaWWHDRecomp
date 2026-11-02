@@ -215,7 +215,7 @@ void hs_draw(u32 list) {
             text(list, x + 18, 344, 25, ink, hs_upgrade_names[u]);
             /* Fixed short lines fit the cards without depending on font metrics. */
             const char *a[] = {"Link performs a spin attack.",     "Arrows seek the nearest foe.",
-                               "Native throw, flight and return.", "Link throws a real bomb.",
+                               "Native throw, flight and return.", "Bombs explode on ground contact.",
                                "All weapon damage +20%.",          "Reduce weapon cooldowns.",
                                "Larger sword and bomb radius.",    "Pick up EXP from farther away.",
                                "One extra heart; heal one.",       "Restore three hearts."};

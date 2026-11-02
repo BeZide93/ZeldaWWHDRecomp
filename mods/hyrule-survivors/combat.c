@@ -17,12 +17,14 @@
 #define LOCK_ACTOR 0x65B0
 #define BOMB_SPHERE 0x920
 #define SPHERE_GEOMETRY 0x118
+#define BOMB_GROUND_FLAGS (0x67C + 0x28)
+#define LINK_CATCH_FLAGS 0x3B8
 #define HERO_SWORD 0x38
 #define SWORD_EQUIP 0x103
 typedef struct {
     HsId id, target;
     u32 pointer;
-    int weapon, damage, retiring;
+    int weapon, damage, retiring, released;
     float reach, born;
     unsigned hit_mask, generations[HS_ENEMIES];
 } NativeShot;
@@ -56,6 +58,16 @@ static NativeShot *shot_for(void *actor) {
             *(u16 *)((u8 *)actor + 0xE) == shot_profiles[shots[i].weapon])
             return &shots[i];
     return 0;
+}
+static NativeShot *returned_boomerang(void *link) {
+    NativeShot *shot = shot_for(kept(link, KEEP_EQUIP));
+    return shot && shot->weapon == HS_BOOMERANG && shot->released ? shot : 0;
+}
+static u32 collision_actor(void *object) {
+    if (!valid((u32)object, 0x48))
+        return 0;
+    u32 status = word(object, 0x44);
+    return valid(status, 0x10) ? word((void *)status, 0xC) : 0;
 }
 static fopAc_ac_c *target_for(HsId id) {
     fopAc_ac_c *target = lookup(id);
@@ -147,6 +159,13 @@ void hs_combat_step(void *link) {
     if (hs.phase != HS_RUN)
         return;
     hs_combat_provision();
+    /* returnBoomerang moves the thrown actor back into KEEP_EQUIP. That
+     * happens after the throw's busy state has already ended. Let the native
+     * catch request and animation finish, then release this held actor even
+     * when no attack is busy. Otherwise KEEP_EQUIP blocks every future cast. */
+    if (returned_boomerang(player) && walking(player) && !(word(player, LINK_CATCH_FLAGS) & 0x20) &&
+        upper(player) != 0x33)
+        wwhd_daPy_lk_c__deleteEquipItem(player, 0);
     if (busy_weapon < 0)
         return;
     float age = hs.elapsed - started;
@@ -163,7 +182,8 @@ void hs_combat_step(void *link) {
     else
         done = player->mCurProc != 0x71;
     if (done || age > 4) {
-        cancel_held(player);
+        if (!returned_boomerang(player))
+            cancel_held(player);
         busy_weapon = -1;
         /* A spin has no independent actor; stop accepting its old contacts. */
         if (player->mCurProc != 0x55)
@@ -279,8 +299,56 @@ WWHD_REPLACE(0x023FB10C, void, survivors_throw_boomerang, (void *link)) {
             aim(link, target);
     }
     original_throw_boomerang(link);
-    if (shot)
+    if (shot) {
+        if (shot_for(kept(link, KEEP_THROW)) == shot)
+            shot->released = 1;
         *(u32 *)((u8 *)link + LOCK_ACTOR) = previous;
+    }
+}
+/* checkNextMode enters item aiming merely because an upper-body ready/throw
+ * animation exists. Suppress that transition for our automatic casts; native
+ * ready-action processing, release, recovery and catch still run normally. */
+static int automatic_item(void *link, int weapon) {
+    if (link != player || !hs_in_arena())
+        return 0;
+    NativeShot *held = shot_for(kept(link, KEEP_EQUIP));
+    NativeShot *thrown = shot_for(kept(link, KEEP_THROW));
+    return busy_weapon == weapon || (held && held->weapon == weapon) || (thrown && thrown->weapon == weapon);
+}
+#define ITEM_AIM(address, name, weapon)                                                                                \
+    WWHD_GAME_ORIGINAL(address, s32, original_##name, (void *));                                                       \
+    WWHD_REPLACE(address, s32, survivors_##name, (void *link)) {                                                       \
+        if (automatic_item(link, weapon))                                                                              \
+            return 0;                                                                                                  \
+        return original_##name(link);                                                                                  \
+    }
+ITEM_AIM(0x023E8984, bow_mode, HS_BOW)
+ITEM_AIM(0x023E8F2C, boomerang_mode, HS_BOOMERANG)
+
+/* Called from the native free-bomb proc after bgCrrPos, before bounce. Held
+ * bombs never enter this path; check carry status too so stale ground flags
+ * cannot detonate a bomb in Link's hand. Native explosion handles all effects. */
+WWHD_GAME_ORIGINAL(0x020C7C34, u8, original_bomb_ground, (void *));
+WWHD_REPLACE(0x020C7C34, u8, survivors_bomb_ground, (void *actor)) {
+    NativeShot *shot = hs_in_arena() ? shot_for(actor) : 0;
+    if (shot && shot->weapon == HS_BOMB && hs.phase == HS_RUN && !shot->retiring &&
+        !(((fopAc_ac_c *)actor)->actor_status & 0x2000) && (word(actor, BOMB_GROUND_FLAGS) & 0x20))
+        return wwhd_daBomb_c__procExplode_init(actor) != 0;
+    return original_bomb_ground(actor);
+}
+
+/* Reject only our bomb -> Link collision pair before the engine records hit
+ * damage, knockback or invulnerability. Enemies and ordinary bombs retain
+ * their complete native collision rules, including simultaneous enemy hits. */
+WWHD_GAME_ORIGINAL(0x0200CE78, u32, original_no_hit, (void *, void *, void *));
+WWHD_REPLACE(0x0200CE78, u32, survivors_no_hit, (void *server, void *attack, void *target)) {
+    if (player && collision_actor(target) == (u32)player && hs_in_arena()) {
+        u32 source = collision_actor(attack);
+        NativeShot *shot = valid(source, 0x3AC) ? shot_for((void *)source) : 0;
+        if (shot && shot->weapon == HS_BOMB)
+            return 1;
+    }
+    return original_no_hit(server, attack, target);
 }
 /* This setter is shared; alter only the explosion sphere of a tracked bomb. */
 WWHD_GAME_ORIGINAL(0x02018C8C, void, original_sphere_radius, (void *, f32));
@@ -313,12 +381,7 @@ WWHD_REPLACE(0x025192A8, u32, survivors_contact, (void *target, void *at_info)) 
     int slot = hs_in_arena() ? hs_enemy_slot(target) : -1;
     if (slot < 0)
         return original_contact(target, at_info);
-    u32 object = word(at_info, 0), source = 0;
-    if (valid(object, 0x48)) {
-        u32 status = word((void *)object, 0x44);
-        if (valid(status, 0x10))
-            source = word((void *)status, 0xC);
-    }
+    u32 source = collision_actor((void *)word(at_info, 0));
     NativeShot *shot = valid(source, 0x3AC) ? shot_for((void *)source) : 0;
     if (!shot && source == spin.pointer && spin.pointer && word((void *)source, 4) == spin.id)
         shot = &spin;

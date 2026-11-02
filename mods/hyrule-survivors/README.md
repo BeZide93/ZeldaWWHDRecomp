@@ -7,9 +7,11 @@ assets come from the player's installed game. This repository contains only
 source code and configuration; no game models, textures or map archives.
 
 The **0.1.0 room/run prototype has been reported working in-game by the user**.
-Version **0.2.0 replaces its drawn spirit attacks with native abilities and Link
-animations**. This new combat integration still needs an in-game acceptance
-pass. Automated tests execute the translated adapter against synthetic game
+Version **0.2.1 replaces its drawn spirit attacks with native abilities and Link
+animations**. Version 0.2.1 fixes the reported native-combat issues: automatic
+boomerang cleanup after catching, third-person automatic bow shots, and bombs
+that explode on ground contact without hitting Link. These fixes still need
+an in-game acceptance pass. Automated tests execute the translated adapter against synthetic game
 calls; they cannot verify animation appearance, actual physics or balancing.
 
 ## Install and start
@@ -18,7 +20,7 @@ calls; they cannot verify animation appearance, actual physics or balancing.
    touch/input services and the vector HUD from this repository.
 2. Download `hyrule-survivors-wwhdmod` from the **Hyrule Survivors mod** GitHub
    Actions run and extract the outer artifact ZIP. The contained
-   `hyrule-survivors-0.2.0.wwhdmod` is the installable package.
+   `hyrule-survivors-0.2.1.wwhdmod` is the installable package.
 3. In **Mods → Installed packages**, choose the package, install it and enable
    it. Allow the normal setup/rebuild and restart the game when requested.
 4. Load a Quest Log and stand in an ordinary playable area. Tap/click
@@ -51,9 +53,11 @@ wave heals one heart and collects remaining EXP.
   and attack collision. Replaces Spirit Sword.
 - **Hero's Bow:** Link loads and fires a native arrow with the bow animations;
   the launch direction aims at the selected enemy. Native walls and impacts apply.
-- **Boomerang:** native throwing animation, target lock, flight and return/catch.
-- **Bombs:** Link takes out and throws a native bomb; the game's fuse, explosion
-  and collision handle the result. Bombs can also hurt Link.
+- **Boomerang:** native throwing animation, target lock, flight and return/catch;
+  the returned item is automatically put away after its catch animation.
+- **Bombs:** Link takes out and throws a native bomb. Ground contact triggers
+  the native explosion before a bounce; the normal fuse remains a fallback.
+  Run bombs cannot damage or knock back Link; enemy damage remains active.
 - **EXP and levels:** collect green orbs; choose one of three upgrades while
   combat is paused. Weapon ranks, damage, cooldown, reach, pickup radius,
   heart containers and healing are available. The first three level-ups each
@@ -129,7 +133,7 @@ PowerPC support, and LLD:
 python3 mods/hyrule-survivors/build.py
 ```
 
-Output: `build/hyrule-survivors/hyrule-survivors-0.2.0.wwhdmod`.
+Output: `build/hyrule-survivors/hyrule-survivors-0.2.1.wwhdmod`.
 `CC`, `CXX`, `WWHD_PPC_CLANG`, and `WWHD_PPC_LLD` select compilers.
 The translated host module requires Clang; `WWHD_HOST_CC` overrides its path
 (otherwise the same Clang executable builds both targets).
@@ -146,8 +150,10 @@ check entry, floor validation, input capture, every HUD screen, damage routing,
 save serialization, normal return and Quest Log isolation. Combat checks cover
 all four native dispatch paths, non-walking/busy gates, projectile ownership,
 aiming, hit deduplication, scaled HP, blast radius, pause, failed item creation
-and cleanup. It supplies stubbed
-native game calls, so this is an adapter test, not an in-game test. A game dump
+and cleanup. Regression tests additionally simulate early/late boomerang returns
+through catch and automatic rearming, automatic bow mode transitions, ground
+versus wall/held bomb contact, and bomb/Link collision exclusion while keeping
+enemy and ordinary-bomb collisions intact. It supplies stubbed native game calls, so this is an adapter test, not an in-game test. A game dump
 is not used by these checks. This test harness currently requires Linux;
 the resulting guest package uses the cross-platform runtime ABI.
 
@@ -175,9 +181,10 @@ Before treating this as a stable release, test on a backed-up save:
    widescreen and both game regions. Confirm the story save stays intact.
 
 The 0.1.0 prototype's basic room/run flow was reported working. Repeat these
-checks for the new 0.2.0 native attacks; compilation and simulation are not a
+checks for the new 0.2.1 native attacks; compilation and simulation are not a
 substitute for that pass. In particular, check arrow release while moving,
-boomerang catch during another ability, bomb self-damage, upgrades mid-flight,
+boomerang catch and automatic rearming, ground-impact bombs without self-damage,
+upgrades mid-flight,
 and return with live bombs/arrows. See `NATIVE_COMBAT.md` for integration details.
 
 License: MPL-2.0, matching the repository. Native game assets are not distributed.

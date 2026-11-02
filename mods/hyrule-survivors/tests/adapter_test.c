@@ -25,6 +25,8 @@ enum {
     AT_INFO = 0x18000000,
     AT_OBJ = 0x18000100,
     AT_STATUS = 0x18000300,
+    TG_OBJ = 0x18000400,
+    TG_STATUS = 0x18000600,
     SAVE_BYTES = 0x778
 };
 static const WWHDGuestModuleV1 *mod;
@@ -36,6 +38,7 @@ static volatile int preempt[3];
 static Cpu cpu;
 static unsigned shot_count, native_spin, native_reload, native_throw, native_anim, native_exec, contacts;
 static unsigned shot_alive[32], fail_item;
+static unsigned aim_calls, ground_calls, explosions, no_hit_calls, no_hit_result;
 static float set_radius;
 static void clear_native_keep(uint32_t offset) {
     st32(LINK + offset, HS_NONE);
@@ -167,6 +170,12 @@ static void dispatch(Cpu *c) {
     }
     if (c->pc == GAME_TEXTURE_ANIM)
         return;
+    if (c->pc == GAME_BOMB_EXPLODE) {
+        explosions++;
+        assert(c->r[3] == SHOT_BASE);
+        c->r[3] = 1;
+        return;
+    }
     if (c->pc == GAME_THROW_BOMB) {
         assert(ld32(LINK + 0x65A4));
         native_throw++;
@@ -202,6 +211,17 @@ static void original(Cpu *c, uint32_t address) {
         st32(LINK + 0x659C, ld32(LINK + 0x6594));
         clear_native_keep(0x6590);
         st16(LINK + 0x69B0, 0x100);
+    } else if (address == GAME_BOW_MODE || address == GAME_BOOM_MODE) {
+        aim_calls++;
+        st32(LINK + 0x65F0, address == GAME_BOW_MODE ? 0x94 : 0x80);
+    } else if (address == GAME_BOMB_GROUND) {
+        ground_calls++;
+        c->r[3] = 0;
+        return;
+    } else if (address == GAME_NO_HIT) {
+        no_hit_calls++;
+        c->r[3] = no_hit_result;
+        return;
     } else
         assert(address == GAME_LINK);
     c->r[3] = 1;
@@ -301,6 +321,7 @@ static void setup(void) {
     memset(&cpu, 0, sizeof(cpu));
     cpu.r[1] = STACK + 0xFF000;
     shot_count = native_spin = native_reload = native_throw = native_anim = native_exec = contacts = fail_item = 0;
+    aim_calls = ground_calls = explosions = no_hit_calls = no_hit_result = 0;
     memset(shot_alive, 0, sizeof(shot_alive));
     st32(PLAY + 0x5B2C, LINK);
     st32(LINK + 4, 10);
@@ -472,6 +493,133 @@ static void test_native_combat(void) {
     puts("Native combat: animation dispatch, busy gates, launch aim, real-hit damage, deduplication, radius, pause and "
          "cleanup passed");
 }
+/* Simulate the actual returnBoomerang keep transfer, including its deferred
+ * catch flag. It occurs independently of the scheduler's throw recovery. */
+static void return_native_boomerang(void) {
+    st32(LINK + 0x6590, ld32(LINK + 0x6598));
+    st32(LINK + 0x6594, ld32(LINK + 0x659C));
+    clear_native_keep(0x6598);
+    st16(LINK + 0x69B0, 0x2D);
+    st32(LINK + 0x3B8, 0x20);
+    st32(SHOT_BASE + 0xB0, 0);
+}
+static void test_boomerang_recovery(void) {
+    for (int early_return = 0; early_return < 2; early_return++) {
+        native_fixture();
+        assert(launch(HS_BOOMERANG));
+        hook(GAME_BOOM_MODE, LINK);
+        assert(!cpu.r[3] && !aim_calls && ld32(LINK + 0x65F0) == 4);
+        hook(GAME_THROW_BOOM, LINK);
+        st16(LINK + 0x5888, 0xFFFF);
+        stf32(FIELD(elapsed), 1);
+        if (!early_return)
+            call(COMBAT_STEP, LINK); /* throw busy state has ended */
+        return_native_boomerang();
+        call(COMBAT_STEP, LINK);
+        assert(ld32(LINK + 0x6594) == SHOT_BASE && shot_alive[0]);
+        assert(!launch(HS_BOW)); /* pending catch must not be cancelled */
+        st32(LINK + 0x3B8, 0);
+        st16(LINK + 0x5888, 0x33);
+        stf32(LINK + 0x58D8, 1);
+        st32(LINK + 0x65F0, 0x82);
+        call(COMBAT_STEP, LINK);
+        assert(shot_alive[0]); /* full-body catch still playing */
+        st32(LINK + 0x65F0, 4);
+        call(COMBAT_STEP, LINK);
+        assert(shot_alive[0]); /* upper-body catch still playing */
+        st16(LINK + 0x5888, 0xFFFF);
+        st32(FIELD(phase), HS_PAUSED);
+        call(COMBAT_STEP, LINK);
+        assert(shot_alive[0]);
+        st32(FIELD(phase), HS_RUN);
+        call(COMBAT_STEP, LINK);
+        assert(!shot_alive[0] && !ld32(LINK + 0x6594) && ld16(LINK + 0x69B0) == 0x100);
+        assert(launch(HS_BOW)); /* no manual sheath/input */
+    }
+}
+static void test_bow_camera(void) {
+    native_fixture();
+    assert(launch(HS_BOW));
+    const unsigned animations[] = {0xC, 0x36, 0xE};
+    const unsigned procs[] = {4, 6, 7, 8, 9, 0x17, 0x18};
+    for (unsigned a = 0; a < 3; a++) {
+        st16(LINK + 0x5888, animations[a]);
+        for (unsigned i = 0; i < sizeof(procs) / sizeof(procs[0]); i++) {
+            st32(LINK + 0x65F0, procs[i]);
+            hook(GAME_BOW_MODE, LINK);
+            assert(!cpu.r[3] && !aim_calls && ld32(LINK + 0x65F0) == procs[i]);
+        }
+    }
+    hook(GAME_ARROW_SHOOT, SHOT_BASE); /* normal release still works */
+    clear_native_keep(0x6590);
+    stf32(LINK + 0x58D8, 0);
+    stf32(FIELD(elapsed), 1);
+    call(COMBAT_STEP, LINK);
+    assert(launch(HS_SWORD));
+    /* Hooks must preserve normal manual item aiming outside the expedition. */
+    set_stage("sea\0\0\0\0");
+    hook(GAME_BOW_MODE, LINK);
+    assert(cpu.r[3] == 1 && aim_calls == 1 && ld32(LINK + 0x65F0) == 0x94);
+    hook(GAME_BOOM_MODE, LINK);
+    assert(cpu.r[3] == 1 && aim_calls == 2 && ld32(LINK + 0x65F0) == 0x80);
+    native_fixture();
+    hook(GAME_BOW_MODE, LINK); /* no owned automatic bow */
+    assert(aim_calls == 1);
+}
+static unsigned collision_pair(unsigned source, unsigned target) {
+    st32(AT_OBJ + 0x44, AT_STATUS);
+    st32(AT_STATUS + 0xC, source);
+    st32(TG_OBJ + 0x44, TG_STATUS);
+    st32(TG_STATUS + 0xC, target);
+    cpu.r[4] = AT_OBJ;
+    cpu.r[5] = TG_OBJ;
+    hook(GAME_NO_HIT, PLAY);
+    return cpu.r[3];
+}
+static void test_impact_bombs(void) {
+    native_fixture();
+    assert(launch(HS_BOMB));
+    st32(SHOT_BASE + 0x6A4, 0x20); /* ground flag left over while carried */
+    st32(SHOT_BASE + 0x2E0, 0x2000);
+    hook(GAME_BOMB_GROUND, SHOT_BASE);
+    assert(!explosions && ground_calls == 1);
+    clear_native_keep(0x65A0);
+    st32(SHOT_BASE + 0x2E0, 0);
+    st32(SHOT_BASE + 0x6A4, 0x10 | 0x200); /* wall/ceiling alone */
+    hook(GAME_BOMB_GROUND, SHOT_BASE);
+    assert(!explosions && ground_calls == 2);
+    st32(SHOT_BASE + 0x6A4, 0);
+    hook(GAME_BOMB_GROUND, SHOT_BASE);
+    assert(!explosions && ground_calls == 3);
+    st32(SHOT_BASE + 0x6A4, 0x20);
+    hook(GAME_BOMB_GROUND, SHOT_BASE);
+    assert(cpu.r[3] == 1 && explosions == 1 && ground_calls == 3);
+    /* Bomb self-hit is excluded before damage/reaction registration. */
+    assert(collision_pair(SHOT_BASE, LINK) == 1 && !no_hit_calls);
+    assert(collision_pair(SHOT_BASE, ENEMY) == 0 && no_hit_calls == 1);
+    contact(SHOT_BASE);
+    assert(ld32(FIELD(enemies) + offsetof(HsEnemy, hp)) == 143);
+    assert(collision_pair(ENEMY, LINK) == 0 && no_hit_calls == 2);
+    unsigned other = SHOT_BASE + 0x4000;
+    st32(other + 4, 999);
+    st16(other + 0xE, 0x126);
+    st32(other + 0x6A4, 0x20);
+    assert(collision_pair(other, LINK) == 0 && no_hit_calls == 3);
+    no_hit_result = 1; /* preserve native rejection of unrelated pairs too */
+    assert(collision_pair(ENEMY, LINK) == 1 && no_hit_calls == 4);
+    hook(GAME_BOMB_GROUND, other);
+    assert(explosions == 1 && ground_calls == 4);
+    /* Stale actor identity must not grant immunity to a reused pointer. */
+    st32(SHOT_BASE + 4, 999);
+    no_hit_result = 0;
+    assert(collision_pair(SHOT_BASE, LINK) == 0 && no_hit_calls == 5);
+    st32(SHOT_BASE + 4, 100);
+    set_stage("sea\0\0\0\0");
+    assert(collision_pair(SHOT_BASE, LINK) == 0 && no_hit_calls == 6);
+    hook(GAME_BOMB_GROUND, SHOT_BASE);
+    assert(explosions == 1 && ground_calls == 5);
+}
+
 int main(int argc, char **argv) {
     assert(argc == 2);
     void *memory = mmap(PPC_MEM_BASE, 0x80000000ull, PROT_READ | PROT_WRITE,
@@ -537,6 +685,10 @@ int main(int argc, char **argv) {
     puts("Translated adapter: entry, floor gate, input, HUD, damage, serialization, return and Quest Log isolation "
          "passed");
     test_native_combat();
+    test_boomerang_recovery();
+    test_bow_camera();
+    test_impact_bombs();
+    puts("Combat regressions: automatic boomerang recovery, third-person bow and safe ground-impact bombs passed");
     dlclose(lib);
     munmap(memory, 0x80000000ull);
 }

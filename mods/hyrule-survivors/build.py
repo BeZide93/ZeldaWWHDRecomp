@@ -110,6 +110,8 @@ def main():
                               "ANGLE_Y": 0x0200F93C, "ANGLE_X": 0x0200F974,
                               "ARROW_SHOOT": 0x02053814, "THROW_BOOM": 0x023FB10C, "RADIUS": 0x02018C8C,
                               "ARROW_EXEC": 0x02053184, "BOOM_EXEC": 0x020CC454, "BOMB_EXEC": 0x020C506C,
+                              "BOW_MODE": 0x023E8984, "BOOM_MODE": 0x023E8F2C,
+                              "BOMB_GROUND": 0x020C7C34, "BOMB_EXPLODE": 0x020C5EF8, "NO_HIT": 0x0200CE78,
                               "CONTACT": 0x025192A8}.items():
             addresses["GAME_" + name] = game_build.code(address)
         (out / "test_addresses.h").write_text("".join(f"#define {name} 0x{address:08X}u\n"

@@ -10,7 +10,7 @@ const char *const hs_upgrade_names[] = {"Spin Attack", "Hero's Bow", "Boomerang"
 const char *const hs_upgrade_details[] = {"Link's native spin attack. More damage per rank.",
                                           "Unlock auto-aimed arrows. Extra ranks add damage.",
                                           "Unlock a returning blade. Uses native flight and collision.",
-                                          "Unlock timed bombs. Explosions hit every nearby enemy.",
+                                          "Unlock bombs that explode on ground contact. Safe for Link.",
                                           "+20% damage for every weapon.",
                                           "Shorter cooldowns for every weapon.",
                                           "+15% sword reach and explosion radius.",
