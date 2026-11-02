@@ -55,15 +55,39 @@ static void test_textures(void) {
         st32(MATERIALS+m*0x39c,res);
         st32(res,0x464d4154); st16(res+0xc,index); st8(res+0x10,2); st8(res+0x11,2);
         st32(res+0x2c,0x80-0x2c); /* sampler array */
-        st32(res+0x80+0xc,0xc0-(0x80+0xc));
-        st32(res+0x98+0xc,0xc4-(0x98+0xc));
+        /* Wii U sampler: three GX2 words, handle (+0x0c), name (+0x10),
+         * index (+0x14), padding; verified against BfresLibrary Sampler.Load.
+         * Zero handles reproduce the video's ?,? / NO_ALBEDO failure. */
+        st32(res+0x80+0xc,0); st32(res+0x98+0xc,0);
+        st32(res+0x80+0x10,0xc0-(0x80+0x10));
+        st32(res+0x98+0x10,0xc4-(0x98+0x10));
+        st8(res+0x80+0x14,0); st8(res+0x98+0x14,1);
         memcpy(ppc_ptr(res+0xc0),"_a1\0_a0",8);
         st32(native,res); st32(native+0x2c,TEX_REFS+index*0x20);
         st32(texture_slot(m)-4,TEX_ORIGINAL); st32(texture_slot(m),TEX_ORIGINAL);
     }
     texture_refresh(); texture_tinted();
+    expect_hud("DL 0.1.9 ON");
     expect_hud("Body J/N=8/8  Albedo=8  Views=8  Eyes found/bound=6/6");
     expect_hud("Samplers body: _a1,_a0  eyes: _a1,_a0");
+    /* A handle resembling a valid _a0 relative pointer must never select the
+     * toon slot or affect diagnostic names. Only the actual +0x10 name counts. */
+    hook(0x027f50f8,2,MODEL,0);
+    st32(TEX_RES+0x80+0xc,0xc4-(0x80+0xc));
+    st32(TEX_RES+0x98+0xc,0xc0-(0x98+0xc));
+    hook(0x027f50f8,3,MODEL,0); texture_tinted();
+    expect_hud("Samplers body: _a1,_a0  eyes: _a1,_a0");
+    hook(0x027f50f8,2,MODEL,0);
+    st32(TEX_RES+0x98+0x10,0); /* missing name even though the handle looks valid */
+    st32(TEX_RES+0x98+0xc,0xc4-(0x98+0xc));
+    hook(0x027f50f8,3,MODEL,0);
+    assert(ld32(texture_slot(0))==TEX_ORIGINAL && ld32(texture_slot(0)-4)==TEX_ORIGINAL);
+    expect_hud("Skip=NO_ALBEDO  Count=1");
+    expect_hud("Samplers body: _a1,?  eyes: _a1,_a0");
+    hook(0x027f50f8,2,MODEL,0);
+    st32(TEX_RES+0x80+0xc,0); st32(TEX_RES+0x98+0xc,0);
+    st32(TEX_RES+0x98+0x10,0xc4-(0x98+0x10));
+    hook(0x027f50f8,3,MODEL,0); texture_tinted();
     uint32_t body_view=ld32(texture_slot(0)), eye_view=ld32(texture_slot(1));
     assert(body_view!=eye_view); /* the same input texture needs two distinct views */
     memcpy(old_view,ppc_ptr(eye_view),sizeof old_view);

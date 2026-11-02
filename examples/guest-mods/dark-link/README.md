@@ -1,11 +1,19 @@
-# Dark Link (diagnostic prototype 0.1.8)
+# Dark Link (prototype 0.1.9)
 
-Standalone code mod for ZeldaWWHDRecomp: charge with sword hits and activate a
-sword-damage boost. **Full black shading and red eyes are still unresolved.**
-The user confirmed that 0.1.7, like 0.1.6, only blackens lit surfaces and leaves
-the eyes unchanged. Version 0.1.8 retains that appearance implementation and adds
-bounded on-screen observations to find where the texture path stops or loses its
-bindings. This is a diagnostic build, not a verified appearance fix.
+Standalone code mod for ZeldaWWHDRecomp: charge with sword hits, activate a
+sword-damage boost and a black-body/red-eye texture override.
+
+**0.1.9 fixes the sampler-name offset that blocked every texture override in the
+0.1.8 diagnostic video.** The video showed 24/24 materials, six recognized eyes,
+zero albedo matches/views, and `NO_ALBEDO` for all 24 materials. The code read the
+sampler handle at +0x0c as a name; Wii U ResSampler stores its name at +0x10,
+after three GX2 register words and the handle. Both lookup and diagnostics now
+read +0x10. The earlier synthetic tests repeated the incorrect layout; corrected
+fixtures fail against the old module and pass with this change.
+
+This resolves a demonstrated lookup defect. Full black shading and red eyes
+still need confirmation in-game; successful synthetic tests do not prove shader
+output. The 0.1.8 on-screen diagnostics remain available for that confirmation.
 The package contains original code only: no textures, models or game binaries.
 
 ## Install
@@ -16,7 +24,7 @@ The package contains original code only: no textures, models or game binaries.
 3. Enable **Code mods** in setup if needed, complete the code-mod setup/build,
    and restart the game. Accept the normal code-mod trust prompt.
 
-With the gauge visible, the HUD title must read **DARK LINK 0.1.8**. This label
+With the gauge visible, the HUD title must read **DARK LINK 0.1.9**. This label
 comes from the running code module, not just the package manifest.
 
 The same package is translated for the installed USA or EU build and the host
@@ -24,7 +32,7 @@ platform, including Android. It does not require a new APK/runtime feature.
 
 ### Upgrading from 0.1.0/0.1.1
 
-Replace the installed package with 0.1.8 and fully restart the game, then load a
+Replace the installed package with 0.1.9 and fully restart the game, then load a
 normal in-game save. Do not resume a full emulator/recomp save state made with the
 old visual effect active: 0.1.1 left extra material override flags set. The new
 version cannot infer those flags' original values from an already altered state.
@@ -52,15 +60,15 @@ is claimed while the button is hidden or normal gameplay is suspended. If your
 host controller mapping assigns another action to a stick click, use the DARK
 button, automatic activation, or adjust that host binding.
 
-## Diagnose the incomplete appearance
+## Verify the appearance and read diagnostics
 
-1. Install 0.1.8, finish the code-mod build and fully restart the game.
+1. Install 0.1.9, finish the code-mod build and fully restart the game.
 2. Enable **Free transformation** and **Appearance diagnostics** in mod settings.
 3. Activate Dark Link, wait a moment in normal gameplay, and capture the four
    diagnostic lines near the top of the screen. A screenshot or typed values are
    enough; no Share log function, log upload or game binary is needed.
 
-The first line identifies the running module as `DL 0.1.8 ON`. `Draw` counts
+The first line identifies the running module as `DL 0.1.9 ON`. `Draw` counts
 active body draw-hook calls; `Refresh B/H/Hair` counts active native texture-refresh
 returns for body, hands and hair. Counters saturate at 999999 and reset on a new
 transformation or when diagnostics are enabled. They are not frame counts.
@@ -149,12 +157,14 @@ outer submission, native/other-mod changes, absent samplers and invalid resource
 hands/hair, freezing, cancellation, disable, stage changes, death, deletion and
 stale material-array identity. Existing TEV/timing/gameplay checks also run.
 HUD tests also verify no-refresh reporting, observed sampler/eye/material counts,
-missing albedo, invalid model/material guards, overwritten bindings, reset and the
+zero/misleading handles, missing actual sampler names, missing albedo, invalid
+model/material guards, overwritten bindings, reset and the
 live diagnostic toggle. These checks validate memory and descriptor behavior,
 not the game's shader output or actual in-game resource layout.
 
-For this build, report the diagnostic lines using the steps above. Full visual
-acceptance (black shaded/lit surfaces, red animated eyes and clean restoration)
+Test lit and shaded surfaces, normal/blinking/damage eyes, then toggle off and
+check restoration. If any part remains wrong, report the four diagnostic lines.
+Albedo/views should now be nonzero for supported materials. Full visual acceptance
 remains outstanding; synthetic fixtures cannot establish it.
 
 ## Build
@@ -185,3 +195,8 @@ Texture-path references: `runtime/src/mods/story_prop_textures.cpp`,
 `tools/story_mods/export_glb.py`, `runtime/third_party/cemu/gx2_texture_regs.cpp`,
 `runtime/third_party/cemu/Cafe/HW/Latte/ISA/LatteReg.h`, and the public decomp's
 `d/actor/d_a_obj_ftree.cpp` and `d/actor/d_a_tbox.cpp`.
+
+Sampler layout reference (Wii U Load/Save, three uint32 GX2 words followed by
+handle, name, byte index and padding):
+[public BfresLibrary Sampler.cs](https://github.com/KillzXGaming/BfresLibrary/blob/master/BfresLibrary/Shared/Models/Material/Sampler.cs).
+No third-party code or game assets are copied into this package.

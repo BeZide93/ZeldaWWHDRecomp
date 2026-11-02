@@ -81,6 +81,10 @@ static u32 dl_texture_view(u32 texture, int eye) {
         ((eye ? 5u : 4u) << 16) | (4u << 19) | (4u << 22);
     return (u32)cached->view;
 }
+/* Wii U ResSampler (24 bytes): GX2 words +0x00..08, handle +0x0c,
+ * self-relative name +0x10, index +0x14. The handle is NOT a name pointer.
+ * Layout checked against BfresLibrary/Shared/Models/Material/Sampler.cs.
+ * 0.1.7/8 mistakenly read +0x0c, skipping every material in the user's video. */
 static s32 dl_albedo_slot(u32 resource) {
     if (!dl_game_span(resource, 0x34) || *(u32*)resource != 0x464d4154u) return -DL_PROBE_FMAT;
     const u8* r = (const u8*)resource;
@@ -89,7 +93,7 @@ static s32 dl_albedo_slot(u32 resource) {
     u32 samplers = dl_relative(resource + 0x2c);
     if (!dl_game_span(samplers, count * 24)) return -DL_PROBE_SAMPLERS;
     for (u32 i = 0; i < count; ++i) {
-        u32 name = dl_relative(samplers + i * 24 + 0xc);
+        u32 name = dl_relative(samplers + i * 24 + 0x10);
         /* Names need not be word-aligned; bound the four-byte string. */
         if (name && name <= 0x50000000u - 4) {
             const char* s = (const char*)name;
@@ -108,7 +112,7 @@ static void dl_probe_samplers(u32 resource, char out[48]) {
     if (!count || count > 32 || !dl_game_span(samplers, count * 24)) return;
     for (u32 i = 0; i < count && i < 3; ++i) {
         if (i) out[n++] = ',';
-        u32 name = dl_relative(samplers + i * 24 + 0xc);
+        u32 name = dl_relative(samplers + i * 24 + 0x10);
         if (!name || name > 0x50000000u - 13) { out[n++] = '?'; continue; }
         u32 j = 0;
         for (; j < 12 && ((u8*)name)[j]; ++j) {
@@ -207,7 +211,7 @@ static void dl_diag_hud(u32 list) {
 #define DL_S(s) n = dl_probe_append(line, n, s)
 #define DL_N(v) n = dl_probe_number(line, n, v)
     char* line = dl_probe_lines[0];
-    DL_S("DL 0.1.8 "); DL_S(dl_state.active ? "ON" : "OFF (last sample)");
+    DL_S("DL 0.1.9 "); DL_S(dl_state.active ? "ON" : "OFF (last sample)");
     DL_S("  Draw="); DL_N(dl_probe.draws); DL_S("  Refresh B/H/Hair=");
     DL_N(dl_probe.refresh[0]); DL_S("/"); DL_N(dl_probe.refresh[1]); DL_S("/"); DL_N(dl_probe.refresh[2]); lengths[0] = n;
     line = dl_probe_lines[1]; n = 0;
