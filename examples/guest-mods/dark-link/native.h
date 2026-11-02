@@ -11,6 +11,9 @@
 #define DL_AT_POWER 0x02518DB0
 #define DL_CC_CHECK 0x025192A8
 #define DL_MODEL_ENTRY 0x027F4F1C
+#define DL_MODEL_UPDATE 0x027F4FE4
+
+WWHD_GAME_FUNC(0x027F9F0C, f32*, dl_material_parameter, (void*, u32));
 
 WWHD_GAME_FUNC(0x027DF9B0, s32, dl_material_name_index, (void*, const char*));
 /* The same two sead::SafeString names that Link's createHeap uses to find the

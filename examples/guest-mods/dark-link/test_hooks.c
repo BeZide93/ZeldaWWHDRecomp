@@ -10,17 +10,11 @@
 enum { PLAY=0x11000000, LINK=0x11010000, SAVE=0x11020000, ENEMY=0x11030000,
        HIT=0x11040000, INPUT=0x11050000, MODEL=0x11060000, DATA=0x11070000,
        MATERIALS=0x11080000, EYE_ANIM=0x11090000, RESOURCE=0x110a0000,
-       NAMES=0x110b0000, PE=0x110c0000, FOG=0x110d0000, VTABLE=0x110e0000, INSTANCES=0x110f0000 };
+       NAMES=0x110b0000, INSTANCES=0x110f0000 };
 static const WWHDGuestModuleV1* module;
 static uint32_t filter, hud, touch, step=1, revision=1;
 static int free_mode, enabled=1, paused, menu, touch_visible=1, claim_active, elements;
-static int eye_indices[2]={1,2}, name_lookups, diagnostics=1, log_count, phase_count;
-static char last_log[256];
-static void log_line(Cpu* c) {
-    const char* line=(const char*)ppc_ptr(c->r[3]);
-    assert(strlen(line)<sizeof last_log); strcpy(last_log,line); ++log_count;
-    if (!strncmp(line,"DL phase ",9)) ++phase_count;
-}
+static int eye_indices[2]={1,2}, name_lookups, missing_color;
 
 static void execute(uint32_t fn, uint32_t a, uint32_t b) {
     Cpu c = {0}; c.r[1] = 0x1201fff0; c.r[3] = a; c.r[4] = b;
@@ -40,7 +34,7 @@ static const char* arg_string(Cpu* c) { return (const char*)ppc_ptr(c->r[3]); }
 static void config_bool(Cpu* c) {
     const char* key=arg_string(c);
     c->r[3] = !strcmp(key,"free_transform") ? free_mode : !strcmp(key,"enabled") ? enabled :
-        !strcmp(key,"touch_button") ? touch_visible : !strcmp(key,"diagnostics") ? diagnostics : c->r[4];
+        !strcmp(key,"touch_button") ? touch_visible : c->r[4];
 }
 static void config_int(Cpu* c) { c->r[3]=c->r[4]; }
 static void config_revision(Cpu* c) { c->r[3]=0; c->r[4]=revision; }
@@ -54,7 +48,6 @@ static void emit(Cpu* c) { ++elements; c->r[3]=1; }
 static void copy(Cpu* c) { memcpy(ppc_ptr(c->r[3]),ppc_ptr(c->r[4]),c->r[5]); }
 static void clear(Cpu* c) { memset(ppc_ptr(c->r[3]),c->r[4],c->r[5]); }
 static PpcFunc service(const char* name) {
-    if (!strcmp(name,"wwhd_log")) return log_line;
     if (!strcmp(name,"wwhd_config_bool")) return config_bool;
     if (!strcmp(name,"wwhd_config_int")) return config_int;
     if (!strcmp(name,"wwhd_config_changed")) return config_revision;
@@ -74,6 +67,9 @@ static void dispatch(Cpu* c) {
         case 0x025200d4: c->r[3]=PLAY; return;
         case 0x025986bc: c->r[3]=menu; return;
         case 0x025af2a4: c->r[3]=paused; return;
+        case 0x027f9f0c:
+            assert(c->r[4]==4 || c->r[4]==7); /* never request lighting/shadow registers */
+            c->r[3] = missing_color ? 0 : c->r[3]+4+c->r[4]*16; return;
         case 0x027df9b0:
             assert(c->r[3]==RESOURCE+0x100); ++name_lookups;
             assert(c->r[4]==NAMES || c->r[4]==NAMES+32);
@@ -81,7 +77,7 @@ static void dispatch(Cpu* c) {
         default: fprintf(stderr,"Unexpected native call: %08x\n",c->pc); abort();
     }
 }
-static void tick(void) { ++step; hook(0x0240ebb0,2,LINK,0); hook(0x0240ebb0,3,LINK,0); }
+static void tick(void) { ++step; hook(0x0240ebb0,2,LINK,0); }
 static void buttons(uint32_t value) { st32(INPUT,value); execute(filter,INPUT,0); }
 static unsigned damage(unsigned power) {
     st8(HIT+8,power); hook(0x02518db0,3,HIT,0); return ld8(HIT+8);
@@ -98,12 +94,23 @@ static void restored(void) {
     assert(!memcmp(ppc_ptr(MATERIALS),original_materials,sizeof original_materials));
     assert(!memcmp(ppc_ptr(INSTANCES),original_instances,sizeof original_instances));
 }
+static void tinted(void) {
+    for (int m=0;m<3;++m) {
+        uint32_t expected=0xa0000090u;
+        assert(ld32(MATERIALS+m*0x39c+0xa0)==expected);
+        for (int k=0;k<11;++k) {
+            int changed=k==4 || k==7;
+            assert((float)ldf32(color(m,k))==(changed ? (m ? 1.0f : 0.008f) : 0.25f+k*0.01f));
+            assert((float)ldf32(color(m,k)+4)==(changed ? (m ? 0.002f : 0.009f) : 0.5f));
+            assert((float)ldf32(color(m,k)+8)==(changed ? (m ? 0.002f : 0.012f) : 0.75f));
+            assert((float)ldf32(color(m,k)+12)==0.4f+m*0.1f);
+        }
+    }
+}
 static void prepare(int active) {
-    (void)active; /* This diagnostic version deliberately has no appearance writes. */
-    hook(0x025e2e5c,2,MODEL,0); restored();
-    hook(0x027f4f1c,2,MODEL,0); restored();
+    hook(0x027f4f1c,2,MODEL,0);
+    if (active) tinted(); else restored();
     hook(0x027f4f1c,3,MODEL,0); restored();
-    hook(0x027f55fc,2,MODEL,0); restored();
 }
 int main(int argc, char** argv) {
     assert(argc==2);
@@ -120,7 +127,7 @@ int main(int argc, char** argv) {
     memcpy(ppc_ptr(module->mem_base),module->image,module->image_size);
     for (unsigned i=0; i<module->hook_count; ++i) {
         assert(module->hooks[i].kind!=WWHD_GUEST_REPLACE);
-        assert(module->hooks[i].target!=0x027f5018 && module->hooks[i].target!=0x027f583c);
+        assert(module->hooks[i].target!=0x027f5018 && module->hooks[i].target!=0x027f583c && module->hooks[i].target!=0x027f55fc);
     }
     st32(PLAY+0x5b2c,LINK); st32(LINK+4,42); st32(0x101f84dc,SAVE);
     st16(SAVE+0x20,80); st16(SAVE+0x22,80); st8(ENEMY+0x2da,2);
@@ -153,39 +160,48 @@ int main(int argc, char** argv) {
     }
     st32(MODEL+0x138,3); st32(MODEL+0x13c,INSTANCES);
     for (int m=0;m<3;++m) {
-        st32(MATERIALS+m*0x39c,RESOURCE+0x200+m*0x20);
-        st16(RESOURCE+0x200+m*0x20+0xc,m);
-        st32(MATERIALS+m*0x39c+0xa0,0xa0000090u+m);
+        /* absent/partly present/fully present tint mask; unrelated bits survive */
+        st32(MATERIALS+m*0x39c+0xa0,0xa0000000u+(m==1 ? 0x10 : m==2 ? 0x90 : 0));
         for (int k=0;k<14;++k) st32(INSTANCES+m*0x38+k*4,0x12340000u+m*100+k);
     }
     memcpy(original_materials,ppc_ptr(MATERIALS),sizeof original_materials);
     memcpy(original_instances,ppc_ptr(INSTANCES),sizeof original_instances);
     prepare(1); assert(name_lookups==2);
-    assert(strstr(last_log,"DL instance [slot,i,14 words]"));
-    int logs=log_count;
-    for (int i=0;i<100;++i) prepare(1);
-    assert(log_count==logs); /* each model/path detailed only once per phase */
-    hook(0x027f55fc,2,MODEL+0x400,0); assert(log_count==logs); restored();
-    diagnostics=0; tick();
-    for (int i=0;i<100;++i) { prepare(1); tick(); }
-    assert(log_count==logs); /* no logs/reads while explicitly disabled */
-    diagnostics=1; tick(); prepare(1); assert(log_count>logs);
-    for (int i=0;i<60;++i) tick();
-    assert(strstr(last_log,"DL probe player matches"));
-    logs=log_count;
-    for (int i=0;i<100;++i) { prepare(1); tick(); }
-    assert(log_count==logs); /* bounded window closes; not a per-frame log */
-    /* Toggle enough times to exhaust the four-session cap. */
-    free_mode=1; ++revision; tick();
-    for (int i=0;i<8;++i) { buttons(0); buttons(0x60000); tick(); prepare(0); }
-    logs=log_count;
-    for (int i=0;i<4;++i) { buttons(0); buttons(0x60000); tick(); prepare(0); }
-    assert(log_count==logs);
-    /* Restore the timed-mode gameplay scenario for the remaining tests. */
-    enabled=0; ++revision; tick();
-    enabled=1; free_mode=0; ++revision; tick();
+    /* Native changes between preparation calls require reapplying the tint,
+     * without replacing the saved baseline with the already-tinted value. */
+    hook(0x027f4f1c,2,MODEL,0);
+    stf32(color(0,4),0.75f);
+    hook(0x027f4fe4,2,MODEL,0); tinted();
+    hook(0x027f4fe4,3,MODEL,0); tinted();
+    hook(0x027f4f1c,3,MODEL,0); restored();
+    /* Restore our two mask bits, but retain unrelated native mask updates. */
+    hook(0x027f4f1c,2,MODEL,0);
+    st32(MATERIALS+0xa0,ld32(MATERIALS+0xa0)|0x4000);
+    hook(0x027f4f1c,3,MODEL,0);
+    assert(ld32(MATERIALS+0xa0)==0xa0004000u);
+    st32(MATERIALS+0xa0,0xa0000000u); restored();
+    hook(0x027f4f1c,2,MODEL+0x400,0); restored();
+    hook(0x027f4f1c,3,MODEL+0x400,0); restored();
+    for (int i=0;i<20;++i) hook(0x027f4f1c,2,MODEL,0);
+    for (int i=0;i<20;++i) hook(0x027f4f1c,3,MODEL,0);
+    restored();
+    missing_color=1; prepare(0); missing_color=0;
+    st32(DATA+0x0c,97); prepare(0); st32(DATA+0x0c,3);
+    st32(LINK+0x3bc,0x800); prepare(0); st32(LINK+0x3bc,0);
+    /* Both native eye names identify eyes even without animation controllers. */
+    eye_indices[0]=-1; eye_indices[1]=3;
+    hook(0x027f4f1c,2,MODEL,0);
+    assert((float)ldf32(color(1,4))==0.008f && (float)ldf32(color(2,4))==0.008f);
+    hook(0x027f4f1c,3,MODEL,0); restored();
+    st32(LINK+0x604,EYE_ANIM); st32(MATERIALS+0x39c+0x24,EYE_ANIM);
+    hook(0x027f4f1c,2,MODEL,0); assert((float)ldf32(color(1,4))==1.0f);
+    hook(0x027f4f1c,3,MODEL,0);
+    st32(LINK+0x604,0); st32(MATERIALS+0x39c+0x24,0); restored();
+    eye_indices[0]=1; eye_indices[1]=2;
+    /* Cancellation must leave the next preparation untouched. */
+    buttons(0); buttons(0x60000); tick(); assert(damage(3)==3); prepare(0);
     buttons(0); for (int i=0;i<20;++i) hit(1);
-    buttons(0x60000); tick(); assert(damage(3)==6);
+    buttons(0x60000); tick(); assert(damage(3)==6); prepare(1);
 
     paused=1; buttons(0); assert(!claim_active); elements=0; execute(hud,1,0); assert(!elements);
     for (int i=0;i<900;++i) tick();
@@ -212,7 +228,7 @@ int main(int argc, char** argv) {
     st16(SAVE+0x22,80); tick(); buttons(0x60000); tick(); assert(damage(3)==6);
     hook(0x027f4f1c,2,MODEL,0);
     enabled=0; ++revision; tick(); assert(damage(3)==3);
-    /* Probe remains read-only even when enabled changes between entry/return. */
+    /* Restore even when enabled changes between entry and return. */
     hook(0x027f4f1c,3,MODEL,0); restored(); prepare(0);
     enabled=1; ++revision; tick(); buttons(0); buttons(0x60000); tick(); assert(damage(3)==6);
     hook(0x0240ee28,2,LINK,0); assert(damage(3)==3 && !claim_active); prepare(0);

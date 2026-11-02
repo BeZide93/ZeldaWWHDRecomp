@@ -1,11 +1,11 @@
-# Dark Link (diagnostic prototype 0.1.3)
+# Dark Link (prototype 0.1.4)
 
-Standalone code mod for ZeldaWWHDRecomp. The gauge, activation, HUD and sword
-boost are implemented. **The Dark Link appearance is not working yet.** Version
-0.1.3 removes the ineffective fog edits and provides a bounded, read-only probe
-of the model/material path. It does not recolor Link, and is not a visual fix.
-This package contains original code only: no textures, models, game binaries or
-save data.
+Standalone code mod for ZeldaWWHDRecomp: charge with sword hits, activate a damage
+boost and a partial body tint. Version 0.1.4 restores the original C0/K0 color
+approach after the diagnostic build, with corrected restoration of its override
+bits. **Complete shadow recoloring and visible red eyes are still unresolved.**
+This is a recovery of the partial appearance, not a finished Dark Link skin.
+The package contains original code only: no textures, models or game binaries.
 
 ## Install
 
@@ -20,7 +20,7 @@ platform, including Android. It does not require a new APK/runtime feature.
 
 ### Upgrading from 0.1.0/0.1.1
 
-Replace the installed package with 0.1.3 and fully restart the game, then load a
+Replace the installed package with 0.1.4 and fully restart the game, then load a
 normal in-game save. Do not resume a full emulator/recomp save state made with the
 old visual effect active: 0.1.1 left extra material override flags set. The new
 version cannot infer those flags' original values from an already altered state.
@@ -48,39 +48,28 @@ is claimed while the button is hidden or normal gameplay is suspended. If your
 host controller mapping assigns another action to a stick click, use the DARK
 button, automatic activation, or adjust that host binding.
 
-## Capture the visual diagnostic
+## Appearance and limits
 
-1. Install 0.1.3 and start a fresh session from a normal in-game save.
-2. Keep **Visual diagnostic logs** enabled (default in this diagnostic build).
-3. Wait about three seconds in gameplay, enable **Free transformation**, then
-   tap **DARK**, wait three seconds, tap it again and wait three seconds.
-4. Share the regular application log. Android's setup screen has **Share log**;
-   a crash is not needed. Look for `[guestmod:dark-link]` and `DL` probe lines.
+Only native C0/K0 RGB (indices 4 and 7) are changed. These are the two registers
+used by the original version that the user reported partially recolored Link.
+The other nine color registers, native alpha and fog remain unchanged. Current
+player body/hands/hair instance identity limits the override; frozen Link is
+skipped. Eye materials use the game's own names, with controller fallback. The
+user's 0.1.3 trace confirmed the body eye indices 8/11; these indices are resolved
+dynamically rather than hard-coded.
 
-The probe logs the version, active/enabled/gameplay state, observed model-path
-counts and one scalar snapshot per player model/path/state. It covers at most
-four state changes and 60 logic steps per state. Repeated frames do not produce
-repeated snapshots. Switch the diagnostic option off/on to capture again.
-Logging stops while the option is off. It reads material IDs, pointer addresses,
-flags and per-instance material records, not texture/model asset contents.
+RGB values are saved once, reapplied in nested preparation, and restored bit for
+bit. The two override-mask bits are restored to their original values instead of
+being left enabled. Changes by native code to unrelated mask bits survive.
+Scopes now surround native model entry/update (material preparation), ending
+before viewCalc queues its asynchronous job. No visual hooks run around
+viewCalc, joint submission or the UBO worker. This is a narrower scope than
+0.1.0; its real-game behavior still requires confirmation.
 
-Path IDs in the log: 0 = mDoExt model entry wrapper, 1 = native model entry,
-2 = native model entry return, 3 = viewCalc entry. Model slots: 0 = body,
-1 = hands, 2 = hair. All numeric row values are hexadecimal. An absent path or
-model in a capture is evidence too; the summary includes zero match counts.
-No asynchronous UBO worker hook is installed. Unknown material counts are skipped.
-
-## Scope and limits
-
-The previous material-register edit altered lighting and left override bits set.
-The subsequent local PE-fog edit had no visible effect in the user's game.
-`runtime/src/fog_pin.cpp` shows the HD renderer copying fog from a per-view object
-into scene uniforms, so local legacy fog fields are not evidence of a working
-per-material recolor. The precise Link shader/material route remains unresolved.
-Do not replace it with another write based only on a synthetic-memory test.
-
-There is no custom aura, eye bloom, White/Gold variant or transformation animation.
-The diagnostic build leaves all game material/render data unchanged.
+There is no diagnostic mode/logging in this build. The ineffective local fog
+approach has been removed. There is no custom aura, eye bloom, White/Gold variant
+or transformation animation. A complete appearance needs further work; no binary
+upload is required to use this fallback.
 
 Damage scaling runs after native `at_power_check`, only for the current player's
 three sword colliders and the sword attack flag. It changes the freshly calculated
@@ -91,12 +80,18 @@ is awarded when `cc_at_check` reduces an enemy's health. Special bosses/scripted
 targets that bypass these native paths are outside this first version's coverage;
 armor-specific handlers can further override the native result.
 
-Automated checks compile the PowerPC ELF, translate and compile it for both game
-regions, and execute state and mocked guest-hook tests. Tests cover gameplay,
-controller/touch cancellation, read-only material/instance snapshots, model
-identity filtering, per-phase snapshot suppression, capture-window/session bounds,
-and logging disabled. They do not execute the game's renderer or prove a visual
-fix. A real application capture is required for the next implementation step.
+Automated checks compile the PowerPC ELF, translate and compile it for USA/EU,
+and execute gameplay and translated-hook tests. Checks cover both tint registers,
+all untouched registers/alpha, absent/partial/full original override masks,
+unrelated native mask changes, nested reapplication/restoration, name/controller
+eye detection, missing uniforms, foreign models, frozen state, scope bounds,
+controller/touch cancellation, Free transformation and lifecycle resets. These
+checks validate memory behavior, not the game's rendered output.
+
+Test from a fresh session with Free transformation: activate in a lit/shaded room,
+then toggle off repeatedly and disable Dark Link. Verify restoration of clothes,
+skin and eyes. The shaded areas may still retain their original colors; do not
+treat this build as a confirmed fix for that limitation.
 
 ## Build
 
