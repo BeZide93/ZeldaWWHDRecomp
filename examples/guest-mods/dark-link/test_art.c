@@ -38,5 +38,23 @@ int main(int argc,char** argv) {
     assert(dl_art_address(0,1,8,2,0,128)==16);
     assert(dl_art_address(8,0,32,4,0,32)==768);
     assert(dl_art_address(0,0,32,4,1,32)==256);
+    /* Independent tiny ramp: identity, mirror, edge clamping and interpolation.
+     * Channels include alpha so transformed coverage is checked as well. */
+    dl_art_width=4;dl_art_height=1;
+    const f32 uv[4]={0,0,1,1};f32 srt[5]={0,0,0,1,1};
+    for(u32 i=0;i<4;++i) for(u32 c=0;c<4;++c) dl_art_pixels[i*4+c]=i*80;
+    assert(dl_art_bake_uv(uv,srt));
+    for(u32 i=0;i<4;++i) assert(dl_art_pixels[i*4+3]==i*80);
+    srt[3]=-1;assert(dl_art_bake_uv(uv,srt));
+    for(u32 i=0;i<4;++i) assert(dl_art_pixels[i*4+3]==(3-i)*80);
+    srt[3]=-1;assert(dl_art_bake_uv(uv,srt)); /* restore ramp */
+    srt[3]=2;assert(dl_art_bake_uv(uv,srt));
+    const u8 stretched[4]={0,40,200,240};
+    for(u32 i=0;i<4;++i) assert(dl_art_pixels[i*4+3]==stretched[i]);
+    srt[0]=4;assert(dl_art_bake_uv(uv,srt));
+    for(u32 i=0;i<4;++i) assert(dl_art_pixels[i*4+3]==240);
+    srt[2]=45;assert(!dl_art_bake_uv(uv,srt));
+    srt[2]=0;srt[0]=1e30f;assert(!dl_art_bake_uv(uv,srt));
+    u32 nanbits=0x7fc00000;memcpy(&srt[0],&nanbits,4);assert(!dl_art_bake_uv(uv,srt));
     puts("Dark Link native artwork pixel tests passed");
 }

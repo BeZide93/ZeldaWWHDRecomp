@@ -12,7 +12,6 @@ static u32 dl_magic_picture_count, dl_magic_loaded, dl_magic_retry;
 static unsigned long long dl_magic_epoch;
 static wwhd_game_pane dl_magic_query, dl_magic_base[2], dl_magic_fill[2];
 static u32 dl_magic_images[2][2], dl_magic_tint[2][2], dl_magic_archive;
-static f32 dl_magic_uv[2][2][4];
 static f32 dl_magic_position[4];
 static f32 dl_magic_authored[2];
 static u32 dl_magic_authored_valid;
@@ -176,6 +175,7 @@ static u32 dl_magic_image(wwhd_game_pane* pane,u32 picture,u32 variant,u32 fill)
         }
         vertex=0xffffff00u|(vertex&255);
     }
+    if(!dl_art_bake_uv(dl_magic_pictures[picture].uv,dl_magic_pictures[picture].tex_srt)) return 0;
     dl_magic_tint[variant][fill]=vertex;
     u32 size=dl_art_encode();
     if(!size) return 0;
@@ -223,20 +223,7 @@ static void dl_magic_load(void) {
         if(frame<0 || fill<0) continue;
         dl_magic_images[v][0]=dl_magic_image(&dl_magic_base[v],(u32)frame,v,0);
         dl_magic_images[v][1]=dl_magic_image(&dl_magic_fill[v],(u32)fill,v,1);
-        /* Store the selected UVs in two fixed records per capacity. */
-        for(u32 k=0;k<4;++k) {
-            dl_magic_uv[v][0][k]=dl_magic_pictures[frame].uv[k];
-            dl_magic_uv[v][1][k]=dl_magic_pictures[fill].uv[k];
-        }
-        for(u32 layer=0;layer<2;++layer) {
-            f32* t=dl_magic_pictures[layer?fill:frame].tex_srt;
-            f32* uv=dl_magic_uv[v][layer];
-            if(t[2]!=0) { /* A rotated image cannot be represented by this HUD UV rectangle. */
-                wwhd_hud_release(dl_magic_images[v][layer]);dl_magic_images[v][layer]=0;continue;
-            }
-            uv[0]=(uv[0]-0.5f)*t[3]+0.5f+t[0];uv[2]=(uv[2]-0.5f)*t[3]+0.5f+t[0];
-            uv[1]=(uv[1]-0.5f)*t[4]+0.5f+t[1];uv[3]=(uv[3]-0.5f)*t[4]+0.5f+t[1];
-        }
+
     }
     dl_magic_loaded=dl_magic_images[0][0] && dl_magic_images[0][1] &&
         dl_magic_images[1][0] && dl_magic_images[1][1];
@@ -290,11 +277,14 @@ static void dl_magic_hud(u32 list) {
         f32 x=dl_magic_position[0]+(p->x-dl_magic_base[v].x)*scale+(dl_magic_position[2]-w)/2;
         f32 y=dl_magic_position[1]-(p->y-dl_magic_base[v].y)*scale_y+(dl_magic_position[3]-h)/2;
         f32 fraction=layer ? dl_gauge_fraction():1;
-        f32* uv=dl_magic_uv[v][layer];
+        /* One rejected command invalidates the whole owner list, including
+         * DARK. Unsupported/malformed native geometry must stay local here. */
+        if(!(x>=-65536 && x<=65536 && y>=-65536 && y<=65536 &&
+             w>0 && w<=65536 && h>0 && h<=65536 && fraction>0 && fraction<=1)) continue;
         dl_element=(wwhd_hud_element){.kind=WWHD_HUD_IMAGE,.anchor=anchor,
             .x=x,.y=y,.w=w*fraction,.h=h,.rgba=dl_magic_tint[v][layer],
             .image=dl_magic_images[v][layer],.thickness=1,
-            .u0=uv[0],.v0=uv[1],.u1=uv[0]+(uv[2]-uv[0])*fraction,.v1=uv[3]};
+            .u0=0,.v0=0,.u1=fraction,.v1=1};
         if(fraction>0) wwhd_hud_emit(list,&dl_element);
     }
 }

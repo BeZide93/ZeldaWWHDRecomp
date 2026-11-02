@@ -1,25 +1,24 @@
-# Dark Link (prototype 0.1.14)
+# Dark Link (prototype 0.1.15)
 
 Standalone code mod for ZeldaWWHDRecomp: sword hits charge a transformation with
 black body/equipment, red eyes and boosted sword damage. The user confirmed the
 complete body, mouth, eyes, sword and shield appearance in **0.1.11**. That
 texture-binding repair at **viewCalc return** is retained.
 
-## Fixed in 0.1.14
+## Fixed in 0.1.15
 
-- The visible shell still uses violet shader/BRK colours. Suppress source RGB
-  in the shell's blend equation: `0 * source + (1 - sourceAlpha) * destination`.
-  This produces a black veil using the native animated coverage, independently
-  of the shader RGB. Preserve the original alpha equation and restore owned
-  blend fields when disabled.
-- Read the full-capacity state of native `G_Bar_00` animations (16 or 32 frames),
-  including picture size/scale, material colours and texture transforms. The
-  static BFLYT state alone can describe a partially filled bar.
-- Give fill pixels the requested red RGB directly while retaining their alpha.
-  Do not multiply a dark source gradient by red or darken it again with green
-  vertex RGB. Apply the authored/animated UV transform before duration cropping.
-- Keep the working 0.1.11 body/face/eye/equipment binding path unchanged, and
-  retain 0.1.13's resource-derived aura animation length.
+- Bake native texture coordinates and animated scale/translation into the
+  copied gauge pixels. Version 0.1.14 sent these coordinates directly to the
+  HUD: out-of-range or reversed UVs cause the renderer to discard the entire
+  mod list, including the DARK button. The emitted UVs now stay within [0,1].
+- Resample with bilinear filtering and edge clamping; preserve coverage alpha
+  and crop the baked full-capacity red fill by the Dark Link timer.
+- Reject unsupported rotated textures and invalid gauge geometry locally so
+  they cannot discard the button or diagnostic overlay.
+- Replay actual translated-hook HUD output through the runtime's real Store
+  validator, including reversed/out-of-range scales and malformed resources.
+- Retain 0.1.14's black aura blend equation/full-capacity animation handling
+  and the user-confirmed 0.1.11 body/face/eye/equipment binding path.
 
 USA/EU compilation, translated-hook regressions and synthetic pixel/PNG tests
 pass. **The new appearance still needs checking in-game**: no game executable
@@ -72,7 +71,9 @@ UVs. Decode the referenced BFLIM (RGBA8, BC1–5; linear, micro and macro tiling
 apply the material's black/white colours in linear light, and replace fill RGB
 with (255, 32, 32). Preserve texture/material alpha. When the base itself is green,
 make its empty copy black and use the same full-size art for the red fill.
-Partial fill crops the image width and UVs, rather than stretching it.
+Bake the selected UV rectangle and texture scale/translation into the copied
+pixels with bilinear sampling and edge clamping. Partial fill then crops image
+width and normalized UVs; native out-of-range/reversed UVs never reach the HUD.
 
 Cache four small generated PNGs as `magic-{0,1}-{frame,fill}.png` in this mod's
 Data folder and load them through the existing HUD image service. The source
@@ -114,7 +115,7 @@ collision path charge the gauge. Boss-specific handlers may override damage.
 ## Diagnostics and validation
 
 Enable **Appearance diagnostics** only when needed. The first line reads
-`DL 0.1.14 ON/OFF`; `Magic` counts loaded frame/fill images (up to four),
+`DL 0.1.15 ON/OFF`; `Magic` counts loaded frame/fill images (up to four),
 `Pos` is 1 for native or 2 for authored placement, and `Aura` reports the shell
 model being present. Body material/albedo/eye counts, binding retention and late
 repair counters retain their existing meanings. `Fill` reports the actual

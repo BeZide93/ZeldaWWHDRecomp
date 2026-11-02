@@ -9,7 +9,7 @@ static float magic_width, magic_x, magic_y;
 static void magic_release(Cpu* c) { c->r[3]=1; }
 static void magic_epoch(Cpu* c) { c->r[3]=(uint32_t)(magic_generation>>32); c->r[4]=(uint32_t)magic_generation; }
 static uint32_t magic_fill_handles[2];
-static int magic_writes,magic_base_fill,magic_animated,magic_bad_animation,magic_long;
+static int magic_writes,magic_base_fill,magic_animated,magic_bad_animation,magic_long,magic_bad_geometry;
 static void magic_write(Cpu* c) {
     const char* path=(const char*)ppc_ptr(c->r[3]);
     const uint8_t* png=ppc_ptr(c->r[4]);
@@ -42,6 +42,7 @@ static void magic_setting(Cpu* c) {
     uint32_t p=c->r[5]; memset(ppc_ptr(p),0,64);
     st32(p,1); st32(p+4,3); stf32(p+8,0); stf32(p+12,0);
     stf32(p+16,fill ? (magic_animated?48:96):(magic_long&&!strcmp(name,"P_MagicBase_01")?200:100)); stf32(p+20,fill ? 12:16); st32(p+28,255);
+    if(fill && magic_bad_geometry) stf32(p+8,100000);
     strcpy((char*)ppc_ptr(p+32),fill ? "fill":"frame"); c->r[3]=64;
 }
 static void magic_emit(uint32_t e) {
@@ -51,7 +52,7 @@ static void magic_emit(uint32_t e) {
         magic_width=ldf32(e+20); magic_x=ldf32(e+12); magic_y=ldf32(e+16);
         assert(ld32(e+56)==0xffffffff); /* red pixels must not be tinted a second time */
         float end=magic_width/(magic_base_fill?100.0f:magic_animated&&magic_bad_animation?48.0f:magic_long?196.0f:96.0f);
-        if(magic_animated && !magic_bad_animation) { assert(ldf32(e+40)==0.25f);end=0.25f+end*0.5f; }
+        assert(ldf32(e+40)==0 && ldf32(e+44)==0 && ldf32(e+52)==1);
         float delta=(float)ldf32(e+48)-end; assert(delta>-0.00001f && delta<0.00001f);
     } else assert(ld32(e+56)==0xffffffff);
 }
@@ -153,6 +154,24 @@ static void test_magic(void) {
     magic_animated=1;free_mode=1;++revision;tick();fixture_magic();fixture_animation(16);++magic_generation;
     read_hud();hook(0x02675414,3,MAGIC_CTRL,0);read_hud();assert(magic_width==96 && magic_x==62);
     expect_hud("Full=1/0");expect_hud("Fill=100%");
+    /* Native FLTS scales may reverse UV order or extend past [0,1].
+     * Replay these actual commands through the real HUD Store after this test. */
+    uint32_t scale_key=MAGIC_ARC+0xc00+84+112+36+12+12+16;
+    const float scales[]={-2,4,0};
+    for(unsigned i=0;i<sizeof scales/sizeof scales[0];++i) {
+        stf32(scale_key,scales[i]);++magic_generation;
+        read_hud();hook(0x02675414,3,MAGIC_CTRL,0);magic_draws=0;read_hud();
+        assert(magic_draws==2 && magic_width==96);expect_hud("DARK");
+    }
+    /* Unsupported rotation and non-finite UVs omit only the gauge. */
+    uint32_t scale_entry=MAGIC_ARC+0xc00+84+112+36+12;
+    st8(scale_entry+1,2);stf32(scale_key,45);++magic_generation;
+    read_hud();hook(0x02675414,3,MAGIC_CTRL,0);magic_draws=0;read_hud();
+    assert(!magic_draws);expect_hud("DARK");
+    fixture_magic();fixture_animation(16);
+    st32(MAGIC_FLYT+392+0x68,0x7fc00000);++magic_generation;
+    magic_draws=0;read_hud();assert(!magic_draws);expect_hud("DARK");
+    fixture_magic();fixture_animation(16);
     /* Malformed keys cannot partially apply an animation or read outside it. */
     magic_bad_animation=1;st32(MAGIC_ARC+0xc00+84+28+36+12+8,0xfffffff0);++magic_generation;
     read_hud();hook(0x02675414,3,MAGIC_CTRL,0);read_hud();assert(magic_width==48);
@@ -164,6 +183,9 @@ static void test_magic(void) {
     magic_long=0;st8(SAVE+0x33,0);
     magic_animated=magic_bad_animation=0;free_mode=0;++revision;tick();fixture_magic();++magic_generation;
     read_hud();hook(0x02675414,3,MAGIC_CTRL,0);read_hud();
+    magic_bad_geometry=1;++magic_generation;read_hud();hook(0x02675414,3,MAGIC_CTRL,0);
+    magic_draws=0;read_hud();assert(magic_draws==1);expect_hud("DARK");
+    magic_bad_geometry=0;++magic_generation;read_hud();hook(0x02675414,3,MAGIC_CTRL,0);read_hud();
     /* Return a full duration for the subsequent gameplay regression. */
     buttons(0); buttons(0x60000); tick(); buttons(0);
     for(int i=0;i<20;++i) hit(1);

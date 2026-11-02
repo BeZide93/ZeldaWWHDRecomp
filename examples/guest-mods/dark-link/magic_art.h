@@ -118,6 +118,33 @@ static u32 dl_art_chunk(u32 at,u32 tag,u32 n) {
     dl_art_put(dl_art_png+at,n);dl_art_put(dl_art_png+at+4,tag);
     dl_art_put(dl_art_png+at+8+n,dl_art_crc(dl_art_png+at+4,n+4));return at+n+12;
 }
+/* Bake native UV/SRT into an owned image. HUD rectangles require ordered UVs
+ * in [0,1]; native clamp samplers also allow outside/reversed coordinates.
+ * Reuse the PNG buffer as scratch before encoding, without another allocation.
+ * Rotation remains unsupported: omit that gauge image, never emit bad UVs. */
+static int dl_art_bake_uv(const f32 uv[4],const f32 srt[5]) {
+    for(u32 i=0;i<4;++i) if(!(uv[i]>=-1000000 && uv[i]<=1000000)) return 0;
+    for(u32 i=0;i<5;++i) if(!(srt[i]>=-1000000 && srt[i]<=1000000)) return 0;
+    if(srt[2]!=0 || !dl_art_width || !dl_art_height) return 0;
+    for(u32 y=0;y<dl_art_height;++y) for(u32 x=0;x<dl_art_width;++x) {
+        f32 u=uv[0]+(uv[2]-uv[0])*((f32)x+0.5f)/dl_art_width;
+        f32 v=uv[1]+(uv[3]-uv[1])*((f32)y+0.5f)/dl_art_height;
+        f32 sx=((u-0.5f)*srt[3]+0.5f+srt[0])*dl_art_width-0.5f;
+        f32 sy=((v-0.5f)*srt[4]+0.5f+srt[1])*dl_art_height-0.5f;
+        sx=sx<0?0:sx>dl_art_width-1?dl_art_width-1:sx;
+        sy=sy<0?0:sy>dl_art_height-1?dl_art_height-1:sy;
+        u32 x0=(u32)sx,y0=(u32)sy,x1=x0+1<dl_art_width?x0+1:x0,y1=y0+1<dl_art_height?y0+1:y0;
+        f32 fx=sx-x0,fy=sy-y0;
+        for(u32 c=0;c<4;++c) {
+            f32 a=dl_art_pixels[(y0*dl_art_width+x0)*4+c],b=dl_art_pixels[(y0*dl_art_width+x1)*4+c];
+            f32 d=dl_art_pixels[(y1*dl_art_width+x0)*4+c],e=dl_art_pixels[(y1*dl_art_width+x1)*4+c];
+            f32 top=a+(b-a)*fx,bottom=d+(e-d)*fx;
+            dl_art_png[(y*dl_art_width+x)*4+c]=(u8)(top+(bottom-top)*fy+0.5f);
+        }
+    }
+    memcpy(dl_art_pixels,dl_art_png,dl_art_width*dl_art_height*4);
+    return 1;
+}
 static u32 dl_art_encode(void) {
     static const u8 sig[8]={137,80,78,71,13,10,26,10};
     for(u32 i=0;i<8;++i) dl_art_png[i]=sig[i];

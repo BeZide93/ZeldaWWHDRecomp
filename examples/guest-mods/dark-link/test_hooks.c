@@ -15,6 +15,7 @@ static const WWHDGuestModuleV1* module;
 static uint32_t filter, hud, touch, step=1, revision=1;
 static int diagnostics=1;
 static char hud_text[2048];
+static FILE* hud_trace;
 static int free_mode, enabled=1, paused, menu, touch_visible=1, claim_active, elements;
 static const char* eye_names[]={"eyeL","eyeR","eyeLdamA","eyeRdamA","eyeLdamB","eyeRdamB"};
 static int eye_indices[6]={1,2,3,4,5,6}, name_lookups, missing_color;
@@ -60,6 +61,9 @@ static void emit(Cpu* c) {
     ++elements;
     /* Guest HUD ABI: text pointer at 64, byte count at 68 (72-byte element). */
     uint32_t e=c->r[4];
+    assert(fputc('C',hud_trace)!=EOF);
+    assert(fwrite(ppc_ptr(e),1,72,hud_trace)==72);
+    if(ld32(e)==1) assert(fwrite(ppc_ptr(ld32(e+64)),1,ld32(e+68),hud_trace)==ld32(e+68));
     if (ld32(e)==2) magic_emit(e);
     if (ld32(e)==1) {
         uint32_t p=ld32(e+64), bytes=ld32(e+68);
@@ -69,7 +73,11 @@ static void emit(Cpu* c) {
     }
     c->r[3]=1;
 }
-static void read_hud(void) { hud_text[0]=0; execute(hud,1,0); }
+static void read_hud(void) {
+    assert(fputc('B',hud_trace)!=EOF);
+    hud_text[0]=0; execute(hud,1,0);
+    assert(fputc('E',hud_trace)!=EOF);
+}
 static void expect_hud(const char* expected) {
     read_hud();
     if (!strstr(hud_text,expected)) { fprintf(stderr,"HUD missing %s in:\n%s",expected,hud_text); abort(); }
@@ -168,7 +176,8 @@ static void prepare(int active) { submit(0x025e2e5c,active); }
 #include "test_textures.h"
 #include "test_magic.h"
 int main(int argc, char** argv) {
-    assert(argc==2);
+    assert(argc==3);
+    hud_trace=fopen(argv[2],"wb");assert(hud_trace);
     void* memory=mmap(PPC_MEM_BASE,0x100000000ull,PROT_READ|PROT_WRITE,
         MAP_PRIVATE|MAP_ANONYMOUS|MAP_FIXED_NOREPLACE|MAP_NORESERVE,-1,0);
     assert(memory==PPC_MEM_BASE);
@@ -318,5 +327,6 @@ int main(int argc, char** argv) {
     enabled=1; ++revision; tick(); buttons(0); buttons(0x60000); tick(); assert(damage(3)==6);
     hook(0x0240ee28,2,LINK,0); assert(damage(3)==3 && !claim_active); prepare(0);
     puts("Dark Link translated guest-hook tests passed");
+    assert(fclose(hud_trace)==0);
     dlclose(library); munmap(memory,0x100000000ull);
 }

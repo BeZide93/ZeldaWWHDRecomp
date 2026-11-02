@@ -75,7 +75,16 @@ def main():
             driver = out / "test-hooks"
             subprocess.run(host + ["-std=c11", "-D_GNU_SOURCE", "-O2", "-UNDEBUG", "-I" + str(ROOT / "runtime/include"),
                 str(SOURCE / "test_hooks.c"), "-ldl", "-o", str(driver)], check=True)
-            subprocess.run([str(driver), result["module"]], check=True)
+            trace = out / "hud-trace.bin"
+            subprocess.run([str(driver), result["module"], str(trace)], check=True)
+            # Replay the emitted guest ABI records with the real runtime validator.
+            # C++ is a separate executable: no C driver ABI/linker assumptions.
+            validator = out / "test-hud"
+            stdlib = "-lc++" if any("zig" in part for part in host) else "-lstdc++"
+            subprocess.run(host + ["-x", "c++", "-std=c++20", "-O2", "-UNDEBUG",
+                "-Wall", "-Wextra", "-Werror", "-Wno-missing-field-initializers", str(SOURCE / "test_hud.cpp"), stdlib,
+                "-o", str(validator)], check=True)
+            subprocess.run([str(validator), str(trace)], check=True)
     archive = out / "dark-link.wwhdmod"
     with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as z:
         for name in ("manifest.json", "mod.elf", "README.md"):
