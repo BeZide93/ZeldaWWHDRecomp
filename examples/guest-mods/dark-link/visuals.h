@@ -1,15 +1,18 @@
-/* Restore the original C0/K0 tint, with scoped RGB and override-mask ownership.
- * This is a partial appearance fallback, not a complete Dark Link skin. */
+/* Scoped TEV palette: body black, eye materials red. Keep the lighting inputs
+ * and the user-confirmed 0.1.5 submission boundaries unchanged. */
 #pragma once
 #define DL_MAX_MATERIALS 96
 #define DL_DRAW_DEPTH 16
-#define DL_TINT_MASK 0x90u /* C0 (4) and K0 (7), d_kankyo_6.cpp */
+#define DL_FIRST_COLOR 4u
+#define DL_COLOR_COUNT 7u /* C0..C2 (4..6), K0..K3 (7..10) */
+#define DL_TINT_MASK 0x7f0u
+#define DL_EYE_COUNT 6u
 #define DL_SAVED_MATERIALS (DL_MAX_MATERIALS * 3)
 typedef struct {
     u32* flags;
     u32 mask;
-    u32* color[2];
-    u32 rgb[2][3];
+    u32* color[DL_COLOR_COUNT];
+    u32 rgb[DL_COLOR_COUNT][3];
 } DLMaterialSave;
 static DLMaterialSave dl_materials[DL_SAVED_MATERIALS];
 static u32 dl_material_count, dl_draw_depth;
@@ -18,7 +21,7 @@ static u32 dl_draw_marks[DL_DRAW_DEPTH];
 static void dl_restore_colors(u32 mark) {
     while (dl_material_count > mark) {
         DLMaterialSave* saved = &dl_materials[--dl_material_count];
-        for (u32 i = 0; i < 2; ++i)
+        for (u32 i = 0; i < DL_COLOR_COUNT; ++i)
             if (saved->color[i])
                 for (u32 j = 0; j < 3; ++j) saved->color[i][j] = saved->rgb[i][j];
         /* These bits select overrides; do NOT leave newly enabled bits set.
@@ -35,34 +38,35 @@ static void dl_palette(u8* material, int eye) {
         if (dl_material_count >= DL_SAVED_MATERIALS) return;
         saved = &dl_materials[dl_material_count++];
         saved->flags = flags; saved->mask = *flags & DL_TINT_MASK;
-        for (u32 i = 0; i < 2; ++i) {
-            saved->color[i] = (u32*)dl_material_parameter(flags, i ? 7 : 4);
+        for (u32 i = 0; i < DL_COLOR_COUNT; ++i) {
+            saved->color[i] = (u32*)dl_material_parameter(flags, DL_FIRST_COLOR + i);
             if (saved->color[i])
                 for (u32 j = 0; j < 3; ++j) saved->rgb[i][j] = saved->color[i][j];
         }
     }
-    for (u32 i = 0; i < 2; ++i) {
+    for (u32 i = 0; i < DL_COLOR_COUNT; ++i) {
         f32* color = (f32*)saved->color[i];
         if (!color) continue;
-        color[0] = eye ? 1.0f : 0.008f;
-        color[1] = eye ? 0.002f : 0.009f;
-        color[2] = eye ? 0.002f : 0.012f;
-        *flags |= 1u << (i ? 7 : 4);
+        color[0] = eye ? 1.0f : 0.0f;
+        color[1] = 0.0f;
+        color[2] = 0.0f;
+        *flags |= 1u << (DL_FIRST_COLOR + i);
     }
     /* No alpha writes, no material/ambient lighting overrides, no fog changes. */
 }
-static void dl_find_eyes(u8* data, u32 count, s32 eyes[2]) {
-    eyes[0] = eyes[1] = -1;
+static void dl_find_eyes(u8* data, u32 count, s32 eyes[DL_EYE_COUNT]) {
+    /* All eye variants from daPy_lk_c::playerInit (02410BE8). Eyebrows
+     * (mayu*) are deliberately body-colored; blinking/alpha remain native. */
+    static const char* const names[DL_EYE_COUNT] = {
+        "eyeL", "eyeR", "eyeLdamA", "eyeRdamA", "eyeLdamB", "eyeRdamB"
+    };
     u8* resource = (u8*)dl_word(data, 0);
     if (!resource) return;
     u32 relative = dl_word(resource, 0x18);
     if (!relative) return;
     void* table = resource + 0x18 + (s32)relative;
-    const u8* names = (const u8*)&WWHD_GAME_DATA(DL_EYE_MATERIAL_NAMES, u8);
-    for (u32 i = 0; i < 2; ++i) {
-        const char* name = (const char*)dl_word(names, i * 8);
-        if (!name) continue;
-        s32 index = dl_material_name_index(table, name);
+    for (u32 i = 0; i < DL_EYE_COUNT; ++i) {
+        s32 index = dl_material_name_index(table, names[i]);
         if (index >= 0 && (u32)index < count) eyes[i] = index;
     }
 }
@@ -80,13 +84,18 @@ static void dl_visual_begin(void* model) {
     u32 count = dl_word(data, 0x0c);
     u8* materials = (u8*)dl_word(data, 0x10);
     if (!materials || !count || count > DL_MAX_MATERIALS) return;
-    s32 eyes[2] = {-1, -1};
+    s32 eyes[DL_EYE_COUNT];
+    for (u32 i = 0; i < DL_EYE_COUNT; ++i) eyes[i] = -1;
     if (address == link->mpCLModel) dl_find_eyes(data, count, eyes);
     for (u32 i = 0; i < count; ++i) {
         u8* material = materials + i * 0x39c;
         u32 animation = dl_word(material, 0x24);
-        int eye = address == link->mpCLModel && ((s32)i == eyes[0] || (s32)i == eyes[1] ||
-            (animation && (animation == link->m_tex_eye_scroll[0] || animation == link->m_tex_eye_scroll[1])));
+        int eye = 0;
+        if (address == link->mpCLModel) {
+            for (u32 e = 0; e < DL_EYE_COUNT; ++e)
+                if ((s32)i == eyes[e]) eye = 1;
+            if (animation && (animation == link->m_tex_eye_scroll[0] || animation == link->m_tex_eye_scroll[1])) eye = 1;
+        }
         dl_palette(material, eye);
     }
 }
@@ -99,8 +108,8 @@ static void dl_visual_end(void) {
  * model preparation and viewCalc/submission. Restoring at the inner native
  * entry return (0.1.4) removed the tint before that subsequent stage.
  * viewCalc and joint entry are submission boundaries, not immediate GPU draws;
- * this deliberately returns to the original, user-observed partial-tint path.
- * Do not claim this validates the asynchronous renderer or shaded surfaces. */
+ * preserve these user-confirmed boundaries when extending the palette.
+ * Host tests do not validate the asynchronous renderer or shader output. */
 WWHD_HOOK(DL_MODEL_ENTRY, dl_entry_before, (void* model)) { dl_visual_begin(model); }
 WWHD_HOOK_RETURN(DL_MODEL_ENTRY, dl_entry_after, (void* model)) { (void)model; dl_visual_end(); }
 WWHD_HOOK(DL_MODEL_UPDATE, dl_update_before, (void* model, void* data)) { (void)data; dl_visual_begin(model); }

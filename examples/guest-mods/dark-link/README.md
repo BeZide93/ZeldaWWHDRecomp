@@ -1,10 +1,11 @@
-# Dark Link (prototype 0.1.5)
+# Dark Link (prototype 0.1.6)
 
 Standalone code mod for ZeldaWWHDRecomp: charge with sword hits, activate a damage
-boost and a partial body tint. Version 0.1.5 restores all four original hook pairs as well as the C0/K0
-palette. The tint now remains active through the complete model submission
-wrapper, with corrected restoration of its override bits. **Complete shadow recoloring and visible red eyes are still unresolved.**
-This is a recovery of the partial appearance, not a finished Dark Link skin.
+boost and a black body/red-eye TEV palette. Version 0.1.6 extends the two-register
+palette to all seven TEV RGB registers and recognizes all six native eye materials.
+It retains the four submission hook pairs from 0.1.5, whose partial tint the user
+confirmed working. **The expanded palette's final appearance still needs an in-game
+check; host tests cannot establish full shadow coverage or visible red eyes.**
 The package contains original code only: no textures, models or game binaries.
 
 ## Install
@@ -15,7 +16,7 @@ The package contains original code only: no textures, models or game binaries.
 3. Enable **Code mods** in setup if needed, complete the code-mod setup/build,
    and restart the game. Accept the normal code-mod trust prompt.
 
-With the gauge visible, the HUD title must read **DARK LINK 0.1.5**. This label
+With the gauge visible, the HUD title must read **DARK LINK 0.1.6**. This label
 comes from the running code module, not just the package manifest.
 
 The same package is translated for the installed USA or EU build and the host
@@ -23,7 +24,7 @@ platform, including Android. It does not require a new APK/runtime feature.
 
 ### Upgrading from 0.1.0/0.1.1
 
-Replace the installed package with 0.1.5 and fully restart the game, then load a
+Replace the installed package with 0.1.6 and fully restart the game, then load a
 normal in-game save. Do not resume a full emulator/recomp save state made with the
 old visual effect active: 0.1.1 left extra material override flags set. The new
 version cannot infer those flags' original values from an already altered state.
@@ -53,29 +54,33 @@ button, automatic activation, or adjust that host binding.
 
 ## Appearance and limits
 
-Only native C0/K0 RGB (indices 4 and 7) are changed. These are the two registers
-used by the original version that the user reported partially recolored Link.
-The other nine color registers, native alpha and fog remain unchanged. Current
-player body/hands/hair instance identity limits the override; frozen Link is
-skipped. Eye materials use the game's own names, with controller fallback. The
-user's 0.1.3 trace confirmed the body eye indices 8/11; these indices are resolved
-dynamically rather than hard-coded.
+The palette writes C0/C1/C2 and K0/K1/K2/K3 RGB (indices 4 through 10):
+black `(0, 0, 0)` for body/hands/hair, red `(1, 0, 0)` for eyes. The prior
+C0/K0-only palette left other TEV color inputs unchanged. This extension targets
+those inputs without changing the four material/ambient lighting registers
+(indices 0 through 3), native alpha or fog. It does not reintroduce the eleven-slot
+lighting override from 0.1.1. Equipment and other actors retain their native colors.
+
+Eye materials are resolved by their native names: `eyeL`, `eyeR`, `eyeLdamA`,
+`eyeRdamA`, `eyeLdamB`, `eyeRdamB`. The latter four support damage expressions;
+`mayu*` eyebrow materials stay black. Controller identity remains a fallback.
+Texture animation, eyelid visibility and alpha remain native. The current player's
+body/hands/hair model instance identity limits the override; frozen Link is skipped.
 
 RGB values are saved once, reapplied in nested preparation, and restored bit for
-bit. The two override-mask bits are restored to their original values instead of
-being left enabled. Changes by native code to unrelated mask bits survive.
-The scope uses the original mDoExt model entry/update wrappers, viewCalc and
-joint-entry hook pairs. In 0.1.4, the scope ended at the inner native preparation
-return, before the wrapper's subsequent viewCalc/submission. That was not the
-original timing. Version 0.1.5 keeps the palette active through the whole wrapper
-and supports standalone viewCalc/joint submissions too. These are submission
-boundaries, not immediate GPU draws; asynchronous rendering and the actual visual
-result are not validated by the host tests. No UBO worker hook is installed.
+bit. The seven owned override-mask bits are restored to their original values.
+Changes by native code to unrelated mask bits survive. Missing parameter pointers
+are skipped without enabling an override for that slot.
 
-There is no diagnostic mode/logging in this build. The ineffective local fog
-approach has been removed. There is no custom aura, eye bloom, White/Gold variant
-or transformation animation. A complete appearance needs further work; no binary
-upload is required to use this fallback.
+The scope still uses the mDoExt model entry/update wrappers, viewCalc and
+joint-entry hook pairs from 0.1.5. In 0.1.4, restoration at the inner native
+preparation return removed the tint before the wrapper's subsequent submission.
+These working outer boundaries have not changed. They are submission boundaries,
+not immediate GPU draws; asynchronous rendering and the game's actual shader output
+are not validated by the host tests. No UBO worker hook is installed.
+
+There is no diagnostic mode/logging, custom aura, eye bloom, White/Gold variant or
+transformation animation. No binary upload is required to use this package.
 
 Damage scaling runs after native `at_power_check`, only for the current player's
 three sword colliders and the sword attack flag. It changes the freshly calculated
@@ -87,18 +92,18 @@ targets that bypass these native paths are outside this first version's coverage
 armor-specific handlers can further override the native result.
 
 Automated checks compile the PowerPC ELF, translate and compile it for USA/EU,
-and execute gameplay and translated-hook tests. Checks cover both tint registers,
-the preparation-to-submission interval, both wrappers, standalone view/joint
-scopes, all untouched registers/alpha, absent/partial/full original override masks,
-unrelated native mask changes, nested reapplication/restoration, name/controller
-eye detection, missing uniforms, foreign models, frozen state, scope bounds,
-controller/touch cancellation, Free transformation and lifecycle resets. These
-checks validate memory behavior, not the game's rendered output.
+and execute gameplay and translated-hook tests. Checks cover all seven TEV RGB
+registers, all six named eye variants and a black eyebrow material, hands/hair,
+unchanged lighting registers and alpha, missing/partial/full original override
+masks, unrelated native mask updates, missing parameter pointers, nested restoration,
+the preparation-to-submission interval, both wrappers and standalone view/joint
+scopes. Gameplay checks retain cancellation, Free transformation and lifecycle resets.
+These checks validate memory behavior, not the game's rendered output.
 
-Test from a fresh session with Free transformation: activate in a lit/shaded room,
-then toggle off repeatedly and disable Dark Link. Verify restoration of clothes,
-skin and eyes. The shaded areas may still retain their original colors; do not
-treat this build as a confirmed fix for that limitation.
+Test from a fresh session with Free transformation: activate in lit and shaded
+areas, blink/take damage to exercise eye variants, toggle off repeatedly and disable
+Dark Link. Verify black clothes/skin/hair/hands, red eyes and restoration on exit.
+Check casual clothes as well. Confirm **DARK LINK 0.1.6** in the running HUD.
 
 ## Build
 
@@ -120,4 +125,5 @@ mod and this README are packaged. Build outputs are not committed.
 Native layout references: the CC0 public `ZeldaWWHDDecomp/wwhd` source,
 `d/d_cc_uty.cpp`, `include/d/d_cc_d.h`, `include/JSystem/J3DGraph.h`,
 `d/actor/d_a_player_main_01.cpp`, `include/d/actor/d_a_player_main_01.h`,
-`d/d_kankyo_6.cpp` and `m_Do/m_Do_ext_heap_model.cpp`.
+`d/d_kankyo_6.cpp`, `d/actor/d_a_swhit0.cpp`, `d/actor/d_a_bgn_draw.cpp`,
+`d/actor/d_a_player_main_04b.cpp` and `m_Do/m_Do_ext_heap_model.cpp`.

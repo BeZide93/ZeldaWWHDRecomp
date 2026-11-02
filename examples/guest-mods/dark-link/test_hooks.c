@@ -10,11 +10,13 @@
 enum { PLAY=0x11000000, LINK=0x11010000, SAVE=0x11020000, ENEMY=0x11030000,
        HIT=0x11040000, INPUT=0x11050000, MODEL=0x11060000, DATA=0x11070000,
        MATERIALS=0x11080000, EYE_ANIM=0x11090000, RESOURCE=0x110a0000,
-       NAMES=0x110b0000, INSTANCES=0x110f0000 };
+       INSTANCES=0x110f0000, MATERIAL_COUNT=8 };
 static const WWHDGuestModuleV1* module;
 static uint32_t filter, hud, touch, step=1, revision=1;
 static int free_mode, enabled=1, paused, menu, touch_visible=1, claim_active, elements;
-static int eye_indices[2]={1,2}, name_lookups, missing_color;
+static const char* eye_names[]={"eyeL","eyeR","eyeLdamA","eyeRdamA","eyeLdamB","eyeRdamB"};
+static int eye_indices[6]={1,2,3,4,5,6}, name_lookups, missing_color;
+static uint32_t missing_slots;
 
 static void execute(uint32_t fn, uint32_t a, uint32_t b) {
     Cpu c = {0}; c.r[1] = 0x1201fff0; c.r[3] = a; c.r[4] = b;
@@ -68,12 +70,14 @@ static void dispatch(Cpu* c) {
         case 0x025986bc: c->r[3]=menu; return;
         case 0x025af2a4: c->r[3]=paused; return;
         case 0x027f9f0c:
-            assert(c->r[4]==4 || c->r[4]==7); /* never request lighting/shadow registers */
-            c->r[3] = missing_color ? 0 : c->r[3]+4+c->r[4]*16; return;
+            assert(c->r[4]>=4 && c->r[4]<=10); /* never request material/ambient lighting */
+            c->r[3] = (missing_color || (missing_slots & (1u<<c->r[4]))) ? 0 : c->r[3]+4+c->r[4]*16; return;
         case 0x027df9b0:
             assert(c->r[3]==RESOURCE+0x100); ++name_lookups;
-            assert(c->r[4]==NAMES || c->r[4]==NAMES+32);
-            c->r[3]=eye_indices[c->r[4]==NAMES+32]; return;
+            for (int i=0;i<6;++i) if (!strcmp((const char*)ppc_ptr(c->r[4]),eye_names[i])) {
+                c->r[3]=eye_indices[i]; return;
+            }
+            assert(!"unexpected material name (eyebrows must stay black)"); return;
         default: fprintf(stderr,"Unexpected native call: %08x\n",c->pc); abort();
     }
 }
@@ -89,20 +93,21 @@ static void hit(int lose_hp) {
     hook(0x025192a8,3,ENEMY,HIT);
 }
 static uint32_t color(int material, int index) { return MATERIALS+material*0x39c+0xa4+index*16; }
-static uint8_t original_materials[3*0x39c], original_instances[3*0x38];
+static uint8_t original_materials[MATERIAL_COUNT*0x39c], original_instances[MATERIAL_COUNT*0x38];
 static void restored(void) {
     assert(!memcmp(ppc_ptr(MATERIALS),original_materials,sizeof original_materials));
     assert(!memcmp(ppc_ptr(INSTANCES),original_instances,sizeof original_instances));
 }
 static void tinted(void) {
-    for (int m=0;m<3;++m) {
-        uint32_t expected=0xa0000090u;
+    for (int m=0;m<MATERIAL_COUNT;++m) {
+        uint32_t expected=0xa00007fbu;
+        int eye=m>=1 && m<=6;
         assert(ld32(MATERIALS+m*0x39c+0xa0)==expected);
         for (int k=0;k<11;++k) {
-            int changed=k==4 || k==7;
-            assert((float)ldf32(color(m,k))==(changed ? (m ? 1.0f : 0.008f) : 0.25f+k*0.01f));
-            assert((float)ldf32(color(m,k)+4)==(changed ? (m ? 0.002f : 0.009f) : 0.5f));
-            assert((float)ldf32(color(m,k)+8)==(changed ? (m ? 0.002f : 0.012f) : 0.75f));
+            int changed=k>=4;
+            assert((float)ldf32(color(m,k))==(changed ? (eye ? 1.0f : 0.0f) : 0.25f+k*0.01f));
+            assert((float)ldf32(color(m,k)+4)==(changed ? 0.0f : 0.5f));
+            assert((float)ldf32(color(m,k)+8)==(changed ? 0.0f : 0.75f));
             assert((float)ldf32(color(m,k)+12)==0.4f+m*0.1f);
         }
     }
@@ -162,23 +167,22 @@ int main(int argc, char** argv) {
     st8(LINK+0x3ac,0); st8(LINK+0x69e8,0);
 
     st32(LINK+0x448,MODEL);
-    st32(MODEL+0xac,DATA); st32(DATA+0x0c,3); st32(DATA+0x10,MATERIALS);
+    st32(MODEL+0xac,DATA); st32(DATA+0x0c,MATERIAL_COUNT); st32(DATA+0x10,MATERIALS);
     st32(DATA,RESOURCE); st32(RESOURCE+0x18,0x100-0x18);
-    st32(0x1046cd2c,NAMES); st32(0x1046cd34,NAMES+32);
-    /* No eye controller pointers: name resolution must identify BOTH eyes. */
-    for (int m=0; m<3; ++m) for (int k=0; k<11; ++k) {
+    /* No eye controller pointers: names must identify all six eyes; material 7 represents an eyebrow. */
+    for (int m=0; m<MATERIAL_COUNT; ++m) for (int k=0; k<11; ++k) {
         stf32(color(m,k),0.25f+k*0.01f); stf32(color(m,k)+4,0.5f);
         stf32(color(m,k)+8,0.75f); stf32(color(m,k)+12,0.4f+m*0.1f);
     }
-    st32(MODEL+0x138,3); st32(MODEL+0x13c,INSTANCES);
-    for (int m=0;m<3;++m) {
+    st32(MODEL+0x138,MATERIAL_COUNT); st32(MODEL+0x13c,INSTANCES);
+    for (int m=0;m<MATERIAL_COUNT;++m) {
         /* absent/partly present/fully present tint mask; unrelated bits survive */
-        st32(MATERIALS+m*0x39c+0xa0,0xa0000000u+(m==1 ? 0x10 : m==2 ? 0x90 : 0));
+        st32(MATERIALS+m*0x39c+0xa0,0xa000000bu+(m==1 ? 0x90 : m==2 ? 0x7f0 : 0));
         for (int k=0;k<14;++k) st32(INSTANCES+m*0x38+k*4,0x12340000u+m*100+k);
     }
     memcpy(original_materials,ppc_ptr(MATERIALS),sizeof original_materials);
     memcpy(original_instances,ppc_ptr(INSTANCES),sizeof original_instances);
-    prepare(1); assert(name_lookups==6);
+    prepare(1); assert(name_lookups==18);
     submit(0x025e2de0,1);
     /* Standalone view/joint calls also need their own bounded scopes. */
     hook(0x027f55fc,2,MODEL,0); tinted();
@@ -192,30 +196,50 @@ int main(int argc, char** argv) {
     hook(0x027f55fc,2,MODEL,0); tinted();
     hook(0x027f55fc,3,MODEL,0); tinted();
     hook(0x025e2e5c,3,MODEL,0); restored();
-    /* Restore our two mask bits, but retain unrelated native mask updates. */
+    /* Restore our seven mask bits, but retain unrelated native mask updates. */
     hook(0x025e2e5c,2,MODEL,0);
     st32(MATERIALS+0xa0,ld32(MATERIALS+0xa0)|0x4000);
     hook(0x025e2e5c,3,MODEL,0);
-    assert(ld32(MATERIALS+0xa0)==0xa0004000u);
-    st32(MATERIALS+0xa0,0xa0000000u); restored();
+    assert(ld32(MATERIALS+0xa0)==0xa000400bu);
+    st32(MATERIALS+0xa0,0xa000000bu); restored();
     hook(0x025e2e5c,2,MODEL+0x400,0); restored();
     hook(0x025e2e5c,3,MODEL+0x400,0); restored();
     for (int i=0;i<20;++i) hook(0x025e2e5c,2,MODEL,0);
     for (int i=0;i<20;++i) hook(0x025e2e5c,3,MODEL,0);
     restored();
-    missing_color=1; prepare(0); missing_color=0;
-    st32(DATA+0x0c,97); prepare(0); st32(DATA+0x0c,3);
-    st32(LINK+0x3bc,0x800); prepare(0); st32(LINK+0x3bc,0);
-    /* Both native eye names identify eyes even without animation controllers. */
-    eye_indices[0]=-1; eye_indices[1]=3;
+    /* An absent individual TEV parameter must not activate its override bit. */
+    missing_slots=1u<<5;
     hook(0x025e2e5c,2,MODEL,0);
-    assert((float)ldf32(color(1,4))==0.008f && (float)ldf32(color(2,4))==0.008f);
+    assert(ld32(MATERIALS+0xa0)==(0xa00007fbu & ~(1u<<5)));
+    assert((float)ldf32(color(0,5))==0.30f);
+    assert((float)ldf32(color(0,6))==0.0f);
+    hook(0x025e2e5c,3,MODEL,0); restored(); missing_slots=0;
+    missing_color=1; prepare(0); missing_color=0;
+    st32(DATA+0x0c,97); prepare(0); st32(DATA+0x0c,MATERIAL_COUNT);
+    st32(LINK+0x3bc,0x800); prepare(0); st32(LINK+0x3bc,0);
+    /* Missing/out-of-range names must never make a body material red. */
+    for (int i=0;i<6;++i) eye_indices[i]=i%2 ? MATERIAL_COUNT : -1;
+    hook(0x025e2e5c,2,MODEL,0);
+    assert((float)ldf32(color(1,4))==0.0f && (float)ldf32(color(2,4))==0.0f);
     hook(0x025e2e5c,3,MODEL,0); restored();
     st32(LINK+0x604,EYE_ANIM); st32(MATERIALS+0x39c+0x24,EYE_ANIM);
     hook(0x025e2e5c,2,MODEL,0); assert((float)ldf32(color(1,4))==1.0f);
     hook(0x025e2e5c,3,MODEL,0);
     st32(LINK+0x604,0); st32(MATERIALS+0x39c+0x24,0); restored();
-    eye_indices[0]=1; eye_indices[1]=2;
+    for (int i=0;i<6;++i) eye_indices[i]=i+1;
+    /* Hands and hair use the black palette even when sharing this synthetic
+     * material table; eye names apply only to the current player's body. */
+    for (int part=0;part<2;++part) {
+        uint32_t model=MODEL+0x400+part*0x400;
+        uint32_t field=LINK+(part ? 0x44c : 0xcf4);
+        st32(field,model); st32(model+0xac,DATA);
+        int previous_lookups=name_lookups;
+        hook(0x025e2e5c,2,model,0);
+        assert(name_lookups==previous_lookups);
+        for (int m=0;m<MATERIAL_COUNT;++m) for (int k=4;k<=10;++k)
+            for (int c=0;c<3;++c) assert((float)ldf32(color(m,k)+c*4)==0.0f);
+        hook(0x025e2e5c,3,model,0); restored(); st32(field,0);
+    }
     /* Cancellation must leave the next preparation untouched. */
     buttons(0); buttons(0x60000); tick(); assert(damage(3)==3); prepare(0);
     buttons(0); for (int i=0;i<20;++i) hit(1);

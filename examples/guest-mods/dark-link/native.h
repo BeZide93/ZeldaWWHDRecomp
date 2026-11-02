@@ -18,9 +18,6 @@
 WWHD_GAME_FUNC(0x027F9F0C, f32*, dl_material_parameter, (void*, u32));
 
 WWHD_GAME_FUNC(0x027DF9B0, s32, dl_material_name_index, (void*, const char*));
-/* The same two sead::SafeString names that Link's createHeap uses to find the
- * left/right eye materials. Use relocatable guest data, never copied strings. */
-#define DL_EYE_MATERIAL_NAMES 0x1046CD2C
 WWHD_GAME_FUNC(0x025986BC, int, dl_menu_open, (void));
 WWHD_GAME_FUNC(WWHD_ADDR_dScnPly_isPause, int, dl_paused, (void));
 
