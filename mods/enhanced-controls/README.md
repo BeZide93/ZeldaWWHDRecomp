@@ -22,23 +22,56 @@ the seven-feature runtime port, not a prerequisite.
   frame count. A new macro replaces the previous one; real buttons are preserved.
 - **Camera-distance pinch**: 50–200%, with a native camera collision query for
   zooming out. This changes eye-to-target distance, not FOV. Fingers apart zoom
-  in. The distance is session state; changing the distance option resets it.
+  in. Distance starts at 100% each session and is adjusted by pinching.
 - **Double-tap recenter** on the right-hand gesture pad: a short ZL pulse. As
   with the game's ZL button, a nearby target can be locked onto instead.
-- Four combat icons from the Enhanced fork replace the text labels. **Combat
-  icons** switches back to text. Missing/failed images fall back to text per
-  button. Icons retain their proportions, use the existing touch areas and
-  reload after a save-state/HUD reset.
-- Live toggles and numeric position/size settings in the mod's settings page.
+- Four combat icons from the Enhanced fork, with per-button icon/text selection
+  in the editor. Missing images fall back to text. Icons retain their proportions
+  and reload after a save-state/HUD reset.
+- A **macro-only touch editor**, opened by the **Edit** touch button. The mod's
+  settings contain only **Show editor button**, **horizontal position** and
+  **vertical position**. Camera gestures stay enabled at their default position.
 
 The visible rectangle on the upper right is a **dedicated gesture pad**, not
 an invisible listener over the native right stick. Start a pinch or double tap
 there; normal camera dragging remains outside it. Mouse wheel over a claimed
 area also changes distance. The mod claims only its displayed rectangles;
-claimed touches cannot simultaneously operate built-in touch controls. Move the
-macro row / gesture pad in the mod options if they overlap your touch layout.
-Positions use 1280×720 layout units centred on the picture, positive Y upwards.
-The row moves as a group; there is no native touch-editor integration or drag editor.
+positions use 1280×720 layout units centred on the picture, positive Y upwards.
+The fixed gesture pad stays at (420, 120). Macro buttons take priority over this
+pad if moved onto it; the Edit launcher takes priority over macros.
+
+## Macro editor
+
+1. Tap **Edit** (top centre by default). Choose **Jump**, **Slash**, **Spin** or
+   **Dodge** in the top row, or select a button directly, then drag it.
+2. **Smaller/Larger** changes the selected button in 5% steps (60–180%).
+   **Opacity** cycles 100/80/60/40/20%. **Shape** selects a circle/square frame;
+   **Fill** changes the frame background. **Style** switches icon/text.
+   The original icons remain circular artwork inside the chosen frame.
+3. **Visible** enables/disables that button. Hidden buttons remain dimly visible
+   in the editor and selectable using the top tabs, even when all four are hidden.
+4. **Grid** enables a 20-unit snap grid. **Reset all** resets the draft layout.
+   **Save / Done** saves and closes; **Cancel** discards the draft.
+
+Changes update each button's hit area as well as its appearance. Drag positions
+are bounded to the 1280×720 safe area beneath the editor toolbar. The editor
+previews hidden/very faint buttons more brightly to keep them editable.
+Saved layouts live in this mod's own data directory as two alternating,
+versioned/checksummed files (`macro-layout-a.bin`, `macro-layout-b.bin`). A short
+or failed write keeps the editor open with an error; retry Save or use Cancel.
+The previous complete generation remains available. Layouts persist across app
+restarts and game saves; loading a save state reloads the saved layout and closes
+an unfinished editor. They are shared by this mod's sessions, not per Quest Log.
+Version 0.2.0 starts with the default row when no editor layout exists; old
+numeric row settings are replaced by this per-button layout.
+
+Editing cancels pending macros and blocks controller buttons/sticks until the
+editor closes and inputs return to neutral. Menus, player changes and lifecycle
+interruptions discard the draft. **The game world keeps running**: edit in a safe
+place. This is a guest-mod overlay, not the native Android editor. Native Android
+buttons can intercept touches before a mod; temporarily hide those controls with
+the app's touch-controls toggle if they cover the editor or its buttons. Avoid
+placing macro buttons beneath native controls when using both layouts.
 
 Gestures and macros are cancelled during events, messages, menus, stage changes,
 first-person aiming and unsupported movement such as swimming, climbing, sailing
@@ -51,14 +84,15 @@ macro's release; the mod does not forcibly release the player's inputs.
 
 1. Download the `enhanced-controls` artifact from the successful **Enhanced
    Controls mod** Actions run. Extract the outer GitHub artifact ZIP to obtain
-   `enhanced-controls-0.1.3.wwhdmod`; do **not** extract that file.
+   `enhanced-controls-0.2.0.wwhdmod`; do **not** extract that file.
 2. Enable **Code mods** in the app's setup or **Settings → Mods → More →
    Code-mod support**. If newly enabled, let the app rebuild the game code.
 3. **Settings → Mods → More → Install from a file**: choose the `.wwhdmod`.
 4. Review and enable it. The manager marks this package experimental and handles
    its save backup. Close and reopen the app when asked.
-5. Configure it under **Mods → Community → Enhanced Controls**. Included features
-   default on once the package itself is enabled; each can be disabled separately.
+5. Under **Mods → Community → Enhanced Controls**, set the Edit button's position
+   and visibility. Use **Edit** in-game for all four macro buttons. Camera gestures
+   remain active; macro visibility is controlled inside the editor.
 
 No special APK is needed. Do not enable the duplicate controls/zoom from the
 runtime PR at the same time. Mods that claim overlapping areas, change input or
@@ -81,7 +115,7 @@ python3 mods/enhanced-controls/build.py
 python3 mods/enhanced-controls/tests/run_tests.py
 ```
 
-Output: `build/enhanced-controls/enhanced-controls-0.1.3.wwhdmod` and
+Output: `build/enhanced-controls/enhanced-controls-0.2.0.wwhdmod` and
 `SHA256SUMS.txt`. `WWHD_PPC_CLANG`, `WWHD_PPC_LLD` and `CC` can select compilers.
 The build checks the real upstream package reader and PPC-to-C translator for
 both USA and EU. Tests exercise the pure policy and the translated module with
@@ -120,6 +154,6 @@ MPL-2.0, see `LICENSE` in the package and repository. Macro timings and the
 camera-distance/collision approach are adapted from SSunnKing's
 `ZeldaWWHDRecompAndroid---ENHANCED` and the `enhanced-on-main` port. The guest
 adapter and package build are implemented against the official public SDK.
-The archive includes `src/mod.c` and `src/core.h`; build tools and tests are in
+The archive includes `src/mod.c`, `src/core.h` and `src/editor.h`; build tools and tests are in
 `mods/enhanced-controls` on this branch. Public game names/offsets derive from
 ZeldaWWHDDecomp/wwhd (CC0), as documented by the upstream generated SDK.

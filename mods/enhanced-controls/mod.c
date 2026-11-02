@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: MPL-2.0 */
 #include "wwhd_guest.h"
 #include "wwhd/functions.h"
-#include "core.h"
+#include "editor.h"
 
 /* Only verified public game calls. Data bases use SDK relocations for USA/EU. */
 WWHD_GAME_FUNC(0x023E6380, s32, spin_attack, (void*, s32));
@@ -16,15 +16,36 @@ WWHD_GAME_FUNC(0x024FCBE8, u8, camera_line_check, (void*, void*, void*, u32));
 
 static EcState state;
 static int registered, ready, mask, pinch_on, tap_on, claims_valid;
-static EcRect rects[5], claimed[5];
+static EcRect rects[7], claimed[7];
+static EcEditor editor;
+static EcLayoutFile layout_file[2]; /* host services require mod-owned buffers */
+static const char* const layout_names[]={"macro-layout-a.bin","macro-layout-b.bin"};
+static int editor_visible=1, release_input;
+static void load_layout(void) {
+    editor.saved=ee_defaults(); editor.sequence=0; ee_close(&editor);
+    for(int i=0;i<2;++i) {
+        EcLayoutFile* f=&layout_file[i];
+        if(wwhd_file_read(layout_names[i],f,sizeof(*f))==(s32)sizeof(*f) && ee_file_valid(f) &&
+           (!editor.sequence || (s32)(f->sequence-editor.sequence)>0)) {
+            editor.saved=f->layout; editor.sequence=f->sequence;
+        }
+    }
+}
+static int save_layout(void) {
+    unsigned sequence=editor.sequence+1; if(!sequence) sequence=1;
+    EcLayoutFile* f=&layout_file[sequence&1];
+    *f=(EcLayoutFile){0x45434C59u,1,sequence,0,editor.draft}; f->checksum=ee_hash(f);
+    if(wwhd_file_write(layout_names[sequence&1],f,sizeof(*f))!=(s32)sizeof(*f)) {
+        editor.error=1; return 0;
+    }
+    editor.saved=editor.draft; editor.sequence=sequence; return 1;
+}
 static unsigned claimed_mask;
-static unsigned long long last_step, distance_revision, hud_epoch;
+static unsigned long long last_step, hud_epoch;
 static u32 player_id;
 static wwhd_input_state sampled; /* service buffers must belong to the mod */
 static wwhd_hud_element element;
-static float size = 1;
 static const char* const names[] = {"Jump", "Slash", "Spin", "Dodge"};
-static const char* const toggle_ids[] = {"jump", "slash", "spin", "dodge"};
 
 static int object(u32 p, u32 bytes) { return !(p&3) && p >= 0x10000000 && p <= 0x50000000-bytes; }
 static int is_menu(void) {
@@ -66,20 +87,20 @@ static int playable(void) {
 }
 static void clear_claims(void) {
     if (!claims_valid) return;
-    for (u32 i=0;i<5;++i) wwhd_touch_claim(i,0,0,0,0);
+    for (u32 i=0;i<7;++i) wwhd_touch_claim(i,0,0,0,0);
     claims_valid=0; claimed_mask=0;
 }
 static void update_claims(void) {
-    unsigned wanted=ready ? (unsigned)mask | ((pinch_on||tap_on)?16u:0u) : 0;
+    unsigned wanted=ready ? (editor.open?64u:((unsigned)mask|16u|(editor_visible?32u:0u))) : 0;
     if (!wanted) { clear_claims(); return; }
     int changed=!claims_valid || wanted!=claimed_mask;
-    for (int i=0;i<5;++i) {
+    for (int i=0;i<7;++i) {
         EcRect a=rects[i], b=claimed[i];
-        if (a.x!=b.x || a.y!=b.y || a.w!=b.w || a.h!=b.h) changed=1;
+        if ((wanted&(1u<<i)) && (a.x!=b.x || a.y!=b.y || a.w!=b.w || a.h!=b.h)) changed=1;
     }
     if (!changed) return; /* Do not steal overlapping claims back every frame. */
     ec_cancel(&state);
-    for (u32 i=0;i<5;++i) {
+    for (u32 i=0;i<7;++i) {
         EcRect r=rects[i]; claimed[i]=r;
         if (wanted&(1u<<i)) wwhd_touch_claim(i,r.x-r.w/2,r.y-r.h/2,r.x+r.w/2,r.y+r.h/2);
         else wwhd_touch_claim(i,0,0,0,0);
@@ -94,38 +115,46 @@ static void refresh(void) {
     if (step!=last_step || epoch!=hud_epoch) {
         if (epoch!=hud_epoch || step<last_step || step-last_step>1) {
             ec_cancel(&state); clear_claims();
+            if(epoch!=hud_epoch) load_layout();
+            else ee_close(&editor);
         } else ec_tick(&state,wwhd_logic_dt());
         last_step=step; hud_epoch=epoch;
-        int new_mask=0;
-        for (int i=0;i<4;++i) if(wwhd_config_bool(toggle_ids[i],1)) new_mask|=1<<i;
-        int new_pinch=wwhd_config_bool("pinch",1), new_tap=wwhd_config_bool("double-tap",1);
-        if(new_mask!=mask || new_pinch!=pinch_on || new_tap!=tap_on) ec_cancel(&state);
-        mask=new_mask; pinch_on=new_pinch; tap_on=new_tap;
-        unsigned long long rev=wwhd_config_changed("distance");
-        if (rev!=distance_revision) {
-            state.distance=number("distance",100,50,200)/100;
-            state.pinching=state.tap_valid=state.previous_tap=0; distance_revision=rev;
-        }
-        size=number("button-size",100,60,140)/100;
-        float x=number("buttons-x",0,-350,350), y=number("buttons-y",-180,-270,270);
-        for (int i=0;i<4;++i) rects[i]=(EcRect){x+(i-1.5f)*100*size,y,88*size,60*size};
-        rects[4]=(EcRect){number("gesture-x",420,150,480),number("gesture-y",120,-200,250),260,140};
+        editor_visible=wwhd_config_bool("editor-visible",1);
+        if(!editor_visible && editor.open) ee_close(&editor);
+        rects[5]=(EcRect){number("editor-x",0,-570,570),number("editor-y",260,-320,320),96,48};
+        rects[4]=(EcRect){420,120,260,140};
+        rects[6]=(EcRect){0,0,1280,720};
     }
     int next=playable();
     u32 id=next ? U32(U32(PLAY,0x5B2C),4) : 0;
-    if (!next || id!=player_id) ec_cancel(&state);
+    if (!next || id!=player_id) { ec_cancel(&state); ee_close(&editor); }
+    mask=0;
+    for(int i=0;i<4;++i) {
+        EcPlacement p=(editor.open?editor.draft:editor.saved).button[i];
+        rects[i]=ee_rect(p); if(p.visible) mask|=1<<i;
+    }
     player_id=id; ready=next;
     update_claims();
 }
 static void touch(const wwhd_touch_event* event) {
     refresh(); if(!ready) return;
     float x=event->x, y=event->y;
+    if(editor.open) {
+        int action=ee_touch(&editor,event->kind,x,y);
+        if(action==EE_CANCEL) ee_close(&editor);
+        else if(action==EE_SAVE) { if(save_layout()) ee_close(&editor); }
+        else if(action>=0) ee_apply(&editor,action);
+        ec_cancel(&state); refresh(); return;
+    }
+    if(event->kind==WWHD_TOUCH_DOWN && editor_visible && ec_inside(rects[5],x,y)) {
+        ee_begin(&editor); release_input=1; ec_cancel(&state); refresh(); return;
+    }
     switch(event->kind) {
         case WWHD_TOUCH_DOWN: {
             int hit=EC_NONE;
-            /* Claim slot 4 is newest and wins an overlap, matching the host. */
-            if ((pinch_on||tap_on) && ec_inside(rects[4],x,y)) hit=4;
-            else for(int i=0;i<4;++i) if((mask&(1<<i)) && ec_inside(rects[i],x,y)) hit=i;
+            /* Editable macros take priority over the fixed gesture pad. */
+            for(int i=0;i<4;++i) if((mask&(1<<i)) && ec_inside(rects[i],x,y)) hit=i;
+            if(hit==EC_NONE && (pinch_on||tap_on) && ec_inside(rects[4],x,y)) hit=4;
             ec_down(&state,hit,x,y);
             if(hit>=0 && hit<4) {
                 wwhd_input_read(&sampled);
@@ -152,6 +181,12 @@ static void touch(const wwhd_touch_event* event) {
 }
 static void filter(wwhd_input_state* pad) {
     refresh(); if(!ready) return;
+    if(editor.open || release_input) {
+        int neutral=!pad->buttons && pad->lx>=-.15f && pad->lx<=.15f && pad->ly>=-.15f && pad->ly<=.15f &&
+            pad->rx>=-.15f && pad->rx<=.15f && pad->ry>=-.15f && pad->ry<=.15f;
+        if(!editor.open && neutral) release_input=0;
+        pad->buttons=0; pad->lx=pad->ly=pad->rx=pad->ry=0; return;
+    }
     /* Always preserve real buttons. The macro only supplies additional holds. */
     pad->buttons |= ec_buttons(&state);
     ec_stick(&state,&pad->lx,&pad->ly);
@@ -181,34 +216,96 @@ static void sync_icons(void) {
         for(int i=0;i<4;++i) icons[i]=0; /* old handles are already invalid */
         icon_attempts=0; icon_epoch=epoch;
     }
-    if(!wwhd_config_bool("icons",1)) {
-        for(int i=0;i<4;++i) { if(icons[i]) wwhd_hud_release(icons[i]); icons[i]=0; }
-        icon_attempts=0; return;
-    }
-    for(int i=0;i<4;++i) if((mask&(1<<i)) && !(icon_attempts&(1u<<i))) {
-        icons[i]=wwhd_hud_texture(WWHD_HUD_PACKAGE,icon_paths[i]);
-        icon_attempts|=1u<<i;
+    for(int i=0;i<4;++i) {
+        EcPlacement p=(editor.open?editor.draft:editor.saved).button[i];
+        int needed=p.icons && (p.visible || editor.open);
+        if(!needed) { if(icons[i]) wwhd_hud_release(icons[i]); icons[i]=0; icon_attempts&=~(1u<<i); }
+        else if(!(icon_attempts&(1u<<i))) {
+            icons[i]=wwhd_hud_texture(WWHD_HUD_PACKAGE,icon_paths[i]); icon_attempts|=1u<<i;
+        }
     }
 }
-static void macro_button(u32 list,int i) {
-    if(!icons[i]) { box(list,rects[i],names[i],state.macro==i?0x397a96df:0x14222cb8); return; }
-    EcRect r=rects[i];
-    float side=r.w<r.h?r.w:r.h; /* preserve aspect ratio inside the existing hitbox */
-    element=(wwhd_hud_element){.kind=WWHD_HUD_IMAGE,.anchor=WWHD_HUD_CENTER,
-        .x=640+r.x-side/2,.y=360-r.y-side/2,.w=side,.h=side,
-        .thickness=1,.u1=1,.v1=1,.rgba=state.macro==i?0xB0D8FFFF:0xFFFFFFFF,.image=icons[i]};
+static void label(u32 list,float x,float y,const char* text,float font,u32 color) {
+    unsigned n=0; while(text[n]) ++n;
+    element=(wwhd_hud_element){.kind=WWHD_HUD_TEXT,.anchor=WWHD_HUD_CENTER,
+        .x=640+x,.y=360-y,.size=font,.rgba=color,.text=text,.text_bytes=n};
     wwhd_hud_emit(list,&element);
+}
+static void outline(u32 list,EcRect r,u32 color) {
+    element=(wwhd_hud_element){.kind=WWHD_HUD_RECT_OUTLINE,.anchor=WWHD_HUD_CENTER,
+        .x=640+r.x-r.w/2,.y=360-r.y-r.h/2,.w=r.w,.h=r.h,.thickness=2,.rgba=color};
+    wwhd_hud_emit(list,&element);
+}
+static void line(u32 list,float x,float y,float xx,float yy,u32 color) {
+    element=(wwhd_hud_element){.kind=WWHD_HUD_LINE,.anchor=WWHD_HUD_CENTER,
+        .x=640+x,.y=360-y,.w=xx-x,.h=y-yy,.thickness=1,.rgba=color};
+    wwhd_hud_emit(list,&element);
+}
+static void macro_button(u32 list,int i) {
+    EcPlacement p=(editor.open?editor.draft:editor.saved).button[i];
+    EcRect r=rects[i]; float side=r.w<r.h?r.w:r.h;
+    u32 alpha=(u32)(255*p.opacity/100);
+    if(editor.open && alpha<128) alpha=128; /* editable even if hidden or faint */
+    if(editor.open && !p.visible) alpha=96;
+    u32 tint=(state.macro==i?0xB0D8FF00u:0xFFFFFF00u)|alpha;
+    element=(wwhd_hud_element){.kind=p.shape?(p.filled?WWHD_HUD_RECT:WWHD_HUD_RECT_OUTLINE):
+        (p.filled?WWHD_HUD_CIRCLE:WWHD_HUD_CIRCLE_OUTLINE),.anchor=WWHD_HUD_CENTER,
+        .x=640+r.x-(p.shape?r.w/2:0),.y=360-r.y-(p.shape?r.h/2:0),
+        .w=r.w,.h=r.h,.size=side/2,.thickness=2,.rgba=p.filled?(0x14222C00u|alpha):tint};
+    wwhd_hud_emit(list,&element);
+    if(icons[i] && p.icons) {
+        element=(wwhd_hud_element){.kind=WWHD_HUD_IMAGE,.anchor=WWHD_HUD_CENTER,
+            .x=640+r.x-side/2,.y=360-r.y-side/2,.w=side,.h=side,
+            .u1=1,.v1=1,.rgba=tint,.image=icons[i]};
+        wwhd_hud_emit(list,&element);
+    } else label(list,r.x-r.w/2+8,r.y+9,names[i],18*p.size/100.f,tint);
+    if(editor.open && editor.selected==i) outline(list,r,0xFFDB70FF);
+}
+static char editor_text[12][64];
+static void editor_value(char* out,const char* prefix,int value,const char* suffix) {
+    unsigned n=0; while(*prefix) out[n++]=*prefix++;
+    if(value<0) { out[n++]='-'; value=-value; }
+    if(value>=100) out[n++]='0'+value/100;
+    if(value>=10) out[n++]='0'+(value/10)%10;
+    out[n++]='0'+value%10;
+    while(*suffix) out[n++]=*suffix++;
+    out[n]=0;
+}
+static void editor_hud(u32 list) {
+    box(list,(EcRect){0,245,1260,210},"",0x102332F0);
+    if(editor.draft.grid) {
+        for(int x=-620;x<=620;x+=20) line(list,x,-320,x,150,0xD0DCEC28);
+        for(int y=-320;y<=140;y+=20) line(list,-620,y,620,y,0xD0DCEC28);
+    }
+    for(int i=0;i<4;++i) if(i!=editor.selected) macro_button(list,i);
+    macro_button(list,editor.selected);
+    for(int i=0;i<4;++i) box(list,ee_tab(i),names[i],editor.selected==i?0x436B8FFF:0x223C50FF);
+    EcPlacement p=editor.draft.button[editor.selected];
+    editor_value(editor_text[0],"Smaller ",p.size,"%");
+    editor_value(editor_text[1],"Larger ",p.size,"%");
+    editor_value(editor_text[2],"Opacity ",p.opacity,"%");
+    const char* captions[EE_ACTIONS]={editor_text[0],editor_text[1],editor_text[2],
+        p.shape?"Shape: square":"Shape: circle",p.filled?"Fill: on":"Fill: off",
+        p.icons?"Style: icon":"Style: text",p.visible?"Visible: yes":"Visible: no",
+        editor.draft.grid?"Grid: on":"Grid: off","Reset all","Cancel","Save / Done"};
+    for(int i=0;i<EE_ACTIONS;++i) box(list,ee_action_rect(i),captions[i],i==EE_SAVE?0x26745AFF:0x29475FFF);
+    label(list,-590,345,"MACRO EDITOR - select a button, then drag it",18,0xFFFFFFFF);
+    box(list,(EcRect){0,-342,1280,36},"",0x102332F0);
+    label(list,-590,-334,editor.error?"Save failed - retry Save or Cancel":
+        "Only macro buttons are edited. The game keeps running; use a safe place.",16,editor.error?0xFF8888FF:0xFFFFFFFF);
 }
 static char zoom_label[]="Pinch / double tap 100%";
 static void hud(u32 list) {
     refresh(); if(!ready) return;
     sync_icons();
+    if(editor.open) { editor_hud(list); return; }
     for(int i=0;i<4;++i) if(mask&(1<<i)) macro_button(list,i);
     if(pinch_on||tap_on) {
         unsigned n=(unsigned)(state.distance*100+.5f);
         zoom_label[19]='0'+n/100; zoom_label[20]='0'+(n/10)%10; zoom_label[21]='0'+n%10;
         box(list,rects[4],zoom_label,0x14222c78);
     }
+    if(editor_visible) box(list,rects[5],"Edit",0x23445CD0);
 }
 /* Public HD proc IDs: WAIT, MOVE, ATN_MOVE, ATN_ACTOR_WAIT/MOVE,
  * WAIT_TURN and MOVE_TURN. Never interrupt damage, jumps, rolls, another attack,
@@ -224,7 +321,7 @@ static int can_spin(void* link) {
 }
 WWHD_HOOK(WWHD_ADDR_daPy_Execute,enhanced_register,(void* link)) {
     if(!registered) {
-        ec_init(&state); last_step=~0ull;
+        ec_init(&state); load_layout(); pinch_on=tap_on=1; last_step=~0ull;
         wwhd_touch_register(touch); wwhd_input_filter_register(filter);
         wwhd_hud_register(hud,WWHD_HUD_TV); registered=1;
         wwhd_log("Enhanced Controls: guest mod ready (experimental)");
@@ -233,7 +330,7 @@ WWHD_HOOK(WWHD_ADDR_daPy_Execute,enhanced_register,(void* link)) {
     /* Execute once on Link's game update, never from a touch/HUD/input callback.
      * A refused request is discarded instead of firing later after recovery. */
     if(ec_take_spin(&state)) {
-        if(!ready || (u32)link!=U32(PLAY,0x5B2C) || !can_spin(link) || !spin_attack(link,1))
+        if(editor.open || !ready || (u32)link!=U32(PLAY,0x5B2C) || !can_spin(link) || !spin_attack(link,1))
             state.macro=EC_NONE;
     }
 }
@@ -251,7 +348,7 @@ static int blocked(void* data,float factor) {
 WWHD_HOOK_RETURN(WWHD_ADDR_store_024F8430,enhanced_camera_store,(void* camera)) {
     if(!registered) return;
     refresh();
-    if(!ready || !pinch_on || state.distance==1 || (u32)camera!=U32(PLAY,0x5AF8)) return;
+    if(editor.open || !ready || !pinch_on || state.distance==1 || (u32)camera!=U32(PLAY,0x5AF8)) return;
     u8* body=(u8*)camera+0x248;
     if(!U8(body,4) || U8(body,5)) return;
     u32 param=U32(body,0x8A8);

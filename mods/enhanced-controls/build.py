@@ -53,6 +53,7 @@ def build(out, clang, lld):
     files = {'manifest.json': staging/'manifest.json', 'mod.elf': staging/'mod.elf',
              'README.md': HERE/'README.md', 'LICENSE': REPO/'LICENSE',
              'src/mod.c': HERE/'mod.c', 'src/core.h': HERE/'core.h',
+             'src/editor.h': HERE/'editor.h',
              'assets/NOTICE.md': HERE/'assets/NOTICE.md'}
     for name in ('combat_jump_attack','combat_vertical_slash','combat_spin_attack','combat_dodge'):
         files[f'assets/{name}.png']=HERE/'assets'/f'{name}.png'

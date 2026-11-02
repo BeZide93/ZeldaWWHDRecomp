@@ -29,8 +29,12 @@ def main():
         assert json.loads(z.read('manifest.json'))==manifest
         assert z.read('src/mod.c')==(HERE.parent/'mod.c').read_bytes()
         assert z.read('src/core.h')==(HERE.parent/'core.h').read_bytes()
+        assert z.read('src/editor.h')==(HERE.parent/'editor.h').read_bytes()
+        assert {o['id'] for o in manifest['options']}=={'editor-visible','editor-x','editor-y'}
     run(CC+['-std=c11','-Wall','-Wextra','-Werror',HERE/'core_test.c','-lm','-o',OUT/'core-test'])
     run([OUT/'core-test'])
+    run(CC+['-std=c11','-Wall','-Wextra','-Werror','-Wno-unused-function',HERE/'editor_test.c','-o',OUT/'editor-test'])
+    run([OUT/'editor-test'])
     for region in ('USA','EU'):
         b=by_name(region)
         defs={'PLAY':b.data(0x1046f0b0),'SAVE_PTR':b.data(0x101f84dc),
