@@ -23,7 +23,8 @@ the seven-feature runtime port, not a prerequisite.
 - Four custom combat icons, with per-button icon/text selection
   in the editor. Missing images fall back to text. Icons retain their proportions
   and reload after a save-state/HUD reset.
-- A **macro-only touch editor**, opened by the **Edit** touch button. The mod's
+- A **touch editor**, opened by the **Edit** touch button; with Dark Link 0.1.17+
+  installed it also edits the Dark Link button in the same session. The mod's
   settings contain only **Show editor button**, **horizontal position** and
   **vertical position**.
 
@@ -83,7 +84,7 @@ macro's release; the mod does not forcibly release the player's inputs.
 
 1. Download the `enhanced-controls` artifact from the successful **Enhanced
    Controls mod** Actions run. Extract the outer GitHub artifact ZIP to obtain
-   `enhanced-controls-0.3.1.wwhdmod`; do **not** extract that file.
+   `enhanced-controls-0.4.0.wwhdmod`; do **not** extract that file.
 2. Enable **Code mods** in the app's setup or **Settings → Mods → More →
    Code-mod support**. If newly enabled, let the app rebuild the game code.
 3. **Settings → Mods → More → Install from a file**: choose the `.wwhdmod`.
@@ -113,7 +114,7 @@ python3 mods/enhanced-controls/build.py
 python3 mods/enhanced-controls/tests/run_tests.py
 ```
 
-Output: `build/enhanced-controls/enhanced-controls-0.3.1.wwhdmod` and
+Output: `build/enhanced-controls/enhanced-controls-0.4.0.wwhdmod` and
 `SHA256SUMS.txt`. `WWHD_PPC_CLANG`, `WWHD_PPC_LLD`, `CC` and `CXX` can select compilers.
 The build checks the real upstream package reader and PPC-to-C translator for
 both USA and EU. Tests exercise the pure policy and the translated module with
