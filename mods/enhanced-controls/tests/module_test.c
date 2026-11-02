@@ -15,6 +15,7 @@ static Cpu cpu;
 static uint32_t touch_fn, filter_fn, hud_fn;
 static uint64_t step=1, epoch=1, revision=1;
 static int pinch_enabled=1, jump_enabled=1, claim_count, hud_count, rays;
+static int spins, equip_animation, guard_animation, spin_enabled=1;
 static int icons_enabled=1, texture_calls, image_count, releases, fail_texture;
 static float distance_option=100, wall_z=100000;
 static float claim[5][4];
@@ -29,6 +30,14 @@ static void call(uint32_t fn, uint32_t arg) {
     fprintf(stderr,"unknown callback %08x\n",fn); abort();
 }
 static void dispatch(Cpu* c) {
+    if(c->pc==SPIN) {
+        assert(c->r[3]==LINK && c->r[4]==1);
+        ++spins; st32(LINK+0x65F0,0x55); c->r[3]=1; return;
+    }
+    if(c->pc==EQUIPPING || c->pc==GUARDING) {
+        assert(c->r[3]==LINK);
+        c->r[3]=c->pc==EQUIPPING?equip_animation:guard_animation; return;
+    }
     if(c->pc==COLLISION) {
         ++rays;
         assert(c->r[3]==CAMERA+0x248 && c->r[6]==0x7f);
@@ -63,7 +72,7 @@ static void s_epoch(Cpu* c) { u64(c,epoch); }
 static void s_dt(Cpu* c) { c->f[1].ps0=1./30; }
 static void s_bool(Cpu* c) {
     const char* name=string(c->r[3]); assert(own(c->r[3],1));
-    c->r[3]=!strcmp(name,"icons")?icons_enabled:!strcmp(name,"pinch")?pinch_enabled:!strcmp(name,"jump")?jump_enabled:c->r[4];
+    c->r[3]=!strcmp(name,"spin")?spin_enabled:!strcmp(name,"icons")?icons_enabled:!strcmp(name,"pinch")?pinch_enabled:!strcmp(name,"jump")?jump_enabled:c->r[4];
 }
 static void s_changed(Cpu* c) { assert(!strcmp(string(c->r[3]),"distance")); u64(c,revision); }
 static void s_number(Cpu* c) {
@@ -112,6 +121,7 @@ int main(void) {
     memcpy(ppc_ptr(mod->mem_base),mod->image,mod->image_size);
     memcpy(ppc_ptr(PLAY+0x5134),"sea",4);
     st32(PLAY+0x5B2C,LINK); st32(LINK,1); st32(LINK+4,7); st16(LINK+0x69B0,0x103);
+    st32(LINK+0x65F0,4);
     st32(SAVE_PTR,SAVE); st16(SAVE+0x20,12); st16(SAVE+0x22,12);
     st32(PLAY+0x5AF8,CAMERA); st8(CAMERA+0x248+4,1);
     hook(LINK_EXECUTE,LINK); assert(touch_fn && filter_fn && hud_fn && claim_count==5);
@@ -130,26 +140,65 @@ int main(void) {
     next(); next(); assert(pad(0)==(0x80|0x8000)); assert(pad(0)==(0x80|0x8000));
     touch(2,-150,-180); assert(pad(0)==(0x80|0x8000));
     for(int i=0;i<7;++i) next(); assert(pad(0x1000)==0x1000);
-    touch(0,50,-180); assert(pad(0)==0 && ldf32(SCRATCH+4)==1);
+    touch(0,50,-180); assert(pad(0)==0 && ldf32(SCRATCH+4)==0);
     st8(MENU_FLAG,1); assert(pad(0)==0); assert(claim[0][0]==claim[0][2]);
     st8(MENU_FLAG,0); next(); assert(pad(0)==0);
-    /* Full quick-spin circle, delayed B edge and neutral release through the
-     * actual translated input filter. Preserve unrelated physical buttons. */
-    touch(0,50,-180);
-    float previous_x=1,previous_y=0,angle=0;
-    for(int phase=0;phase<11;++phase) {
-        assert(pad(0x1000)==(0x1000u | (phase>=8 && phase<10 ? 0x4000u : 0)));
-        float x=ldf32(SCRATCH+4),y=ldf32(SCRATCH+8);
-        if(phase<=8) {
-            assert(fabsf(x*x+y*y-1)<.00001f);
-            angle+=atan2f(previous_x*y-previous_y*x,previous_x*x+previous_y*y);
-            previous_x=x;previous_y=y;
-        } else assert(x==0 && y==0);
-        if(phase==8) assert(fabsf(angle-6.2831853f)<.0001f);
-        next();
+    hook(LINK_EXECUTE,LINK); assert(spins==0); /* menu discarded queued tap */
+    /* No native dispatch from touch/filter/HUD. Lifting still commits one tap. */
+    touch(0,50,-180); touch(2,50,-180);
+    assert(pad(0x5000)==0x5000); call(hud_fn,1); assert(spins==0);
+    memset(ppc_ptr(SCRATCH),0,32); st32(SCRATCH,0x5000);
+    stf32(SCRATCH+4,.3f); stf32(SCRATCH+8,-.4f); call(filter_fn,SCRATCH);
+    assert(ld32(SCRATCH)==0x5000 && ldf32(SCRATCH+4)==.3f && ldf32(SCRATCH+8)==-.4f);
+    hook(LINK_EXECUTE,LINK); assert(spins==1);
+    for(int i=0;i<12;++i) { next(); hook(LINK_EXECUTE,LINK); }
+    assert(spins==1); /* holding/repeated hooks never restart the native attack */
+    touch(0,50,-180); hook(LINK_EXECUTE,LINK); assert(spins==1); /* spin busy */
+    /* Every unsupported proc refuses the request, including attack/damage/jump.
+     * The stub changes proc on success just like native commonProcInit. */
+    for(unsigned proc=0;proc<=0x100;++proc) {
+        touch(3,0,0); st32(LINK+0x65F0,proc);
+        int before=spins, allowed=proc==4||proc==6||proc==7||proc==8||proc==9||proc==0x17||proc==0x18;
+        touch(0,50,-180); hook(LINK_EXECUTE,LINK); assert(spins==before+allowed);
+        st32(LINK+0x65F0,4); hook(LINK_EXECUTE,LINK); assert(spins==before+allowed);
     }
-    memset(ppc_ptr(SCRATCH),0,32); stf32(SCRATCH+4,.3f); stf32(SCRATCH+8,-.4f);
-    call(filter_fn,SCRATCH); assert(ldf32(SCRATCH+4)==.3f && ldf32(SCRATCH+8)==-.4f);
+    /* Revalidate sword/item/catch/curse/animation state when executing. */
+    for(int reason=0;reason<8;++reason) {
+        touch(3,0,0); st32(LINK+0x65F0,4); touch(0,50,-180); int before=spins;
+        switch(reason) {
+            case 0: st16(LINK+0x69B0,0xff); break;
+            case 1: st32(LINK+0x8260,1); break;
+            case 2: st32(LINK+0x65A4,0x18030000); break;
+            case 3: st32(LINK+0x6594,0x18030000); break;
+            case 4: st32(LINK+0x3B8,0x20); break;
+            case 5: st16(CURSE,1); break;
+            case 6: equip_animation=1; break;
+            case 7: guard_animation=1; break;
+        }
+        hook(LINK_EXECUTE,LINK); assert(spins==before);
+        st16(LINK+0x69B0,0x103); st32(LINK+0x8260,0); st32(LINK+0x65A4,0);
+        st32(LINK+0x6594,0); st32(LINK+0x3B8,0); st16(CURSE,0);
+        equip_animation=guard_animation=0;
+        hook(LINK_EXECUTE,LINK); assert(spins==before); /* no delayed replay */
+    }
+    /* Pending requests cannot survive lifecycle changes or replacement macros. */
+    for(int reason=0;reason<8;++reason) {
+        touch(3,0,0); touch(0,50,-180); int before=spins;
+        switch(reason) {
+            case 0: touch(3,0,0); break;
+            case 1: touch(4,2,0); break;
+            case 2: ++epoch; break;
+            case 3: st32(LINK+4,ld32(LINK+4)+1); break;
+            case 4: spin_enabled=0; next(); break;
+            case 5: st8(MENU_FLAG,1); break;
+            case 6: step+=3; break;
+            case 7: touch(0,-150,-180); break;
+        }
+        hook(LINK_EXECUTE,LINK); assert(spins==before);
+        spin_enabled=1; st8(MENU_FLAG,0); next();
+        hook(LINK_EXECUTE,LINK); assert(spins==before);
+    }
+    touch(3,0,0);
     /* Disable a live option during an attack. */
     touch(0,-150,-180); assert(pad(0)==0x80); jump_enabled=0; next(); assert(!pad(0));
     jump_enabled=1; next();
@@ -165,7 +214,8 @@ int main(void) {
     st8(PLAY+0x5292,1); camera(100); assert(ldf32(CAMERA+0xE4)==100);
     st8(PLAY+0x5292,0); st32(PLAY+0x5CD8,0x2000); camera(100); assert(ldf32(CAMERA+0xE4)==100);
     st32(PLAY+0x5CD8,0); pinch_enabled=0; next(); camera(100); assert(ldf32(CAMERA+0xE4)==100);
-    touch(0,50,-180); assert(pad(0)==0 && ldf32(SCRATCH+4)==1); ++epoch; assert(!pad(0));
+    touch(0,50,-180); assert(pad(0)==0 && ldf32(SCRATCH+4)==0); ++epoch; assert(!pad(0));
+    int before=spins; hook(LINK_EXECUTE,LINK); assert(spins==before);
     puts("Translated module: registration, claims, HUD, input, lifecycle and camera fixture passed");
     assert(munmap(memory,1ull<<32)==0);
 }

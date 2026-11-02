@@ -13,28 +13,22 @@ int main(void) {
     ec_tick(&s,.14); assert(ec_buttons(&s)==EC_ZL);
     ec_tick(&s,.06); assert(!ec_buttons(&s));
     ec_start(&s,EC_SLASH,0); ec_tick(&s,.07); assert(ec_buttons(&s)==(EC_ZL|EC_B));
-    /* Both game rates see a closed circle before the first attack edge. */
+    /* Spin is a one-shot native request, never a pad/stick macro at 30/60 Hz. */
     for (int hz=30; hz<=60; hz+=30) {
         ec_init(&s); ec_start(&s,EC_SPIN,0);
-        float previous_x=1, previous_y=0, angle=0;
-        for (int frame=0;frame<11*hz/30;++frame) {
-            int phase=frame*30/hz;
-            float x=.3f,y=.4f;
-            assert(ec_stick(&s,&x,&y));
-            assert(ec_buttons(&s)==(phase>=8 && phase<10 ? EC_B : 0));
-            if (phase<=8) {
-                assert(fabsf(x*x+y*y-1)<.00001f);
-                angle+=atan2f(previous_x*y-previous_y*x,previous_x*x+previous_y*y);
-                previous_x=x; previous_y=y;
-            } else assert(x==0 && y==0);
-            if (frame==8*hz/30) assert(fabsf(angle-6.2831853f)<.0001f);
-            ec_tick(&s,1.0/hz);
-        }
         float x=.3f,y=.4f;
-        assert(!ec_active(&s) && !ec_buttons(&s));
-        assert(!ec_stick(&s,&x,&y) && x==.3f && y==.4f);
-        ec_start(&s,EC_SPIN,0); ec_tick(&s,.1); ec_cancel(&s);
-        assert(!ec_stick(&s,&x,&y) && !ec_buttons(&s));
+        assert(!ec_buttons(&s) && !ec_stick(&s,&x,&y) && x==.3f && y==.4f);
+        assert(ec_take_spin(&s) && !ec_take_spin(&s));
+        for(int frame=0;frame<hz;++frame) {
+            ec_tick(&s,1.0/hz);
+            assert(!ec_buttons(&s) && !ec_stick(&s,&x,&y) && !ec_take_spin(&s));
+        }
+        assert(!ec_active(&s));
+        ec_start(&s,EC_SPIN,0); ec_cancel(&s); assert(!ec_take_spin(&s));
+        ec_start(&s,EC_SPIN,0); ec_start(&s,EC_SLASH,0); assert(!ec_take_spin(&s));
+        ec_start(&s,EC_SPIN,0); ec_tick(&s,.2); ec_tick(&s,.1); assert(!ec_take_spin(&s));
+        ec_start(&s,EC_SPIN,0); ec_down(&s,EC_SPIN,0,0); ec_up(&s,0,0,0);
+        assert(ec_take_spin(&s)); /* lifting the finger does not lose a tap */
     }
     ec_start(&s,EC_DODGE,-.8f); assert(s.dodge_x==-1 && s.dodge_y==0);
     ec_start(&s,EC_DODGE,0); assert(s.dodge_x==0 && s.dodge_y==-1);

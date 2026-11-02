@@ -8,6 +8,7 @@ enum { EC_JUMP, EC_SLASH, EC_SPIN, EC_DODGE, EC_NONE = -1 };
 enum { EC_A = 0x8000, EC_B = 0x4000, EC_ZL = 0x80 };
 typedef struct { float x, y, w, h; } EcRect; /* centre, +y up */
 typedef struct {
+    int spin_pending;
     int macro, contact, tap_valid, tap_moved, previous_tap, pinching;
     double now, macro_start, down_time, tap_time, center_until;
     float down_x, down_y, tap_x, tap_y, dodge_x, dodge_y;
@@ -24,21 +25,18 @@ static int ec_inside(EcRect r, float x, float y) {
     return x >= r.x-r.w/2 && x <= r.x+r.w/2 && y >= r.y-r.h/2 && y <= r.y+r.h/2;
 }
 static void ec_cancel(EcState* s) {
-    s->macro = EC_NONE; s->contact = EC_NONE;
+    s->macro = EC_NONE; s->contact = EC_NONE; s->spin_pending = 0;
     s->tap_valid = s->tap_moved = s->previous_tap = s->pinching = 0;
     s->center_until = 0;
 }
 static void ec_init(EcState* s) {
     *s = (EcState){0}; s->distance = s->pinch_start = 1; ec_cancel(s);
 }
-/* One 45-degree sector per original 30 Hz logic interval. True-60 holds
- * each sector for two reads; repeated reads in one step do not advance it. */
-static int ec_spin_phase(const EcState* s) {
-    return (int)((s->now-s->macro_start)*30.0 + .000001);
-}
+/* Spin uses this timer only for pending-request expiry and button feedback. */
 static int ec_active(EcState* s) {
-    if (s->macro != EC_NONE && (s->macro==EC_SPIN ? ec_spin_phase(s)>=11 : s->now-s->macro_start>=.26))
-        s->macro = EC_NONE;
+    if (s->macro != EC_NONE && s->now-s->macro_start>=.26) {
+        s->macro = EC_NONE; s->spin_pending = 0;
+    }
     return s->macro != EC_NONE;
 }
 static void ec_tick(EcState* s, double dt) {
@@ -47,6 +45,7 @@ static void ec_tick(EcState* s, double dt) {
 }
 static void ec_start(EcState* s, int which, float stick_x) {
     s->macro = which; s->macro_start = s->now;
+    s->spin_pending = which == EC_SPIN;
     s->dodge_x = stick_x > .35f ? 1 : stick_x < -.35f ? -1 : 0;
     s->dodge_y = s->dodge_x == 0 ? -1 : 0; /* VPAD +y forward */
     s->previous_tap = 0;
@@ -55,34 +54,22 @@ static unsigned ec_buttons(EcState* s) {
     unsigned bits = s->now < s->center_until ? EC_ZL : 0;
     if (ec_active(s)) {
         double t = s->now-s->macro_start;
-        if (s->macro == EC_SPIN) {
-            int phase=ec_spin_phase(s);
-            if (phase>=8 && phase<10) bits |= EC_B;
-        }
-        else {
+        if (s->macro != EC_SPIN) {
             bits |= EC_ZL;
             if (t >= .06 && t < .20) bits |= s->macro == EC_SLASH ? EC_B : EC_A;
         }
     }
     return bits;
 }
-/* The macro temporarily owns the left stick, then returns it to the player.
- * Eight sectors plus the initial direction close one full circle before B.
- * Neutral on the second attack interval and release interval stops movement. */
+/* Only dodge supplies stick input. A native spin leaves physical input alone. */
 static int ec_stick(EcState* s, float* x, float* y) {
     if (!ec_active(s)) return 0;
     if (s->macro==EC_DODGE) { *x=s->dodge_x; *y=s->dodge_y; return 1; }
-    if (s->macro==EC_SPIN) {
-        static const float circle[8][2] = {
-            {1,0},{.70710678f,.70710678f},{0,1},{-.70710678f,.70710678f},
-            {-1,0},{-.70710678f,-.70710678f},{0,-1},{.70710678f,-.70710678f}
-        };
-        int phase=ec_spin_phase(s);
-        if (phase<=8) { *x=circle[phase&7][0]; *y=circle[phase&7][1]; }
-        else { *x=0; *y=0; }
-        return 1;
-    }
     return 0;
+}
+static int ec_take_spin(EcState* s) {
+    if (!ec_active(s) || !s->spin_pending) return 0;
+    s->spin_pending = 0; return 1;
 }
 static void ec_down(EcState* s, int contact, float x, float y) {
     s->contact = contact; s->down_time = s->now;

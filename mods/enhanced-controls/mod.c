@@ -4,6 +4,9 @@
 #include "core.h"
 
 /* Only verified public game calls. Data bases use SDK relocations for USA/EU. */
+WWHD_GAME_FUNC(0x023E6380, s32, spin_attack, (void*, s32));
+WWHD_GAME_FUNC(0x023D794C, s32, equipping, (void*));
+WWHD_GAME_FUNC(0x02443728, s32, guarding, (void*));
 WWHD_GAME_FUNC(0x024FCBE8, u8, camera_line_check, (void*, void*, void*, u32));
 #define PLAY ((u8*)&WWHD_GAME_DATA(0x1046F0B0,u8))
 #define U8(p,o) (*(volatile u8*)((u8*)(p)+(o)))
@@ -127,7 +130,10 @@ static void touch(const wwhd_touch_event* event) {
             if(hit>=0 && hit<4) {
                 wwhd_input_read(&sampled);
                 /* Attack macros need a drawn sword; dodge works without it. */
-                if(hit==EC_DODGE || U16(U32(PLAY,0x5B2C),0x69B0)==0x103) ec_start(&state,hit,sampled.lx);
+                if(hit==EC_DODGE || U16(U32(PLAY,0x5B2C),0x69B0)==0x103) {
+                    if(hit!=EC_SPIN || state.macro!=EC_SPIN || !ec_active(&state))
+                        ec_start(&state,hit,sampled.lx);
+                }
             }
             break;
         }
@@ -138,7 +144,7 @@ static void touch(const wwhd_touch_event* event) {
             /* Wheel events have no preceding DOWN; all pinch locations owned
              * by this mod support zoom, including the macro buttons. */
             state.tap_valid=state.previous_tap=0;
-            if(pinch_on) { state.macro=EC_NONE; ec_pinch(&state,x); }
+            if(pinch_on) { state.macro=EC_NONE; state.spin_pending=0; ec_pinch(&state,x); }
             break;
         case WWHD_TOUCH_PINCH_END:
             state.pinching=state.tap_valid=state.previous_tap=0; break;
@@ -204,8 +210,19 @@ static void hud(u32 list) {
         box(list,rects[4],zoom_label,0x14222c78);
     }
 }
+/* Public HD proc IDs: WAIT, MOVE, ATN_MOVE, ATN_ACTOR_WAIT/MOVE,
+ * WAIT_TURN and MOVE_TURN. Never interrupt damage, jumps, rolls, another attack,
+ * item use or scripted actions. Recheck at consumption, not in the pad callback.
+ * procCutTurn_init(link, 1) is the native quick-spin path in checkNextAction. */
+static int can_spin(void* link) {
+    u32 proc=U32(link,0x65F0);
+    if(proc!=4 && proc!=6 && proc!=7 && proc!=8 && proc!=9 && proc!=0x17 && proc!=0x18) return 0;
+    if(U16(link,0x69B0)!=0x103 || U32(link,0x8260) ||
+       U32(link,0x65A4) || U32(link,0x6594) || (U32(link,0x3B8)&0x20) ||
+       WWHD_GAME_DATA(0x101CEF16,u16)==1) return 0;
+    return !equipping(link) && !guarding(link);
+}
 WWHD_HOOK(WWHD_ADDR_daPy_Execute,enhanced_register,(void* link)) {
-    (void)link;
     if(!registered) {
         ec_init(&state); last_step=~0ull;
         wwhd_touch_register(touch); wwhd_input_filter_register(filter);
@@ -213,6 +230,12 @@ WWHD_HOOK(WWHD_ADDR_daPy_Execute,enhanced_register,(void* link)) {
         wwhd_log("Enhanced Controls: guest mod ready (experimental)");
     }
     refresh();
+    /* Execute once on Link's game update, never from a touch/HUD/input callback.
+     * A refused request is discarded instead of firing later after recovery. */
+    if(ec_take_spin(&state)) {
+        if(!ready || (u32)link!=U32(PLAY,0x5B2C) || !can_spin(link) || !spin_attack(link,1))
+            state.macro=EC_NONE;
+    }
 }
 
 typedef struct { void* body; float eye[3],center[3],end[3]; } Ray;
