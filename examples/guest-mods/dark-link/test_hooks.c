@@ -16,6 +16,7 @@ static uint32_t filter, hud, touch, step=1, revision=1;
 static int diagnostics=1,show_gauge=1;
 static char hud_text[2048];
 static FILE* hud_trace;
+static unsigned touch_claim_mask;
 static int free_mode, enabled=1, paused, menu, touch_visible=1, claim_active, elements;
 static const char* eye_names[]={"eyeL","eyeR","eyeLdamA","eyeRdamA","eyeLdamB","eyeRdamB"};
 static int eye_indices[6]={1,2,3,4,5,6}, name_lookups, missing_color;
@@ -56,7 +57,7 @@ static void logic_dt(Cpu* c) { c->f[1].ps0=1.0/30; }
 static void reg_filter(Cpu* c) { filter=c->r[3]; c->r[3]=1; }
 static void reg_hud(Cpu* c) { hud=c->r[3]; c->r[3]=1; }
 static void reg_touch(Cpu* c) { touch=c->r[3]; c->r[3]=1; }
-static void claim(Cpu* c) { claim_active=c->f[3].ps0>c->f[1].ps0 && c->f[4].ps0>c->f[2].ps0; c->r[3]=1; }
+static void claim(Cpu* c) { unsigned bit=1u<<c->r[3]; if(c->f[3].ps0>c->f[1].ps0 && c->f[4].ps0>c->f[2].ps0) touch_claim_mask|=bit; else touch_claim_mask&=~bit; claim_active=!!touch_claim_mask; c->r[3]=1; }
 static void emit(Cpu* c) {
     ++elements;
     /* Guest HUD ABI: text pointer at 64, byte count at 68 (72-byte element). */
@@ -84,6 +85,7 @@ static void expect_hud(const char* expected) {
 }
 static void copy(Cpu* c) { memcpy(ppc_ptr(c->r[3]),ppc_ptr(c->r[4]),c->r[5]); }
 static void clear(Cpu* c) { memset(ppc_ptr(c->r[3]),c->r[4],c->r[5]); }
+static void no_file(Cpu* c) { c->r[3]=(uint32_t)-1; }
 static PpcFunc service(const char* name) {
     if (!strcmp(name,"wwhd_config_bool")) return config_bool;
     if (!strcmp(name,"wwhd_config_int")) return config_int;
@@ -95,6 +97,7 @@ static PpcFunc service(const char* name) {
     if (!strcmp(name,"wwhd_touch_register")) return reg_touch;
     if (!strcmp(name,"wwhd_touch_claim")) return claim;
     if (!strcmp(name,"wwhd_hud_emit")) return emit;
+    if (!strcmp(name,"wwhd_file_read")) return no_file;
     if (!strcmp(name,"wwhd_file_write")) return magic_write;
     if (!strcmp(name,"wwhd_setting_get")) return magic_setting;
     if (!strcmp(name,"wwhd_hud_texture")) return magic_texture;
@@ -106,6 +109,7 @@ static PpcFunc service(const char* name) {
 }
 static void dispatch(Cpu* c) {
     switch (c->pc) {
+        case 0x0267598c: c->r[3]=ld32(c->r[3]); return;
         case 0x026fbb24: c->r[3]=magic_archive; return;
         case 0x027df40c: ++aura_notifications; return;
         case 0x02000008: c->r[3]=30; return; /* BRK resource getFrameMax */
@@ -312,11 +316,13 @@ int main(int argc, char** argv) {
     buttons(0); buttons(0x60000); tick(); assert(damage(3)==3); prepare(0);
     buttons(0); buttons(0x60000); tick(); assert(damage(3)==6); prepare(1);
     /* DARK touch cancellation, move/up do not toggle, second tap activates. */
+    stf32(INPUT+0x104,348);stf32(INPUT+0x108,-222);
     st32(INPUT+0x100,0); execute(touch,INPUT+0x100,0); tick();
     assert(damage(3)==3); prepare(0);
     st32(INPUT+0x100,1); execute(touch,INPUT+0x100,0); tick();
     st32(INPUT+0x100,2); execute(touch,INPUT+0x100,0); tick();
     assert(damage(3)==3); prepare(0);
+    stf32(INPUT+0x104,348);stf32(INPUT+0x108,-222);
     st32(INPUT+0x100,0); execute(touch,INPUT+0x100,0); tick();
     assert(damage(3)==6); prepare(1);
     touch_visible=0; ++revision; tick(); buttons(0); assert(!claim_active);

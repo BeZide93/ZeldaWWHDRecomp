@@ -22,6 +22,7 @@ static void magic_write(Cpu* c) {
     ++magic_writes;c->r[3]=c->r[5];
 }
 static void magic_texture(Cpu* c) {
+    if(c->r[3]==0) { assert(!strcmp((const char*)ppc_ptr(c->r[4]),"assets/dark_link.png")); c->r[3]=0; return; } /* fallback tested here; combined test loads the icon */
     assert(c->r[3]==1); /* owned, recoloured native artwork in mod Data */
     const char* path=(const char*)ppc_ptr(c->r[4]);
     assert(!strncmp(path,"magic-",6));
@@ -161,16 +162,16 @@ static void test_magic(void) {
     for(unsigned i=0;i<sizeof scales/sizeof scales[0];++i) {
         stf32(scale_key,scales[i]);++magic_generation;
         read_hud();hook(0x02675414,3,MAGIC_CTRL,0);magic_draws=0;read_hud();
-        assert(magic_draws==2 && magic_width==96);expect_hud("DARK");
+        assert(magic_draws==2 && magic_width==96);expect_hud("Dark Link");
     }
     /* Unsupported rotation and non-finite UVs omit only the gauge. */
     uint32_t scale_entry=MAGIC_ARC+0xc00+84+112+36+12;
     st8(scale_entry+1,2);stf32(scale_key,45);++magic_generation;
     read_hud();hook(0x02675414,3,MAGIC_CTRL,0);magic_draws=0;read_hud();
-    assert(!magic_draws);expect_hud("DARK");
+    assert(!magic_draws);expect_hud("Dark Link");
     fixture_magic();fixture_animation(16);
     st32(MAGIC_FLYT+392+0x68,0x7fc00000);++magic_generation;
-    magic_draws=0;read_hud();assert(!magic_draws);expect_hud("DARK");
+    magic_draws=0;read_hud();assert(!magic_draws);expect_hud("Dark Link");
     fixture_magic();fixture_animation(16);
     /* Malformed keys cannot partially apply an animation or read outside it. */
     magic_bad_animation=1;st32(MAGIC_ARC+0xc00+84+28+36+12+8,0xfffffff0);++magic_generation;
@@ -184,7 +185,7 @@ static void test_magic(void) {
     magic_animated=magic_bad_animation=0;free_mode=0;++revision;tick();fixture_magic();++magic_generation;
     read_hud();hook(0x02675414,3,MAGIC_CTRL,0);read_hud();
     magic_bad_geometry=1;++magic_generation;read_hud();hook(0x02675414,3,MAGIC_CTRL,0);
-    magic_draws=0;read_hud();assert(magic_draws==1);expect_hud("DARK");
+    magic_draws=0;read_hud();assert(magic_draws==1);expect_hud("Dark Link");
     magic_bad_geometry=0;++magic_generation;read_hud();hook(0x02675414,3,MAGIC_CTRL,0);read_hud();
     /* Return a full duration for the subsequent gameplay regression. */
     buttons(0); buttons(0x60000); tick(); buttons(0);

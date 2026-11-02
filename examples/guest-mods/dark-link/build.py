@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build/validate an asset-free Dark Link package. Requires PowerPC clang (or Zig)."""
+"""Build/validate the Dark Link package with its original button icon. Requires PowerPC clang (or Zig)."""
 import argparse
 import json
 from pathlib import Path
@@ -35,6 +35,13 @@ def main():
         "-I" + str(ROOT / "runtime/guest/include"), "-c", str(SOURCE / "mod.c"), "-o", str(package / "mod.elf")], check=True)
     for filename in ("manifest.json", "README.md"):
         shutil.copyfile(SOURCE / filename, package / filename)
+    (package / "assets").mkdir(exist_ok=True)
+    for asset in ("dark_link.png", "NOTICE.md"):
+        shutil.copyfile(SOURCE / "assets" / asset, package / "assets" / asset)
+    icon = (package / "assets/dark_link.png").read_bytes()
+    assert icon[:8] == b"\x89PNG\r\n\x1a\n" and icon[24:26] == bytes([8, 6])
+    width, height = struct.unpack_from(">II", icon, 16)
+    assert width == height and 0 < width <= 1536  # leave room for the gauge images
     test = out / "test-state"
     subprocess.run(host + ["-std=c11", "-O2", "-UNDEBUG", "-Wall", "-Wextra", "-Werror", str(SOURCE / "test_state.c"), "-o", str(test)], check=True)
     subprocess.run([str(test)], check=True)
@@ -64,7 +71,7 @@ def main():
         result = builder.build(str(package), str(out / "cache"), 0x7F000000,
             host, str(ROOT / "runtime/include"), game_build=by_name(region))
         supported = {"wwhd_hud_register", "wwhd_touch_register", "wwhd_input_filter_register",
-            "wwhd_config_changed", "wwhd_config_bool", "wwhd_config_int", "wwhd_logic_step",
+            "wwhd_file_read", "wwhd_config_changed", "wwhd_config_bool", "wwhd_config_int", "wwhd_logic_step",
             "wwhd_touch_claim", "wwhd_logic_dt", "wwhd_hud_emit", "wwhd_hud_epoch",
             "wwhd_hud_texture", "wwhd_hud_release", "wwhd_file_write", "wwhd_setting_get", "memcpy", "memset"}
         unexpected = set(translated.services) - supported
@@ -87,7 +94,7 @@ def main():
             subprocess.run([str(validator), str(trace)], check=True)
     archive = out / "dark-link.wwhdmod"
     with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as z:
-        for name in ("manifest.json", "mod.elf", "README.md"):
+        for name in ("manifest.json", "mod.elf", "README.md", "assets/dark_link.png", "assets/NOTICE.md"):
             z.write(package / name, name)
     print(f"Package: {archive}")
 

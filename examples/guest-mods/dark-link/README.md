@@ -176,3 +176,55 @@ Texture/art references: this repository's `story_prop_textures.cpp`,
 `game_layouts.cpp`, `aspect.cpp`, `tools/story_mods/lyt`, Cemu GX2 registers,
 [BfresLibrary RenderState](https://github.com/KillzXGaming/BfresLibrary/blob/master/BfresLibrary/Shared/Models/Material/RenderState.cs)
 and [NW4F render-state bit layout](https://github.com/nw4f/G3d/blob/nsmbu/include/nw/g3d/res/g3d_ResMaterial.h).
+
+### 0.1.17 — shared touch editor and Shortcut spacing
+
+The transformation button now uses an original transparent Dark Link medallion
+matching the Enhanced Controls icons. The image is included in the package;
+there are no copied game textures in the repository.
+
+Tap **Edit** to move the button, change its size, opacity, circle/square shape,
+fill, icon/text style or visibility. The toolbar matches Enhanced Controls.
+**Save / Done** persists the layout; **Cancel** discards the draft. Hidden buttons
+remain available through the top tabs. Editing suppresses combat and transform
+inputs; the game continues running, so edit in a safe place.
+
+Install **Enhanced Controls 0.4.0+ together with Dark Link 0.1.17+** for one Edit
+button and all five tabs (Jump, Slash, Spin, Dodge, Dark Link). Enhanced Controls
+owns the combined saved layout; each mod still owns and draws its own textures.
+With Enhanced Controls absent/disabled, Dark Link uses its own standalone saved
+layout. Updating only one package cannot enable the combined editor. The native
+controller overlay's separate editor is not part of this mod-button editor.
+Legacy Dark Link X/Y options seed a fresh standalone layout; subsequent changes
+are made through Edit. Enhanced Controls' four-button v1 layouts migrate to v2.
+
+Shortcut spacing now runs around native Main_00 `drawLayout` (026F8D08), finds
+`L_Shortcut_00` from the actual layout root, and includes its nested parts layout.
+It shifts final global Y matrices for the draw and restores their exact original
+bits afterward. It does not assume `N_Default_00` is the Shortcut's parent or
+that the base Pane CalculateMtx is called for every derived parts pane. No gauge,
+menu/cutscene or missing native resources means no shift. Traversal is bounded,
+checks links/cycles, and validates the complete target before making any writes.
+
+The SDK currently has no mod exports. The shared editor uses a versioned,
+synchronous value-only rendezvous at the verified read-only native getter
+0267598C (`hdHudMainStateNumber_c::getNumber`, returns its object's first word).
+Only explicit protocol packets in the loader's mod arena are handled; native
+game objects are ignored. There are no fixed scratch addresses, saved peer
+pointers, cross-owner texture handles or new host services. Thus these are mod
+package updates; they do not require a new app build. The public layout/getter
+evidence is pinned to ZeldaWWHDDecomp/wwhd `b2811a3ce838d1f875bc8e68536c1950af5d7ffc`.
+
+Validation: USA/EU translation and native compilation, existing gameplay,
+appearance/aura/gauge regressions, native-shaped nested Shortcut draw fixtures,
+and real runtime HUD transaction validation. The two-module integration test
+loads separately translated modules at different guest bases, tests both hook
+orders, save/restart/cancel/short writes, hidden buttons, standalone modes and
+per-owner image/list validation. Run it after building both packages:
+
+```
+python examples/guest-mods/dark-link/test_shared.py --enhanced-root /path/to/enhanced-mod
+```
+
+These tests use synthetic memory; actual in-game positioning still needs a
+runtime check on the target device.

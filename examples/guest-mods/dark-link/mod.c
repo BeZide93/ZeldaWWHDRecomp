@@ -16,7 +16,6 @@ static wwhd_hud_element dl_element;
 static void dl_texture_restore_all(void);
 static void dl_aura_restore(void);
 static void dl_texture_resubmit(void* model);
-static const char dl_button_text[] = "DARK";
 
 static int dl_limit(int v, int low, int high) { return v < low ? low : v > high ? high : v; }
 static void dl_options(void) {
@@ -55,22 +54,17 @@ static int dl_allowed(daPy_lk_c* link) {
         !play[WWHD_PLAY_EVENT_RUNNING_OFFSET] && !play[WWHD_PLAY_ENABLE_NEXT_STAGE_OFFSET] &&
         !dl_menu_open() && !dl_paused();
 }
-static void dl_touch(const wwhd_touch_event* event) {
-    if (event->kind == WWHD_TOUCH_DOWN && dl_touch_enabled && dl_allowed(dl_owner)) dl_request = 1;
-}
+#include "touch_editor.h"
+static void dl_touch(const wwhd_touch_event* event) { dl_editor_touch(event); }
 static void dl_filter(wwhd_input_state* input) {
-    const u32 combo = 0x00060000; /* VPAD L3 + R3, runtime/src/input.h */
-    int held = (input->buttons & combo) == combo;
-    int allowed = dl_owner && dl_allowed(dl_owner);
-    if (held && !dl_combo_held && allowed) dl_request = 1;
-    dl_combo_held = held;
-    if (held && allowed) input->buttons &= ~combo;
-    if (!allowed) dl_request = 0;
-    /* Refresh even while Link's Execute is suspended, removing stale touch claims. */
-    if (allowed && dl_touch_enabled)
-        wwhd_touch_claim(0, dl_touch_x - 640.0f, 360.0f - dl_touch_y - 44.0f,
-                         dl_touch_x - 640.0f + 96.0f, 360.0f - dl_touch_y);
-    else wwhd_touch_claim(0, 0, 0, 0, 0);
+    const u32 combo=0x00060000;
+    int held=(input->buttons&combo)==combo;
+    if(dl_editor_filter(input)) { dl_combo_held=held; return; }
+    int allowed=dl_owner && dl_allowed(dl_owner);
+    if(held && !dl_combo_held && allowed) dl_request=1;
+    dl_combo_held=held;
+    if(held && allowed) input->buttons&=~combo;
+    if(!allowed) dl_request=0;
 }
 static void dl_rect(u32 list, f32 x, f32 y, f32 width, f32 height, u32 color) {
     dl_element = (wwhd_hud_element){.kind=WWHD_HUD_RECT, .anchor=WWHD_HUD_CENTER,
@@ -86,19 +80,17 @@ static void dl_text(u32 list, f32 x, f32 y, const char* text, u32 length, u32 co
 #include "shortcut_hud.h"
 static void dl_hud(u32 list) {
     if (!dl_owner || !dl_allowed(dl_owner)) return;
-    int ready = dl_ready(&dl_state, &dl_config);
     if (dl_show_hud) dl_magic_hud(list);
     if (dl_diagnostics) dl_diag_hud(list);
-    if (dl_touch_enabled) {
-        dl_rect(list, dl_touch_x, dl_touch_y, 96, 44, dl_state.active ? 0xa52e43e8 : ready ? 0x764d33e8 : 0x302536d0);
-        dl_text(list, dl_touch_x + 23, dl_touch_y + 12, dl_button_text, sizeof dl_button_text - 1, 0xf0e5f0ff, 17);
-    }
+    dl_editor_hud(list);
 }
 static void dl_clear(void) {
     dl_texture_restore_all();
     dl_reset(&dl_state);
     dl_owner = 0; dl_owner_id = 0; dl_request = 0; dl_gameplay = 0;
-    wwhd_touch_claim(0, 0, 0, 0, 0);
+    ee_close(&editor);
+    for(u32 i=0;i<3;++i) wwhd_touch_claim(i,0,0,0,0);
+    dl_claim_mask=0;
 }
 WWHD_HOOK(WWHD_ADDR_daPy_Execute, dl_execute, (daPy_lk_c* link)) {
     /* Register idempotently: native HUD/input handles are renewed after state loads. */
@@ -106,6 +98,7 @@ WWHD_HOOK(WWHD_ADDR_daPy_Execute, dl_execute, (daPy_lk_c* link)) {
     wwhd_touch_register(dl_touch);
     wwhd_input_filter_register(dl_filter);
     dl_options();
+    dl_editor_refresh();
     if (link != dl_player()) return;
     if (link != dl_owner || dl_actor_id(link) != dl_owner_id) {
         dl_texture_restore_all(); /* Discard stale owners without dereferencing their slots. */

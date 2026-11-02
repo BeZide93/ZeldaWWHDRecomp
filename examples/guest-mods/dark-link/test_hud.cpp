@@ -24,7 +24,7 @@ int main(int argc,char** argv) {
         if(tag=='E') {
             assert(store.commit(owner,list));auto published=store.snapshot(0);
             assert(count ? published.size()==1 && published[0]->commands.size()==count : published.empty());
-            if(dark) { bool found=false;for(const auto& c:published[0]->commands) found|=c.text=="DARK";assert(found);++dark_frames; }
+            if(dark) { bool found=false;for(const auto& c:published[0]->commands) found|=c.text=="Dark Link";assert(found);++dark_frames; }
             ++frames;list=0;continue;
         }
         assert(tag=='C');uint8_t b[72];assert(std::fread(b,1,sizeof b,f)==sizeof b);
@@ -32,7 +32,7 @@ int main(int argc,char** argv) {
         c.x=real(b+12);c.y=real(b+16);c.w=real(b+20);c.h=real(b+24);c.size=real(b+28);
         c.thickness=real(b+32);c.rotation=real(b+36);c.u0=real(b+40);c.v0=real(b+44);c.u1=real(b+48);c.v1=real(b+52);c.rgba=word(b+56);
         if(c.kind==Command::Text) {
-            uint32_t n=word(b+68);assert(n<2048);c.text.resize(n);assert(std::fread(c.text.data(),1,n,f)==n);dark|=c.text=="DARK";
+            uint32_t n=word(b+68);assert(n<2048);c.text.resize(n);assert(std::fread(c.text.data(),1,n,f)==n);dark|=c.text=="Dark Link";
         }
         if(c.kind==Command::Picture) { assert(word(b+60));assert(store.picture(owner,list,image,c));++pictures; }
         else assert(store.append(owner,list,c));

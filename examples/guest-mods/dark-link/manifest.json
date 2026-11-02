@@ -2,7 +2,7 @@
   "format_version": 1,
   "id": "dark-link",
   "name": "Dark Link",
-  "version": "0.1.16",
+  "version": "0.1.17",
   "game_id": "wwhd",
   "minimum_manager_version": "1.5.0",
   "kind": "guest",
@@ -18,8 +18,8 @@
     {"id":"free_transform","type":"bool","name":"Free transformation","default":false,"menu":true,"live":true,"section":"Transformation","description":"Transform without charging and stay transformed until toggled off. Useful for testing the appearance."},
     {"id":"auto_transform","type":"bool","name":"Transform automatically when full","default":false,"menu":true,"live":true,"section":"Transformation","description":"Inactive in Free transformation mode."},
     {"id":"show_hud","type":"bool","name":"Show gauge","default":true,"menu":true,"live":true,"section":"HUD and touch"},
-    {"id":"touch_button","type":"bool","name":"Show DARK touch button","default":true,"menu":true,"live":true,"section":"HUD and touch"},
-    {"id":"touch_x","type":"number","name":"Touch button X","default":940,"min":0,"max":1184,"step":1,"menu":true,"live":true,"section":"HUD and touch","description":"Horizontal position on the centered 1280 x 720 canvas."},
-    {"id":"touch_y","type":"number","name":"Touch button Y","default":560,"min":0,"max":676,"step":1,"menu":true,"live":true,"section":"HUD and touch","description":"Vertical position on the centered 1280 x 720 canvas."}
+    {"id":"touch_button","type":"bool","name":"Show Dark Link touch controls","default":true,"menu":true,"live":true,"section":"HUD and touch"},
+    {"id":"touch_x","type":"number","name":"Touch button X","default":940,"min":0,"max":1184,"step":1,"menu":false,"live":true,"section":"HUD and touch","description":"Legacy starting position, imported only before a touch layout has been saved. Use the in-game Edit button."},
+    {"id":"touch_y","type":"number","name":"Touch button Y","default":560,"min":0,"max":676,"step":1,"menu":false,"live":true,"section":"HUD and touch","description":"Legacy starting position, imported only before a touch layout has been saved. Use the in-game Edit button."}
   ]
 }
