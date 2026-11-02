@@ -13,6 +13,8 @@ enum { PLAY=0x11000000, LINK=0x11010000, SAVE=0x11020000, ENEMY=0x11030000,
        INSTANCES=0x110f0000, MATERIAL_COUNT=8 };
 static const WWHDGuestModuleV1* module;
 static uint32_t filter, hud, touch, step=1, revision=1;
+static int diagnostics=1;
+static char hud_text[2048];
 static int free_mode, enabled=1, paused, menu, touch_visible=1, claim_active, elements;
 static const char* eye_names[]={"eyeL","eyeR","eyeLdamA","eyeRdamA","eyeLdamB","eyeRdamB"};
 static int eye_indices[6]={1,2,3,4,5,6}, name_lookups, missing_color;
@@ -36,7 +38,7 @@ static const char* arg_string(Cpu* c) { return (const char*)ppc_ptr(c->r[3]); }
 static void config_bool(Cpu* c) {
     const char* key=arg_string(c);
     c->r[3] = !strcmp(key,"free_transform") ? free_mode : !strcmp(key,"enabled") ? enabled :
-        !strcmp(key,"touch_button") ? touch_visible : c->r[4];
+        !strcmp(key,"touch_button") ? touch_visible : !strcmp(key,"appearance_diagnostics") ? diagnostics : c->r[4];
 }
 static void config_int(Cpu* c) { c->r[3]=c->r[4]; }
 static void config_revision(Cpu* c) { c->r[3]=0; c->r[4]=revision; }
@@ -46,7 +48,23 @@ static void reg_filter(Cpu* c) { filter=c->r[3]; c->r[3]=1; }
 static void reg_hud(Cpu* c) { hud=c->r[3]; c->r[3]=1; }
 static void reg_touch(Cpu* c) { touch=c->r[3]; c->r[3]=1; }
 static void claim(Cpu* c) { claim_active=c->f[3].ps0>c->f[1].ps0 && c->f[4].ps0>c->f[2].ps0; c->r[3]=1; }
-static void emit(Cpu* c) { ++elements; c->r[3]=1; }
+static void emit(Cpu* c) {
+    ++elements;
+    /* Guest HUD ABI: text pointer at 64, byte count at 68 (72-byte element). */
+    uint32_t e=c->r[4];
+    if (ld32(e)==1) {
+        uint32_t p=ld32(e+64), bytes=ld32(e+68);
+        size_t used=strlen(hud_text);
+        assert(bytes < 192 && used+bytes+2 < sizeof hud_text);
+        memcpy(hud_text+used,ppc_ptr(p),bytes); hud_text[used+bytes]='\n'; hud_text[used+bytes+1]=0;
+    }
+    c->r[3]=1;
+}
+static void read_hud(void) { hud_text[0]=0; execute(hud,1,0); }
+static void expect_hud(const char* expected) {
+    read_hud();
+    if (!strstr(hud_text,expected)) { fprintf(stderr,"HUD missing %s in:\n%s",expected,hud_text); abort(); }
+}
 static void copy(Cpu* c) { memcpy(ppc_ptr(c->r[3]),ppc_ptr(c->r[4]),c->r[5]); }
 static void clear(Cpu* c) { memset(ppc_ptr(c->r[3]),c->r[4],c->r[5]); }
 static PpcFunc service(const char* name) {
@@ -152,7 +170,7 @@ int main(int argc, char** argv) {
     st32(HIT,LINK+0x7b1c); st32(HIT+4,LINK); st8(HIT+10,1); st32(LINK+0x7b1c+0x10,2);
     tick(); assert(filter && hud && touch);
     buttons(0); assert(claim_active);
-    elements=0; execute(hud,1,0); assert(elements>=5);
+    elements=0; read_hud(); assert(elements>=5); expect_hud("Skip=NO_REFRESH");
     for (int i=0; i<20; ++i) hit(0);
     buttons(0x60000); tick(); assert(damage(3)==3); /* blocked hits give no charge */
     buttons(0);

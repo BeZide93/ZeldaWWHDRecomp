@@ -12,8 +12,9 @@ static int dl_touch_x = 940, dl_touch_y = 560;
 static unsigned long long dl_step;
 static unsigned long long dl_revision[9];
 static wwhd_hud_element dl_element;
+#include "appearance_probe.h"
 static void dl_texture_restore_all(void);
-static const char dl_title[] = "DARK LINK 0.1.7";
+static const char dl_title[] = "DARK LINK 0.1.8";
 static const char dl_ready_text[] = "READY - L3 + R3 / DARK";
 static const char dl_charge_text[] = "Charge with sword hits";
 static const char dl_active_text[] = "ACTIVE - sword damage boosted";
@@ -41,6 +42,9 @@ static void dl_options(void) {
     }
     dl_touch_x = dl_limit(wwhd_config_int("touch_x", 940), 0, 1184);
     dl_touch_y = dl_limit(wwhd_config_int("touch_y", 560), 0, 676);
+    int diagnostics = wwhd_config_bool("appearance_diagnostics", 1);
+    if (diagnostics != dl_diagnostics) dl_probe = (DLAppearanceProbe){.reason=DL_PROBE_NO_REFRESH};
+    dl_diagnostics = diagnostics;
     if (!dl_enabled) { dl_texture_restore_all(); dl_reset(&dl_state); }
 }
 static int dl_alive(daPy_lk_c* link) {
@@ -96,6 +100,7 @@ static void dl_hud(u32 list) {
         u32 length = dl_state.active ? sizeof dl_active_text - 1 : ready ? sizeof dl_ready_text - 1 : sizeof dl_charge_text - 1;
         dl_text(list, 506, 688, label, length, 0xcfc2d3ff, 13);
     }
+    if (dl_diagnostics) dl_diag_hud(list);
     if (dl_touch_enabled) {
         dl_rect(list, dl_touch_x, dl_touch_y, 96, 44, dl_state.active ? 0xa52e43e8 : ready ? 0x764d33e8 : 0x302536d0);
         dl_text(list, dl_touch_x + 23, dl_touch_y + 12, dl_button_text, sizeof dl_button_text - 1, 0xf0e5f0ff, 17);
@@ -133,7 +138,9 @@ WWHD_HOOK(WWHD_ADDR_daPy_Execute, dl_execute, (daPy_lk_c* link)) {
     dl_gameplay = dl_allowed(link);
     int request = dl_request || (dl_auto && !dl_config.free_transform && !dl_state.active && dl_ready(&dl_state, &dl_config));
     dl_request = 0;
+    int was_active = dl_state.active;
     dl_tick(&dl_state, &dl_config, (f32)wwhd_logic_dt(), request, dl_gameplay);
+    if (!was_active && dl_state.active) dl_probe = (DLAppearanceProbe){.reason=DL_PROBE_NO_REFRESH};
     if (!dl_state.active) dl_texture_restore_all();
 }
 WWHD_HOOK(WWHD_ADDR_daPy_Delete, dl_delete, (daPy_lk_c* link)) {

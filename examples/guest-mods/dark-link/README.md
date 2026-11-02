@@ -1,11 +1,11 @@
-# Dark Link (prototype 0.1.7)
+# Dark Link (diagnostic prototype 0.1.8)
 
-Standalone code mod for ZeldaWWHDRecomp: charge with sword hits, activate a damage
-boost and a black-body/red-eye appearance. Version 0.1.7 adds per-instance albedo
-texture views after native texture animation/refresh. Version 0.1.6's seven TEV
-registers still only recolored lit surfaces and did not produce red eyes in the
-user's test, so this version targets the sampled base texture as well.
-**The new path's in-game appearance still needs verification.**
+Standalone code mod for ZeldaWWHDRecomp: charge with sword hits and activate a
+sword-damage boost. **Full black shading and red eyes are still unresolved.**
+The user confirmed that 0.1.7, like 0.1.6, only blackens lit surfaces and leaves
+the eyes unchanged. Version 0.1.8 retains that appearance implementation and adds
+bounded on-screen observations to find where the texture path stops or loses its
+bindings. This is a diagnostic build, not a verified appearance fix.
 The package contains original code only: no textures, models or game binaries.
 
 ## Install
@@ -16,7 +16,7 @@ The package contains original code only: no textures, models or game binaries.
 3. Enable **Code mods** in setup if needed, complete the code-mod setup/build,
    and restart the game. Accept the normal code-mod trust prompt.
 
-With the gauge visible, the HUD title must read **DARK LINK 0.1.7**. This label
+With the gauge visible, the HUD title must read **DARK LINK 0.1.8**. This label
 comes from the running code module, not just the package manifest.
 
 The same package is translated for the installed USA or EU build and the host
@@ -24,7 +24,7 @@ platform, including Android. It does not require a new APK/runtime feature.
 
 ### Upgrading from 0.1.0/0.1.1
 
-Replace the installed package with 0.1.7 and fully restart the game, then load a
+Replace the installed package with 0.1.8 and fully restart the game, then load a
 normal in-game save. Do not resume a full emulator/recomp save state made with the
 old visual effect active: 0.1.1 left extra material override flags set. The new
 version cannot infer those flags' original values from an already altered state.
@@ -52,9 +52,44 @@ is claimed while the button is hidden or normal gameplay is suspended. If your
 host controller mapping assigns another action to a stick click, use the DARK
 button, automatic activation, or adjust that host binding.
 
+## Diagnose the incomplete appearance
+
+1. Install 0.1.8, finish the code-mod build and fully restart the game.
+2. Enable **Free transformation** and **Appearance diagnostics** in mod settings.
+3. Activate Dark Link, wait a moment in normal gameplay, and capture the four
+   diagnostic lines near the top of the screen. A screenshot or typed values are
+   enough; no Share log function, log upload or game binary is needed.
+
+The first line identifies the running module as `DL 0.1.8 ON`. `Draw` counts
+active body draw-hook calls; `Refresh B/H/Hair` counts active native texture-refresh
+returns for body, hands and hair. Counters saturate at 999999 and reset on a new
+transformation or when diagnostics are enabled. They are not frame counts.
+
+The remaining lines describe the **last body refresh attempt**:
+
+- `Body J/N`: observed J3D/native material counts; `Albedo`: explicit `_a0` samplers
+  found; `Views`: overrides installed; `Eyes found/bound`: recognized eye materials
+  versus successfully bound red views.
+- `Skip`: first rejection category, with total rejected operations in `Count`.
+  `NO_REFRESH` means no active body refresh has been observed since reset.
+  `MODEL_DATA`/`MATERIALS`/`FMAT`/`SAMPLERS` identify layout guards; `NO_ALBEDO`
+  identifies absent `_a0`; `INDEX`/`RESOURCE`/`REFS` identify binding guards;
+  `TEXTURE` identifies rejected descriptors. `FROZEN`, `CAPACITY`, and `DUPLICATE`
+  identify the corresponding existing skip conditions.
+- `Kept`/`Lost`: owned body bindings still present versus overwritten or invalid
+  at the last outer submission return. This does not prove the GPU sampled them.
+- `Samplers body`/`eyes`: up to three names from the first readable material in
+  each category. `?` means unavailable/nonprintable, `~` truncation, `+` more names.
+
+`OFF (last sample)` explicitly labels retained observations after cancellation.
+The live **Appearance diagnostics** toggle hides the panel and stops observation.
+Diagnostics only read existing model/resource structures and write mod-owned
+counters/HUD text; they add no game writes, file logging, texture uploads or hooks.
+The panel is independent of **Show gauge** and hidden with other mod HUD in menus.
+
 ## Appearance and limits
 
-The new texture path operates on the current player's body, hands and hair only.
+The unverified texture path operates on the current player's body, hands and hair only.
 At the native model texture refresh (0x027F50F8), it first removes any previous
 owned bindings, lets the game update textures/animation, then replaces each
 material's explicitly named `_a0` albedo binding with an immutable copied FTEX/GX2
@@ -66,7 +101,7 @@ The copied descriptor selects constant RGB `(0, 0, 0)` for body/hands/hair and
 `(1, 0, 0)` for eyes. Both GX2 component selectors and their packed texture register
 are changed. The original alpha selector, dimensions, image/mip pointers, format,
 UV animation and other register bits are preserved. The original descriptors and
-image bytes are never modified. This works at sampling time and does not require
+image bytes are never modified. These selectors are intended to act at sampling time. The implementation does not require
 recompressing textures, creating/uploading images, or replacing game files.
 
 Eye materials are resolved by native names: `eyeL`, `eyeR`, `eyeLdamA`,
@@ -93,8 +128,8 @@ binding is skipped and the existing TEV tint remains the fallback.
 The existing seven-register TEV palette and its four user-confirmed submission
 hook pairs are unchanged. RGB and the original override bits are restored at
 scope exit; lighting registers, alpha and fog are not modified. No UBO worker
-hook is installed. There is no diagnostic mode/logging, custom aura, eye bloom,
-White/Gold variant or transformation animation.
+hook is installed. There is no file logging, custom aura, eye bloom, White/Gold
+variant or transformation animation.
 
 Damage scaling runs after native `at_power_check`, only for the current player's
 three sword colliders and the sword attack flag. It changes the freshly calculated
@@ -113,12 +148,14 @@ words, immutable cached views, animated eye-frame changes, bindings retained aft
 outer submission, native/other-mod changes, absent samplers and invalid resources,
 hands/hair, freezing, cancellation, disable, stage changes, death, deletion and
 stale material-array identity. Existing TEV/timing/gameplay checks also run.
-These checks validate memory and descriptor behavior, not the game's shader output.
+HUD tests also verify no-refresh reporting, observed sampler/eye/material counts,
+missing albedo, invalid model/material guards, overwritten bindings, reset and the
+live diagnostic toggle. These checks validate memory and descriptor behavior,
+not the game's shader output or actual in-game resource layout.
 
-Test from a fresh session with Free transformation: activate in lit and shaded
-areas, blink/take damage to exercise eye variants, toggle off repeatedly and disable
-Dark Link. Verify black clothes/skin/hair/hands, red eyes and restoration on exit.
-Check casual clothes as well. Confirm **DARK LINK 0.1.7** in the running HUD.
+For this build, report the diagnostic lines using the steps above. Full visual
+acceptance (black shaded/lit surfaces, red animated eyes and clean restoration)
+remains outstanding; synthetic fixtures cannot establish it.
 
 ## Build
 

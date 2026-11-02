@@ -62,11 +62,18 @@ static void test_textures(void) {
         st32(texture_slot(m)-4,TEX_ORIGINAL); st32(texture_slot(m),TEX_ORIGINAL);
     }
     texture_refresh(); texture_tinted();
+    expect_hud("Body J/N=8/8  Albedo=8  Views=8  Eyes found/bound=6/6");
+    expect_hud("Samplers body: _a1,_a0  eyes: _a1,_a0");
     uint32_t body_view=ld32(texture_slot(0)), eye_view=ld32(texture_slot(1));
     assert(body_view!=eye_view); /* the same input texture needs two distinct views */
     memcpy(old_view,ppc_ptr(eye_view),sizeof old_view);
     /* Returning from the outer submission must NOT remove queued bindings. */
     hook(0x025e2e5c,2,MODEL,0); hook(0x025e2e5c,3,MODEL,0); texture_tinted();
+    expect_hud("Skip=OK  Count=0  Kept=8  Lost=0");
+    st32(texture_slot(2),TEX_NEXT);
+    hook(0x025e2e5c,2,MODEL,0); hook(0x025e2e5c,3,MODEL,0);
+    expect_hud("Kept=7  Lost=1");
+    st32(texture_slot(2),eye_view);
     hook(0x027f50f8,2,MODEL,0); texture_originals();
     st32(texture_slot(1),TEX_NEXT); /* native BTP refresh changes the eye frame */
     hook(0x027f50f8,3,MODEL,0);
@@ -99,6 +106,8 @@ static void test_textures(void) {
     assert(ld32(texture_slot(0))==TEX_ORIGINAL && ld32(texture_slot(1))==TEX_PIXELS);
     assert(ld32(texture_slot(2))==TEX_ORIGINAL && ld32(texture_slot(3))==TEX_ORIGINAL);
     texture_view_check(ld32(texture_slot(4)),TEX_ORIGINAL,1);
+    expect_hud("Skip=NO_ALBEDO  Count=4");
+    expect_hud("Body J/N=8/8  Albedo=7  Views=4  Eyes found/bound=6/3");
     hook(0x027f50f8,2,MODEL,0);
     st8(TEX_RES+0xc5,'a'); st32(texture_slot(1),TEX_ORIGINAL);
     st32(TEX_MATS+(MATERIAL_COUNT-1-2)*0x3c,TEX_RES+2*0x200);
@@ -127,6 +136,19 @@ static void test_textures(void) {
     for (int m=0;m<MATERIAL_COUNT;++m) st32(texture_slot(m),TEX_ORIGINAL);
     st32(MODEL+0x34,TEX_MATS);
     enabled=1; ++revision; tick(); buttons(0); buttons(0x60000); tick(); assert(damage(3)==6);
+    /* Diagnostic toggle only changes observations, never appearance bindings. */
+    diagnostics=0; tick(); texture_refresh(); texture_tinted();
+    read_hud(); assert(!strstr(hud_text,"Skip=") && !strstr(hud_text,"Samplers body:"));
+    diagnostics=1; tick(); expect_hud("Refresh B/H/Hair=0/0/0"); expect_hud("Skip=NO_REFRESH");
+    texture_refresh(); texture_tinted(); expect_hud("Refresh B/H/Hair=1/0/0");
+    hook(0x027f50f8,2,MODEL,0);
+    st32(MODEL+0xac,0); hook(0x027f50f8,3,MODEL,0); expect_hud("Skip=MODEL_DATA");
+    st32(MODEL+0xac,DATA); st16(MODEL+0x2a,0);
+    hook(0x027f50f8,3,MODEL,0); expect_hud("Skip=MATERIALS");
+    st16(MODEL+0x2a,MATERIAL_COUNT); texture_refresh(); texture_tinted();
+    /* Turning off restores all original bindings and leaves an explicitly old sample. */
+    buttons(0); buttons(0x60000); tick(); texture_originals(); expect_hud("OFF (last sample)");
+    buttons(0); buttons(0x60000); tick(); expect_hud("Skip=NO_REFRESH");
     assert(!memcmp(asset,ppc_ptr(TEX_ORIGINAL),sizeof asset));
     for (int m=0;m<MATERIAL_COUNT;++m) st32(MATERIALS+m*0x39c,0);
     st32(MODEL+0x34,0); st16(MODEL+0x2a,0);
