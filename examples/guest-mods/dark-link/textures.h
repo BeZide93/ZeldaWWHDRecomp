@@ -134,6 +134,8 @@ static void dl_texture_apply(void* model) {
         dl_probe.materials = dl_probe.native_materials = dl_probe.albedo = dl_probe.views = dl_probe.eyes = dl_probe.eye_materials = 0;
         dl_probe.reason = DL_PROBE_OK; dl_probe.skipped = dl_probe.kept = dl_probe.lost = dl_probe.rebound = 0;
         dl_probe.body_samplers[0] = dl_probe.eye_samplers[0] = 0;
+        dl_probe.late_calls = dl_probe.late_changed = dl_probe.late_stale = dl_probe.late_rejected = 0;
+        dl_probe.late_pointer = dl_probe.late_word = 0;
     }
     if (dl_word(dl_owner, 0x3bc) & 0x800) { if (probe) dl_probe_skip(DL_PROBE_FROZEN); return; }
     u8* data = (u8*)dl_word(model, 0xac);
@@ -183,26 +185,38 @@ static void dl_texture_apply(void* model) {
         if (probe) { ++dl_probe.views; dl_probe.eyes += (u32)eye; }
     }
 }
-/* Native preparation may overwrite animated face bindings AFTER 027F50F8.
- * The mDoExt wrappers finish preparation before viewCalc; Link also submits
- * eye joints separately. Rebase only changed live bindings before these two
- * existing submission hooks. Never rewrite a published descriptor or snapshot
- * our own view as the original; cancellation must restore the latest animation.
- * Unrecognized bindings and stale identities are left alone. */
+/* viewCalc itself calls the base texture refresh (story_props.cpp documents
+ * this nesting). Replacements after that refresh must be repaired at viewCalc
+ * RETURN, not entry. Separate eye-joint entries retain their existing check.
+ * Never rewrite published descriptors or snapshot our view as an original.
+ * Cancellation restores the latest supported native animation frame. */
 static void dl_texture_resubmit(void* model) {
     if (!dl_enabled || !dl_state.active || !dl_texture_model((u32)model) ||
         (dl_word(dl_owner, 0x3bc) & 0x800)) return;
+    int probe = dl_diagnostics && (u32)model == dl_owner->mpCLModel;
+    if (probe) dl_probe_increment(&dl_probe.late_calls);
     for (u32 i = 0; i < dl_binding_count; ++i) {
         DLTextureBinding* b = &dl_bindings[i];
-        if (b->model != (u32)model || !dl_binding_live(b)) continue;
+        if (b->model != (u32)model) continue;
+        if (!dl_binding_live(b)) { if (probe) dl_probe_increment(&dl_probe.late_stale); continue; }
         u32 current = *(u32*)b->slot;
         if (current == b->view) continue;
+        if (probe) dl_probe_increment(&dl_probe.late_changed);
         u32 view = dl_texture_view(current, (int)b->eye);
-        if (!view) continue;
+        if (!view) {
+            if (probe) {
+                if (!dl_probe.late_rejected) {
+                    dl_probe.late_pointer = current;
+                    dl_probe.late_word = dl_game_span(current, 4) ? *(u32*)current : 0;
+                }
+                dl_probe_increment(&dl_probe.late_rejected);
+            }
+            continue;
+        }
         b->original = current;
         b->view = view;
         *(u32*)b->slot = view;
-        if (dl_diagnostics && (u32)model == dl_owner->mpCLModel) dl_probe_increment(&dl_probe.rebound);
+        if (probe) dl_probe_increment(&dl_probe.rebound);
     }
 }
 /* The runtime's native prop texture path uses this exact synchronous refresh
@@ -230,11 +244,11 @@ static void dl_diag_submission(void* model) {
 static void dl_diag_hud(u32 list) {
     static const char* const reasons[] = {"OK", "NO_REFRESH", "FROZEN", "MODEL_DATA",
         "MATERIALS", "FMAT", "SAMPLERS", "NO_ALBEDO", "INDEX", "RESOURCE", "REFS", "TEXTURE", "CAPACITY", "DUPLICATE"};
-    u32 lengths[4], n = 0;
+    u32 lengths[5], n = 0;
 #define DL_S(s) n = dl_probe_append(line, n, s)
 #define DL_N(v) n = dl_probe_number(line, n, v)
     char* line = dl_probe_lines[0];
-    DL_S("DL 0.1.10 "); DL_S(dl_state.active ? "ON" : "OFF (last sample)");
+    DL_S("DL 0.1.11 "); DL_S(dl_state.active ? "ON" : "OFF (last sample)");
     DL_S("  Draw="); DL_N(dl_probe.draws); DL_S("  Refresh B/H/Hair/Gear=");
     DL_N(dl_probe.refresh[0]); DL_S("/"); DL_N(dl_probe.refresh[1]); DL_S("/"); DL_N(dl_probe.refresh[2]); DL_S("/"); DL_N(dl_probe.refresh[3]); lengths[0] = n;
     line = dl_probe_lines[1]; n = 0;
@@ -246,8 +260,13 @@ static void dl_diag_hud(u32 list) {
     line = dl_probe_lines[3]; n = 0;
     DL_S("Samplers body: "); DL_S(dl_probe.body_samplers[0] ? dl_probe.body_samplers : "?");
     DL_S("  eyes: "); DL_S(dl_probe.eye_samplers[0] ? dl_probe.eye_samplers : "?"); lengths[3] = n;
+    line = dl_probe_lines[4]; n = 0;
+    DL_S("Late calls="); DL_N(dl_probe.late_calls); DL_S(" changed="); DL_N(dl_probe.late_changed);
+    DL_S(" stale="); DL_N(dl_probe.late_stale); DL_S(" rejected="); DL_N(dl_probe.late_rejected);
+    DL_S(" ptr="); n = dl_probe_hex(line, n, dl_probe.late_pointer);
+    DL_S(" word="); n = dl_probe_hex(line, n, dl_probe.late_word); lengths[4] = n;
 #undef DL_S
 #undef DL_N
-    dl_rect(list, 20, 110, 1240, 100, 0x101018ef);
-    for (u32 i = 0; i < 4; ++i) dl_text(list, 28, 116 + i * 23, dl_probe_lines[i], lengths[i], 0xffffffff, 17);
+    dl_rect(list, 20, 110, 1240, 123, 0x101018ef);
+    for (u32 i = 0; i < 5; ++i) dl_text(list, 28, 116 + i * 23, dl_probe_lines[i], lengths[i], 0xffffffff, 17);
 }

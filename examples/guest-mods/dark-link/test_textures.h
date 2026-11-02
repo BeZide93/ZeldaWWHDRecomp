@@ -67,7 +67,7 @@ static void test_textures(void) {
         st32(texture_slot(m)-4,TEX_ORIGINAL); st32(texture_slot(m),TEX_ORIGINAL);
     }
     texture_refresh(); texture_tinted();
-    expect_hud("DL 0.1.10 ON");
+    expect_hud("DL 0.1.11 ON");
     expect_hud("Body J/N=8/8  Albedo=8  Views=8  Eyes found/bound=6/6");
     expect_hud("Samplers body: _a1,_a0  eyes: _a1,_a0");
     /* A handle resembling a valid _a0 relative pointer must never select the
@@ -108,6 +108,24 @@ static void test_textures(void) {
     st32(texture_slot(1),TEX_ORIGINAL);
     hook(0x027f50f8,3,MODEL,0); texture_tinted();
     assert(ld32(texture_slot(0))==body_view && ld32(texture_slot(1))==eye_view); /* cache reuse */
+    /* Actual nesting: viewCalc performs base refresh itself, then face
+     * animation can replace those bindings before viewCalc returns. A repair
+     * at viewCalc ENTRY cannot cover this sequence (0.1.10 regression). */
+    hook(0x025e2e5c,2,MODEL,0);
+    hook(0x027f55fc,2,MODEL,0);
+    texture_refresh();
+    for (int m=0;m<7;++m) st32(texture_slot(m),TEX_NEXT);
+    hook(0x027f55fc,3,MODEL,0);
+    for (int m=0;m<7;++m) texture_view_check(ld32(texture_slot(m)),TEX_NEXT,m>0);
+    hook(0x025e2e5c,3,MODEL,0);
+    expect_hud("Kept=8  Lost=0  Rebound=7");
+    expect_hud("Late calls=1 changed=7 stale=0 rejected=0");
+    hook(0x027f50f8,2,MODEL,0);
+    for (int m=0;m<7;++m) {
+        assert(ld32(texture_slot(m))==TEX_NEXT);
+        st32(texture_slot(m),TEX_ORIGINAL);
+    }
+    hook(0x027f50f8,3,MODEL,0); texture_tinted();
     /* Reproduce the observed late face overwrite: native animation runs after
      * refresh but before joint/view submission. Material 0 acts as the mouth. */
     hook(0x025e2e5c,2,MODEL,0);
@@ -118,8 +136,8 @@ static void test_textures(void) {
     hook(0x027f583c,3,MODEL,DATA);
     st32(texture_slot(2),TEX_NEXT);
     hook(0x027f55fc,2,MODEL,0);
-    texture_view_check(ld32(texture_slot(2)),TEX_NEXT,1);
     hook(0x027f55fc,3,MODEL,0);
+    texture_view_check(ld32(texture_slot(2)),TEX_NEXT,1);
     hook(0x025e2e5c,3,MODEL,0);
     expect_hud("Kept=8  Lost=0  Rebound=3");
     hook(0x027f55fc,2,MODEL,0); hook(0x027f55fc,3,MODEL,0);
@@ -138,6 +156,11 @@ static void test_textures(void) {
     st32(MODEL+0x34,TEX_MATS);
     hook(0x027f55fc,2,MODEL,0); hook(0x027f55fc,3,MODEL,0);
     assert(ld32(texture_slot(0))==0xdeadbeef);
+    expect_hud("stale=8 rejected=1 ptr=DEADBEEF word=00000000");
+    st32(texture_slot(0),TEX_PIXELS); st32(TEX_PIXELS,0x12345678);
+    hook(0x027f55fc,2,MODEL,0); hook(0x027f55fc,3,MODEL,0);
+    assert(ld32(texture_slot(0))==TEX_PIXELS);
+    expect_hud("rejected=2 ptr=DEADBEEF word=00000000"); /* first rejection remains */
     st32(texture_slot(0),body_view);
     /* Cancel via actual input/config lifecycle; no further draw is needed. */
     free_mode=1; ++revision; tick();

@@ -1,4 +1,4 @@
-/* Bounded, on-screen observations for 0.1.10. No game writes or file logging. */
+/* Bounded, on-screen observations for 0.1.11. No game writes or file logging. */
 #pragma once
 enum {
     DL_PROBE_OK, DL_PROBE_NO_REFRESH, DL_PROBE_FROZEN, DL_PROBE_MODEL_DATA,
@@ -9,6 +9,7 @@ enum {
 typedef struct {
     u32 draws, refresh[4], materials, native_materials, albedo, views, eyes, eye_materials;
     u32 reason, skipped, kept, lost, rebound;
+    u32 late_calls, late_changed, late_stale, late_rejected, late_pointer, late_word;
     char body_samplers[48], eye_samplers[48];
 } DLAppearanceProbe;
 static DLAppearanceProbe dl_probe = {.reason=DL_PROBE_NO_REFRESH};
@@ -20,7 +21,7 @@ static void dl_probe_skip(u32 reason) {
     if (!dl_probe.skipped) dl_probe.reason = reason;
     dl_probe_increment(&dl_probe.skipped);
 }
-static char dl_probe_lines[4][192];
+static char dl_probe_lines[5][192];
 static u32 dl_probe_append(char* line, u32 n, const char* s) {
     while (*s && n < 191) line[n++] = *s++;
     line[n] = 0; return n;
@@ -29,5 +30,11 @@ static u32 dl_probe_number(char* line, u32 n, u32 value) {
     char digits[10]; u32 count = 0;
     do { digits[count++] = '0' + value % 10; value /= 10; } while (value && count < 10);
     while (count && n < 191) line[n++] = digits[--count];
+    line[n] = 0; return n;
+}
+
+static u32 dl_probe_hex(char* line, u32 n, u32 value) {
+    static const char digits[] = "0123456789ABCDEF";
+    for (int shift = 28; shift >= 0 && n < 191; shift -= 4) line[n++] = digits[(value >> shift) & 15];
     line[n] = 0; return n;
 }

@@ -15,7 +15,7 @@ static wwhd_hud_element dl_element;
 #include "appearance_probe.h"
 static void dl_texture_restore_all(void);
 static void dl_texture_resubmit(void* model);
-static const char dl_title[] = "DARK LINK 0.1.10";
+static const char dl_title[] = "DARK LINK 0.1.11";
 static const char dl_ready_text[] = "READY - L3 + R3 / DARK";
 static const char dl_charge_text[] = "Charge with sword hits";
 static const char dl_active_text[] = "ACTIVE - sword damage boosted";
