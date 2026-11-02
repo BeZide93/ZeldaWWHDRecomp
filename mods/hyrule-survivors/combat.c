@@ -389,6 +389,15 @@ WWHD_REPLACE(0x025192A8, u32, survivors_contact, (void *target, void *at_info)) 
         return original_contact(target, at_info);
     fopAc_ac_c *enemy = target;
     HsEnemy *run_enemy = &hs.enemies[slot];
+    if (run_enemy->hp <= 0) {
+        /* Late projectile contacts must not temporarily resurrect an actor
+         * whose native death is still running. */
+        enemy->health = 0;
+        u32 result = original_contact(target, at_info);
+        enemy->health = 0;
+        *((u8 *)at_info + 9) = 1;
+        return result;
+    }
     /* Native damage/reactions still execute, but their signed-byte health must
      * not kill a scaled enemy before the run HP says so (elite HP exceeds 127).
      * Native defenses decide whether this function is reached in the first place. */
@@ -399,9 +408,27 @@ WWHD_REPLACE(0x025192A8, u32, survivors_contact, (void *target, void *at_info)) 
         shot->hit_mask |= 1u << slot;
         shot->generations[slot] = run_enemy->generation;
         hs_native_hit(&hs, run_enemy->id, shot->damage, shot->weapon);
+        if (run_enemy->kind == HS_MOBLIN && run_enemy->hp == 0)
+            wwhd_log_int("Moblin fatal native hit; actor", run_enemy->id);
     }
     enemy->health = run_enemy->hp > 0 ? 100 : 0;
     if (!run_enemy->hp)
         *((u8 *)at_info + 9) = 1;
     return result;
+}
+
+/* Moblin damage_check restores its old native HP after a boomerang contact.
+ * Reconcile a confirmed Survivors defeat before damage_reaction consumes HP
+ * in the SAME execute, so even a boomerang kill follows native death. Never
+ * edit reaction modes, graphics pointers or the engine's heap/destructors. */
+WWHD_GAME_ORIGINAL(0x02041F94, s32, original_damage_reaction, (void *));
+WWHD_REPLACE(0x02041F94, s32, survivors_damage_reaction, (void *reaction)) {
+    if (hs_in_arena() && valid((u32)reaction, 4)) {
+        u32 actor = word(reaction, 0);
+        int slot = valid(actor, 0x3AC) ? hs_enemy_slot((void *)actor) : -1;
+        if (slot >= 0 && hs.enemies[slot].kind == HS_MOBLIN && (u32)reaction == actor + 0x8BC &&
+            hs.enemies[slot].hp <= 0)
+            ((fopAc_ac_c *)actor)->health = 0;
+    }
+    return original_damage_reaction(reaction);
 }

@@ -95,6 +95,15 @@ static fopAc_ac_c *find_actor(HsId id, int kind, int *creating) {
 static int observe(HsId id, int kind, HsVec *pos) {
     int creating = 0;
     fopAc_ac_c *a = find_actor(id, kind, &creating);
+    if (kind == HS_MOBLIN)
+        for (int i = 0; i < HS_ENEMIES; i++)
+            if (hs.enemies[i].id == id && hs.enemies[i].state == HS_DYING) {
+                if (!a && !creating)
+                    wwhd_log_int("Moblin native deletion completed; actor", id);
+                else if (hs.enemies[i].age == 0 && hs.phase == HS_RUN)
+                    wwhd_log_int("Moblin native death pending; actor", id);
+                break;
+            }
     if (!a)
         return creating ? 1 : 0;
     pos->x = a->current.pos.x;

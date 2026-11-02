@@ -7,11 +7,15 @@ assets come from the player's installed game. This repository contains only
 source code and configuration; no game models, textures or map archives.
 
 The **0.1.0 room/run prototype has been reported working in-game by the user**.
-Version **0.2.1 replaces its drawn spirit attacks with native abilities and Link
+Version **0.2.2 replaces its drawn spirit attacks with native abilities and Link
 animations**. Version 0.2.1 fixes the reported native-combat issues: automatic
 boomerang cleanup after catching, third-person automatic bow shots, and bombs
 that explode on ground contact without hitting Link. These fixes still need
-an in-game acceptance pass. Automated tests execute the translated adapter against synthetic game
+an in-game acceptance pass. Version 0.2.2 additionally addresses the reported
+Moblin-kill teardown path: Moblins finish their native death before their pool
+slot is freed. The crash log identifies a failure during Moblin graphics
+teardown; this lifecycle correction is not proof that the original heap fault
+is eliminated. Automated tests execute the translated adapter against synthetic game
 calls; they cannot verify animation appearance, actual physics or balancing.
 
 ## Install and start
@@ -20,7 +24,7 @@ calls; they cannot verify animation appearance, actual physics or balancing.
    touch/input services and the vector HUD from this repository.
 2. Download `hyrule-survivors-wwhdmod` from the **Hyrule Survivors mod** GitHub
    Actions run and extract the outer artifact ZIP. The contained
-   `hyrule-survivors-0.2.1.wwhdmod` is the installable package.
+   `hyrule-survivors-0.2.2.wwhdmod` is the installable package.
 3. In **Mods → Installed packages**, choose the package, install it and enable
    it. Allow the normal setup/rebuild and restart the game when requested.
 4. Load a Quest Log and stand in an ordinary playable area. Tap/click
@@ -133,7 +137,7 @@ PowerPC support, and LLD:
 python3 mods/hyrule-survivors/build.py
 ```
 
-Output: `build/hyrule-survivors/hyrule-survivors-0.2.1.wwhdmod`.
+Output: `build/hyrule-survivors/hyrule-survivors-0.2.2.wwhdmod`.
 `CC`, `CXX`, `WWHD_PPC_CLANG`, and `WWHD_PPC_LLD` select compilers.
 The translated host module requires Clang; `WWHD_HOST_CC` overrides its path
 (otherwise the same Clang executable builds both targets).
@@ -153,7 +157,9 @@ aiming, hit deduplication, scaled HP, blast radius, pause, failed item creation
 and cleanup. Regression tests additionally simulate early/late boomerang returns
 through catch and automatic rearming, automatic bow mode transitions, ground
 versus wall/held bomb contact, and bomb/Link collision exclusion while keeping
-enemy and ordinary-bomb collisions intact. It supplies stubbed native game calls, so this is an adapter test, not an in-game test. A game dump
+enemy and ordinary-bomb collisions intact. Moblin tests cover native death
+completion, slot occupancy, paused death timers, one reward, victory gating,
+late contacts and HP reconciliation after the native boomerang restore. It supplies stubbed native game calls, so this is an adapter test, not an in-game test. A game dump
 is not used by these checks. This test harness currently requires Linux;
 the resulting guest package uses the cross-platform runtime ABI.
 
@@ -181,10 +187,14 @@ Before treating this as a stable release, test on a backed-up save:
    widescreen and both game regions. Confirm the story save stays intact.
 
 The 0.1.0 prototype's basic room/run flow was reported working. Repeat these
-checks for the new 0.2.1 native attacks; compilation and simulation are not a
+checks for the new 0.2.2 native combat and Moblin death lifecycle; compilation and simulation are not a
 substitute for that pass. In particular, check arrow release while moving,
 boomerang catch and automatic rearming, ground-impact bombs without self-damage,
 upgrades mid-flight,
-and return with live bombs/arrows. See `NATIVE_COMBAT.md` for integration details.
+and return with live bombs/arrows. Kill multiple Moblins with each weapon and
+finish the champion. Confirm that their native death finishes before the next
+wave/result, and test an upgrade during death. If the crash recurs, preserve
+the runtime log: the adapter logs the fatal hit, pending native death and
+completed native deletion with the actor ID. See `NATIVE_COMBAT.md` for integration details.
 
 License: MPL-2.0, matching the repository. Native game assets are not distributed.

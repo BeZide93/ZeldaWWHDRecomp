@@ -254,6 +254,74 @@ static void test_native_attacks(void) {
     assert(r.kills == 1 && r.damage[HS_SWORD] == 12);
 }
 
+static void test_moblin_death(void) {
+    HsRun r;
+    reset(&r);
+    suppress_spawning(&r);
+    enemy(&r, 0, 12, (HsVec){1000, 0, 0});
+    r.enemies[0].kind = native[1].kind = HS_MOBLIN;
+    hs_native_hit(&r, 1, 20, HS_BOOMERANG);
+    ticks(&r, 1);
+    assert(r.enemies[0].state == HS_DYING && r.kills == 1 && !remove_calls);
+    for (int w = 0; w < HS_WEAPONS; w++)
+        r.weapon[w] = 1;
+    ticks(&r, 20);
+    assert(!attack_count && r.kills == 1 && !remove_calls);
+    hs_native_hit(&r, 1, 100, HS_SWORD);
+    assert(r.damage[HS_SWORD] == 0 && r.damage[HS_BOOMERANG] == 12);
+    float age = r.enemies[0].age;
+    r.phase = HS_PAUSED;
+    ticks(&r, 800);
+    r.phase = HS_UPGRADE;
+    ticks(&r, 800);
+    assert(r.enemies[0].age == age && !remove_calls);
+    r.phase = HS_RUN;
+    native[1].state = 0; /* engine finishes its own death and deletion */
+    ticks(&r, 1);
+    assert(r.enemies[0].state == HS_FREE && r.kills == 1 && !remove_calls);
+
+    /* Dying Moblins continue to occupy their slot at the full actor cap. */
+    reset(&r);
+    spawn_at = (HsVec){1000, 0, 0};
+    r.wave = 4;
+    ticks(&r, 500);
+    assert(r.spawned == HS_ENEMIES);
+    hs_native_hit(&r, 1, 10000, HS_SWORD);
+    ticks(&r, 20);
+    assert(r.enemies[0].state == HS_DYING && r.spawned == HS_ENEMIES && !remove_calls);
+    native[1].state = 0;
+    ticks(&r, 1);
+    assert(r.spawned == HS_ENEMIES + 1 && peak == HS_ENEMIES);
+
+    /* The champion's reward is immediate; victory waits for native teardown. */
+    reset(&r);
+    suppress_spawning(&r);
+    enemy(&r, 0, 160, (HsVec){1000, 0, 0});
+    r.enemies[0].kind = native[1].kind = HS_MOBLIN;
+    r.enemies[0].elite = 1;
+    r.wave = 5;
+    r.spawned = hs_wave_quota(5);
+    r.defeated = r.spawned - 1;
+    hs_native_hit(&r, 1, 200, HS_BOMB);
+    ticks(&r, 20);
+    assert(r.phase == HS_RUN && r.enemies[0].state == HS_DYING && r.kills == 1 && !remove_calls);
+    native[1].state = 0;
+    ticks(&r, 1);
+    assert(r.phase == HS_WIN && r.kills == 1 && !remove_calls && r.total_xp == 20);
+
+    /* A stuck native death gives an error, never a forced-delete fallback. */
+    reset(&r);
+    suppress_spawning(&r);
+    enemy(&r, 0, 12, (HsVec){1000, 0, 0});
+    r.enemies[0].kind = native[1].kind = HS_MOBLIN;
+    hs_native_hit(&r, 1, 20, HS_SWORD);
+    ticks(&r, 650);
+    assert(r.phase == HS_ERROR && r.error && !remove_calls && r.kills == 1);
+    hs_stop(&r, &backend, HS_RETURNING); /* explicit run exit still cleans up */
+    ticks(&r, 1);
+    assert(remove_calls == 1 && r.enemies[0].state == HS_FREE);
+}
+
 static void test_complete_run(void) {
     HsRun r;
     reset(&r);
@@ -274,7 +342,8 @@ static void test_complete_run(void) {
                     assert(r.wave == 5 && r.enemies[i].max_hp == 160);
                 }
                 native[r.enemies[i].id].state = 3;
-            }
+            } else if (r.enemies[i].state == HS_DYING)
+                native[r.enemies[i].id].state = 0;
         ticks(&r, 1);
     }
     assert(r.phase == HS_WIN && r.kills == expected && expected == 113 && elite == 1);
@@ -294,6 +363,7 @@ int main(void) {
     test_pool_and_rewards();
     test_upgrades();
     test_native_attacks();
+    test_moblin_death();
     test_complete_run();
     puts("Core: pause, damage, native lifetime, capacity, EXP, upgrades, native attack scheduling, six-wave victory "
          "and restart "

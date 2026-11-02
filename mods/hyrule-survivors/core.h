@@ -37,7 +37,8 @@ enum HsUpgrade {
     HS_UP_HEAL,
     HS_UP_COUNT
 };
-enum HsEnemyState { HS_FREE, HS_PENDING, HS_ALIVE, HS_RETIRING };
+enum HsEnemyState { HS_FREE, HS_PENDING, HS_ALIVE, HS_RETIRING, HS_DYING };
+#define HS_MOBLIN 4
 typedef struct {
     HsId id;
     unsigned generation;

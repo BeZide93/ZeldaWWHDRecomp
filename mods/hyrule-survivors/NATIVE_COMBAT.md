@@ -1,8 +1,8 @@
-# Native combat integration (0.2.1)
+# Native combat integration (0.2.2)
 
 This adapter replaces the prototype's vector attacks with the game's own Link
 animations, sword collision and item actors. It does not ship game assets.
-The 0.1.0 room/run was reported working by the user; 0.2.1's native-combat fixes need
+The 0.1.0 room/run was reported working by the user; 0.2.2's native-combat fixes need
 in-game acceptance testing. Synthetic host tests verify dispatch and ownership,
 not the appearance or complete behavior of the actual game functions.
 
@@ -54,9 +54,11 @@ function still runs for reactions/effects. Survivors damage is credited once
 per attack and enemy generation; reusing an enemy slot permits a fresh hit.
 Native signed-byte health is staged at 100 and then synchronized to alive/dead,
 so the champion's 160 Survivors HP cannot overflow it. A pending enemy hit is
-treated as proof that native creation has finished. Reward/deletion remains
-owned by the next core tick, including native death or boomerang paths that
-restore vanilla health after `cc_at_check`.
+treated as proof that native creation has finished. The next core tick grants a reward once. For Moblins, a separate `HS_DYING`
+state retains the pool slot and waits for native deletion instead of calling
+`fopAcM_delete` at the fatal hit. Other enemy kinds retain their prior removal
+behavior. The Moblin's own reaction stage reconciles a fatal hit after native
+boomerang code restores vanilla health.
 
 Native stun-only branches can bypass damage, notably some ChuChu/boomerang
 interactions. Native walls, shields and misses apply. The previous synthetic
@@ -124,3 +126,38 @@ after this pass; the automated checks cannot establish these properties.
 Both translated-region test hosts exercise these regression paths. Actual
 camera appearance, animation timing and collision geometry still require the
 in-game pass described above.
+
+## Moblin death lifecycle correction in 0.2.2
+
+The reported Android crash while defeating a Moblin follows `mo2_class_dt`
+(`021D3C90`), `mDoExt_3DlineMat0`/line destructors (`025E99E0`, `025E91C8`),
+array delete (`0273AFC8`) and the heap's unlink path (`0273B310`), with an
+invalid access at `00000005`. This locates the failing teardown, not the
+original writer or a proven double free. No heap guard or destructor bypass
+is installed, and this build must not be described as a reproduced crash fix.
+
+Previously, observing native HP zero or Survivors HP zero immediately enqueued
+actor deletion, cutting off the Moblin's death reaction. Now its kill/EXP is
+granted once and its state becomes `HS_DYING`. The actor continues executing
+while the run is active. It is not targetable, cannot grant another reward,
+and retains its slot until lookup confirms native deletion. Wave transitions
+and victory also wait for that deletion. Upgrade/pause freezes its animation
+and timeout together. After 30 active seconds without completion the run
+shows an error; it does not force a destructor as a timeout fallback. Explicit
+return/retry still uses the existing scene cleanup path.
+
+Moblin `damage_check` restores the old native HP after boomerang hits. The
+`damage_reaction` entry (`02041F94`) is therefore wrapped: only a tracked
+Moblin's exact reaction block (`actor + 08BC`, whose first word is `mpEnemy`)
+with zero Survivors HP gets native HP zero before the original reaction runs.
+This occurs in the same native execute after the restore. Other actors and
+living targets pass through. Late tracked contacts never stage a dying enemy
+back at 100 HP. Reaction modes and graphics ownership remain native.
+
+Core and both translated-adapter tests cover delayed native disappearance,
+slot capacity, pause/upgrade, timeout, champion victory, repeated contacts,
+boomerang HP restoration and unrelated-actor isolation. The adapter emits
+three short actor-ID messages around a native fatal hit, waiting for death,
+and completed removal. The reported Android heap failure still requires an
+in-game retest; if it persists, the earlier allocation/free history is needed
+to identify the actual corruption.

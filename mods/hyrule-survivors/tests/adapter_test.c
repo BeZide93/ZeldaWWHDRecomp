@@ -39,6 +39,7 @@ static Cpu cpu;
 static unsigned shot_count, native_spin, native_reload, native_throw, native_anim, native_exec, contacts;
 static unsigned shot_alive[32], fail_item;
 static unsigned aim_calls, ground_calls, explosions, no_hit_calls, no_hit_result;
+static unsigned enemy_present, enemy_deletes, enemy_execs, reaction_hp;
 static float set_radius;
 static void clear_native_keep(uint32_t offset) {
     st32(LINK + offset, HS_NONE);
@@ -101,7 +102,7 @@ static void dispatch(Cpu *c) {
     if (c->pc == GAME_SEARCH) {
         unsigned id = c->r[3];
         uint32_t p = 0;
-        if (id == 20)
+        if (id == 20 && enemy_present)
             p = ENEMY;
         if (id >= 100 && id < 100 + shot_count && shot_alive[id - 100])
             p = SHOT_BASE + (id - 100) * 0x2000;
@@ -110,6 +111,10 @@ static void dispatch(Cpu *c) {
         return;
     }
     if (c->pc == GAME_DELETE) {
+        if (c->r[3] == 20) {
+            enemy_deletes++;
+            enemy_present = 0;
+        }
         kill_native_item(c->r[3]);
         c->r[3] = 1;
         return;
@@ -194,7 +199,7 @@ static void original(Cpu *c, uint32_t address) {
         original_damage++;
     else if (address == GAME_CONTACT) {
         contacts++;
-        assert(ld8(c->r[3] + 0x3A1) == 100 || c->r[3] != ENEMY);
+        assert(ld8(c->r[3] + 0x3A1) == 100 || ld8(c->r[3] + 0x3A1) == 0 || c->r[3] != ENEMY);
         st8(c->r[3] + 0x3A1, 96);
         st8(c->r[4] + 8, 4);
         c->r[3] = ld32(AT_STATUS + 0xC);
@@ -222,6 +227,12 @@ static void original(Cpu *c, uint32_t address) {
         no_hit_calls++;
         c->r[3] = no_hit_result;
         return;
+    } else if (address == GAME_REACTION) {
+        reaction_hp = ld8(ld32(c->r[3]) + 0x3A1);
+        c->r[3] = 20;
+        return;
+    } else if (address == GAME_MOBLIN_EXEC) {
+        enemy_execs++;
     } else
         assert(address == GAME_LINK);
     c->r[3] = 1;
@@ -322,6 +333,7 @@ static void setup(void) {
     cpu.r[1] = STACK + 0xFF000;
     shot_count = native_spin = native_reload = native_throw = native_anim = native_exec = contacts = fail_item = 0;
     aim_calls = ground_calls = explosions = no_hit_calls = no_hit_result = 0;
+    enemy_present = enemy_deletes = enemy_execs = reaction_hp = 0;
     memset(shot_alive, 0, sizeof(shot_alive));
     st32(PLAY + 0x5B2C, LINK);
     st32(LINK + 4, 10);
@@ -373,6 +385,7 @@ static void native_fixture(void) {
     enter();
     st32(FIELD(phase), HS_RUN);
     stf32(FIELD(spawn_timer), 10000);
+    enemy_present = 1;
     memset(ppc_ptr(ENEMY), 0, 0x1000);
     st32(ENEMY + 4, 20);
     st16(ENEMY + 0xE, 0xBC);
@@ -620,6 +633,57 @@ static void test_impact_bombs(void) {
     assert(explosions == 1 && ground_calls == 5);
 }
 
+static void test_native_moblin_death(void) {
+    native_fixture();
+    assert(launch(HS_BOOMERANG));
+    uint32_t e = FIELD(enemies), reaction = ENEMY + 0x8BC;
+    st32(reaction, ENEMY);
+    st32(e + offsetof(HsEnemy, hp), 5);
+    contact(SHOT_BASE);
+    assert(ld32(e + offsetof(HsEnemy, hp)) == 0);
+    /* Native Moblin damage_check restores old HP after boomerang cc_at_check.
+     * The shared reaction is called next in the same native execute. */
+    st8(ENEMY + 0x3A1, 100);
+    hook(GAME_REACTION, reaction);
+    assert(reaction_hp == 0 && ld8(ENEMY + 0x3A1) == 0 && cpu.r[3] == 20);
+    stf32(FIELD(spawn_timer), 1000);
+    frame();
+    assert(ld32(e + offsetof(HsEnemy, state)) == HS_DYING && VALUE(kills) == 1 && !enemy_deletes);
+    contact(SHOT_BASE); /* late contact cannot revive/reward the same Moblin */
+    assert(ld8(ENEMY + 0x3A1) == 0 && VALUE(kills) == 1 && ld32(FIELD(damage) + HS_BOOMERANG * 4) == 5);
+    hook(GAME_MOBLIN_EXEC, ENEMY);
+    assert(enemy_execs == 1); /* allow the native death to advance */
+    st32(FIELD(phase), HS_UPGRADE);
+    hook(GAME_MOBLIN_EXEC, ENEMY);
+    frames(5);
+    assert(enemy_execs == 1 && !enemy_deletes);
+    st32(FIELD(phase), HS_RUN);
+    frames(20);
+    assert(VALUE(kills) == 1 && !enemy_deletes && ld32(e + offsetof(HsEnemy, state)) == HS_DYING);
+    enemy_present = 0; /* native destructor and actor deletion have finished */
+    frame();
+    assert(ld32(e + offsetof(HsEnemy, state)) == HS_FREE && VALUE(kills) == 1 && !enemy_deletes);
+
+    /* Only this owned Moblin's exact reaction block may reconcile HP. */
+    native_fixture();
+    st32(reaction, ENEMY);
+    st8(ENEMY + 0x3A1, 75);
+    hook(GAME_REACTION, reaction);
+    assert(reaction_hp == 75 && cpu.r[3] == 20); /* living scaled enemy */
+    st32(e + offsetof(HsEnemy, hp), 0);
+    st32(reaction + 0x20, ENEMY);
+    hook(GAME_REACTION, reaction + 0x20);
+    assert(reaction_hp == 75); /* wrong block */
+    st32(ENEMY + 4, 999);
+    hook(GAME_REACTION, reaction);
+    assert(reaction_hp == 75); /* unrelated Moblin */
+    st32(ENEMY + 4, 20);
+    set_stage("sea\0\0\0\0");
+    hook(GAME_REACTION, reaction);
+    assert(reaction_hp == 75); /* normal game */
+    puts("Moblin death: native reaction HP, delayed deletion, pause, no revival and single reward passed");
+}
+
 int main(int argc, char **argv) {
     assert(argc == 2);
     void *memory = mmap(PPC_MEM_BASE, 0x80000000ull, PROT_READ | PROT_WRITE,
@@ -688,6 +752,7 @@ int main(int argc, char **argv) {
     test_boomerang_recovery();
     test_bow_camera();
     test_impact_bombs();
+    test_native_moblin_death();
     puts("Combat regressions: automatic boomerang recovery, third-person bow and safe ground-impact bombs passed");
     dlclose(lib);
     munmap(memory, 0x80000000ull);

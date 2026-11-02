@@ -90,9 +90,14 @@ static void defeat(HsRun *r, const HsBackend *b, int i) {
     r->kills++;
     r->defeated++;
     orb(r, e->pos, e->elite ? 20 : 2 + e->kind);
-    e->state = HS_RETIRING;
+    /* Moblin death owns a multi-frame reaction and graphics teardown. Keep
+     * its slot until native deletion completes; do not cut it short by
+     * requesting deletion on the first fatal-hit observation. */
+    e->hp = 0;
+    e->state = e->kind == HS_MOBLIN ? HS_DYING : HS_RETIRING;
     e->age = 0;
-    b->remove(e->id);
+    if (e->state == HS_RETIRING)
+        b->remove(e->id);
 }
 void hs_native_hit(HsRun *r, HsId id, int damage, int weapon) {
     if (r->phase != HS_RUN || damage <= 0 || weapon < 0 || weapon >= HS_WEAPONS)
@@ -214,6 +219,21 @@ void hs_tick(HsRun *r, const HsBackend *b, float dt) {
         if (e->state == HS_FREE)
             continue;
         int observed = b->observe(e->id, e->kind, &e->pos);
+        if (e->state == HS_DYING) {
+            if (!observed)
+                e->state = HS_FREE;
+            else if (r->phase == HS_RUN) {
+                e->age += dt;
+                if (e->age > 30) {
+                    /* Stop safely rather than forcing the same premature
+                     * destructor path that this state is meant to avoid. */
+                    r->error = "A Moblin's native death did not finish. Return or retry the run.";
+                    r->phase = HS_ERROR;
+                    return;
+                }
+            }
+            continue;
+        }
         if (e->state == HS_RETIRING) {
             if (!observed)
                 e->state = HS_FREE;
