@@ -9,10 +9,12 @@
 
 enum { PLAY=0x11000000, LINK=0x11010000, SAVE=0x11020000, ENEMY=0x11030000,
        HIT=0x11040000, INPUT=0x11050000, MODEL=0x11060000, DATA=0x11070000,
-       MATERIALS=0x11080000, EYE_ANIM=0x11090000 };
+       MATERIALS=0x11080000, EYE_ANIM=0x11090000, RESOURCE=0x110a0000,
+       NAMES=0x110b0000 };
 static const WWHDGuestModuleV1* module;
 static uint32_t filter, hud, touch, step=1, revision=1;
 static int free_mode, enabled=1, paused, menu, touch_visible=1, claim_active, elements;
+static int eye_indices[2]={1,2}, name_lookups;
 
 static void execute(uint32_t fn, uint32_t a, uint32_t b) {
     Cpu c = {0}; c.r[1] = 0x1201fff0; c.r[3] = a; c.r[4] = b;
@@ -66,6 +68,10 @@ static void dispatch(Cpu* c) {
         case 0x025986bc: c->r[3]=menu; return;
         case 0x025af2a4: c->r[3]=paused; return;
         case 0x027f9f0c: c->r[3] += 4 + c->r[4]*16; return;
+        case 0x027df9b0:
+            assert(c->r[3]==RESOURCE+0x100); ++name_lookups;
+            assert(c->r[4]==NAMES || c->r[4]==NAMES+32);
+            c->r[3]=eye_indices[c->r[4]==NAMES+32]; return;
         default: fprintf(stderr,"Unexpected native call: %08x\n",c->pc); abort();
     }
 }
@@ -116,26 +122,48 @@ int main(int argc, char** argv) {
     st8(LINK+0x3ac,8); st8(LINK+0x69e8,1); assert(damage(100)==63);
     st8(LINK+0x3ac,0); st8(LINK+0x69e8,0);
 
-    st32(LINK+0x448,MODEL); st32(LINK+0x604,EYE_ANIM);
-    st32(MODEL+0xac,DATA); st32(DATA+0x0c,2); st32(DATA+0x10,MATERIALS);
-    st32(MATERIALS+0x39c+0x24,EYE_ANIM);
-    for (int m=0; m<2; ++m) for (int k=4; k<=7; k+=3) {
-        stf32(color(m,k),0.25f); stf32(color(m,k)+4,0.5f);
-        stf32(color(m,k)+8,0.75f); stf32(color(m,k)+12,0.4f);
+    st32(LINK+0x448,MODEL);
+    st32(MODEL+0xac,DATA); st32(DATA+0x0c,3); st32(DATA+0x10,MATERIALS);
+    st32(DATA,RESOURCE); st32(RESOURCE+0x18,0x100-0x18);
+    st32(0x1046cd2c,NAMES); st32(0x1046cd34,NAMES+32);
+    /* No eye controller pointers: name resolution must identify BOTH eyes. */
+    for (int m=0; m<3; ++m) for (int k=0; k<11; ++k) {
+        stf32(color(m,k),0.25f+k*0.01f); stf32(color(m,k)+4,0.5f);
+        stf32(color(m,k)+8,0.75f); stf32(color(m,k)+12,0.4f+m*0.1f);
     }
     hook(0x027f55fc,2,MODEL,0);
-    assert(red(0)<0.02f && red(1)==1.0f);
-    assert((float)ldf32(color(1,4)+12)==0.4f); /* alpha preserved */
+    assert(name_lookups==2);
+    for (int m=0; m<3; ++m) for (int k=0; k<11; ++k) {
+        assert((float)ldf32(color(m,k))==(m ? 1.0f : 0.008f));
+        assert((float)ldf32(color(m,k)+4)==(m ? 0.002f : 0.009f));
+        assert((float)ldf32(color(m,k)+12)==0.4f+m*0.1f);
+    }
+    /* Model preparation can overwrite a register between entry and actual
+     * drawing. Nested calls must reapply, not skip the already-saved pointer. */
+    stf32(color(0,5),0.8f); stf32(color(0,7),0.9f); stf32(color(2,4),0.6f);
     hook(0x027f583c,2,MODEL,0); hook(0x027f583c,3,MODEL,0);
-    assert(red(0)<0.02f && red(1)==1.0f); /* inner return retains outer override */
+    assert((float)ldf32(color(0,5))==0.008f && (float)ldf32(color(0,7))==0.008f);
+    assert(red(0)<0.02f && red(1)==1.0f && red(2)==1.0f);
     hook(0x027f55fc,3,MODEL,0);
-    assert(red(0)==0.25f && red(1)==0.25f);
-    assert((ld32(MATERIALS+0xa0)&0x90)==0x90); /* restored colors re-upload */
-    hook(0x027f55fc,2,MODEL+0x400,0); assert(red(0)==0.25f);
+    for (int m=0; m<3; ++m) for (int k=0; k<11; ++k) {
+        assert((float)ldf32(color(m,k))==0.25f+k*0.01f);
+        assert((float)ldf32(color(m,k)+4)==0.5f && (float)ldf32(color(m,k)+8)==0.75f);
+        assert((float)ldf32(color(m,k)+12)==0.4f+m*0.1f);
+    }
+    assert((ld32(MATERIALS+0xa0)&0x7ff)==0x7ff); /* all restored colors re-upload */
+    hook(0x027f55fc,2,MODEL+0x400,0); assert(red(0)==0.29f);
     hook(0x027f55fc,3,MODEL+0x400,0); /* foreign instance untouched */
     for (int i=0;i<20;++i) hook(0x027f55fc,2,MODEL,0);
     for (int i=0;i<20;++i) hook(0x027f55fc,3,MODEL,0);
-    assert(red(0)==0.25f && red(1)==0.25f); /* bounded scope overflow */
+    assert(red(0)==0.29f && red(1)==0.29f); /* bounded scope overflow */
+    /* Invalid/missing names must not accidentally classify material zero. */
+    eye_indices[0]=-1; eye_indices[1]=3;
+    hook(0x027f55fc,2,MODEL,0); assert(red(0)<0.02f && red(1)<0.02f && red(2)<0.02f);
+    hook(0x027f55fc,3,MODEL,0);
+    st32(LINK+0x604,EYE_ANIM); st32(MATERIALS+0x39c+0x24,EYE_ANIM);
+    hook(0x027f55fc,2,MODEL,0); assert(red(1)==1.0f && red(2)<0.02f); /* controller fallback */
+    hook(0x027f55fc,3,MODEL,0);
+    eye_indices[0]=1; eye_indices[1]=2;
 
     paused=1; buttons(0); assert(!claim_active); elements=0; execute(hud,1,0); assert(!elements);
     for (int i=0;i<900;++i) tick();

@@ -1,4 +1,4 @@
-# Dark Link (prototype 0.1.0)
+# Dark Link (prototype 0.1.1)
 
 Standalone code mod for ZeldaWWHDRecomp. Charge with damaging sword hits, then
 transform into a charcoal-colored Link with red eyes and stronger sword attacks.
@@ -56,13 +56,19 @@ targets that bypass these native paths are outside this first version's coverage
 armor-specific handlers can further override the native result.
 
 Visual overrides match the live player model instances (body, hands and hair).
-Eye materials are identified by the native eye animation-controller pointers.
-RGB uniforms are saved and restored around model/joint submissions and HD draws;
-alpha and resource files are untouched. Unknown material counts fail closed.
+Eye materials are resolved using the game's own left/right eye material names;
+native eye animation-controller pointers remain a fallback. All eleven material,
+ambient and TEV RGB registers are overridden, covering both sides of the toon
+lighting blend rather than only C0/K0. Uniforms are saved and restored around
+model/joint submissions and HD draws, and reapplied at nested draws after native
+preparation can regenerate them. Alpha and resource files are untouched. Unknown
+material counts fail closed.
 
 Automated checks compile the PowerPC ELF, translate and compile it for both game
-regions, and execute state and mocked guest-hook tests (including nested material
-restoration). These checks do not replace a real-game visual/playtest. First test
+regions, and execute state and mocked guest-hook tests (including all eleven color
+registers, both named eyes without controller pointers, nested native color
+rewrites and complete restoration). These checks do not replace a real-game
+visual/playtest. First test
 Free transformation in a lit room, eye animation, different outfits, swimming,
 menus, scene changes and combat against Bokoblins/Moblins. Compare body/eyes and
 other actors before, during and after activation on Android and desktop.
