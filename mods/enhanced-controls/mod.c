@@ -1,7 +1,9 @@
 /* SPDX-License-Identifier: MPL-2.0 */
 #include "wwhd_guest.h"
 #include "wwhd/functions.h"
+#include "core.h"
 #include "editor.h"
+#include "editor_peer.h"
 
 /* Only verified public game calls. Data bases use SDK relocations for USA/EU. */
 WWHD_GAME_FUNC(0x023E6380, s32, spin_attack, (void*, s32));
@@ -19,10 +21,10 @@ static EcLayoutFile layout_file[2]; /* host services require mod-owned buffers *
 static const char* const layout_names[]={"macro-layout-a.bin","macro-layout-b.bin"};
 static int editor_visible=1, release_input;
 static void load_layout(void) {
-    editor.saved=ee_defaults(); editor.sequence=0; ee_close(&editor);
+    editor.saved=ee_defaults(); editor.sequence=0; editor.available=15; ee_close(&editor);
     for(int i=0;i<2;++i) {
         EcLayoutFile* f=&layout_file[i];
-        if(wwhd_file_read(layout_names[i],f,sizeof(*f))==(s32)sizeof(*f) && ee_file_valid(f) &&
+        if(ee_decode(f,wwhd_file_read(layout_names[i],f,sizeof(*f))) &&
            (!editor.sequence || (s32)(f->sequence-editor.sequence)>0)) {
             editor.saved=f->layout; editor.sequence=f->sequence;
         }
@@ -31,7 +33,7 @@ static void load_layout(void) {
 static int save_layout(void) {
     unsigned sequence=editor.sequence+1; if(!sequence) sequence=1;
     EcLayoutFile* f=&layout_file[sequence&1];
-    *f=(EcLayoutFile){0x45434C59u,1,sequence,0,editor.draft}; f->checksum=ee_hash(f);
+    *f=(EcLayoutFile){0x45434C59u,2,sequence,0,editor.draft}; f->checksum=ee_hash(f);
     if(wwhd_file_write(layout_names[sequence&1],f,sizeof(*f))!=(s32)sizeof(*f)) {
         editor.error=1; return 0;
     }
@@ -41,8 +43,6 @@ static unsigned claimed_mask;
 static unsigned long long last_step, hud_epoch;
 static u32 player_id;
 static wwhd_input_state sampled; /* service buffers must belong to the mod */
-static wwhd_hud_element element;
-static const char* const names[] = {"Jump", "Slash", "Spin", "Dodge"};
 
 static int object(u32 p, u32 bytes) { return !(p&3) && p >= 0x10000000 && p <= 0x50000000-bytes; }
 static int is_menu(void) {
@@ -107,6 +107,12 @@ static void update_claims(void) {
 static float number(const char* id,float fallback,float lo,float hi) {
     return ec_clamp((float)wwhd_config_float(id,fallback),lo,hi);
 }
+WWHD_HOOK(0x0267598C,enhanced_editor_peer,(EeExchange* q)) {
+    if(!registered || !ee_packet(q,1)) return;
+    q->ready=ready; q->open=editor.open; q->selected=editor.selected;
+    q->placement=(editor.open?editor.draft:editor.saved).button[4];
+    q->answered=0x54434f4bu;
+}
 static void refresh(void) {
     unsigned long long step=wwhd_logic_step(), epoch=wwhd_hud_epoch();
     if (step!=last_step || epoch!=hud_epoch) {
@@ -124,6 +130,12 @@ static void refresh(void) {
     int next=playable();
     u32 id=next ? U32(U32(PLAY,0x5B2C),4) : 0;
     if (!next || id!=player_id) { ec_cancel(&state); ee_close(&editor); }
+    int peer=ee_ask(2);
+    unsigned available=peer?31u:15u;
+    if(available!=editor.available) {
+        ee_close(&editor); editor.available=available;
+        if(peer && !editor.sequence) editor.saved.button[4]=ee_query.placement;
+    }
     mask=0;
     for(int i=0;i<4;++i) {
         EcPlacement p=(editor.open?editor.draft:editor.saved).button[i];
@@ -174,16 +186,6 @@ static void filter(wwhd_input_state* pad) {
     pad->buttons |= ec_buttons(&state);
     ec_stick(&state,&pad->lx,&pad->ly);
 }
-static void box(u32 list,EcRect r,const char* label,u32 color) {
-    element=(wwhd_hud_element){.kind=WWHD_HUD_RECT,.anchor=WWHD_HUD_CENTER,
-        .x=640+r.x-r.w/2,.y=360-r.y-r.h/2,.w=r.w,.h=r.h,
-        .thickness=1,.u1=1,.v1=1,.rgba=color};
-    wwhd_hud_emit(list,&element);
-    unsigned n=0; while(label[n]) ++n;
-    element.kind=WWHD_HUD_TEXT; element.x+=10; element.y+=r.h/2-9;
-    element.size=18; element.rgba=0xffffffff; element.text=label; element.text_bytes=n;
-    wwhd_hud_emit(list,&element);
-}
 /* Package-owned images: four 1024x1024 RGBA icons fit the SDK's 16 MiB
  * per-mod pixel limit. Retry missing images only after a HUD epoch change. */
 static const char* const icon_paths[] = {
@@ -208,82 +210,17 @@ static void sync_icons(void) {
         }
     }
 }
-/* The host validates positive thickness for every primitive, including text
- * and images. Zero-initialized omitted fields invalidate the entire HUD list. */
-static void label(u32 list,float x,float y,const char* text,float font,u32 color) {
-    unsigned n=0; while(text[n]) ++n;
-    element=(wwhd_hud_element){.kind=WWHD_HUD_TEXT,.anchor=WWHD_HUD_CENTER,
-        .x=640+x,.y=360-y,.size=font,.thickness=1,.rgba=color,.text=text,.text_bytes=n};
-    wwhd_hud_emit(list,&element);
-}
-static void outline(u32 list,EcRect r,u32 color) {
-    element=(wwhd_hud_element){.kind=WWHD_HUD_RECT_OUTLINE,.anchor=WWHD_HUD_CENTER,
-        .x=640+r.x-r.w/2,.y=360-r.y-r.h/2,.w=r.w,.h=r.h,.thickness=2,.rgba=color};
-    wwhd_hud_emit(list,&element);
-}
-static void line(u32 list,float x,float y,float xx,float yy,u32 color) {
-    element=(wwhd_hud_element){.kind=WWHD_HUD_LINE,.anchor=WWHD_HUD_CENTER,
-        .x=640+x,.y=360-y,.w=xx-x,.h=y-yy,.thickness=1,.rgba=color};
-    wwhd_hud_emit(list,&element);
-}
-static void macro_button(u32 list,int i) {
-    EcPlacement p=(editor.open?editor.draft:editor.saved).button[i];
-    EcRect r=rects[i]; float side=r.w<r.h?r.w:r.h;
-    u32 alpha=(u32)(255*p.opacity/100);
-    if(editor.open && alpha<128) alpha=128; /* editable even if hidden or faint */
-    if(editor.open && !p.visible) alpha=96;
-    u32 tint=(state.macro==i?0xB0D8FF00u:0xFFFFFF00u)|alpha;
-    element=(wwhd_hud_element){.kind=p.shape?(p.filled?WWHD_HUD_RECT:WWHD_HUD_RECT_OUTLINE):
-        (p.filled?WWHD_HUD_CIRCLE:WWHD_HUD_CIRCLE_OUTLINE),.anchor=WWHD_HUD_CENTER,
-        .x=640+r.x-(p.shape?r.w/2:0),.y=360-r.y-(p.shape?r.h/2:0),
-        .w=r.w,.h=r.h,.size=side/2,.thickness=2,.rgba=p.filled?(0x14222C00u|alpha):tint};
-    wwhd_hud_emit(list,&element);
-    if(icons[i] && p.icons) {
-        element=(wwhd_hud_element){.kind=WWHD_HUD_IMAGE,.anchor=WWHD_HUD_CENTER,
-            .x=640+r.x-side/2,.y=360-r.y-side/2,.w=side,.h=side,
-            .thickness=1,.u1=1,.v1=1,.rgba=tint,.image=icons[i]};
-        wwhd_hud_emit(list,&element);
-    } else label(list,r.x-r.w/2+8,r.y+9,names[i],18*p.size/100.f,tint);
-    if(editor.open && editor.selected==i) outline(list,r,0xFFDB70FF);
-}
-static char editor_text[12][64];
-static void editor_value(char* out,const char* prefix,int value,const char* suffix) {
-    unsigned n=0; while(*prefix) out[n++]=*prefix++;
-    if(value<0) { out[n++]='-'; value=-value; }
-    if(value>=100) out[n++]='0'+value/100;
-    if(value>=10) out[n++]='0'+(value/10)%10;
-    out[n++]='0'+value%10;
-    while(*suffix) out[n++]=*suffix++;
-    out[n]=0;
-}
-static void editor_hud(u32 list) {
-    box(list,(EcRect){0,245,1260,210},"",0x102332F0);
-    if(editor.draft.grid) {
-        for(int x=-620;x<=620;x+=20) line(list,x,-320,x,150,0xD0DCEC28);
-        for(int y=-320;y<=140;y+=20) line(list,-620,y,620,y,0xD0DCEC28);
-    }
-    for(int i=0;i<4;++i) if(i!=editor.selected) macro_button(list,i);
-    macro_button(list,editor.selected);
-    for(int i=0;i<4;++i) box(list,ee_tab(i),names[i],editor.selected==i?0x436B8FFF:0x223C50FF);
-    EcPlacement p=editor.draft.button[editor.selected];
-    editor_value(editor_text[0],"Smaller ",p.size,"%");
-    editor_value(editor_text[1],"Larger ",p.size,"%");
-    editor_value(editor_text[2],"Opacity ",p.opacity,"%");
-    const char* captions[EE_ACTIONS]={editor_text[0],editor_text[1],editor_text[2],
-        p.shape?"Shape: square":"Shape: circle",p.filled?"Fill: on":"Fill: off",
-        p.icons?"Style: icon":"Style: text",p.visible?"Visible: yes":"Visible: no",
-        editor.draft.grid?"Grid: on":"Grid: off","Reset all","Cancel","Save / Done"};
-    for(int i=0;i<EE_ACTIONS;++i) box(list,ee_action_rect(i),captions[i],i==EE_SAVE?0x26745AFF:0x29475FFF);
-    label(list,-590,345,"MACRO EDITOR - select a button, then drag it",18,0xFFFFFFFF);
-    box(list,(EcRect){0,-342,1280,36},"",0x102332F0);
-    label(list,-590,-334,editor.error?"Save failed - retry Save or Cancel":
-        "Only macro buttons are edited. The game keeps running; use a safe place.",16,editor.error?0xFF8888FF:0xFFFFFFFF);
+#include "editor_view.h"
+static void editor_button(u32 list,int i) {
+    if(i>=4) return; /* rendered by its owning mod */
+    ee_draw_button(list,(editor.open?editor.draft:editor.saved).button[i],names[i],icons[i],
+        editor.open,editor.selected==i,state.macro==i);
 }
 static void hud(u32 list) {
     refresh(); if(!ready) return;
     sync_icons();
     if(editor.open) { editor_hud(list); return; }
-    for(int i=0;i<4;++i) if(mask&(1<<i)) macro_button(list,i);
+    for(int i=0;i<4;++i) if(mask&(1<<i)) editor_button(list,i);
     if(editor_visible) box(list,rects[4],"Edit",0x23445CD0);
 }
 /* Public HD proc IDs: WAIT, MOVE, ATN_MOVE, ATN_ACTOR_WAIT/MOVE,

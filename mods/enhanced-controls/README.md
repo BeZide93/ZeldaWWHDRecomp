@@ -23,7 +23,8 @@ the seven-feature runtime port, not a prerequisite.
 - Four custom combat icons, with per-button icon/text selection
   in the editor. Missing images fall back to text. Icons retain their proportions
   and reload after a save-state/HUD reset.
-- A **macro-only touch editor**, opened by the **Edit** touch button. The mod's
+- A **touch editor**, opened by the **Edit** touch button; with Dark Link 0.1.17+
+  installed it also edits the Dark Link button in the same session. The mod's
   settings contain only **Show editor button**, **horizontal position** and
   **vertical position**.
 
@@ -83,7 +84,7 @@ macro's release; the mod does not forcibly release the player's inputs.
 
 1. Download the `enhanced-controls` artifact from the successful **Enhanced
    Controls mod** Actions run. Extract the outer GitHub artifact ZIP to obtain
-   `enhanced-controls-0.3.1.wwhdmod`; do **not** extract that file.
+   `enhanced-controls-0.4.0.wwhdmod`; do **not** extract that file.
 2. Enable **Code mods** in the app's setup or **Settings → Mods → More →
    Code-mod support**. If newly enabled, let the app rebuild the game code.
 3. **Settings → Mods → More → Install from a file**: choose the `.wwhdmod`.
@@ -113,7 +114,7 @@ python3 mods/enhanced-controls/build.py
 python3 mods/enhanced-controls/tests/run_tests.py
 ```
 
-Output: `build/enhanced-controls/enhanced-controls-0.3.1.wwhdmod` and
+Output: `build/enhanced-controls/enhanced-controls-0.4.0.wwhdmod` and
 `SHA256SUMS.txt`. `WWHD_PPC_CLANG`, `WWHD_PPC_LLD`, `CC` and `CXX` can select compilers.
 The build checks the real upstream package reader and PPC-to-C translator for
 both USA and EU. Tests exercise the pure policy and the translated module with
@@ -149,3 +150,25 @@ adapter and package build are implemented against the official public SDK.
 The archive includes `src/mod.c`, `src/core.h` and `src/editor.h`; build tools and tests are in
 `mods/enhanced-controls` on this branch. Public game names/offsets derive from
 ZeldaWWHDDecomp/wwhd (CC0), as documented by the upstream generated SDK.
+
+### 0.4.0 — shared editor with Dark Link
+
+With **Dark Link 0.1.17+**, Edit opens one shared editor for Jump, Slash, Spin,
+Dodge and Dark Link. The fifth tab also recovers a hidden Dark Link button.
+Both packages must be updated. Enhanced Controls stores the combined layout;
+Dark Link renders its own icon, keeping textures and HUD handles with their
+owning mod. Without Dark Link, the editor continues to show four macro tabs.
+
+Existing v1 four-button layout files migrate to the validated five-slot v2
+format without changing the four placements. Save/Cancel and alternating-file
+recovery continue to apply to the entire draft. The shared saved layout belongs
+to Enhanced Controls; Dark Link has a separate standalone profile when this mod
+is absent/disabled. Editing suppresses action inputs but does not pause the game.
+
+`editor.h`, `editor_geometry.h`, `editor_view.h` and `editor_peer.h` are shared
+verbatim with the Dark Link package. The peer protocol uses the read-only native
+0267598C getter as a synchronous hook rendezvous (see `editor_peer.h` for the
+pinned public decomp evidence). Only versioned packets in the mod arena are
+handled. No game state, fixed scratch addresses, peer callbacks or host handles
+are shared, and no new app version is required. The combined translated-module
+regression is in Dark Link's `test_shared.py --enhanced-root /path/to/this/repo`.
