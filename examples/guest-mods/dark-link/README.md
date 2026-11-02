@@ -1,24 +1,22 @@
-# Dark Link (prototype 0.1.16)
+# Dark Link (prototype 0.1.17)
 
 Standalone code mod for ZeldaWWHDRecomp: sword hits charge a transformation with
 black body/equipment, red eyes and boosted sword damage. The user confirmed the
 complete body, mouth, eyes, sword and shield appearance in **0.1.11**. That
 texture-binding repair at **viewCalc return** is retained.
 
-## Added in 0.1.16
+## Added in 0.1.17
 
-The native Main_00 `L_Shortcut_00` group (D-pad and item icons) moves down
-by the copied gauge height plus its eight-unit gap while the Dark Link gauge
-is visible. Before magic is unlocked it also reserves the otherwise hidden
-magic row, since the copied gauge sits below that row. Native HeartPos and
-MagicPos animation results remain the starting position, including two heart
-rows and doubled magic capacity. Parent scale is accounted for.
+- Original Dark Link medallion icon in the Enhanced Controls style.
+- The same touch editor as Enhanced Controls, with a standalone saved profile.
+- One shared editor for all five mod buttons when Enhanced Controls 0.4.0 is
+  installed; update both packages to enable this.
+- Replace 0.1.16's ineffective D-pad calculation hook with draw-time spacing from
+  Main_00's actual layout root, including the Shortcut's nested parts layout.
+  Final global matrices are restored immediately after drawing. The shift is
+  one gauge row plus its gap (two rows before native magic is unlocked).
 
-The offset is scoped to native matrix calculation: the local position is
-restored immediately afterwards and marked dirty for the next calculation.
-There is no accumulated displacement or saved-setting change. Menus, pause,
-disabling/hiding the mod gauge, unavailable gauge resources and state-load
-epoch changes remove the extra space. Only this mod package needs rebuilding.
+See the 0.1.17 section below for editor ownership, compatibility and validation.
 
 ## Fixed in 0.1.15
 
@@ -130,7 +128,7 @@ collision path charge the gauge. Boss-specific handlers may override damage.
 ## Diagnostics and validation
 
 Enable **Appearance diagnostics** only when needed. The first line reads
-`DL 0.1.16 ON/OFF`; `Magic` counts loaded frame/fill images (up to four),
+`DL 0.1.17 ON/OFF`; `Magic` counts loaded frame/fill images (up to four),
 `Pos` is 1 for native or 2 for authored placement, and `Aura` reports the shell
 model being present. Body material/albedo/eye counts, binding retention and late
 repair counters retain their existing meanings. `Fill` reports the actual
