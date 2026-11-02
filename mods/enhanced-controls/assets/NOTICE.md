@@ -1,18 +1,28 @@
-# Combat icon source
+# Combat icon artwork
 
-These four unmodified PNG files come from SSunnKing/ZeldaWWHDRecompAndroid---ENHANCED,
-commit 2f28a4012fd2b5001695d1c8fd96d453d6304878,
-`docs/touch-icons-v2-preview/`. The repository declares MPL-2.0 in its README
-and LICENSE; its design prompts are in `docs/touch-icons-prompts.md`.
+The four current icons were newly generated for BeZide93's Enhanced Controls
+mod and approved by the project owner. They replace the images previously
+copied from SSunnKing/ZeldaWWHDRecompAndroid---ENHANCED; no files from that
+icon set are included in the current package.
 
-Source: https://github.com/SSunnKing/ZeldaWWHDRecompAndroid---ENHANCED
+Designs: Master Sword jump attack with impact, vertical slash through air
+without ground impact, circular spin attack, and a simple brown Wind Waker-style
+boot for dodge. The existing macro assignments are unchanged.
+
+Artwork was generated with OpenAI image generation and prepared as 1024×1024
+RGBA PNGs with transparent exteriors. All four decoded images together use
+16 MiB, within the current per-mod HUD texture budget.
+
+These are fan-made illustrations, not textures extracted from the game.
+The Legend of Zelda, Link and the Master Sword belong to Nintendo. No Nintendo
+affiliation or endorsement is implied. Mod source code remains under MPL-2.0.
 
 SHA-256:
 
-`e5cd2e23d6c6d814db9f9488c5f23397f96549dbd45aea53db381f78346e1838`  combat_jump_attack.png
+`cae660907ac278a74607fcf1fd8751fcb70a6e448ebf325c5b4b45f42f012b6a`  combat_jump_attack.png
 
-`a5734bae185a85ddeb3eaab445158d8ebcf598f9861a7f491be587e870a08d76`  combat_vertical_slash.png
+`1d8521ed08c3c746f3783fb7a0ba507e20230d11debe70d25f13f9cdd439fa8b`  combat_vertical_slash.png
 
-`296c12d88383df2b5dc26069f76403704c26011a87a4fa20ee4a63ba508c855d`  combat_spin_attack.png
+`264a2324fb904c03703ca7fbef84c0d935d961e95546e418639f686d280d9ccc`  combat_spin_attack.png
 
-`911dc5cffbaedc7c74c829666dc9c5e9a8d475adcc0ac8a3e4edf517ed1aad30`  combat_dodge.png
+`ad9c0b94b48f02ed2b518af94c51a8737ff3376c23c627e4c9b3f337b23b9247`  combat_dodge.png

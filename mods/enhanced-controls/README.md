@@ -20,7 +20,7 @@ the seven-feature runtime port, not a prerequisite.
   A dodge goes sideways with left/right stick input, otherwise backwards.
   Timing follows game logic time, including true-60 mode, rather than rendered
   frame count. A new macro replaces the previous one; real buttons are preserved.
-- Four combat icons from the Enhanced fork, with per-button icon/text selection
+- Four custom combat icons, with per-button icon/text selection
   in the editor. Missing images fall back to text. Icons retain their proportions
   and reload after a save-state/HUD reset.
 - A **macro-only touch editor**, opened by the **Edit** touch button. The mod's
@@ -30,6 +30,10 @@ the seven-feature runtime port, not a prerequisite.
 The mod claims only its displayed button rectangles during gameplay; the Edit
 launcher takes priority over macros. Positions use 1280×720 layout units centred
 on the picture, positive Y upwards.
+
+Version **0.3.1** replaces the previous fork icons with the approved Master Sword
+attack icons and simple brown boot. Icons keep the same dimensions and texture
+budget; saved layouts remain compatible.
 
 Version **0.3.0** removes the gesture pad, pinch zoom and double-tap recenter,
 including the camera hook and collision query. Existing saved editor layouts and
@@ -42,7 +46,7 @@ options remain compatible. The HUD visibility fix from 0.2.1 remains included.
 2. **Smaller/Larger** changes the selected button in 5% steps (60–180%).
    **Opacity** cycles 100/80/60/40/20%. **Shape** selects a circle/square frame;
    **Fill** changes the frame background. **Style** switches icon/text.
-   The original icons remain circular artwork inside the chosen frame.
+   The icons remain circular artwork inside the chosen frame.
 3. **Visible** enables/disables that button. Hidden buttons remain dimly visible
    in the editor and selectable using the top tabs, even when all four are hidden.
 4. **Grid** enables a 20-unit snap grid. **Reset all** resets the draft layout.
@@ -79,7 +83,7 @@ macro's release; the mod does not forcibly release the player's inputs.
 
 1. Download the `enhanced-controls` artifact from the successful **Enhanced
    Controls mod** Actions run. Extract the outer GitHub artifact ZIP to obtain
-   `enhanced-controls-0.3.0.wwhdmod`; do **not** extract that file.
+   `enhanced-controls-0.3.1.wwhdmod`; do **not** extract that file.
 2. Enable **Code mods** in the app's setup or **Settings → Mods → More →
    Code-mod support**. If newly enabled, let the app rebuild the game code.
 3. **Settings → Mods → More → Install from a file**: choose the `.wwhdmod`.
@@ -90,8 +94,8 @@ macro's release; the mod does not forcibly release the player's inputs.
    their visibility.
 
 No special APK is needed. Do not enable the duplicate controls from the
-runtime PR at the same time. Mods that claim overlapping areas or change input can conflict. The package includes the four combat icons from the Enhanced fork (see
-`assets/NOTICE.md` for source attribution). No game files or shaders are included.
+runtime PR at the same time. Mods that claim overlapping areas or change input can conflict. The package includes four newly generated and approved combat icons (see
+`assets/NOTICE.md` for artwork details). No game files or shaders are included.
 
 ## Not included
 
@@ -109,7 +113,7 @@ python3 mods/enhanced-controls/build.py
 python3 mods/enhanced-controls/tests/run_tests.py
 ```
 
-Output: `build/enhanced-controls/enhanced-controls-0.3.0.wwhdmod` and
+Output: `build/enhanced-controls/enhanced-controls-0.3.1.wwhdmod` and
 `SHA256SUMS.txt`. `WWHD_PPC_CLANG`, `WWHD_PPC_LLD`, `CC` and `CXX` can select compilers.
 The build checks the real upstream package reader and PPC-to-C translator for
 both USA and EU. Tests exercise the pure policy and the translated module with
