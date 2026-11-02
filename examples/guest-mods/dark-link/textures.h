@@ -248,7 +248,7 @@ static void dl_diag_hud(u32 list) {
 #define DL_S(s) n = dl_probe_append(line, n, s)
 #define DL_N(v) n = dl_probe_number(line, n, v)
     char* line = dl_probe_lines[0];
-    DL_S("DL 0.1.13 "); DL_S(dl_state.active ? "ON" : "OFF (last sample)");
+    DL_S("DL 0.1.14 "); DL_S(dl_state.active ? "ON" : "OFF (last sample)");
     DL_S("  Draw="); DL_N(dl_probe.draws); DL_S("  Refresh B/H/Hair/Gear=");
     DL_N(dl_probe.refresh[0]); DL_S("/"); DL_N(dl_probe.refresh[1]); DL_S("/"); DL_N(dl_probe.refresh[2]); DL_S("/"); DL_N(dl_probe.refresh[3]);
     DL_S(" Magic="); DL_N((dl_magic_images[0][0]!=0)+(dl_magic_images[0][1]!=0)+(dl_magic_images[1][0]!=0)+(dl_magic_images[1][1]!=0));
@@ -262,7 +262,9 @@ static void dl_diag_hud(u32 list) {
     DL_S("  Kept="); DL_N(dl_probe.kept); DL_S("  Lost="); DL_N(dl_probe.lost); DL_S("  Rebound="); DL_N(dl_probe.rebound); lengths[2] = n;
     line = dl_probe_lines[3]; n = 0;
     DL_S("Samplers body: "); DL_S(dl_probe.body_samplers[0] ? dl_probe.body_samplers : "?");
-    DL_S("  eyes: "); DL_S(dl_probe.eye_samplers[0] ? dl_probe.eye_samplers : "?"); lengths[3] = n;
+    DL_S("  eyes: "); DL_S(dl_probe.eye_samplers[0] ? dl_probe.eye_samplers : "?");
+    DL_S(" Fill=");DL_N((u32)(dl_gauge_fraction()*100+0.5f));DL_S("%");
+    DL_S(" Full=");DL_N(dl_magic_animation_ok[0]);DL_S("/");DL_N(dl_magic_animation_ok[1]);lengths[3] = n;
     line = dl_probe_lines[4]; n = 0;
     DL_S("Late calls="); DL_N(dl_probe.late_calls); DL_S(" changed="); DL_N(dl_probe.late_changed);
     DL_S(" stale="); DL_N(dl_probe.late_stale); DL_S(" rejected="); DL_N(dl_probe.late_rejected);

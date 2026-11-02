@@ -9,7 +9,7 @@ static float magic_width, magic_x, magic_y;
 static void magic_release(Cpu* c) { c->r[3]=1; }
 static void magic_epoch(Cpu* c) { c->r[3]=(uint32_t)(magic_generation>>32); c->r[4]=(uint32_t)magic_generation; }
 static uint32_t magic_fill_handles[2];
-static int magic_writes,magic_base_fill;
+static int magic_writes,magic_base_fill,magic_animated,magic_bad_animation,magic_long;
 static void magic_write(Cpu* c) {
     const char* path=(const char*)ppc_ptr(c->r[3]);
     const uint8_t* png=ppc_ptr(c->r[4]);
@@ -17,7 +17,7 @@ static void magic_write(Cpu* c) {
     /* First pixel of the uncompressed zlib stream: filter byte then RGBA.
      * Validate output pixels, not only a red tint in an emitted HUD command. */
     assert(png[24]==8 && png[25]==6 && png[48]==0);
-    if(strstr(path,"fill")) { assert(png[49]>200 && png[49]>png[50]*2 && png[52]==255); }
+    if(strstr(path,"fill")) { for(int i=0;i<4;++i) assert(png[49+i*4]==255 && png[50+i*4]==32 && png[51+i*4]==32);assert(png[52]==255); }
     if(magic_base_fill && strstr(path,"frame")) assert(png[49]==0&&png[50]==0&&png[51]==0);
     ++magic_writes;c->r[3]=c->r[5];
 }
@@ -41,7 +41,7 @@ static void magic_setting(Cpu* c) {
     if (!fill && strcmp(name,"P_MagicBase_00") && strcmp(name,"P_MagicBase_01")) { c->r[3]=0; return; }
     uint32_t p=c->r[5]; memset(ppc_ptr(p),0,64);
     st32(p,1); st32(p+4,3); stf32(p+8,0); stf32(p+12,0);
-    stf32(p+16,fill ? 96:100); stf32(p+20,fill ? 12:16); st32(p+28,255);
+    stf32(p+16,fill ? (magic_animated?48:96):(magic_long&&!strcmp(name,"P_MagicBase_01")?200:100)); stf32(p+20,fill ? 12:16); st32(p+28,255);
     strcpy((char*)ppc_ptr(p+32),fill ? "fill":"frame"); c->r[3]=64;
 }
 static void magic_emit(uint32_t e) {
@@ -49,12 +49,17 @@ static void magic_emit(uint32_t e) {
     assert(ld32(e+4)==(magic_authored ? 1u:0u)); /* follows native, already aspect-adjusted coordinates */
     if (ld32(e+60)==magic_fill_handles[0] || ld32(e+60)==magic_fill_handles[1]) {
         magic_width=ldf32(e+20); magic_x=ldf32(e+12); magic_y=ldf32(e+16);
-        float delta=(float)ldf32(e+48)-magic_width/(magic_base_fill?100.0f:96.0f); assert(delta>-0.00001f && delta<0.00001f);
+        assert(ld32(e+56)==0xffffffff); /* red pixels must not be tinted a second time */
+        float end=magic_width/(magic_base_fill?100.0f:magic_animated&&magic_bad_animation?48.0f:magic_long?196.0f:96.0f);
+        if(magic_animated && !magic_bad_animation) { assert(ldf32(e+40)==0.25f);end=0.25f+end*0.5f; }
+        float delta=(float)ldf32(e+48)-end; assert(delta>-0.00001f && delta<0.00001f);
     } else assert(ld32(e+56)==0xffffffff);
 }
 static void fixture_picture(uint32_t p,const char* name,unsigned mat) {
     st32(p,0x70696331); st32(p+4,0x88); strcpy((char*)ppc_ptr(p+12),name);
     st16(p+0x64,mat); st8(p+0x66,1);
+    stf32(p+0x44,1);stf32(p+0x48,1);
+    stf32(p+0x4c,mat?(magic_animated?48:96):100);stf32(p+0x50,mat?12:16);
     for(unsigned i=0;i<4;++i) st32(p+0x54+4*i,0xffffffff);
     const float uv[8]={0,0,1,0,0,1,1,1};
     for(unsigned i=0;i<8;++i) stf32(p+0x68+4*i,uv[i]);
@@ -94,6 +99,26 @@ static void fixture_magic(void) {
     stf32(MAGIC_PANE+0x48,1); stf32(MAGIC_PANE+0x5c,1);
     stf32(MAGIC_PANE+0x54,-530); stf32(MAGIC_PANE+0x64,280);
 }
+static void fixture_animation(unsigned frames) {
+    /* Fourth SARC node, preserving existing names after the SFNT moves. */
+    memmove(ppc_ptr(MAGIC_ARC+0x60),ppc_ptr(MAGIC_ARC+0x50),0x48);
+    st16(MAGIC_ARC+0x1a,4);st32(MAGIC_ARC+8,0x2000);
+    st32(MAGIC_ARC+0x54,0);st32(MAGIC_ARC+0x58,0xb00);st32(MAGIC_ARC+0x5c,0xb00+280);
+    uint32_t f=MAGIC_ARC+0xc00,pat=f+20,pai=f+84;
+    memset(ppc_ptr(f),0,280);st32(f,0x464c414e);st16(f+4,0xfeff);st16(f+6,20);st16(f+16,2);
+    st32(pat,0x70617431);st32(pat+4,64);st16(pat+10,1);st32(pat+12,28);st32(pat+16,36);
+    st16(pat+22,frames);strcpy((char*)ppc_ptr(pat+28),"Full");strcpy((char*)ppc_ptr(pat+36),"G_Bar_00");
+    st32(pai,0x70616931);st32(pai+4,196);st16(pai+8,frames);st16(pai+14,2);st32(pai+16,20);
+    st32(pai+20,28);st32(pai+24,112);
+    for(int i=0;i<2;++i) {
+        uint32_t c=pai+28+i*84,t=c+36,e=t+12,k=e+12;
+        strcpy((char*)ppc_ptr(c),i?"Fill":"P_Fill_00");st8(c+28,1);st8(c+29,i);st32(c+32,36);
+        st32(t,i?0x464c5453:0x464c5041);st8(t+4,1);st32(t+8,12);
+        st8(e+1,i?3:8);st8(e+2,2);st16(e+4,2);st32(e+8,12);
+        stf32(k,0);stf32(k+4,i?1:48);stf32(k+8,i?-0.5f/frames:((frames==32?196.0f:96.0f)-48)/frames);
+        stf32(k+12,frames);stf32(k+16,i?0.5f:frames==32?196:96);stf32(k+20,i?-0.5f/frames:((frames==32?196.0f:96.0f)-48)/frames);
+    }
+}
 static void test_magic(void) {
     fixture_magic();
     /* Invalid resource is rejected with no texture handles or fake rectangle. */
@@ -123,6 +148,22 @@ static void test_magic(void) {
     st8(MAGIC_PANE+0x47,5); /* native origin top-left */
     hook(0x02675414,3,MAGIC_CTRL,0); read_hud(); assert(magic_x==112 && magic_y==106);
     st8(MAGIC_PANE+0x47,0); hook(0x02675414,3,MAGIC_CTRL,0);
+    /* Native authored half-width fill becomes full-width at frame 16;
+     * its texture scale changes too. Free mode must cover the complete bar. */
+    magic_animated=1;free_mode=1;++revision;tick();fixture_magic();fixture_animation(16);++magic_generation;
+    read_hud();hook(0x02675414,3,MAGIC_CTRL,0);read_hud();assert(magic_width==96 && magic_x==62);
+    expect_hud("Full=1/0");expect_hud("Fill=100%");
+    /* Malformed keys cannot partially apply an animation or read outside it. */
+    magic_bad_animation=1;st32(MAGIC_ARC+0xc00+84+28+36+12+8,0xfffffff0);++magic_generation;
+    read_hud();hook(0x02675414,3,MAGIC_CTRL,0);read_hud();assert(magic_width==48);
+    expect_hud("Full=0/0");
+    magic_bad_animation=0;magic_long=1;st8(SAVE+0x33,32);fixture_magic();fixture_animation(32);
+    stf32(MAGIC_FLYT+256+0x4c,200);stf32(MAGIC_PANE+0x3c,200);++magic_generation;
+    read_hud();hook(0x02675414,3,MAGIC_CTRL,0);read_hud();assert(magic_width==196);
+    expect_hud("Full=0/1");
+    magic_long=0;st8(SAVE+0x33,0);
+    magic_animated=magic_bad_animation=0;free_mode=0;++revision;tick();fixture_magic();++magic_generation;
+    read_hud();hook(0x02675414,3,MAGIC_CTRL,0);read_hud();
     /* Return a full duration for the subsequent gameplay regression. */
     buttons(0); buttons(0x60000); tick(); buttons(0);
     for(int i=0;i<20;++i) hit(1);
@@ -142,12 +183,19 @@ static void test_aura(void) {
     uint8_t original_save[0x40]; memcpy(original_save,ppc_ptr(SAVE),sizeof original_save);
     uint32_t flags=ld32(LINK+0x3bc); unsigned timer=ld16(LINK+0x699e);
     hook(0x0240b7f4,2,LINK,0);
-    assert((float)ldf32(AURA_ANM)>30 && (ld32(AURA_RS+0x1c)&0x1fff)==0x504);
+    assert((float)ldf32(AURA_ANM)>30 && (ld32(AURA_RS+0x1c)&0x1fff)==0x500);
     assert(ld32(LINK+0x3bc)==flags && ld16(LINK+0x699e)==timer);
     hook(0x0240b7f4,3,LINK,0); assert((float)ldf32(AURA_ANM)==0);
     hook(0x023dbbe4,2,LINK,0); assert((float)ldf32(AURA_ANM)>29);
     hook(0x023dbbe4,3,LINK,0); assert((float)ldf32(AURA_ANM)==0 && (float)ldf32(AURA_VALUE)==0);
     assert(aura_notifications>=6 && !memcmp(original_save,ppc_ptr(SAVE),sizeof original_save));
+    st32(AURA_RS+0x1c,0x504); /* native non-separate alpha uses RGB equation */
+    hook(0x0240b7f4,2,LINK,0);
+    assert((ld32(AURA_RS+0x1c)&0x1fff)==0x500);
+    assert((ld32(AURA_RS+0x1c)&(1u<<29)) && ((ld32(AURA_RS+0x1c)>>16)&0x1fff)==0x504);
+    hook(0x0240b7f4,3,LINK,0);
+    /* Return native separate-alpha fixture before restoration assertions. */
+    st32(AURA_RS+0x1c,0x20010101);
     st32(LINK+0x3bc,flags|1); stf32(AURA_ANM,12);
     hook(0x0240b7f4,2,LINK,0); assert((float)ldf32(AURA_ANM)==12);
     hook(0x0240b7f4,3,LINK,0); assert((float)ldf32(AURA_ANM)==12);

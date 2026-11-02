@@ -1,22 +1,25 @@
-# Dark Link (prototype 0.1.13)
+# Dark Link (prototype 0.1.14)
 
 Standalone code mod for ZeldaWWHDRecomp: sword hits charge a transformation with
 black body/equipment, red eyes and boosted sword damage. The user confirmed the
 complete body, mouth, eyes, sword and shield appearance in **0.1.11**. That
 texture-binding repair at **viewCalc return** is retained.
 
-## Fixed in 0.1.13
+## Fixed in 0.1.14
 
-- The Magic Armor BRK is initialized with automatic playback disabled, leaving
-  `FrameCtrl.mEnd` at zero. 0.1.12 incorrectly rejected that controller. Read
-  `getFrameMax` from the animation resource, as the native aura code does.
-- Decode the native gauge artwork with its actual black/white material colours
-  and alpha before recolouring it. A red multiplier on a raw luminance/coverage
-  texture loses parts of the fill and can make transparent regions opaque.
-- If MagicBase already contains the coloured fill, use its full geometry for
-  the red layer and an empty copy beneath it. Do not select a smaller green
-  highlight or leave a green base behind the duration indicator.
-- Keep the working 0.1.11 body/face/eye/equipment binding path unchanged.
+- The visible shell still uses violet shader/BRK colours. Suppress source RGB
+  in the shell's blend equation: `0 * source + (1 - sourceAlpha) * destination`.
+  This produces a black veil using the native animated coverage, independently
+  of the shader RGB. Preserve the original alpha equation and restore owned
+  blend fields when disabled.
+- Read the full-capacity state of native `G_Bar_00` animations (16 or 32 frames),
+  including picture size/scale, material colours and texture transforms. The
+  static BFLYT state alone can describe a partially filled bar.
+- Give fill pixels the requested red RGB directly while retaining their alpha.
+  Do not multiply a dark source gradient by red or darken it again with green
+  vertex RGB. Apply the authored/animated UV transform before duration cropping.
+- Keep the working 0.1.11 body/face/eye/equipment binding path unchanged, and
+  retain 0.1.13's resource-derived aura animation length.
 
 USA/EU compilation, translated-hook regressions and synthetic pixel/PNG tests
 pass. **The new appearance still needs checking in-game**: no game executable
@@ -55,8 +58,9 @@ native update path. Animation length comes from the resource vtable, not the
 uninitialized playback end field.
 
 Only the current player's shell at Link+5700 joins the existing black palette
-and `_a0` texture-view path. Its FMAT render state uses source-alpha and inverse
-source-alpha colour blending while active. Restoration checks actor, model,
+and `_a0` texture-view path. Its FMAT render state uses zero and inverse
+source-alpha colour blending while active. If alpha originally shared the RGB
+equation, preserve that original equation in separate-alpha fields. Restoration checks actor, model,
 material array and resource identities and restores owned bits while preserving
 unrelated changes. Other actors and held non-sword items are excluded.
 
@@ -65,8 +69,8 @@ unrelated changes. Other actors and held non-sword items are excluded.
 Read the resident **MagicBar_00** SARC/BFLYT with bounded offsets. Find the native
 P_MagicBase_00/01 and the authored green fill. Query their original geometry and
 UVs. Decode the referenced BFLIM (RGBA8, BC1–5; linear, micro and macro tiling),
-apply the material's black/white colours in linear light, and map green material
-colours to red. Preserve texture/material alpha. When the base itself is green,
+apply the material's black/white colours in linear light, and replace fill RGB
+with (255, 32, 32). Preserve texture/material alpha. When the base itself is green,
 make its empty copy black and use the same full-size art for the red fill.
 Partial fill crops the image width and UVs, rather than stretching it.
 
@@ -76,8 +80,17 @@ archive is read-only; these local derivatives are never included in the package
 or uploaded. Conversion only runs on load/retry, not on every drawing frame.
 Each decoded image is bounded to 131072 pixels and each cache write is below
 1 MiB. Unsupported or missing textures are skipped and retried, with no fake
-rectangle fallback. The first authored vertex colour is retained; arbitrary
-multi-texture shader effects and per-corner colour gradients are not reproduced.
+rectangle fallback. The frame retains its first authored vertex colour; the
+fill retains its alpha and uses neutral vertex RGB. Arbitrary multi-texture
+shader effects and per-corner alpha gradients are not reproduced.
+
+A bounded BFLAN reader selects a 16/32-frame animation explicitly bound to
+`G_Bar_00`, validates all tracks before applying any, and evaluates its full
+frame. It supports FLPA picture fields, FLMC material colours, FLVC corner
+colours and the first FLTS texture transform. Animated ancestor-pane transforms,
+texture-pattern swaps and rotated UVs are not supported. If no matching valid
+animation exists, the static authored state is retained. Only mod-owned copies
+change; the native HUD, animation controllers and magic amount stay untouched.
 
 The native HD magic controller (02675414) supplies live base position, size and
 origin. Place the copy eight layout units below it; before magic is unlocked,
@@ -101,10 +114,12 @@ collision path charge the gauge. Boss-specific handlers may override damage.
 ## Diagnostics and validation
 
 Enable **Appearance diagnostics** only when needed. The first line reads
-`DL 0.1.13 ON/OFF`; `Magic` counts loaded frame/fill images (up to four),
+`DL 0.1.14 ON/OFF`; `Magic` counts loaded frame/fill images (up to four),
 `Pos` is 1 for native or 2 for authored placement, and `Aura` reports the shell
 model being present. Body material/albedo/eye counts, binding retention and late
-repair counters retain their existing meanings. Diagnostics do not prove GPU
+repair counters retain their existing meanings. `Fill` reports the actual
+Dark Link percentage (100% in Free mode); `Full` reports whether matching full
+animations were applied for normal/doubled capacity. Diagnostics do not prove GPU
 output. No Share log or game-file upload is required.
 
 Automated checks cover gameplay/timing, body/eye/equipment texture restoration,
@@ -112,7 +127,10 @@ nested native refresh, animated face replacements, malformed layout bounds,
 material-derived red pixels and alpha, PNG checksums/zlib decoding, full-width
 coloured bases, UV cropping, native placement, handle reuse/state-load invalidation,
 zero-length playback controllers with valid resource lengths, visual-only aura
-frames, genuine armor coexistence and blend restoration.
+frames, genuine armor coexistence, RGB suppression and preserved alpha blending.
+Regression fixtures cover half-width authored fills becoming full-width at both
+16/32 frames, texture SRT, malformed animation rejection, full Free-mode coverage
+and neutral vertex tint. These are synthetic resource fixtures, not a game run.
 
 In-game acceptance: activate Dark Link, check the black aura in motion and the
 red bar below normal magic, drain/charge the bar, then toggle off and verify

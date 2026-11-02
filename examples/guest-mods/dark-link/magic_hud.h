@@ -7,7 +7,7 @@ WWHD_GAME_FUNC(0x026FBB24, u32, dl_layout_archive, (u32, const u32*));
 static int dl_game_span(u32, u32);
 #include "magic_art.h"
 #define DL_MAGIC_PICTURES 32
-static struct { char name[24], material[29]; u32 fill, black, white, vertex; f32 uv[4]; } dl_magic_pictures[DL_MAGIC_PICTURES];
+static struct { char name[24], material[29]; u32 fill, black, white, vertex[4]; f32 uv[4], tex_srt[5], pane[10], original[10]; } dl_magic_pictures[DL_MAGIC_PICTURES];
 static u32 dl_magic_picture_count, dl_magic_loaded, dl_magic_retry;
 static unsigned long long dl_magic_epoch;
 static wwhd_game_pane dl_magic_query, dl_magic_base[2], dl_magic_fill[2];
@@ -107,7 +107,15 @@ static int dl_magic_parse(u32 f,u32 size) {
             dl_magic_pictures[p].fill=green;
             dl_magic_pictures[p].black=dl_word((void*)m,28);
             dl_magic_pictures[p].white=dl_word((void*)m,32);
-            dl_magic_pictures[p].vertex=dl_word((void*)at,0x54);
+            for(u32 k=0;k<4;++k) dl_magic_pictures[p].vertex[k]=dl_word((void*)at,0x54+k*4);
+            for(u32 k=0;k<10;++k) dl_magic_pictures[p].pane[k]=dl_magic_pictures[p].original[k]=*(f32*)(at+0x2c+k*4);
+            for(u32 k=0;k<5;++k) dl_magic_pictures[p].tex_srt[k]=k>=3?1:0;
+            u32 flags=dl_word((void*)m,36), maps=flags&3, srts=(flags>>2)&3;
+            if(srts) {
+                u32 srt=m+40+maps*4;
+                if(!dl_blob_span(mat,mat_bytes,srt,20)) return 0;
+                for(u32 k=0;k<5;++k) dl_magic_pictures[p].tex_srt[k]=*(f32*)(srt+k*4);
+            }
             /* First UV set: TL,TR,BL,BR. A single unrotated image is sufficient
              * for these authored gauge pictures; reject unsupported UV shapes. */
             f32* uv=(f32*)(at+0x68);
@@ -121,10 +129,21 @@ static int dl_magic_parse(u32 f,u32 size) {
     }
     return dl_magic_picture_count!=0;
 }
+#include "magic_animation.h"
 static int dl_magic_pane(const char* name,wwhd_game_pane* out) {
     u32 n=dl_append(dl_magic_key,0,sizeof dl_magic_key,"layout-pane:MagicBar_00/");
     dl_append(dl_magic_key,n,sizeof dl_magic_key,name);
-    return wwhd_game_pane_get(dl_magic_key,out) && out->version==1 && (out->flags&2) && out->w>0 && out->h>0;
+    if(!wwhd_game_pane_get(dl_magic_key,out) || out->version!=1 || !(out->flags&2) || !(out->w>0 && out->h>0)) return 0;
+    for(u32 i=0;i<dl_magic_picture_count;++i) if(dl_str_equal(name,dl_magic_pictures[i].name,24)) {
+        f32 *a=dl_magic_pictures[i].original,*b=dl_magic_pictures[i].pane;
+        f32 ow=a[6]*a[8],oh=a[7]*a[9];
+        if(ow>0 && oh>0) {
+            out->x+=(b[0]-a[0])*out->w/ow;out->y+=(b[1]-a[1])*out->h/oh;
+            out->w*=b[6]*b[8]/ow;out->h*=b[7]*b[9]/oh;
+        }
+        break;
+    }
+    return out->w>0 && out->h>0;
 }
 static u32 dl_magic_red(u32 colour) {
     return (colour&0x0000ffffu)|((colour&0x00ff0000u)<<8)|((colour&0xff000000u)>>8);
@@ -139,7 +158,7 @@ static u32 dl_magic_image(wwhd_game_pane* pane,u32 picture,u32 variant,u32 fill)
     int srgb=0;
     if(!texture || !dl_art_decode((const u8*)texture,bytes,&srgb)) return 0;
     u32 black=dl_magic_pictures[picture].black,white=dl_magic_pictures[picture].white;
-    u32 vertex=dl_magic_pictures[picture].vertex;
+    u32 vertex=dl_magic_pictures[picture].vertex[0];
     int coloured=dl_green(black)||dl_green(white);
     if(coloured) {
         /* The base itself may contain the green fill. Draw an empty copy
@@ -149,6 +168,14 @@ static u32 dl_magic_image(wwhd_game_pane* pane,u32 picture,u32 variant,u32 fill)
     }
     if(dl_green(vertex)) vertex=fill?dl_magic_red(vertex):(vertex&255);
     dl_art_material(black,white,srgb,0);
+    /* Fill RGB is a requested replacement colour, not a multiplier for
+     * the source green/black gradient. Keep the original coverage alpha. */
+    if(fill) {
+        for(u32 i=0;i<dl_art_width*dl_art_height;++i) {
+            dl_art_pixels[i*4]=255;dl_art_pixels[i*4+1]=32;dl_art_pixels[i*4+2]=32;
+        }
+        vertex=0xffffff00u|(vertex&255);
+    }
     dl_magic_tint[variant][fill]=vertex;
     u32 size=dl_art_encode();
     if(!size) return 0;
@@ -167,6 +194,13 @@ static void dl_magic_load(void) {
     if(!f || !dl_magic_parse(f,size)) return;
     for(u32 v=0;v<2;++v) {
         if(dl_magic_images[v][0] && dl_magic_images[v][1]) continue;
+        if(!dl_magic_parse(f,size)) return;
+        dl_magic_full_animation(v);
+        for(u32 i=0;i<dl_magic_picture_count;++i) {
+            u32 green=dl_green(dl_magic_pictures[i].black)||dl_green(dl_magic_pictures[i].white);
+            for(u32 k=0;k<4;++k) green|=dl_green(dl_magic_pictures[i].vertex[k]);
+            dl_magic_pictures[i].fill=green;
+        }
         for(u32 k=0;k<2;++k) if(dl_magic_images[v][k]) {
             wwhd_hud_release(dl_magic_images[v][k]); dl_magic_images[v][k]=0;
         }
@@ -193,6 +227,15 @@ static void dl_magic_load(void) {
         for(u32 k=0;k<4;++k) {
             dl_magic_uv[v][0][k]=dl_magic_pictures[frame].uv[k];
             dl_magic_uv[v][1][k]=dl_magic_pictures[fill].uv[k];
+        }
+        for(u32 layer=0;layer<2;++layer) {
+            f32* t=dl_magic_pictures[layer?fill:frame].tex_srt;
+            f32* uv=dl_magic_uv[v][layer];
+            if(t[2]!=0) { /* A rotated image cannot be represented by this HUD UV rectangle. */
+                wwhd_hud_release(dl_magic_images[v][layer]);dl_magic_images[v][layer]=0;continue;
+            }
+            uv[0]=(uv[0]-0.5f)*t[3]+0.5f+t[0];uv[2]=(uv[2]-0.5f)*t[3]+0.5f+t[0];
+            uv[1]=(uv[1]-0.5f)*t[4]+0.5f+t[1];uv[3]=(uv[3]-0.5f)*t[4]+0.5f+t[1];
         }
     }
     dl_magic_loaded=dl_magic_images[0][0] && dl_magic_images[0][1] &&

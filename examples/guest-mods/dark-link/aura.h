@@ -45,7 +45,7 @@ static void dl_aura_frame_restore(DLAuraFrame* f) {
     dl_animation_notify((u32*)(f->brk+0x20));
 }
 /* Black additive light is invisible. Change this shell's material blend to
- * source-alpha / inverse-source-alpha, preserving its authored alpha/depth.
+ * zero / inverse-source-alpha, preserving its authored alpha/depth.
  * FMAT+20 relative render state: flags, polygon, depth, alpha, ref, color,
  * target, blend, constant RGBA. BfresLibrary WiiU RenderState/BlendControl. */
 static void dl_aura_restore(void) {
@@ -61,7 +61,7 @@ static void dl_aura_restore(void) {
         const u32 offsets[3]={0,0x14,0x1c};
         for (u32 k=0;k<3;++k) {
             u32* word=(u32*)(b->state+offsets[k]);
-            const u32 masks[3]={0x33,0x100,0x1fff};
+            const u32 masks[3]={0x33,0x100,0x3fff1fff};
             if ((*word&masks[k])==(b->ours[k]&masks[k]))
                 *word=(*word&~masks[k])|(b->before[k]&masks[k]);
         }
@@ -85,7 +85,14 @@ static void dl_aura_blend(daPy_lk_c* link) {
         for (u32 k=0;k<3;++k) b->before[k]=*(u32*)(state+offsets[k]);
         b->ours[0]=(b->before[0]&~0x33u)|0x13u; /* translucent, color blending */
         b->ours[1]=b->before[1]|0x100u;
-        b->ours[2]=(b->before[2]&~0x1fffu)|4u|(5u<<8);
+        /* Ignore shader RGB entirely. Animated BRK/custom shaders can still
+         * output violet after TEV overrides: 0*src + (1-srcAlpha)*dst is
+         * exactly a black veil with the native animated coverage. */
+        b->ours[2]=(b->before[2]&~0x1fffu)|(5u<<8);
+        /* Without separate alpha, changing RGB factors also changes the
+         * destination alpha. Retain the original alpha equation explicitly. */
+        if(!(b->before[2]&(1u<<29)))
+            b->ours[2]=(b->ours[2]&~0x1fff0000u)|((b->before[2]&0x1fff)<<16)|(1u<<29);
         for (u32 k=0;k<3;++k) *(u32*)(state+offsets[k])=b->ours[k];
     }
 }
