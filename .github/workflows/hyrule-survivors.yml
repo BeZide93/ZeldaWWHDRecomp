@@ -1,0 +1,28 @@
+name: Hyrule Survivors mod
+on:
+  push:
+    branches: ['feat/hyrule-survivors-prototype', 'main']
+    paths: ['mods/hyrule-survivors/**', 'runtime/guest/include/**', 'tools/guestmod/**', 'runtime/src/mods/mod_stages_manifest.h', '.github/workflows/hyrule-survivors.yml']
+  pull_request:
+    paths: ['mods/hyrule-survivors/**', 'runtime/guest/include/**', 'tools/guestmod/**', 'runtime/src/mods/mod_stages_manifest.h', '.github/workflows/hyrule-survivors.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  mod:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+      - name: Install PowerPC compiler
+        run: sudo apt-get update && sudo apt-get install -y clang lld
+      - name: Test, compile, and translate USA and EU modules
+        run: python mods/hyrule-survivors/build.py
+      - name: Upload installable mod
+        uses: actions/upload-artifact@v4
+        with:
+          name: hyrule-survivors-wwhdmod
+          path: build/hyrule-survivors/*.wwhdmod
+          if-no-files-found: error
