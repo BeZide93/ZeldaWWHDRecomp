@@ -45,7 +45,7 @@ static void svc_epoch(Cpu *c) { c->r[3]=(uint32_t)(epoch>>32); c->r[4]=(uint32_t
 static void svc_revision(Cpu *c) { c->r[3]=0; c->r[4]=(uint32_t)revision; }
 static void svc_dt(Cpu *c) { c->f[1].ps0=1.0/30; }
 static void svc_bool(Cpu *c) {
-    const char *id=ppc_ptr(c->r[3]);
+    const char *id=(const char *)ppc_ptr(c->r[3]);
     if(!strcmp(id,"enabled")) c->r[3]=enable;
     else if(!strcmp(id,"hp_bars")) c->r[3]=bars;
     else if(!strcmp(id,"damage_numbers")) c->r[3]=numbers;
@@ -53,14 +53,14 @@ static void svc_bool(Cpu *c) {
     else assert(!"unknown boolean");
 }
 static void svc_float(Cpu *c) {
-    const char *id=ppc_ptr(c->r[3]);
+    const char *id=(const char *)ppc_ptr(c->r[3]);
     if(!strcmp(id,"scale")) c->f[1].ps0=size;
     else if(!strcmp(id,"distance")) c->f[1].ps0=distance;
     else assert(!"unknown number option");
 }
 static void svc_string(Cpu *c) {
     const char *value=after_damage?"After damage":"Always";
-    assert(c->r[5]>strlen(value)); strcpy(ppc_ptr(c->r[4]),value);
+    assert(c->r[5]>strlen(value)); strcpy((char *)ppc_ptr(c->r[4]),value);
     c->r[3]=(uint32_t)strlen(value);
 }
 static void svc_hud(Cpu *c) { callback=c->r[3]; assert(c->r[4]==0); c->r[3]=1; }
@@ -140,6 +140,23 @@ int main(int argc,char **argv) {
         .call_original=original,.service=service};
     mod=init(&host); assert(mod);
     for(unsigned i=0;i<mod->hook_count;++i) assert(mod->hooks[i].kind!=1);
+    /* Actual host order (interp.cpp::hook_025DE788): actor Execute hooks,
+     * guestmods::frame(new counter), then guestmods::draw_frame. The old exact
+     * equality check dropped EVERY list in this sequence. Also cover repeated
+     * presentation callbacks without mutating the completed pass's snapshots. */
+    setup(); execute(6); ++step; draw();
+    assert(rectangles==3 && texts==2 && !strcmp(last_text,"4"));
+    draw(); assert(rectangles==3 && texts==2 && !strcmp(last_text,"4"));
+    for(int hp=5;hp>=1;--hp) {
+        hook(GAME_LINK,2,LINK); execute(hp); ++step; draw();
+        assert(rectangles==3 && texts==(unsigned)(2*(7-hp)) && !strcmp(last_text,"1"));
+    }
+    hook(GAME_LINK,2,LINK); execute(0); ++step; draw();
+    assert(!rectangles && texts==14 && !strcmp(last_text,"1"));
+    ++step; draw(); assert(!emissions); /* no actor update: older than one publication */
+    setup(); execute(6); ++step; ++epoch; draw(); assert(!emissions);
+    setup(); execute(6); --step; draw(); assert(!emissions); /* counter rewind */
+    puts("Host phase-order regression: execute -> counter publication -> HUD passed");
     setup(); execute(6); draw(); assert(rectangles==3 && texts==2 && !strcmp(last_text,"4"));
     visible=0; draw(); assert(!emissions); visible=1;
     /* Hooks and rendering must leave every native byte unchanged. */

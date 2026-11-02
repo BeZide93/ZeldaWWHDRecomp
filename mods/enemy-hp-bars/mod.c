@@ -141,7 +141,13 @@ static void text(u32 list,float x,float y,float size,u32 color,int hp,int maximu
 }
 static void draw(u32 list) {
     label_count=0;
-    if (!active || step!=wwhd_logic_step() || epoch!=wwhd_hud_epoch()) return;
+    /* interp.cpp::hook_025DE788 publishes guestmods::frame AFTER actor Execute,
+     * then invokes draw_frame. Actor snapshots normally carry the previous
+     * published counter. Accept that completed pass (and same-step callbacks),
+     * but reject stale snapshots, a rewound counter or a different state epoch.
+     * Do not prepare/tick here: drawing must not age or clear the new hit data. */
+    unsigned long long drawn_step=wwhd_logic_step();
+    if (!active || drawn_step<step || drawn_step-step>1 || epoch!=wwhd_hud_epoch()) return;
     if (bars) {
         int indices[EHP_BARS], count=ehp_nearest(&state,player,range,after_hit,indices);
         for(int i=0;i<count;++i) {
@@ -165,3 +171,4 @@ static void draw(u32 list) {
         text(list,x,y-(18+40*p->age)*scale,20*scale,color,p->damage,0);
     }
 }
+

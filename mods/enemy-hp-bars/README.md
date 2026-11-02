@@ -1,6 +1,6 @@
 # Enemy HP Bars
 
-A standalone `enemy-hp-bars-0.1.0.wwhdmod` for ZeldaWWHDRecomp. Displays floating
+A standalone `enemy-hp-bars-0.1.1.wwhdmod` for ZeldaWWHDRecomp. Displays floating
 health bars and rising, fading damage numbers on the main game picture. It reads
 enemy health; it does not change combat, difficulty, drops or save data. No
 textures, images, models or game files are included.
@@ -68,7 +68,7 @@ On Linux, install Python 3, a C compiler, PowerPC-enabled Clang and LLD:
 python mods/enemy-hp-bars/build.py
 ```
 
-Output: `build/enemy-hp-bars/enemy-hp-bars-0.1.0.wwhdmod`.
+Output: `build/enemy-hp-bars/enemy-hp-bars-0.1.1.wwhdmod`.
 Override `WWHD_PPC_CLANG`, `WWHD_PPC_LLD`, `CC` or `WWHD_HOST_CC` if needed.
 `--tests-only` runs the portable tracking tests without Clang or game files.
 
@@ -77,7 +77,17 @@ translator for USA and EU, compiles both host modules and runs the shipped code
 against synthetic game memory and HUD services. Tests cover damage accounting,
 overkill, actor identity reuse/deletion, bounded pools, live options, projection,
 room/event/load resets, Survivors suppression and unchanged native memory.
+The phase-order regression follows the real host: actor execution, publication
+of the new logic counter, then the HUD callback. Both that completed pass and
+same-counter callbacks can draw; stale, rewound or different-epoch data cannot.
 These checks do not replace in-game testing of enemy behavior and positioning.
+
+## Changes in 0.1.1
+
+Fix the invisible overlay: the host publishes its new logic counter after the
+enemy hooks run and before drawing the HUD. Version 0.1.0 incorrectly required
+the enemy snapshot and HUD counters to be identical, rejecting every normal
+completed pass. Existing settings are preserved when updating the package.
 
 Native method/profile IDs come from the repository's `story_enemies.cpp`,
 `story_enemy_ownership.cpp` and `story_enemies_more.h`. Layouts and region
