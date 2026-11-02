@@ -6,7 +6,7 @@
 
 enum { EC_JUMP, EC_SLASH, EC_SPIN, EC_DODGE, EC_NONE = -1 };
 enum { EC_A = 0x8000, EC_B = 0x4000, EC_ZL = 0x80 };
-typedef struct { float x, y, w, h; } EcRect; /* centre, +y up */
+#include "editor_geometry.h"
 typedef struct {
     int spin_pending, macro;
     double now, macro_start;
@@ -15,12 +15,6 @@ typedef struct {
 static float ec_clamp(float v, float lo, float hi) {
     if (!(v >= lo)) return lo;
     return v > hi ? hi : v;
-}
-static float ec_d2(float ax, float ay, float bx, float by) {
-    float x = ax - bx, y = ay - by; return x*x + y*y;
-}
-static int ec_inside(EcRect r, float x, float y) {
-    return x >= r.x-r.w/2 && x <= r.x+r.w/2 && y >= r.y-r.h/2 && y <= r.y+r.h/2;
 }
 static void ec_cancel(EcState* s) {
     s->macro = EC_NONE; s->spin_pending = 0;

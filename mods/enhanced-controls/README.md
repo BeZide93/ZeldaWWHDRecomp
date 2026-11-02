@@ -149,3 +149,25 @@ adapter and package build are implemented against the official public SDK.
 The archive includes `src/mod.c`, `src/core.h` and `src/editor.h`; build tools and tests are in
 `mods/enhanced-controls` on this branch. Public game names/offsets derive from
 ZeldaWWHDDecomp/wwhd (CC0), as documented by the upstream generated SDK.
+
+### 0.4.0 — shared editor with Dark Link
+
+With **Dark Link 0.1.17+**, Edit opens one shared editor for Jump, Slash, Spin,
+Dodge and Dark Link. The fifth tab also recovers a hidden Dark Link button.
+Both packages must be updated. Enhanced Controls stores the combined layout;
+Dark Link renders its own icon, keeping textures and HUD handles with their
+owning mod. Without Dark Link, the editor continues to show four macro tabs.
+
+Existing v1 four-button layout files migrate to the validated five-slot v2
+format without changing the four placements. Save/Cancel and alternating-file
+recovery continue to apply to the entire draft. The shared saved layout belongs
+to Enhanced Controls; Dark Link has a separate standalone profile when this mod
+is absent/disabled. Editing suppresses action inputs but does not pause the game.
+
+`editor.h`, `editor_geometry.h`, `editor_view.h` and `editor_peer.h` are shared
+verbatim with the Dark Link package. The peer protocol uses the read-only native
+0267598C getter as a synchronous hook rendezvous (see `editor_peer.h` for the
+pinned public decomp evidence). Only versioned packets in the mod arena are
+handled. No game state, fixed scratch addresses, peer callbacks or host handles
+are shared, and no new app version is required. The combined translated-module
+regression is in Dark Link's `test_shared.py --enhanced-root /path/to/this/repo`.

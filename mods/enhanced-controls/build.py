@@ -55,6 +55,8 @@ def build(out, clang, lld):
              'src/mod.c': HERE/'mod.c', 'src/core.h': HERE/'core.h',
              'src/editor.h': HERE/'editor.h',
              'assets/NOTICE.md': HERE/'assets/NOTICE.md'}
+    for header in ("editor_geometry.h","editor_view.h","editor_peer.h"):
+        files[f"src/{header}"]=HERE/header
     for name in ('combat_jump_attack','combat_vertical_slash','combat_spin_attack','combat_dodge'):
         files[f'assets/{name}.png']=HERE/'assets'/f'{name}.png'
     with zipfile.ZipFile(archive, 'w', compression=zipfile.ZIP_DEFLATED) as z:
