@@ -12,7 +12,8 @@ static int dl_touch_x = 940, dl_touch_y = 560;
 static unsigned long long dl_step;
 static unsigned long long dl_revision[9];
 static wwhd_hud_element dl_element;
-static const char dl_title[] = "DARK LINK 0.1.6";
+static void dl_texture_restore_all(void);
+static const char dl_title[] = "DARK LINK 0.1.7";
 static const char dl_ready_text[] = "READY - L3 + R3 / DARK";
 static const char dl_charge_text[] = "Charge with sword hits";
 static const char dl_active_text[] = "ACTIVE - sword damage boosted";
@@ -40,7 +41,7 @@ static void dl_options(void) {
     }
     dl_touch_x = dl_limit(wwhd_config_int("touch_x", 940), 0, 1184);
     dl_touch_y = dl_limit(wwhd_config_int("touch_y", 560), 0, 676);
-    if (!dl_enabled) dl_reset(&dl_state);
+    if (!dl_enabled) { dl_texture_restore_all(); dl_reset(&dl_state); }
 }
 static int dl_alive(daPy_lk_c* link) {
     return link && link == dl_player() && WWHD_GAME_DATA(WWHD_ADDR_save_info_pointer, u32) &&
@@ -101,6 +102,7 @@ static void dl_hud(u32 list) {
     }
 }
 static void dl_clear(void) {
+    dl_texture_restore_all();
     dl_reset(&dl_state);
     dl_owner = 0; dl_owner_id = 0; dl_request = 0; dl_gameplay = 0;
     wwhd_touch_claim(0, 0, 0, 0, 0);
@@ -113,12 +115,14 @@ WWHD_HOOK(WWHD_ADDR_daPy_Execute, dl_execute, (daPy_lk_c* link)) {
     dl_options();
     if (link != dl_player()) return;
     if (link != dl_owner || dl_actor_id(link) != dl_owner_id) {
+        dl_texture_restore_all(); /* Discard stale owners without dereferencing their slots. */
         dl_reset(&dl_state); dl_request = 0;
         dl_owner = link; dl_owner_id = dl_actor_id(link);
         dl_step = wwhd_logic_step() - 1;
     }
     u8* play = wwhd_play_get();
     if (!dl_alive(link) || play[WWHD_PLAY_ENABLE_NEXT_STAGE_OFFSET]) {
+        dl_texture_restore_all();
         dl_reset(&dl_state); dl_request = 0; dl_gameplay = 0;
         wwhd_touch_claim(0, 0, 0, 0, 0);
         return;
@@ -130,6 +134,7 @@ WWHD_HOOK(WWHD_ADDR_daPy_Execute, dl_execute, (daPy_lk_c* link)) {
     int request = dl_request || (dl_auto && !dl_config.free_transform && !dl_state.active && dl_ready(&dl_state, &dl_config));
     dl_request = 0;
     dl_tick(&dl_state, &dl_config, (f32)wwhd_logic_dt(), request, dl_gameplay);
+    if (!dl_state.active) dl_texture_restore_all();
 }
 WWHD_HOOK(WWHD_ADDR_daPy_Delete, dl_delete, (daPy_lk_c* link)) {
     if (link == dl_owner) dl_clear();
@@ -167,3 +172,4 @@ WWHD_HOOK_RETURN(DL_CC_CHECK, dl_hit_after, (fopAc_ac_c* target, DLAttack* hit))
 }
 
 #include "visuals.h"
+#include "textures.h"

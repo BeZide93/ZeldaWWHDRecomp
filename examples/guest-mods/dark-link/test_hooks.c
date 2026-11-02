@@ -129,6 +129,7 @@ static void submit(uint32_t wrapper, int active) {
     hook(wrapper,3,MODEL,0); restored();
 }
 static void prepare(int active) { submit(0x025e2e5c,active); }
+#include "test_textures.h"
 int main(int argc, char** argv) {
     assert(argc==2);
     void* memory=mmap(PPC_MEM_BASE,0x100000000ull,PROT_READ|PROT_WRITE,
@@ -240,6 +241,7 @@ int main(int argc, char** argv) {
             for (int c=0;c<3;++c) assert((float)ldf32(color(m,k)+c*4)==0.0f);
         hook(0x025e2e5c,3,model,0); restored(); st32(field,0);
     }
+    test_textures();
     /* Cancellation must leave the next preparation untouched. */
     buttons(0); buttons(0x60000); tick(); assert(damage(3)==3); prepare(0);
     buttons(0); for (int i=0;i<20;++i) hit(1);

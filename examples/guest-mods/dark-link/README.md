@@ -1,11 +1,11 @@
-# Dark Link (prototype 0.1.6)
+# Dark Link (prototype 0.1.7)
 
 Standalone code mod for ZeldaWWHDRecomp: charge with sword hits, activate a damage
-boost and a black body/red-eye TEV palette. Version 0.1.6 extends the two-register
-palette to all seven TEV RGB registers and recognizes all six native eye materials.
-It retains the four submission hook pairs from 0.1.5, whose partial tint the user
-confirmed working. **The expanded palette's final appearance still needs an in-game
-check; host tests cannot establish full shadow coverage or visible red eyes.**
+boost and a black-body/red-eye appearance. Version 0.1.7 adds per-instance albedo
+texture views after native texture animation/refresh. Version 0.1.6's seven TEV
+registers still only recolored lit surfaces and did not produce red eyes in the
+user's test, so this version targets the sampled base texture as well.
+**The new path's in-game appearance still needs verification.**
 The package contains original code only: no textures, models or game binaries.
 
 ## Install
@@ -16,7 +16,7 @@ The package contains original code only: no textures, models or game binaries.
 3. Enable **Code mods** in setup if needed, complete the code-mod setup/build,
    and restart the game. Accept the normal code-mod trust prompt.
 
-With the gauge visible, the HUD title must read **DARK LINK 0.1.6**. This label
+With the gauge visible, the HUD title must read **DARK LINK 0.1.7**. This label
 comes from the running code module, not just the package manifest.
 
 The same package is translated for the installed USA or EU build and the host
@@ -24,7 +24,7 @@ platform, including Android. It does not require a new APK/runtime feature.
 
 ### Upgrading from 0.1.0/0.1.1
 
-Replace the installed package with 0.1.6 and fully restart the game, then load a
+Replace the installed package with 0.1.7 and fully restart the game, then load a
 normal in-game save. Do not resume a full emulator/recomp save state made with the
 old visual effect active: 0.1.1 left extra material override flags set. The new
 version cannot infer those flags' original values from an already altered state.
@@ -54,33 +54,47 @@ button, automatic activation, or adjust that host binding.
 
 ## Appearance and limits
 
-The palette writes C0/C1/C2 and K0/K1/K2/K3 RGB (indices 4 through 10):
-black `(0, 0, 0)` for body/hands/hair, red `(1, 0, 0)` for eyes. The prior
-C0/K0-only palette left other TEV color inputs unchanged. This extension targets
-those inputs without changing the four material/ambient lighting registers
-(indices 0 through 3), native alpha or fog. It does not reintroduce the eleven-slot
-lighting override from 0.1.1. Equipment and other actors retain their native colors.
+The new texture path operates on the current player's body, hands and hair only.
+At the native model texture refresh (0x027F50F8), it first removes any previous
+owned bindings, lets the game update textures/animation, then replaces each
+material's explicitly named `_a0` albedo binding with an immutable copied FTEX/GX2
+texture descriptor. It resolves the native material index instead of assuming
+that J3D and NNS material arrays have the same order or that albedo is slot zero.
+The runtime's native prop texture support uses this same refresh/binding boundary.
 
-Eye materials are resolved by their native names: `eyeL`, `eyeR`, `eyeLdamA`,
-`eyeRdamA`, `eyeLdamB`, `eyeRdamB`. The latter four support damage expressions;
-`mayu*` eyebrow materials stay black. Controller identity remains a fallback.
-Texture animation, eyelid visibility and alpha remain native. The current player's
-body/hands/hair model instance identity limits the override; frozen Link is skipped.
+The copied descriptor selects constant RGB `(0, 0, 0)` for body/hands/hair and
+`(1, 0, 0)` for eyes. Both GX2 component selectors and their packed texture register
+are changed. The original alpha selector, dimensions, image/mip pointers, format,
+UV animation and other register bits are preserved. The original descriptors and
+image bytes are never modified. This works at sampling time and does not require
+recompressing textures, creating/uploading images, or replacing game files.
 
-RGB values are saved once, reapplied in nested preparation, and restored bit for
-bit. The seven owned override-mask bits are restored to their original values.
-Changes by native code to unrelated mask bits survive. Missing parameter pointers
-are skipped without enabling an override for that slot.
+Eye materials are resolved by native names: `eyeL`, `eyeR`, `eyeLdamA`,
+`eyeRdamA`, `eyeLdamB`, `eyeRdamB`, with controller identity as a fallback.
+Eyebrows use black. The currently animated eye texture is used after each refresh,
+including its original transparency. Toon ramps and other sampler slots are left
+untouched; materials without an explicit `_a0` sampler are skipped rather than
+recoloring an unknown texture. Equipment and other actors keep their bindings.
 
-The scope still uses the mDoExt model entry/update wrappers, viewCalc and
-joint-entry hook pairs from 0.1.5. In 0.1.4, restoration at the inner native
-preparation return removed the tint before the wrapper's subsequent submission.
-These working outer boundaries have not changed. They are submission boundaries,
-not immediate GPU draws; asynchronous rendering and the game's actual shader output
-are not validated by the host tests. No UBO worker hook is installed.
+Bindings remain live after the outer submission wrapper returns, because queued
+packets may still read them. They are restored before the next native texture
+refresh and on cancellation, disable, death, transition and player deletion.
+Restoration checks player/model/material-array/resource identity and only replaces
+slots still containing the mod's exact view, preserving newer native/other-mod
+bindings. Stale identities are discarded without dereferencing old slot pointers.
+Frozen Link receives no new texture overrides.
 
-There is no diagnostic mode/logging, custom aura, eye bloom, White/Gold variant or
-transformation animation. No binary upload is required to use this package.
+The descriptor cache holds at most 512 immutable views (roughly 162 KiB). It has
+no dynamic allocations, pixel copies or eager frees; published entries are never
+reused or rewritten while queued draws could reference them. Identical descriptors
+reuse a view. On capacity exhaustion or unsupported/invalid structures, the new
+binding is skipped and the existing TEV tint remains the fallback.
+
+The existing seven-register TEV palette and its four user-confirmed submission
+hook pairs are unchanged. RGB and the original override bits are restored at
+scope exit; lighting registers, alpha and fog are not modified. No UBO worker
+hook is installed. There is no diagnostic mode/logging, custom aura, eye bloom,
+White/Gold variant or transformation animation.
 
 Damage scaling runs after native `at_power_check`, only for the current player's
 three sword colliders and the sword attack flag. It changes the freshly calculated
@@ -92,18 +106,19 @@ targets that bypass these native paths are outside this first version's coverage
 armor-specific handlers can further override the native result.
 
 Automated checks compile the PowerPC ELF, translate and compile it for USA/EU,
-and execute gameplay and translated-hook tests. Checks cover all seven TEV RGB
-registers, all six named eye variants and a black eyebrow material, hands/hair,
-unchanged lighting registers and alpha, missing/partial/full original override
-masks, unrelated native mask updates, missing parameter pointers, nested restoration,
-the preparation-to-submission interval, both wrappers and standalone view/joint
-scopes. Gameplay checks retain cancellation, Free transformation and lifecycle resets.
-These checks validate memory behavior, not the game's rendered output.
+and execute gameplay and translated-hook tests. Texture tests use synthetic
+FMAT/FTEX data with reordered material indices and albedo in slot one. They cover
+black/red hardware component selectors, original alpha and all other descriptor
+words, immutable cached views, animated eye-frame changes, bindings retained after
+outer submission, native/other-mod changes, absent samplers and invalid resources,
+hands/hair, freezing, cancellation, disable, stage changes, death, deletion and
+stale material-array identity. Existing TEV/timing/gameplay checks also run.
+These checks validate memory and descriptor behavior, not the game's shader output.
 
 Test from a fresh session with Free transformation: activate in lit and shaded
 areas, blink/take damage to exercise eye variants, toggle off repeatedly and disable
 Dark Link. Verify black clothes/skin/hair/hands, red eyes and restoration on exit.
-Check casual clothes as well. Confirm **DARK LINK 0.1.6** in the running HUD.
+Check casual clothes as well. Confirm **DARK LINK 0.1.7** in the running HUD.
 
 ## Build
 
@@ -127,3 +142,9 @@ Native layout references: the CC0 public `ZeldaWWHDDecomp/wwhd` source,
 `d/actor/d_a_player_main_01.cpp`, `include/d/actor/d_a_player_main_01.h`,
 `d/d_kankyo_6.cpp`, `d/actor/d_a_swhit0.cpp`, `d/actor/d_a_bgn_draw.cpp`,
 `d/actor/d_a_player_main_04b.cpp` and `m_Do/m_Do_ext_heap_model.cpp`.
+
+Texture-path references: `runtime/src/mods/story_prop_textures.cpp`,
+`runtime/src/mods/story_props.cpp`, `runtime/src/mods/story_actor_textures.cpp`,
+`tools/story_mods/export_glb.py`, `runtime/third_party/cemu/gx2_texture_regs.cpp`,
+`runtime/third_party/cemu/Cafe/HW/Latte/ISA/LatteReg.h`, and the public decomp's
+`d/actor/d_a_obj_ftree.cpp` and `d/actor/d_a_tbox.cpp`.
