@@ -7,7 +7,7 @@
 #define DL_COLOR_COUNT 7u /* C0..C2 (4..6), K0..K3 (7..10) */
 #define DL_TINT_MASK 0x7f0u
 #define DL_EYE_COUNT 6u
-#define DL_SAVED_MATERIALS (DL_MAX_MATERIALS * 3)
+#define DL_SAVED_MATERIALS (DL_MAX_MATERIALS * DL_MODEL_PARTS)
 typedef struct {
     u32* flags;
     u32 mask;
@@ -78,7 +78,7 @@ static void dl_visual_begin(void* model) {
     daPy_lk_c* link = dl_player();
     if (!link || link != dl_owner || (dl_word(link, 0x3bc) & 0x800)) return;
     u32 address = (u32)model;
-    if (address != link->mpCLModel && address != link->mpHandsModel && address != link->mpKatsuraModel) return;
+    if (dl_model_part(link, address) < 0) return;
     if (dl_diagnostics && address == link->mpCLModel) dl_probe_increment(&dl_probe.draws);
     u8* data = (u8*)dl_word(model, 0xac);
     if (!data) return;
@@ -115,7 +115,7 @@ WWHD_HOOK(DL_MODEL_ENTRY, dl_entry_before, (void* model)) { dl_visual_begin(mode
 WWHD_HOOK_RETURN(DL_MODEL_ENTRY, dl_entry_after, (void* model)) { dl_visual_end(); if (dl_diagnostics) dl_diag_submission(model); }
 WWHD_HOOK(DL_MODEL_UPDATE, dl_update_before, (void* model, void* data)) { (void)data; dl_visual_begin(model); }
 WWHD_HOOK_RETURN(DL_MODEL_UPDATE, dl_update_after, (void* model, void* data)) { (void)data; dl_visual_end(); if (dl_diagnostics) dl_diag_submission(model); }
-WWHD_HOOK(DL_MODEL_VIEW, dl_view_before, (void* model)) { dl_visual_begin(model); }
+WWHD_HOOK(DL_MODEL_VIEW, dl_view_before, (void* model)) { dl_texture_resubmit(model); dl_visual_begin(model); }
 WWHD_HOOK_RETURN(DL_MODEL_VIEW, dl_view_after, (void* model)) { (void)model; dl_visual_end(); }
-WWHD_HOOK(DL_JOINT_ENTRY, dl_joint_before, (void* model, void* joint)) { (void)joint; dl_visual_begin(model); }
+WWHD_HOOK(DL_JOINT_ENTRY, dl_joint_before, (void* model, void* joint)) { (void)joint; dl_texture_resubmit(model); dl_visual_begin(model); }
 WWHD_HOOK_RETURN(DL_JOINT_ENTRY, dl_joint_after, (void* model, void* joint)) { (void)model; (void)joint; dl_visual_end(); }

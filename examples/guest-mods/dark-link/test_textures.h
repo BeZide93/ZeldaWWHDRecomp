@@ -67,7 +67,7 @@ static void test_textures(void) {
         st32(texture_slot(m)-4,TEX_ORIGINAL); st32(texture_slot(m),TEX_ORIGINAL);
     }
     texture_refresh(); texture_tinted();
-    expect_hud("DL 0.1.9 ON");
+    expect_hud("DL 0.1.10 ON");
     expect_hud("Body J/N=8/8  Albedo=8  Views=8  Eyes found/bound=6/6");
     expect_hud("Samplers body: _a1,_a0  eyes: _a1,_a0");
     /* A handle resembling a valid _a0 relative pointer must never select the
@@ -108,6 +108,37 @@ static void test_textures(void) {
     st32(texture_slot(1),TEX_ORIGINAL);
     hook(0x027f50f8,3,MODEL,0); texture_tinted();
     assert(ld32(texture_slot(0))==body_view && ld32(texture_slot(1))==eye_view); /* cache reuse */
+    /* Reproduce the observed late face overwrite: native animation runs after
+     * refresh but before joint/view submission. Material 0 acts as the mouth. */
+    hook(0x025e2e5c,2,MODEL,0);
+    st32(texture_slot(0),TEX_NEXT); st32(texture_slot(1),TEX_NEXT);
+    hook(0x027f583c,2,MODEL,DATA);
+    texture_view_check(ld32(texture_slot(0)),TEX_NEXT,0);
+    texture_view_check(ld32(texture_slot(1)),TEX_NEXT,1);
+    hook(0x027f583c,3,MODEL,DATA);
+    st32(texture_slot(2),TEX_NEXT);
+    hook(0x027f55fc,2,MODEL,0);
+    texture_view_check(ld32(texture_slot(2)),TEX_NEXT,1);
+    hook(0x027f55fc,3,MODEL,0);
+    hook(0x025e2e5c,3,MODEL,0);
+    expect_hud("Kept=8  Lost=0  Rebound=3");
+    hook(0x027f55fc,2,MODEL,0); hook(0x027f55fc,3,MODEL,0);
+    expect_hud("Rebound=3"); /* stable owned views are never reinterpreted */
+    assert(!memcmp(old_view,ppc_ptr(eye_view),sizeof old_view));
+    /* Cancellation restores the new eye/mouth frames, not the pre-animation frame. */
+    free_mode=1; ++revision; tick(); buttons(0); buttons(0x60000); tick();
+    for (int m=0;m<3;++m) assert(ld32(texture_slot(m))==TEX_NEXT);
+    for (int m=3;m<MATERIAL_COUNT;++m) assert(ld32(texture_slot(m))==TEX_ORIGINAL);
+    for (int m=0;m<3;++m) st32(texture_slot(m),TEX_ORIGINAL);
+    buttons(0); buttons(0x60000); tick(); texture_refresh(); texture_tinted();
+    /* Never dereference/recolor an unknown replacement or stale material array. */
+    st32(texture_slot(0),0xdeadbeef); st32(MODEL+0x34,TEX_MATS+0x1000);
+    hook(0x027f55fc,2,MODEL,0); hook(0x027f55fc,3,MODEL,0);
+    assert(ld32(texture_slot(0))==0xdeadbeef);
+    st32(MODEL+0x34,TEX_MATS);
+    hook(0x027f55fc,2,MODEL,0); hook(0x027f55fc,3,MODEL,0);
+    assert(ld32(texture_slot(0))==0xdeadbeef);
+    st32(texture_slot(0),body_view);
     /* Cancel via actual input/config lifecycle; no further draw is needed. */
     free_mode=1; ++revision; tick();
     buttons(0); buttons(0x60000); tick(); assert(damage(3)==3); texture_originals();
@@ -136,13 +167,24 @@ static void test_textures(void) {
     st8(TEX_RES+0xc5,'a'); st32(texture_slot(1),TEX_ORIGINAL);
     st32(TEX_MATS+(MATERIAL_COUNT-1-2)*0x3c,TEX_RES+2*0x200);
     st16(TEX_RES+3*0x200+0xc,MATERIAL_COUNT-1-3);
-    /* Hands and hair are black even if their synthetic materials are named eyes. */
-    for (int part=0;part<2;++part) {
-        uint32_t model=MODEL+0x400+part*0x400, field=LINK+(part ? 0x44c : 0xcf4);
+    /* Hands/hair and selected sword grip/shield/scabbard/held sword stay black,
+     * even if their synthetic material names match eyes. A held non-sword is excluded. */
+    const uint32_t fields[]={0xcf4,0x44c,0xcf8,0xe80,0xe7c,0x4440};
+    for (int part=0;part<6;++part) {
+        uint32_t model=MODEL+0x400+part*0x400, field=LINK+fields[part];
         st32(field,model); st32(model+0xac,DATA); st16(model+0x2a,MATERIAL_COUNT); st32(model+0x34,TEX_MATS);
+        if (part==5) {
+            st16(LINK+0x69b0,0); hook(0x027f50f8,3,model,0); texture_originals();
+            st16(LINK+0x69b0,0x103);
+        }
         hook(0x027f50f8,3,model,0);
         for (int m=0;m<MATERIAL_COUNT;++m) texture_view_check(ld32(texture_slot(m)),TEX_ORIGINAL,0);
-        hook(0x027f50f8,2,model,0); texture_originals(); st32(field,0);
+        st32(texture_slot(0),TEX_NEXT);
+        hook(0x027f55fc,2,model,0); hook(0x027f55fc,3,model,0);
+        texture_view_check(ld32(texture_slot(0)),TEX_NEXT,0);
+        hook(0x027f50f8,2,model,0); assert(ld32(texture_slot(0))==TEX_NEXT);
+        st32(texture_slot(0),TEX_ORIGINAL); texture_originals(); st32(field,0);
+        st16(LINK+0x69b0,0);
     }
     st32(LINK+0x3bc,0x800); texture_refresh(); texture_originals(); st32(LINK+0x3bc,0);
     texture_refresh(); texture_tinted();
@@ -162,9 +204,14 @@ static void test_textures(void) {
     enabled=1; ++revision; tick(); buttons(0); buttons(0x60000); tick(); assert(damage(3)==6);
     /* Diagnostic toggle only changes observations, never appearance bindings. */
     diagnostics=0; tick(); texture_refresh(); texture_tinted();
+    st32(texture_slot(1),TEX_NEXT);
+    hook(0x027f55fc,2,MODEL,0); hook(0x027f55fc,3,MODEL,0);
+    texture_view_check(ld32(texture_slot(1)),TEX_NEXT,1);
+    hook(0x027f50f8,2,MODEL,0); assert(ld32(texture_slot(1))==TEX_NEXT);
+    st32(texture_slot(1),TEX_ORIGINAL);
     read_hud(); assert(!strstr(hud_text,"Skip=") && !strstr(hud_text,"Samplers body:"));
-    diagnostics=1; tick(); expect_hud("Refresh B/H/Hair=0/0/0"); expect_hud("Skip=NO_REFRESH");
-    texture_refresh(); texture_tinted(); expect_hud("Refresh B/H/Hair=1/0/0");
+    diagnostics=1; tick(); expect_hud("Refresh B/H/Hair/Gear=0/0/0/0"); expect_hud("Skip=NO_REFRESH");
+    texture_refresh(); texture_tinted(); expect_hud("Refresh B/H/Hair/Gear=1/0/0/0");
     hook(0x027f50f8,2,MODEL,0);
     st32(MODEL+0xac,0); hook(0x027f50f8,3,MODEL,0); expect_hud("Skip=MODEL_DATA");
     st32(MODEL+0xac,DATA); st16(MODEL+0x2a,0);

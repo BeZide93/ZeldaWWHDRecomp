@@ -7,14 +7,14 @@
 #define DL_TEXTURE_REFRESH 0x027F50F8
 #define DL_TEXTURE_BYTES 0xa0u
 #define DL_TEXTURE_CACHE 512u
-#define DL_TEXTURE_BINDINGS (DL_MAX_MATERIALS * 3)
+#define DL_TEXTURE_BINDINGS (DL_MAX_MATERIALS * DL_MODEL_PARTS)
 typedef struct {
     u32 original[DL_TEXTURE_BYTES / 4];
     u32 view[DL_TEXTURE_BYTES / 4];
     u32 eye;
 } DLTextureView;
 typedef struct {
-    u32 model, materials, index, resource, refs, slot, original, view;
+    u32 model, materials, index, resource, refs, slot, original, view, eye;
 } DLTextureBinding;
 static DLTextureView dl_texture_cache[DL_TEXTURE_CACHE];
 static u32 dl_texture_count, dl_binding_count;
@@ -33,7 +33,7 @@ static u32 dl_relative(u32 p) {
 static int dl_texture_model(u32 model) {
     daPy_lk_c* link = dl_player();
     return link && link == dl_owner && dl_actor_id(link) == dl_owner_id &&
-        (model == link->mpCLModel || model == link->mpHandsModel || model == link->mpKatsuraModel);
+        dl_model_part(link, model) >= 0;
 }
 static int dl_binding_live(const DLTextureBinding* b) {
     if (!dl_texture_model(b->model) || !dl_game_span(b->model, 0xb0) ||
@@ -128,10 +128,11 @@ static void dl_texture_apply(void* model) {
     if (!dl_enabled || !dl_state.active || !dl_texture_model((u32)model)) return;
     int body = (u32)model == dl_owner->mpCLModel;
     int probe = dl_diagnostics && body;
-    if (dl_diagnostics) dl_probe_increment(&dl_probe.refresh[body ? 0 : (u32)model == dl_owner->mpHandsModel ? 1 : 2]);
+    int part = dl_model_part(dl_owner, (u32)model);
+    if (dl_diagnostics) dl_probe_increment(&dl_probe.refresh[part < 3 ? part : 3]);
     if (probe) {
         dl_probe.materials = dl_probe.native_materials = dl_probe.albedo = dl_probe.views = dl_probe.eyes = dl_probe.eye_materials = 0;
-        dl_probe.reason = DL_PROBE_OK; dl_probe.skipped = dl_probe.kept = dl_probe.lost = 0;
+        dl_probe.reason = DL_PROBE_OK; dl_probe.skipped = dl_probe.kept = dl_probe.lost = dl_probe.rebound = 0;
         dl_probe.body_samplers[0] = dl_probe.eye_samplers[0] = 0;
     }
     if (dl_word(dl_owner, 0x3bc) & 0x800) { if (probe) dl_probe_skip(DL_PROBE_FROZEN); return; }
@@ -177,9 +178,31 @@ static void dl_texture_apply(void* model) {
         if (duplicate) { if (probe) dl_probe_skip(DL_PROBE_DUPLICATE); continue; }
         u32 original = *(u32*)slot, view = dl_texture_view(original, eye);
         if (!view) { if (probe) dl_probe_skip(dl_texture_count == DL_TEXTURE_CACHE ? DL_PROBE_CAPACITY : DL_PROBE_TEXTURE); continue; }
-        dl_bindings[dl_binding_count++] = (DLTextureBinding){(u32)model, native_materials, index, resource, refs, slot, original, view};
+        dl_bindings[dl_binding_count++] = (DLTextureBinding){(u32)model, native_materials, index, resource, refs, slot, original, view, (u32)eye};
         *(u32*)slot = view;
         if (probe) { ++dl_probe.views; dl_probe.eyes += (u32)eye; }
+    }
+}
+/* Native preparation may overwrite animated face bindings AFTER 027F50F8.
+ * The mDoExt wrappers finish preparation before viewCalc; Link also submits
+ * eye joints separately. Rebase only changed live bindings before these two
+ * existing submission hooks. Never rewrite a published descriptor or snapshot
+ * our own view as the original; cancellation must restore the latest animation.
+ * Unrecognized bindings and stale identities are left alone. */
+static void dl_texture_resubmit(void* model) {
+    if (!dl_enabled || !dl_state.active || !dl_texture_model((u32)model) ||
+        (dl_word(dl_owner, 0x3bc) & 0x800)) return;
+    for (u32 i = 0; i < dl_binding_count; ++i) {
+        DLTextureBinding* b = &dl_bindings[i];
+        if (b->model != (u32)model || !dl_binding_live(b)) continue;
+        u32 current = *(u32*)b->slot;
+        if (current == b->view) continue;
+        u32 view = dl_texture_view(current, (int)b->eye);
+        if (!view) continue;
+        b->original = current;
+        b->view = view;
+        *(u32*)b->slot = view;
+        if (dl_diagnostics && (u32)model == dl_owner->mpCLModel) dl_probe_increment(&dl_probe.rebound);
     }
 }
 /* The runtime's native prop texture path uses this exact synchronous refresh
@@ -211,15 +234,15 @@ static void dl_diag_hud(u32 list) {
 #define DL_S(s) n = dl_probe_append(line, n, s)
 #define DL_N(v) n = dl_probe_number(line, n, v)
     char* line = dl_probe_lines[0];
-    DL_S("DL 0.1.9 "); DL_S(dl_state.active ? "ON" : "OFF (last sample)");
-    DL_S("  Draw="); DL_N(dl_probe.draws); DL_S("  Refresh B/H/Hair=");
-    DL_N(dl_probe.refresh[0]); DL_S("/"); DL_N(dl_probe.refresh[1]); DL_S("/"); DL_N(dl_probe.refresh[2]); lengths[0] = n;
+    DL_S("DL 0.1.10 "); DL_S(dl_state.active ? "ON" : "OFF (last sample)");
+    DL_S("  Draw="); DL_N(dl_probe.draws); DL_S("  Refresh B/H/Hair/Gear=");
+    DL_N(dl_probe.refresh[0]); DL_S("/"); DL_N(dl_probe.refresh[1]); DL_S("/"); DL_N(dl_probe.refresh[2]); DL_S("/"); DL_N(dl_probe.refresh[3]); lengths[0] = n;
     line = dl_probe_lines[1]; n = 0;
     DL_S("Body J/N="); DL_N(dl_probe.materials); DL_S("/"); DL_N(dl_probe.native_materials);
     DL_S("  Albedo="); DL_N(dl_probe.albedo); DL_S("  Views="); DL_N(dl_probe.views); DL_S("  Eyes found/bound="); DL_N(dl_probe.eye_materials); DL_S("/"); DL_N(dl_probe.eyes); lengths[1] = n;
     line = dl_probe_lines[2]; n = 0;
     DL_S("Skip="); DL_S(reasons[dl_probe.reason]); DL_S("  Count="); DL_N(dl_probe.skipped);
-    DL_S("  Kept="); DL_N(dl_probe.kept); DL_S("  Lost="); DL_N(dl_probe.lost); lengths[2] = n;
+    DL_S("  Kept="); DL_N(dl_probe.kept); DL_S("  Lost="); DL_N(dl_probe.lost); DL_S("  Rebound="); DL_N(dl_probe.rebound); lengths[2] = n;
     line = dl_probe_lines[3]; n = 0;
     DL_S("Samplers body: "); DL_S(dl_probe.body_samplers[0] ? dl_probe.body_samplers : "?");
     DL_S("  eyes: "); DL_S(dl_probe.eye_samplers[0] ? dl_probe.eye_samplers : "?"); lengths[3] = n;

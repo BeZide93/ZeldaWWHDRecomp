@@ -248,16 +248,18 @@ int main(int argc, char** argv) {
     for (int i=0;i<6;++i) eye_indices[i]=i+1;
     /* Hands and hair use the black palette even when sharing this synthetic
      * material table; eye names apply only to the current player's body. */
-    for (int part=0;part<2;++part) {
+    const uint32_t gear_fields[]={0xcf4,0x44c,0xcf8,0xe80,0xe7c,0x4440};
+    for (int part=0;part<6;++part) {
         uint32_t model=MODEL+0x400+part*0x400;
-        uint32_t field=LINK+(part ? 0x44c : 0xcf4);
+        uint32_t field=LINK+gear_fields[part];
+        if (part==5) st16(LINK+0x69b0,0x103);
         st32(field,model); st32(model+0xac,DATA);
         int previous_lookups=name_lookups;
         hook(0x025e2e5c,2,model,0);
         assert(name_lookups==previous_lookups);
         for (int m=0;m<MATERIAL_COUNT;++m) for (int k=4;k<=10;++k)
             for (int c=0;c<3;++c) assert((float)ldf32(color(m,k)+c*4)==0.0f);
-        hook(0x025e2e5c,3,model,0); restored(); st32(field,0);
+        hook(0x025e2e5c,3,model,0); restored(); st32(field,0); st16(LINK+0x69b0,0);
     }
     test_textures();
     /* Cancellation must leave the next preparation untouched. */

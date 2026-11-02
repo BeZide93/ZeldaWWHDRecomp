@@ -1,19 +1,27 @@
-# Dark Link (prototype 0.1.9)
+# Dark Link (prototype 0.1.10)
 
-Standalone code mod for ZeldaWWHDRecomp: charge with sword hits, activate a
-sword-damage boost and a black-body/red-eye texture override.
+Standalone code mod for ZeldaWWHDRecomp: charge with sword hits and activate a
+sword-damage boost with black body/equipment and red eye texture views.
 
-**0.1.9 fixes the sampler-name offset that blocked every texture override in the
-0.1.8 diagnostic video.** The video showed 24/24 materials, six recognized eyes,
-zero albedo matches/views, and `NO_ALBEDO` for all 24 materials. The code read the
-sampler handle at +0x0c as a name; Wii U ResSampler stores its name at +0x10,
-after three GX2 register words and the handle. Both lookup and diagnostics now
-read +0x10. The earlier synthetic tests repeated the incorrect layout; corrected
-fixtures fail against the old module and pass with this change.
+**0.1.10 repairs late texture replacements before submission and includes sword
+and shield models.** The user's 0.1.9 screenshot confirms that body recoloring
+works, all 24 materials receive views and six eye materials are recognized. It
+also reports `Kept=15 Lost=9`, with unchanged mouth and eyes. The prior override
+ran after base texture refresh, but did not follow later binding replacements.
 
-This resolves a demonstrated lookup defect. Full black shading and red eyes
-still need confirmation in-game; successful synthetic tests do not prove shader
-output. The 0.1.8 on-screen diagnostics remain available for that confirmation.
+The mod now checks its live bindings immediately before the existing viewCalc
+and joint-entry hooks. If a supported native FTEX has replaced an owned view, it
+creates/reuses a colored view of that current texture and saves it as the new
+restoration baseline. This covers late animated mouth/eye replacements without
+freezing animation, rewriting published descriptors or restoring an older frame.
+Sword grip, selected shield, separate scabbard and the drawn sword blade are now
+included by exact player-model identity. The held-item slot is included only
+while the equipped item is the native sword type (0x103).
+
+Build and translated-hook tests pass. **The new face/equipment result still needs
+in-game verification.** Diagnostics remain available to distinguish repaired
+bindings (`Rebound`) from remaining losses. The sampler-name offset correction
+from 0.1.9 (+0x10, not the handle at +0x0c) is retained.
 The package contains original code only: no textures, models or game binaries.
 
 ## Install
@@ -24,7 +32,7 @@ The package contains original code only: no textures, models or game binaries.
 3. Enable **Code mods** in setup if needed, complete the code-mod setup/build,
    and restart the game. Accept the normal code-mod trust prompt.
 
-With the gauge visible, the HUD title must read **DARK LINK 0.1.9**. This label
+With the gauge visible, the HUD title must read **DARK LINK 0.1.10**. This label
 comes from the running code module, not just the package manifest.
 
 The same package is translated for the installed USA or EU build and the host
@@ -32,7 +40,7 @@ platform, including Android. It does not require a new APK/runtime feature.
 
 ### Upgrading from 0.1.0/0.1.1
 
-Replace the installed package with 0.1.9 and fully restart the game, then load a
+Replace the installed package with 0.1.10 and fully restart the game, then load a
 normal in-game save. Do not resume a full emulator/recomp save state made with the
 old visual effect active: 0.1.1 left extra material override flags set. The new
 version cannot infer those flags' original values from an already altered state.
@@ -62,15 +70,15 @@ button, automatic activation, or adjust that host binding.
 
 ## Verify the appearance and read diagnostics
 
-1. Install 0.1.9, finish the code-mod build and fully restart the game.
+1. Install 0.1.10, finish the code-mod build and fully restart the game.
 2. Enable **Free transformation** and **Appearance diagnostics** in mod settings.
 3. Activate Dark Link, wait a moment in normal gameplay, and capture the four
    diagnostic lines near the top of the screen. A screenshot or typed values are
    enough; no Share log function, log upload or game binary is needed.
 
-The first line identifies the running module as `DL 0.1.9 ON`. `Draw` counts
-active body draw-hook calls; `Refresh B/H/Hair` counts active native texture-refresh
-returns for body, hands and hair. Counters saturate at 999999 and reset on a new
+The first line identifies the running module as `DL 0.1.10 ON`. `Draw` counts
+active body draw-hook calls; `Refresh B/H/Hair/Gear` counts active native texture-refresh
+returns for body, hands, hair and the included equipment models. Counters saturate at 999999 and reset on a new
 transformation or when diagnostics are enabled. They are not frame counts.
 
 The remaining lines describe the **last body refresh attempt**:
@@ -85,7 +93,8 @@ The remaining lines describe the **last body refresh attempt**:
   `TEXTURE` identifies rejected descriptors. `FROZEN`, `CAPACITY`, and `DUPLICATE`
   identify the corresponding existing skip conditions.
 - `Kept`/`Lost`: owned body bindings still present versus overwritten or invalid
-  at the last outer submission return. This does not prove the GPU sampled them.
+  at the last outer submission return. `Rebound` counts late replacements repaired
+  since the last body refresh. These counts do not prove the GPU sampled them.
 - `Samplers body`/`eyes`: up to three names from the first readable material in
   each category. `?` means unavailable/nonprintable, `~` truncation, `+` more names.
 
@@ -97,15 +106,16 @@ The panel is independent of **Show gauge** and hidden with other mod HUD in menu
 
 ## Appearance and limits
 
-The unverified texture path operates on the current player's body, hands and hair only.
+The texture path operates on the current player's body, hands, hair and the
+selected sword/shield/scabbard models described above.
 At the native model texture refresh (0x027F50F8), it first removes any previous
-owned bindings, lets the game update textures/animation, then replaces each
+owned bindings, lets the game refresh base bindings, then replaces each
 material's explicitly named `_a0` albedo binding with an immutable copied FTEX/GX2
 texture descriptor. It resolves the native material index instead of assuming
 that J3D and NNS material arrays have the same order or that albedo is slot zero.
 The runtime's native prop texture support uses this same refresh/binding boundary.
 
-The copied descriptor selects constant RGB `(0, 0, 0)` for body/hands/hair and
+The copied descriptor selects constant RGB `(0, 0, 0)` for body/mouth/hands/hair/equipment and
 `(1, 0, 0)` for eyes. Both GX2 component selectors and their packed texture register
 are changed. The original alpha selector, dimensions, image/mip pointers, format,
 UV animation and other register bits are preserved. The original descriptors and
@@ -117,7 +127,13 @@ Eye materials are resolved by native names: `eyeL`, `eyeR`, `eyeLdamA`,
 Eyebrows use black. The currently animated eye texture is used after each refresh,
 including its original transparency. Toon ramps and other sampler slots are left
 untouched; materials without an explicit `_a0` sampler are skipped rather than
-recoloring an unknown texture. Equipment and other actors keep their bindings.
+recoloring an unknown texture. Other held items and actors keep their bindings.
+Native sword glow, trails and special attack-effect models are not modified.
+
+Before viewCalc and separate joint submission, changed live slots are rebased
+onto their current FTEX and recolored. Already-owned views are left untouched;
+invalid descriptors and stale identities are skipped. This repair also runs with
+the diagnostic panel disabled. There are no new hook addresses or UBO-worker hooks.
 
 Bindings remain live after the outer submission wrapper returns, because queued
 packets may still read them. They are restored before the next native texture
@@ -133,8 +149,8 @@ reused or rewritten while queued draws could reference them. Identical descripto
 reuse a view. On capacity exhaustion or unsupported/invalid structures, the new
 binding is skipped and the existing TEV tint remains the fallback.
 
-The existing seven-register TEV palette and its four user-confirmed submission
-hook pairs are unchanged. RGB and the original override bits are restored at
+The existing seven-register TEV palette and restoration timing are retained.
+Its four submission hook pairs now also cover the selected equipment identities. RGB and the original override bits are restored at
 scope exit; lighting registers, alpha and fog are not modified. No UBO worker
 hook is installed. There is no file logging, custom aura, eye bloom, White/Gold
 variant or transformation animation.
@@ -155,15 +171,19 @@ black/red hardware component selectors, original alpha and all other descriptor
 words, immutable cached views, animated eye-frame changes, bindings retained after
 outer submission, native/other-mod changes, absent samplers and invalid resources,
 hands/hair, freezing, cancellation, disable, stage changes, death, deletion and
-stale material-array identity. Existing TEV/timing/gameplay checks also run.
+stale material-array identity. New cases replace mouth and eye frames after base
+refresh, verify repair before both joint and view submission, preserve immutable
+views and restore the latest native frame on cancellation. Equipment tests cover
+all selected model slots, black coloring despite eye-like names, a held non-sword
+exclusion, and restoration. Existing TEV/timing/gameplay checks also run.
 HUD tests also verify no-refresh reporting, observed sampler/eye/material counts,
 zero/misleading handles, missing actual sampler names, missing albedo, invalid
 model/material guards, overwritten bindings, reset and the
 live diagnostic toggle. These checks validate memory and descriptor behavior,
 not the game's shader output or actual in-game resource layout.
 
-Test lit and shaded surfaces, normal/blinking/damage eyes, then toggle off and
-check restoration. If any part remains wrong, report the four diagnostic lines.
+Test lit and shaded surfaces, mouth movement, normal/blinking/damage eyes,
+sheathed/drawn sword and shield, then toggle off and check restoration. If any part remains wrong, report the four diagnostic lines.
 Albedo/views should now be nonzero for supported materials. Full visual acceptance
 remains outstanding; synthetic fixtures cannot establish it.
 

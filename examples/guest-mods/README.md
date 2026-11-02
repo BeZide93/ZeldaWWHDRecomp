@@ -14,7 +14,7 @@ Link's hearts tick down a quarter heart every `every` logic steps to half, then 
 
 | Mod | What it shows |
 | --- | --- |
-| [`dark-link`](dark-link/README.md) | Standalone Dark Link prototype: sword-hit gauge, timed transformation, black-body/red-eye texture views with corrected sampler lookup and on-screen diagnostics (in-game appearance pending), damage boost, HUD and touch activation. Its own build script/workflow produces `dark-link.wwhdmod`. |
+| [`dark-link`](dark-link/README.md) | Standalone Dark Link prototype: sword-hit gauge, timed transformation, black body/sword/shield and red eye views with late animation-binding repair and on-screen diagnostics (face/equipment verification pending), damage boost, HUD and touch activation. Its own build script/workflow produces `dark-link.wwhdmod`. |
 | `hud-demo` | rectangle, original PNG and heart-count text on TV and GamePad, with anchors and state-load handle renewal. |
 | `button-icons` | combined code/art package and face-layout setting reads; currently an overdraw candidate awaiting game-frame calibration. |
 | `hud-cost` | performance fixture: exactly 200 rectangles versus no HUD callback, selected by a restart-only option. |
