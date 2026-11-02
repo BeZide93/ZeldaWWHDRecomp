@@ -10,7 +10,7 @@
 enum { PLAY=0x11000000, LINK=0x11010000, SAVE=0x11020000, ENEMY=0x11030000,
        HIT=0x11040000, INPUT=0x11050000, MODEL=0x11060000, DATA=0x11070000,
        MATERIALS=0x11080000, EYE_ANIM=0x11090000, RESOURCE=0x110a0000,
-       NAMES=0x110b0000 };
+       NAMES=0x110b0000, PE=0x110c0000, FOG=0x110d0000, VTABLE=0x110e0000 };
 static const WWHDGuestModuleV1* module;
 static uint32_t filter, hud, touch, step=1, revision=1;
 static int free_mode, enabled=1, paused, menu, touch_visible=1, claim_active, elements;
@@ -67,7 +67,10 @@ static void dispatch(Cpu* c) {
         case 0x025200d4: c->r[3]=PLAY; return;
         case 0x025986bc: c->r[3]=menu; return;
         case 0x025af2a4: c->r[3]=paused; return;
-        case 0x027f9f0c: c->r[3] += 4 + c->r[4]*16; return;
+        /* Synthetic virtual getFogInfo; the real function is read from PE's vtable. */
+        case 0x02001000:
+            assert(c->r[3]>=PE && c->r[3]<PE+3*0x40);
+            c->r[3]=ld32(c->r[3]+4); return;
         case 0x027df9b0:
             assert(c->r[3]==RESOURCE+0x100); ++name_lookups;
             assert(c->r[4]==NAMES || c->r[4]==NAMES+32);
@@ -87,7 +90,31 @@ static void hit(int lose_hp) {
     hook(0x025192a8,3,ENEMY,HIT);
 }
 static uint32_t color(int material, int index) { return MATERIALS+material*0x39c+0xa4+index*16; }
-static float red(int material) { return (float)ldf32(color(material,4)); }
+static uint32_t fog(int material) { return FOG+material*0x40; }
+static uint8_t original_materials[3*0x39c], original_fog[3*0x40];
+static void restored(void) {
+    assert(!memcmp(ppc_ptr(MATERIALS),original_materials,sizeof original_materials));
+    assert(!memcmp(ppc_ptr(FOG),original_fog,sizeof original_fog));
+}
+static void prepare(int active) {
+    hook(0x027f4f1c,2,MODEL,0);
+    if (active) {
+        for (int m=0;m<3;++m) {
+            assert(ld8(fog(m))==2);
+            assert((float)ldf32(fog(m)+4)==-10000.0f);
+            assert((float)ldf32(fog(m)+8)==-9999.0f);
+            assert(ld8(fog(m)+0x14)==(m ? 255 : 2));
+            assert(ld8(fog(m)+0x15)==(m ? 0 : 2));
+            assert(ld8(fog(m)+0x16)==(m ? 0 : 3));
+            assert(ld8(fog(m)+0x17)==255);
+            assert((float)ldf32(fog(m)+12)==1.0f && (float)ldf32(fog(m)+16)==100000.0f);
+        }
+        /* No lighting registers, override flags, texture/alpha data touched. */
+        assert(!memcmp(ppc_ptr(MATERIALS),original_materials,sizeof original_materials));
+    } else restored();
+    hook(0x027f4f1c,3,MODEL,0);
+    restored();
+}
 int main(int argc, char** argv) {
     assert(argc==2);
     void* memory=mmap(PPC_MEM_BASE,0x100000000ull,PROT_READ|PROT_WRITE,
@@ -101,7 +128,10 @@ int main(int argc, char** argv) {
     host.core_preempt=preempt; host.service=service; host.dispatch=dispatch;
     module=init(&host); assert(module);
     memcpy(ppc_ptr(module->mem_base),module->image,module->image_size);
-    for (unsigned i=0; i<module->hook_count; ++i) assert(module->hooks[i].kind!=WWHD_GUEST_REPLACE);
+    for (unsigned i=0; i<module->hook_count; ++i) {
+        assert(module->hooks[i].kind!=WWHD_GUEST_REPLACE);
+        assert(module->hooks[i].target!=0x027f55fc && module->hooks[i].target!=0x027f583c);
+    }
     st32(PLAY+0x5b2c,LINK); st32(LINK+4,42); st32(0x101f84dc,SAVE);
     st16(SAVE+0x20,80); st16(SAVE+0x22,80); st8(ENEMY+0x2da,2);
     st32(HIT,LINK+0x7b1c); st32(HIT+4,LINK); st8(HIT+10,1); st32(LINK+0x7b1c+0x10,2);
@@ -131,39 +161,53 @@ int main(int argc, char** argv) {
         stf32(color(m,k),0.25f+k*0.01f); stf32(color(m,k)+4,0.5f);
         stf32(color(m,k)+8,0.75f); stf32(color(m,k)+12,0.4f+m*0.1f);
     }
-    hook(0x027f55fc,2,MODEL,0);
-    assert(name_lookups==2);
-    for (int m=0; m<3; ++m) for (int k=0; k<11; ++k) {
-        assert((float)ldf32(color(m,k))==(m ? 1.0f : 0.008f));
-        assert((float)ldf32(color(m,k)+4)==(m ? 0.002f : 0.009f));
-        assert((float)ldf32(color(m,k)+12)==0.4f+m*0.1f);
+    /* Use nonzero override masks and sentinel bytes. The old code left 0x7ff
+     * set permanently; these assertions check the exact original material. */
+    st32(VTABLE+0x14,0x02001000);
+    for (int m=0;m<3;++m) {
+        st32(MATERIALS+m*0x39c+0x20,PE+m*0x40);
+        st32(PE+m*0x40,VTABLE); st32(PE+m*0x40+4,fog(m));
+        st32(MATERIALS+m*0x39c+0xa0,0xa0000090u+m);
+        st32(fog(m),0x02aabbcc); /* includes padding, restored bit for bit */
+        stf32(fog(m)+4,500.0f); stf32(fog(m)+8,5000.0f);
+        stf32(fog(m)+12,1.0f); stf32(fog(m)+16,100000.0f);
+        st32(fog(m)+20,0xabcdef80);
     }
-    /* Model preparation can overwrite a register between entry and actual
-     * drawing. Nested calls must reapply, not skip the already-saved pointer. */
-    stf32(color(0,5),0.8f); stf32(color(0,7),0.9f); stf32(color(2,4),0.6f);
-    hook(0x027f583c,2,MODEL,0); hook(0x027f583c,3,MODEL,0);
-    assert((float)ldf32(color(0,5))==0.008f && (float)ldf32(color(0,7))==0.008f);
-    assert(red(0)<0.02f && red(1)==1.0f && red(2)==1.0f);
-    hook(0x027f55fc,3,MODEL,0);
-    for (int m=0; m<3; ++m) for (int k=0; k<11; ++k) {
-        assert((float)ldf32(color(m,k))==0.25f+k*0.01f);
-        assert((float)ldf32(color(m,k)+4)==0.5f && (float)ldf32(color(m,k)+8)==0.75f);
-        assert((float)ldf32(color(m,k)+12)==0.4f+m*0.1f);
-    }
-    assert((ld32(MATERIALS+0xa0)&0x7ff)==0x7ff); /* all restored colors re-upload */
-    hook(0x027f55fc,2,MODEL+0x400,0); assert(red(0)==0.29f);
-    hook(0x027f55fc,3,MODEL+0x400,0); /* foreign instance untouched */
-    for (int i=0;i<20;++i) hook(0x027f55fc,2,MODEL,0);
-    for (int i=0;i<20;++i) hook(0x027f55fc,3,MODEL,0);
-    assert(red(0)==0.29f && red(1)==0.29f); /* bounded scope overflow */
-    /* Invalid/missing names must not accidentally classify material zero. */
+    memcpy(original_materials,ppc_ptr(MATERIALS),sizeof original_materials);
+    memcpy(original_fog,ppc_ptr(FOG),sizeof original_fog);
+    prepare(1); assert(name_lookups==2);
+    /* Nested entry/update returns restore the outer scope exactly once. */
+    hook(0x027f4f1c,2,MODEL,0);
+    hook(0x027f4fe4,2,MODEL,0); hook(0x027f4fe4,3,MODEL,0);
+    assert(ld8(FOG+0x14)==2 && ld8(fog(1)+0x14)==255);
+    hook(0x027f4f1c,3,MODEL,0); restored();
+    hook(0x027f4f1c,2,MODEL+0x400,0); restored();
+    hook(0x027f4f1c,3,MODEL+0x400,0); restored();
+    for (int i=0;i<20;++i) hook(0x027f4f1c,2,MODEL,0);
+    for (int i=0;i<20;++i) hook(0x027f4f1c,3,MODEL,0);
+    restored(); /* bounded scope overflow */
     eye_indices[0]=-1; eye_indices[1]=3;
-    hook(0x027f55fc,2,MODEL,0); assert(red(0)<0.02f && red(1)<0.02f && red(2)<0.02f);
-    hook(0x027f55fc,3,MODEL,0);
+    hook(0x027f4f1c,2,MODEL,0);
+    for (int m=0;m<3;++m) assert(ld8(fog(m)+0x14)==2);
+    hook(0x027f4f1c,3,MODEL,0); restored();
     st32(LINK+0x604,EYE_ANIM); st32(MATERIALS+0x39c+0x24,EYE_ANIM);
-    hook(0x027f55fc,2,MODEL,0); assert(red(1)==1.0f && red(2)<0.02f); /* controller fallback */
-    hook(0x027f55fc,3,MODEL,0);
+    hook(0x027f4f1c,2,MODEL,0); assert(ld8(fog(1)+0x14)==255); /* controller fallback */
+    hook(0x027f4f1c,3,MODEL,0);
+    st32(LINK+0x604,0); st32(MATERIALS+0x39c+0x24,0); restored();
     eye_indices[0]=1; eye_indices[1]=2;
+    st8(LINK+0x3be,8); prepare(0); st8(LINK+0x3be,0); /* frozen */
+    st32(DATA+0x0c,97); prepare(0); st32(DATA+0x0c,3); /* count bound */
+    /* No fog info, no PE block, and unsupported fog modes fail closed. */
+    st32(PE+4,0); st32(MATERIALS+0x39c+0x20,0); st8(fog(2),4);
+    hook(0x027f4f1c,2,MODEL,0);
+    assert(ld32(FOG+20)==0xabcdef80 && ld32(fog(1)+20)==0xabcdef80 && ld8(fog(2))==4);
+    hook(0x027f4f1c,3,MODEL,0);
+    st32(PE+4,FOG); st32(MATERIALS+0x39c+0x20,PE+0x40); st8(fog(2),2); restored();
+    /* Multiple activations/cancellations: BOTH gameplay and next material pass
+     * must be normal after the second button edge (including free mode below). */
+    buttons(0); buttons(0x60000); tick(); assert(damage(3)==3); prepare(0);
+    buttons(0); for (int i=0;i<20;++i) hit(1);
+    buttons(0x60000); tick(); assert(damage(3)==6); prepare(1);
 
     paused=1; buttons(0); assert(!claim_active); elements=0; execute(hud,1,0); assert(!elements);
     for (int i=0;i<900;++i) tick();
@@ -171,15 +215,29 @@ int main(int argc, char** argv) {
     st8(PLAY+0x5292,1); buttons(0); assert(!claim_active);
     for (int i=0;i<900;++i) tick();
     st8(PLAY+0x5292,0); tick(); assert(damage(3)==6);
-    st8(PLAY+0x514c,1); tick(); assert(damage(3)==3); /* stage transition resets */
+    st8(PLAY+0x514c,1); tick(); assert(damage(3)==3); prepare(0); /* stage transition resets */
     st8(PLAY+0x514c,0); free_mode=1; ++revision; tick();
     buttons(0); buttons(0x60000); tick(); assert(damage(3)==6);
+    prepare(1);
+    buttons(0); buttons(0x60000); tick(); assert(damage(3)==3); prepare(0);
+    buttons(0); buttons(0x60000); tick(); assert(damage(3)==6); prepare(1);
+    /* DARK touch cancellation, move/up do not toggle, second tap activates. */
+    st32(INPUT+0x100,0); execute(touch,INPUT+0x100,0); tick();
+    assert(damage(3)==3); prepare(0);
+    st32(INPUT+0x100,1); execute(touch,INPUT+0x100,0); tick();
+    st32(INPUT+0x100,2); execute(touch,INPUT+0x100,0); tick();
+    assert(damage(3)==3); prepare(0);
+    st32(INPUT+0x100,0); execute(touch,INPUT+0x100,0); tick();
+    assert(damage(3)==6); prepare(1);
     touch_visible=0; ++revision; tick(); buttons(0); assert(!claim_active);
-    st16(SAVE+0x22,0); tick(); assert(damage(3)==3);
+    st16(SAVE+0x22,0); tick(); assert(damage(3)==3); prepare(0);
     st16(SAVE+0x22,80); tick(); buttons(0x60000); tick(); assert(damage(3)==6);
+    hook(0x027f4f1c,2,MODEL,0);
     enabled=0; ++revision; tick(); assert(damage(3)==3);
+    /* Return must restore even when active/enabled changed inside the scope. */
+    hook(0x027f4f1c,3,MODEL,0); restored(); prepare(0);
     enabled=1; ++revision; tick(); buttons(0); buttons(0x60000); tick(); assert(damage(3)==6);
-    hook(0x0240ee28,2,LINK,0); assert(damage(3)==3 && !claim_active);
+    hook(0x0240ee28,2,LINK,0); assert(damage(3)==3 && !claim_active); prepare(0);
     puts("Dark Link translated guest-hook tests passed");
     dlclose(library); munmap(memory,0x100000000ull);
 }

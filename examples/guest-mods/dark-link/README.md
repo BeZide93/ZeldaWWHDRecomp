@@ -1,9 +1,9 @@
-# Dark Link (prototype 0.1.1)
+# Dark Link (prototype 0.1.2)
 
 Standalone code mod for ZeldaWWHDRecomp. Charge with damaging sword hits, then
-transform into a charcoal-colored Link with red eyes and stronger sword attacks.
+activate stronger sword attacks and an experimental charcoal silhouette with red eyes.
 This package contains original code only: no textures, models, game binaries or
-save data. It uses the player's installed Link model and native material uniforms.
+save data. It uses the player's installed Link model and native material fog parameters.
 
 ## Install
 
@@ -15,6 +15,14 @@ save data. It uses the player's installed Link model and native material uniform
 
 The same package is translated for the installed USA or EU build and the host
 platform, including Android. It does not require a new APK/runtime feature.
+
+### Upgrading from 0.1.0/0.1.1
+
+Replace the installed package with 0.1.2 and fully restart the game, then load a
+normal in-game save. Do not resume a full emulator/recomp save state made with the
+old visual effect active: 0.1.1 left extra material override flags set. The new
+version cannot infer those flags' original values from an already altered state.
+Normal save data is not modified by this mod.
 
 ## Play
 
@@ -40,12 +48,17 @@ button, automatic activation, or adjust that host binding.
 
 ## Scope and limits
 
-This first version implements the body tint, red eye material colors and gameplay
-mechanic. It does **not** include Dawnlight's custom flowing aura, eye-bloom shader,
-White/Gold variants or a transformation animation. Eye textures and expressions,
-depth testing and eyelid occlusion remain native. Frozen Link keeps his ice look.
-Equipment retains its normal appearance.
+The appearance is an **experimental flat silhouette**, not a textured Dark Link
+skin. Version 0.1.2 replaces the faulty blanket material-register override from
+0.1.1 with the native material-local fog blend. The intended result is nearly
+black body/hands/hair and red eye surfaces, independent of the toon-lighting side.
+This path still needs real-game validation, including whether each eye material
+uses the native fog blend. Materials without fog support remain unchanged.
 
+There is no custom flowing aura, eye-bloom shader, White/Gold variant or
+transformation animation. Eye texture masks and expressions, depth testing and
+eye occlusion remain native. Frozen Link keeps his ice look. Equipment retains
+its normal appearance.
 Damage scaling runs after native `at_power_check`, only for the current player's
 three sword colliders and the sword attack flag. It changes the freshly calculated
 damage, not persistent collider strength, enemy health or the death procedure.
@@ -57,21 +70,29 @@ armor-specific handlers can further override the native result.
 
 Visual overrides match the live player model instances (body, hands and hair).
 Eye materials are resolved using the game's own left/right eye material names;
-native eye animation-controller pointers remain a fallback. All eleven material,
-ambient and TEV RGB registers are overridden, covering both sides of the toon
-lighting blend rather than only C0/K0. Uniforms are saved and restored around
-model/joint submissions and HD draws, and reapplied at nested draws after native
-preparation can regenerate them. Alpha and resource files are untouched. Unknown
-material counts fail closed.
+native eye animation-controller pointers remain a fallback. The PE block's native
+`getFogInfo` accessor supplies each material's fog record. A finite linear fog
+ramp entirely behind the camera requests the silhouette color after lighting;
+near/far projection values, alpha masks and resource files remain unchanged.
+Unsupported fog modes and unknown material counts fail closed.
+
+The complete fog record is saved once per preparation scope and restored bit for
+bit on return, even if the transformation has been disabled. Material/ambient/TEV
+registers and the mask at material +0xA0 are never changed. The previous code
+incorrectly kept every override bit set on restoration. Hooks now surround the
+native model entry/update methods, before `viewCalc` queues the asynchronous UBO
+job. There are no temporary material writes around `viewCalc` or joint packet
+submission; these are not actual immediate draws.
 
 Automated checks compile the PowerPC ELF, translate and compile it for both game
-regions, and execute state and mocked guest-hook tests (including all eleven color
-registers, both named eyes without controller pointers, nested native color
-rewrites and complete restoration). These checks do not replace a real-game
-visual/playtest. First test
-Free transformation in a lit room, eye animation, different outfits, swimming,
-menus, scene changes and combat against Bokoblins/Moblins. Compare body/eyes and
-other actors before, during and after activation on Android and desktop.
+regions, and execute state and mocked guest-hook tests. The tests check exact
+material/flag preservation, complete fog restoration, nested calls, both named
+eyes, unsupported/missing fog, foreign models, freezing, repeated cancellation,
+Free transformation, disabling, death, stage changes and player deletion.
+They **do not execute the game's renderer** or establish that the new silhouette
+looks correct. Test 0.1.2 from a fresh session in lit and shadowed areas, then
+cancel repeatedly with DARK/L3+R3 and disable the mod. Check both eyes, other
+actors, outfits, swimming and equipment on Android and desktop.
 
 ## Build
 

@@ -1,20 +1,16 @@
-/* Scoped HD material uniforms. No texture/model replacement, persistent shared
- * material edits, guessed eye positions, screen-space red dots, or new shaders. */
+/* Native, material-local fog blend: recolor after toon lighting without changing
+ * the lighting/TEV override mask. No textures, shaders or resource edits. */
 #pragma once
 
 #define DL_MAX_MATERIALS 96
 #define DL_DRAW_DEPTH 16
-#define DL_COLOR_REGISTERS 11
 #define DL_SAVED_MATERIALS (DL_MAX_MATERIALS * 3)
-/* HD uses eleven RGBA registers: material/ambient colors, TEV C0..C2 and
- * K0..K3. See the public d_cloth_packet/d_magma lighting layouts, and the
- * native uniform writes in d_kankyo_6, d_a_wind_tag and d_a_bgn_draw.
- * Patching C0/K0 alone recolors only one side of Link's toon-lighting blend. */
+/* d_kankyo_6.h: J3DMaterial +0x20 -> PE block, whose first word is
+ * its vtable; +0x14 is getFogInfo. This is NOT the TEV block's +4 vtable.
+ * FogInfo is 0x18 bytes: type/padding, start/end, near/far, RGBA. */
 typedef struct {
-    u8* material;
-    f32* value[DL_COLOR_REGISTERS];
-    f32 rgb[DL_COLOR_REGISTERS][3];
-    u32 dirty;
+    u8* fog;
+    u32 original[6];
 } DLMaterialSave;
 static DLMaterialSave dl_materials[DL_SAVED_MATERIALS];
 static u32 dl_material_count, dl_draw_depth;
@@ -23,43 +19,39 @@ static u32 dl_draw_marks[DL_DRAW_DEPTH];
 static void dl_restore_colors(u32 mark) {
     while (dl_material_count > mark) {
         DLMaterialSave* saved = &dl_materials[--dl_material_count];
-        for (u32 i = 0; i < DL_COLOR_REGISTERS; ++i) {
-            if (!saved->value[i]) continue;
-            for (u32 j = 0; j < 3; ++j) saved->value[i][j] = saved->rgb[i][j];
-        }
-        /* Restore CPU values AND mark them for the next native uniform upload. */
-        *(u32*)(saved->material + 0xa0) |= saved->dirty;
+        for (u32 i = 0; i < 6; ++i) ((u32*)saved->fog)[i] = saved->original[i];
     }
 }
 static void dl_palette(u8* material, int eye) {
-    u32* flags = (u32*)(material + 0xa0);
+    void* block = (void*)dl_word(material, 0x20);
+    if (!block) return;
+    void* vtable = (void*)dl_word(block, 0);
+    if (!vtable) return;
+    u32 getter = dl_word(vtable, 0x14);
+    if (!getter) return;
+    u8* fog = ((u8* (*)(void*))getter)(block);
+    /* Respect unsupported/special fog modes; never fabricate a PE block. */
+    if (!fog || (fog[0] != 0 && fog[0] != 2)) return;
     DLMaterialSave* saved = 0;
     for (u32 i = 0; i < dl_material_count; ++i)
-        if (dl_materials[i].material == material) { saved = &dl_materials[i]; break; }
+        if (dl_materials[i].fog == fog) { saved = &dl_materials[i]; break; }
     if (!saved) {
         if (dl_material_count >= DL_SAVED_MATERIALS) return;
         saved = &dl_materials[dl_material_count++];
-        saved->material = material; saved->dirty = 0;
-        for (u32 i = 0; i < DL_COLOR_REGISTERS; ++i) {
-            f32* color = dl_material_parameter(flags, i);
-            saved->value[i] = color;
-            if (!color) continue;
-            for (u32 j = 0; j < 3; ++j) saved->rgb[i][j] = color[j];
-            saved->dirty |= 1u << i;
-        }
+        saved->fog = fog;
+        for (u32 i = 0; i < 6; ++i) saved->original[i] = ((u32*)fog)[i];
     }
-    /* Save once, but REAPPLY at each nested draw. Model preparation/animation
-     * may regenerate uniforms after the outer entry hook. The old duplicate
-     * early-return let those native colors through to the actual draw. */
-    for (u32 i = 0; i < DL_COLOR_REGISTERS; ++i) {
-        f32* color = saved->value[i];
-        if (!color) continue;
-        color[0] = eye ? 1.0f : 0.008f;
-        color[1] = eye ? 0.002f : 0.009f;
-        color[2] = eye ? 0.002f : 0.012f;
-        /* Alpha, texture animation, eyelids, skinning and depth remain native. */
-    }
-    *flags |= saved->dirty;
+    /* Linear fog blends the final lit RGB, so both toon-lighting branches get
+     * the same silhouette color. Put the entire finite ramp behind the camera:
+     * every visible fragment is beyond the end; avoid start == end division.
+     * Keep native near/far, padding, material alpha and all texture masks. */
+    fog[0] = 2;
+    *(f32*)(fog + 4) = -10000.0f;
+    *(f32*)(fog + 8) = -9999.0f;
+    fog[0x14] = eye ? 255 : 2;
+    fog[0x15] = eye ? 0 : 2;
+    fog[0x16] = eye ? 0 : 3;
+    fog[0x17] = 255;
 }
 static void dl_find_eyes(u8* data, u32 count, s32 indices[2]) {
     indices[0] = indices[1] = -1;
@@ -84,10 +76,8 @@ static void dl_visual_begin(void* model) {
     daPy_lk_c* link = dl_player();
     if (!link || link != dl_owner) return;
     u32 address = (u32)model;
-    /* Instance identity, not a model name shared with other actors. */
     if (address != link->mpCLModel && address != link->mpHandsModel &&
         address != link->mpKatsuraModel) return;
-    /* Leave the native frozen rendering alone. */
     if (dl_word(link, 0x3bc) & 0x800) return;
     u8* data = (u8*)dl_word(model, 0xac);
     if (!data) return;
@@ -99,8 +89,6 @@ static void dl_visual_begin(void* model) {
     for (u32 i = 0; i < count; ++i) {
         u8* material = materials + i * 0x39c;
         u32 animation = dl_word(material, 0x24);
-        /* Resolve the native eye names even if animation/controller attachment
-         * changes during a draw; keep controller identity as a fallback. */
         int eye = address == link->mpCLModel && ((s32)i == eyes[0] || (s32)i == eyes[1] ||
             (animation && (animation == link->m_tex_eye_scroll[0] || animation == link->m_tex_eye_scroll[1])));
         dl_palette(material, eye);
@@ -112,13 +100,11 @@ static void dl_visual_end(void) {
     if (depth < DL_DRAW_DEPTH) dl_restore_colors(dl_draw_marks[depth]);
 }
 
-/* Scope both preparation/submission and the actual HD draw, plus Link's
- * separate eye/eyebrow joint passes. Restore after each native call completes. */
+/* Scope only the native material preparation. 027F55FC is viewCalc: it queues
+ * an asynchronous matrix/UBO job, NOT a draw. Joint entry queues packets too.
+ * Neither is a safe boundary for temporary shared material edits. The model
+ * entry/update methods below precede viewCalc in mDoExt_modelEntryDL/UpdateDL. */
 WWHD_HOOK(DL_MODEL_ENTRY, dl_entry_before, (void* model)) { dl_visual_begin(model); }
 WWHD_HOOK_RETURN(DL_MODEL_ENTRY, dl_entry_after, (void* model)) { (void)model; dl_visual_end(); }
-WWHD_HOOK(DL_MODEL_UPDATE, dl_update_before, (void* model, void* data)) { (void)data; dl_visual_begin(model); }
-WWHD_HOOK_RETURN(DL_MODEL_UPDATE, dl_update_after, (void* model, void* data)) { (void)model; (void)data; dl_visual_end(); }
-WWHD_HOOK(DL_MODEL_DRAW, dl_draw_before, (void* model)) { dl_visual_begin(model); }
-WWHD_HOOK_RETURN(DL_MODEL_DRAW, dl_draw_after, (void* model)) { (void)model; dl_visual_end(); }
-WWHD_HOOK(DL_JOINT_ENTRY, dl_joint_before, (void* model, void* joint)) { (void)joint; dl_visual_begin(model); }
-WWHD_HOOK_RETURN(DL_JOINT_ENTRY, dl_joint_after, (void* model, void* joint)) { (void)model; (void)joint; dl_visual_end(); }
+WWHD_HOOK(DL_MODEL_UPDATE, dl_update_before, (void* model)) { dl_visual_begin(model); }
+WWHD_HOOK_RETURN(DL_MODEL_UPDATE, dl_update_after, (void* model)) { (void)model; dl_visual_end(); }
