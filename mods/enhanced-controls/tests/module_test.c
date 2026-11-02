@@ -15,11 +15,11 @@ static const WWHDGuestModuleV1* mod;
 static Cpu cpu;
 static uint32_t touch_fn, filter_fn, hud_fn;
 static uint64_t step=1, epoch=1;
-static int editor_visible=1, claim_count, hud_count, rays;
+static int editor_visible=1, claim_count, hud_count;
 static int spins, equip_animation, guard_animation;
 static int texture_calls, image_count, releases, fail_texture;
-static float editor_x,editor_y=260,wall_z=100000;
-static float claim[7][4];
+static float editor_x,editor_y=260;
+static float claim[6][4];
 static unsigned char files[2][512];
 static int file_size[2], writes, reads, fail_write;
 static FILE* capture;
@@ -33,7 +33,7 @@ extern int test_hud_emit(uint32_t list,uint32_t kind,uint32_t anchor,uint32_t bl
                         const float* f,uint32_t rgba,uint32_t image,const char* text,uint32_t bytes);
 extern void test_hud_end(uint32_t list,unsigned commands);
 static volatile int preempt_flags[3];
-static const uint32_t LINK=0x18000000, SAVE=0x18010000, CAMERA=0x18020000,
+static const uint32_t LINK=0x18000000, SAVE=0x18010000,
                       SCRATCH=0x30040000;
 static const char* string(uint32_t a) { return (const char*)ppc_ptr(a); }
 static int own(uint32_t a, uint32_t n) { return a>=mod->mem_base && (uint64_t)a+n<=mod->mem_base+mod->mem_size; }
@@ -62,12 +62,6 @@ static void dispatch(Cpu* c) {
     if(c->pc==EQUIPPING || c->pc==GUARDING) {
         assert(c->r[3]==LINK);
         c->r[3]=c->pc==EQUIPPING?equip_animation:guard_animation; return;
-    }
-    if(c->pc==COLLISION) {
-        ++rays;
-        assert(c->r[3]==CAMERA+0x248 && c->r[6]==0x7f);
-        c->r[3]=ldf32(c->r[5]+8)>wall_z;
-        return;
     }
     for(uint32_t i=0;i<mod->func_count;++i) if(mod->funcs[i].addr==c->pc) { mod->funcs[i].fn(c); return; }
     fprintf(stderr,"unexpected dispatch %08x\n",c->pc); abort();
@@ -127,7 +121,7 @@ static void s_number(Cpu* c) {
     c->f[1].ps0=!strcmp(name,"editor-x")?editor_x:editor_y;
 }
 static void s_claim(Cpu* c) {
-    unsigned slot=c->r[3]; assert(slot<7); ++claim_count;
+    unsigned slot=c->r[3]; assert(slot<6); ++claim_count;
     for(int i=0;i<4;++i) claim[slot][i]=(float)c->f[i+1].ps0;
     c->r[3]=1;
 }
@@ -162,11 +156,10 @@ static unsigned pad(unsigned real) {
     memset(ppc_ptr(SCRATCH),0,32); st32(SCRATCH,real); call(filter_fn,SCRATCH); return ld32(SCRATCH);
 }
 static void next(void) { ++step; (void)pad(0); }
-static void camera(float z) { stf32(CAMERA+0xE4,z); hook(STORE,CAMERA); }
 static void tap(float x,float y) { touch(0,x,y); touch(2,x,y); }
 static void action(int id) { EcRect r=ee_action_rect(id); tap(r.x,r.y); }
 static void tab(int i) { EcRect r=ee_tab(i); tap(r.x,r.y); }
-static void open_editor(void) { tap(editor_x,editor_y); assert(claim[6][0]==-640 && claim[6][2]==640); }
+static void open_editor(void) { tap(editor_x,editor_y); assert(claim[5][0]==-640 && claim[5][2]==640); }
 static void reload_module(void) {
     test_hud_reset();
     memset(ppc_ptr(mod->mem_base),0,mod->mem_size);
@@ -179,20 +172,19 @@ int main(void) {
     assert(memory==PPC_MEM_BASE);
     WWHDGuestHostV1 host={sizeof(host),WWHD_GUEST_ABI_VERSION,dispatch,unavailable,trap,timebase,
         reciprocal,rsqrt,preempt,preempt_flags,original,service};
-    mod=wwhd_guest_module_v1(&host); assert(mod && mod->hook_count==2);
+    mod=wwhd_guest_module_v1(&host); assert(mod && mod->hook_count==1 && mod->hooks[0].target==LINK_EXECUTE);
     memcpy(ppc_ptr(mod->mem_base),mod->image,mod->image_size);
     memcpy(ppc_ptr(PLAY+0x5134),"sea",4);
     st32(PLAY+0x5B2C,LINK); st32(LINK,1); st32(LINK+4,7); st16(LINK+0x69B0,0x103);
     st32(LINK+0x65F0,4);
     st32(SAVE_PTR,SAVE); st16(SAVE+0x20,12); st16(SAVE+0x22,12);
-    st32(PLAY+0x5AF8,CAMERA); st8(CAMERA+0x248+4,1);
-    hook(LINK_EXECUTE,LINK); assert(touch_fn && filter_fn && hud_fn && claim_count==7);
-    assert(claim[4][0]==290 && claim[4][2]==550);
-    call(hud_fn,1); assert(hud_count==12 && image_count==4 && texture_calls==4);
+    hook(LINK_EXECUTE,LINK); assert(touch_fn && filter_fn && hud_fn && claim_count==6);
+    assert(claim[4][0]==-48 && claim[4][2]==48);
+    call(hud_fn,1); assert(hud_count==10 && image_count==4 && texture_calls==4);
     call(hud_fn,1); assert(texture_calls==4); /* cached, not decoded per frame */
     ++epoch; call(hud_fn,1); assert(texture_calls==8 && releases==0);
     fail_texture=1; ++epoch; hud_count=0; call(hud_fn,1);
-    assert(hud_count==12 && texture_calls==12); /* text fallback */
+    assert(hud_count==10 && texture_calls==12); /* text fallback */
     call(hud_fn,1); assert(texture_calls==12); /* no repeated failed loads */
     fail_texture=0; ++epoch; call(hud_fn,1); assert(texture_calls==16);
     int n=claim_count; next(); call(hud_fn,1); assert(claim_count==n);
@@ -247,7 +239,7 @@ int main(void) {
         touch(3,0,0); touch(0,50,-180); int before=spins;
         switch(reason) {
             case 0: touch(3,0,0); break;
-            case 1: touch(4,2,0); break;
+            case 1: for(int i=0;i<9;++i) next(); break; /* request expired */
             case 2: ++epoch; break;
             case 3: st32(LINK+4,ld32(LINK+4)+1); break;
             case 4: touch(0,0,260); touch(2,0,260); break;
@@ -261,27 +253,20 @@ int main(void) {
         hook(LINK_EXECUTE,LINK); assert(spins==before);
     }
     touch(3,0,0);
-    /* A real double tap; pinch clears all tap recognition. */
-    touch(0,420,120); next(); touch(2,420,120); next(); touch(0,420,120); next(); touch(2,420,120);
-    assert(pad(0)==0x80); for(int i=0;i<3;++i)next(); assert(!pad(0));
-    touch(0,420,120); touch(4,2,0); touch(5,0,0); touch(2,420,120); assert(!pad(0));
-    camera(100); assert(fabs(ldf32(CAMERA+0xE4)-50)<.01);
-    /* store rewrites the native view each step: no multiplying an old zoom. */
-    camera(100); assert(fabs(ldf32(CAMERA+0xE4)-50)<.01);
-    touch(4,.25f,0); touch(5,0,0); next(); wall_z=140;
-    camera(100); assert(ldf32(CAMERA+0xE4)>100 && ldf32(CAMERA+0xE4)<140 && rays==7);
-    st8(PLAY+0x5292,1); camera(100); assert(ldf32(CAMERA+0xE4)==100);
-    st8(PLAY+0x5292,0); st32(PLAY+0x5CD8,0x2000); camera(100); assert(ldf32(CAMERA+0xE4)==100);
-    st32(PLAY+0x5CD8,0); next();
+    /* The removed pad leaves this part of the screen unclaimed and inert. */
+    for(int i=0;i<6;++i)
+        assert(!(claim[i][0]<=420 && claim[i][2]>=420 && claim[i][1]<=120 && claim[i][3]>=120));
+    tap(420,120); next(); tap(420,120); assert(!pad(0));
+    touch(4,2,0); touch(5,0,0); assert(!pad(0));
     touch(0,50,-180); assert(pad(0)==0 && ldf32(SCRATCH+4)==0); ++epoch; assert(!pad(0));
     int before=spins; hook(LINK_EXECUTE,LINK); assert(spins==before);
     /* Edit is a separate touch mode: cancel pending spins and swallow held pad
-     * input until release. Dragging never executes a macro or changes zoom. */
+     * input until release. Dragging never executes a macro. */
     st32(LINK+0x65F0,4); touch(3,0,0); touch(0,50,-180); before=spins;
     open_editor(); assert(claim[0][0]==claim[0][2]); assert(pad(0x5000)==0);
     memset(ppc_ptr(SCRATCH),0,32); stf32(SCRATCH+4,.8f); stf32(SCRATCH+12,.6f);
     call(filter_fn,SCRATCH); assert(ldf32(SCRATCH+4)==0 && ldf32(SCRATCH+12)==0);
-    hook(LINK_EXECUTE,LINK); assert(spins==before); camera(100); assert(ldf32(CAMERA+0xE4)==100);
+    hook(LINK_EXECUTE,LINK); assert(spins==before);
     call(hud_fn,1);
     int old_writes=writes, old_reads=reads;
     touch(0,-150,-180); touch(1,-400,-240); touch(2,-400,-240);
@@ -293,8 +278,8 @@ int main(void) {
         capture=fopen(getenv("EC_HUD_DUMP"),"w"); assert(capture); call(hud_fn,1); fclose(capture); capture=NULL;
     }
     assert(writes==old_writes && reads==old_reads); /* no IO while dragging/drawing */
-    fail_write=1; action(EE_SAVE); assert(claim[6][2]==640 && writes==old_writes+1);
-    fail_write=0; action(EE_SAVE); assert(claim[6][0]==claim[6][2] && writes==old_writes+2);
+    fail_write=1; action(EE_SAVE); assert(claim[5][2]==640 && writes==old_writes+1);
+    fail_write=0; action(EE_SAVE); assert(claim[5][0]==claim[5][2] && writes==old_writes+2);
     assert(claim[0][0]==claim[0][2]); /* Jump hidden */
     assert(pad(0x4000)==0);
     memset(ppc_ptr(SCRATCH),0,32); stf32(SCRATCH+4,.05f); call(filter_fn,SCRATCH);
@@ -316,25 +301,25 @@ int main(void) {
     fail_write=0; reload_module(); assert(fabsf(claim[0][0]-(-400-46.2f))<.01f);
     /* Epoch/menu changes discard the editor draft, never write over disk. */
     open_editor(); action(EE_RESET); old_writes=writes; ++epoch; next();
-    assert(claim[6][0]==claim[6][2] && writes==old_writes);
+    assert(claim[5][0]==claim[5][2] && writes==old_writes);
     assert(fabsf(claim[0][0]-(-400-46.2f))<.01f); (void)pad(0);
     open_editor(); action(EE_RESET); st8(MENU_FLAG,1); next(); st8(MENU_FLAG,0); next();
-    assert(claim[6][0]==claim[6][2] && writes==old_writes); (void)pad(0);
+    assert(claim[5][0]==claim[5][2] && writes==old_writes); (void)pad(0);
     /* The only live settings relocate/hide the launcher, including mid-edit. */
-    editor_x=200; editor_y=280; next(); assert(claim[5][0]==152 && claim[5][1]==256);
+    editor_x=200; editor_y=280; next(); assert(claim[4][0]==152 && claim[4][1]==256);
     open_editor(); editor_visible=0; next();
-    assert(claim[5][0]==claim[5][2] && claim[6][0]==claim[6][2]);
+    assert(claim[4][0]==claim[4][2] && claim[5][0]==claim[5][2]);
     editor_visible=1; next(); (void)pad(0); open_editor(); action(EE_RESET); action(EE_SAVE); (void)pad(0);
     assert(claim[0][0]==-194 && claim[1][0]==-94); /* defaults saved */
     /* All four can be hidden; launcher is still reachable and tabs restore them. */
     open_editor(); for(int i=0;i<4;++i) { tab(i); action(EE_VISIBLE); } action(EE_SAVE); (void)pad(0);
     for(int i=0;i<4;++i) assert(claim[i][0]==claim[i][2]);
-    assert(claim[5][2]>claim[5][0]); open_editor(); tab(2); action(EE_VISIBLE); action(EE_SAVE); (void)pad(0);
+    assert(claim[4][2]>claim[4][0]); open_editor(); tab(2); action(EE_VISIBLE); action(EE_SAVE); (void)pad(0);
     assert(claim[2][0]==6 && claim[0][0]==claim[0][2]);
     /* Corrupt layouts safely fall back; a bad second file cannot poison the first. */
     memset(files,0,sizeof(files)); file_size[0]=file_size[1]=148; reload_module();
     assert(claim[0][0]==-194 && claim[3][0]==106);
     puts("Translated editor: input isolation, save/restart, cancel, reset, hidden buttons and IO failures passed");
-    puts("Translated module: registration, claims, HUD, input, lifecycle and camera fixture passed");
+    puts("Translated module: registration, claims, HUD, input, lifecycle and removed-pad regression passed");
     assert(munmap(memory,1ull<<32)==0);
 }

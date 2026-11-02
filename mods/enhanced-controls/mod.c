@@ -7,16 +7,13 @@
 WWHD_GAME_FUNC(0x023E6380, s32, spin_attack, (void*, s32));
 WWHD_GAME_FUNC(0x023D794C, s32, equipping, (void*));
 WWHD_GAME_FUNC(0x02443728, s32, guarding, (void*));
-WWHD_GAME_FUNC(0x024FCBE8, u8, camera_line_check, (void*, void*, void*, u32));
 #define PLAY ((u8*)&WWHD_GAME_DATA(0x1046F0B0,u8))
-#define U8(p,o) (*(volatile u8*)((u8*)(p)+(o)))
 #define U16(p,o) (*(volatile u16*)((u8*)(p)+(o)))
 #define U32(p,o) (*(volatile u32*)((u8*)(p)+(o)))
-#define F32(p,o) (*(volatile f32*)((u8*)(p)+(o)))
 
 static EcState state;
-static int registered, ready, mask, pinch_on, tap_on, claims_valid;
-static EcRect rects[7], claimed[7];
+static int registered, ready, mask, claims_valid;
+static EcRect rects[6], claimed[6];
 static EcEditor editor;
 static EcLayoutFile layout_file[2]; /* host services require mod-owned buffers */
 static const char* const layout_names[]={"macro-layout-a.bin","macro-layout-b.bin"};
@@ -87,20 +84,20 @@ static int playable(void) {
 }
 static void clear_claims(void) {
     if (!claims_valid) return;
-    for (u32 i=0;i<7;++i) wwhd_touch_claim(i,0,0,0,0);
+    for (u32 i=0;i<6;++i) wwhd_touch_claim(i,0,0,0,0);
     claims_valid=0; claimed_mask=0;
 }
 static void update_claims(void) {
-    unsigned wanted=ready ? (editor.open?64u:((unsigned)mask|16u|(editor_visible?32u:0u))) : 0;
+    unsigned wanted=ready ? (editor.open?32u:((unsigned)mask|(editor_visible?16u:0u))) : 0;
     if (!wanted) { clear_claims(); return; }
     int changed=!claims_valid || wanted!=claimed_mask;
-    for (int i=0;i<7;++i) {
+    for (int i=0;i<6;++i) {
         EcRect a=rects[i], b=claimed[i];
         if ((wanted&(1u<<i)) && (a.x!=b.x || a.y!=b.y || a.w!=b.w || a.h!=b.h)) changed=1;
     }
     if (!changed) return; /* Do not steal overlapping claims back every frame. */
     ec_cancel(&state);
-    for (u32 i=0;i<7;++i) {
+    for (u32 i=0;i<6;++i) {
         EcRect r=rects[i]; claimed[i]=r;
         if (wanted&(1u<<i)) wwhd_touch_claim(i,r.x-r.w/2,r.y-r.h/2,r.x+r.w/2,r.y+r.h/2);
         else wwhd_touch_claim(i,0,0,0,0);
@@ -121,9 +118,8 @@ static void refresh(void) {
         last_step=step; hud_epoch=epoch;
         editor_visible=wwhd_config_bool("editor-visible",1);
         if(!editor_visible && editor.open) ee_close(&editor);
-        rects[5]=(EcRect){number("editor-x",0,-570,570),number("editor-y",260,-320,320),96,48};
-        rects[4]=(EcRect){420,120,260,140};
-        rects[6]=(EcRect){0,0,1280,720};
+        rects[4]=(EcRect){number("editor-x",0,-570,570),number("editor-y",260,-320,320),96,48};
+        rects[5]=(EcRect){0,0,1280,720};
     }
     int next=playable();
     u32 id=next ? U32(U32(PLAY,0x5B2C),4) : 0;
@@ -146,16 +142,13 @@ static void touch(const wwhd_touch_event* event) {
         else if(action>=0) ee_apply(&editor,action);
         ec_cancel(&state); refresh(); return;
     }
-    if(event->kind==WWHD_TOUCH_DOWN && editor_visible && ec_inside(rects[5],x,y)) {
+    if(event->kind==WWHD_TOUCH_DOWN && editor_visible && ec_inside(rects[4],x,y)) {
         ee_begin(&editor); release_input=1; ec_cancel(&state); refresh(); return;
     }
     switch(event->kind) {
         case WWHD_TOUCH_DOWN: {
             int hit=EC_NONE;
-            /* Editable macros take priority over the fixed gesture pad. */
             for(int i=0;i<4;++i) if((mask&(1<<i)) && ec_inside(rects[i],x,y)) hit=i;
-            if(hit==EC_NONE && (pinch_on||tap_on) && ec_inside(rects[4],x,y)) hit=4;
-            ec_down(&state,hit,x,y);
             if(hit>=0 && hit<4) {
                 wwhd_input_read(&sampled);
                 /* Attack macros need a drawn sword; dodge works without it. */
@@ -166,17 +159,7 @@ static void touch(const wwhd_touch_event* event) {
             }
             break;
         }
-        case WWHD_TOUCH_MOVE: ec_move(&state,x,y); break;
-        case WWHD_TOUCH_UP: ec_up(&state,x,y,tap_on); break;
         case WWHD_TOUCH_CANCEL: ec_cancel(&state); break;
-        case WWHD_TOUCH_PINCH:
-            /* Wheel events have no preceding DOWN; all pinch locations owned
-             * by this mod support zoom, including the macro buttons. */
-            state.tap_valid=state.previous_tap=0;
-            if(pinch_on) { state.macro=EC_NONE; state.spin_pending=0; ec_pinch(&state,x); }
-            break;
-        case WWHD_TOUCH_PINCH_END:
-            state.pinching=state.tap_valid=state.previous_tap=0; break;
     }
 }
 static void filter(wwhd_input_state* pad) {
@@ -296,18 +279,12 @@ static void editor_hud(u32 list) {
     label(list,-590,-334,editor.error?"Save failed - retry Save or Cancel":
         "Only macro buttons are edited. The game keeps running; use a safe place.",16,editor.error?0xFF8888FF:0xFFFFFFFF);
 }
-static char zoom_label[]="Pinch / double tap 100%";
 static void hud(u32 list) {
     refresh(); if(!ready) return;
     sync_icons();
     if(editor.open) { editor_hud(list); return; }
     for(int i=0;i<4;++i) if(mask&(1<<i)) macro_button(list,i);
-    if(pinch_on||tap_on) {
-        unsigned n=(unsigned)(state.distance*100+.5f);
-        zoom_label[19]='0'+n/100; zoom_label[20]='0'+(n/10)%10; zoom_label[21]='0'+n%10;
-        box(list,rects[4],zoom_label,0x14222c78);
-    }
-    if(editor_visible) box(list,rects[5],"Edit",0x23445CD0);
+    if(editor_visible) box(list,rects[4],"Edit",0x23445CD0);
 }
 /* Public HD proc IDs: WAIT, MOVE, ATN_MOVE, ATN_ACTOR_WAIT/MOVE,
  * WAIT_TURN and MOVE_TURN. Never interrupt damage, jumps, rolls, another attack,
@@ -323,7 +300,7 @@ static int can_spin(void* link) {
 }
 WWHD_HOOK(WWHD_ADDR_daPy_Execute,enhanced_register,(void* link)) {
     if(!registered) {
-        ec_init(&state); load_layout(); pinch_on=tap_on=1; last_step=~0ull;
+        ec_init(&state); load_layout(); last_step=~0ull;
         wwhd_touch_register(touch); wwhd_input_filter_register(filter);
         wwhd_hud_register(hud,WWHD_HUD_TV); registered=1;
         wwhd_log("Enhanced Controls: guest mod ready (experimental)");
@@ -335,33 +312,4 @@ WWHD_HOOK(WWHD_ADDR_daPy_Execute,enhanced_register,(void* link)) {
         if(editor.open || !ready || (u32)link!=U32(PLAY,0x5B2C) || !can_spin(link) || !spin_attack(link,1))
             state.macro=EC_NONE;
     }
-}
-
-typedef struct { void* body; float eye[3],center[3],end[3]; } Ray;
-static int blocked(void* data,float factor) {
-    Ray* r=data;
-    for(int i=0;i<3;++i) r->end[i]=r->center[i]+(r->eye[i]-r->center[i])*factor;
-    return camera_line_check(r->body,r->center,r->end,0x7f)!=0;
-}
-/* store(camera_process_class*) copies the body's newly computed view into the
- * process view before view_setup. Adjust that output, leaving the camera body's
- * simulation untouched. Upstream interpolation/culling then see the same view.
- * Entry/draw patches would miss upstream's cached camera and risk zoom feedback. */
-WWHD_HOOK_RETURN(WWHD_ADDR_store_024F8430,enhanced_camera_store,(void* camera)) {
-    if(!registered) return;
-    refresh();
-    if(editor.open || !ready || !pinch_on || state.distance==1 || (u32)camera!=U32(PLAY,0x5AF8)) return;
-    u8* body=(u8*)camera+0x248;
-    if(!U8(body,4) || U8(body,5)) return;
-    u32 param=U32(body,0x8A8);
-    if(object(param,8) && U32(param,4)==11) return; /* event camera */
-    Ray ray; ray.body=body;
-    float d2=0;
-    for(int i=0;i<3;++i) {
-        ray.eye[i]=F32(camera,0xDC+4*i); ray.center[i]=F32(camera,0xE8+4*i);
-        float d=ray.eye[i]-ray.center[i]; d2+=d*d;
-    }
-    if(!(d2>=3600 && d2<1.e12f)) return;
-    float factor=ec_collision_limit(state.distance,blocked,&ray);
-    for(int i=0;i<3;++i) F32(camera,0xDC+4*i)=ray.center[i]+(ray.eye[i]-ray.center[i])*factor;
 }
