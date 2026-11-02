@@ -1,0 +1,28 @@
+name: Enemy HP Bars mod
+on:
+  push:
+    branches: ['feat/enemy-hp-bars', 'main']
+    paths: ['mods/enemy-hp-bars/**', 'runtime/guest/include/**', 'runtime/include/**', 'tools/guestmod/**', 'tools/recomp/**', '.github/workflows/enemy-hp-bars.yml']
+  pull_request:
+    paths: ['mods/enemy-hp-bars/**', 'runtime/guest/include/**', 'runtime/include/**', 'tools/guestmod/**', 'tools/recomp/**', '.github/workflows/enemy-hp-bars.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  mod:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+      - name: Install PowerPC compiler
+        run: sudo apt-get update && sudo apt-get install -y clang lld
+      - name: Test, compile, and execute translated USA and EU modules
+        run: python mods/enemy-hp-bars/build.py
+      - name: Upload installable mod
+        uses: actions/upload-artifact@v4
+        with:
+          name: enemy-hp-bars-wwhdmod
+          path: build/enemy-hp-bars/*.wwhdmod
+          if-no-files-found: error
