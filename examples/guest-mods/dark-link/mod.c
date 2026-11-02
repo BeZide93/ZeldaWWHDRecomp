@@ -15,7 +15,7 @@ static wwhd_hud_element dl_element;
 static const char dl_title[] = "DARK LINK";
 static const char dl_ready_text[] = "READY - L3 + R3 / DARK";
 static const char dl_charge_text[] = "Charge with sword hits";
-static const char dl_active_text[] = "ACTIVE - sword damage boosted";
+static const char dl_active_text[] = "ACTIVE - diagnostic, no visual change";
 static const char dl_button_text[] = "DARK";
 
 static int dl_limit(int v, int low, int high) { return v < low ? low : v > high ? high : v; }
@@ -166,4 +166,4 @@ WWHD_HOOK_RETURN(DL_CC_CHECK, dl_hit_after, (fopAc_ac_c* target, DLAttack* hit))
         dl_hit(&dl_state, &dl_config, 1);
 }
 
-#include "visuals.h"
+#include "diagnostics.h"

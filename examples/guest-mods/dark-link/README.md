@@ -1,9 +1,11 @@
-# Dark Link (prototype 0.1.2)
+# Dark Link (diagnostic prototype 0.1.3)
 
-Standalone code mod for ZeldaWWHDRecomp. Charge with damaging sword hits, then
-activate stronger sword attacks and an experimental charcoal silhouette with red eyes.
+Standalone code mod for ZeldaWWHDRecomp. The gauge, activation, HUD and sword
+boost are implemented. **The Dark Link appearance is not working yet.** Version
+0.1.3 removes the ineffective fog edits and provides a bounded, read-only probe
+of the model/material path. It does not recolor Link, and is not a visual fix.
 This package contains original code only: no textures, models, game binaries or
-save data. It uses the player's installed Link model and native material fog parameters.
+save data.
 
 ## Install
 
@@ -18,7 +20,7 @@ platform, including Android. It does not require a new APK/runtime feature.
 
 ### Upgrading from 0.1.0/0.1.1
 
-Replace the installed package with 0.1.2 and fully restart the game, then load a
+Replace the installed package with 0.1.3 and fully restart the game, then load a
 normal in-game save. Do not resume a full emulator/recomp save state made with the
 old visual effect active: 0.1.1 left extra material override flags set. The new
 version cannot infer those flags' original values from an already altered state.
@@ -46,19 +48,40 @@ is claimed while the button is hidden or normal gameplay is suspended. If your
 host controller mapping assigns another action to a stick click, use the DARK
 button, automatic activation, or adjust that host binding.
 
+## Capture the visual diagnostic
+
+1. Install 0.1.3 and start a fresh session from a normal in-game save.
+2. Keep **Visual diagnostic logs** enabled (default in this diagnostic build).
+3. Wait about three seconds in gameplay, enable **Free transformation**, then
+   tap **DARK**, wait three seconds, tap it again and wait three seconds.
+4. Share the regular application log. Android's setup screen has **Share log**;
+   a crash is not needed. Look for `[guestmod:dark-link]` and `DL` probe lines.
+
+The probe logs the version, active/enabled/gameplay state, observed model-path
+counts and one scalar snapshot per player model/path/state. It covers at most
+four state changes and 60 logic steps per state. Repeated frames do not produce
+repeated snapshots. Switch the diagnostic option off/on to capture again.
+Logging stops while the option is off. It reads material IDs, pointer addresses,
+flags and per-instance material records, not texture/model asset contents.
+
+Path IDs in the log: 0 = mDoExt model entry wrapper, 1 = native model entry,
+2 = native model entry return, 3 = viewCalc entry. Model slots: 0 = body,
+1 = hands, 2 = hair. All numeric row values are hexadecimal. An absent path or
+model in a capture is evidence too; the summary includes zero match counts.
+No asynchronous UBO worker hook is installed. Unknown material counts are skipped.
+
 ## Scope and limits
 
-The appearance is an **experimental flat silhouette**, not a textured Dark Link
-skin. Version 0.1.2 replaces the faulty blanket material-register override from
-0.1.1 with the native material-local fog blend. The intended result is nearly
-black body/hands/hair and red eye surfaces, independent of the toon-lighting side.
-This path still needs real-game validation, including whether each eye material
-uses the native fog blend. Materials without fog support remain unchanged.
+The previous material-register edit altered lighting and left override bits set.
+The subsequent local PE-fog edit had no visible effect in the user's game.
+`runtime/src/fog_pin.cpp` shows the HD renderer copying fog from a per-view object
+into scene uniforms, so local legacy fog fields are not evidence of a working
+per-material recolor. The precise Link shader/material route remains unresolved.
+Do not replace it with another write based only on a synthetic-memory test.
 
-There is no custom flowing aura, eye-bloom shader, White/Gold variant or
-transformation animation. Eye texture masks and expressions, depth testing and
-eye occlusion remain native. Frozen Link keeps his ice look. Equipment retains
-its normal appearance.
+There is no custom aura, eye bloom, White/Gold variant or transformation animation.
+The diagnostic build leaves all game material/render data unchanged.
+
 Damage scaling runs after native `at_power_check`, only for the current player's
 three sword colliders and the sword attack flag. It changes the freshly calculated
 damage, not persistent collider strength, enemy health or the death procedure.
@@ -68,31 +91,12 @@ is awarded when `cc_at_check` reduces an enemy's health. Special bosses/scripted
 targets that bypass these native paths are outside this first version's coverage;
 armor-specific handlers can further override the native result.
 
-Visual overrides match the live player model instances (body, hands and hair).
-Eye materials are resolved using the game's own left/right eye material names;
-native eye animation-controller pointers remain a fallback. The PE block's native
-`getFogInfo` accessor supplies each material's fog record. A finite linear fog
-ramp entirely behind the camera requests the silhouette color after lighting;
-near/far projection values, alpha masks and resource files remain unchanged.
-Unsupported fog modes and unknown material counts fail closed.
-
-The complete fog record is saved once per preparation scope and restored bit for
-bit on return, even if the transformation has been disabled. Material/ambient/TEV
-registers and the mask at material +0xA0 are never changed. The previous code
-incorrectly kept every override bit set on restoration. Hooks now surround the
-native model entry/update methods, before `viewCalc` queues the asynchronous UBO
-job. There are no temporary material writes around `viewCalc` or joint packet
-submission; these are not actual immediate draws.
-
 Automated checks compile the PowerPC ELF, translate and compile it for both game
-regions, and execute state and mocked guest-hook tests. The tests check exact
-material/flag preservation, complete fog restoration, nested calls, both named
-eyes, unsupported/missing fog, foreign models, freezing, repeated cancellation,
-Free transformation, disabling, death, stage changes and player deletion.
-They **do not execute the game's renderer** or establish that the new silhouette
-looks correct. Test 0.1.2 from a fresh session in lit and shadowed areas, then
-cancel repeatedly with DARK/L3+R3 and disable the mod. Check both eyes, other
-actors, outfits, swimming and equipment on Android and desktop.
+regions, and execute state and mocked guest-hook tests. Tests cover gameplay,
+controller/touch cancellation, read-only material/instance snapshots, model
+identity filtering, per-phase snapshot suppression, capture-window/session bounds,
+and logging disabled. They do not execute the game's renderer or prove a visual
+fix. A real application capture is required for the next implementation step.
 
 ## Build
 

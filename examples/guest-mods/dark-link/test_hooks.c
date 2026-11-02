@@ -10,11 +10,17 @@
 enum { PLAY=0x11000000, LINK=0x11010000, SAVE=0x11020000, ENEMY=0x11030000,
        HIT=0x11040000, INPUT=0x11050000, MODEL=0x11060000, DATA=0x11070000,
        MATERIALS=0x11080000, EYE_ANIM=0x11090000, RESOURCE=0x110a0000,
-       NAMES=0x110b0000, PE=0x110c0000, FOG=0x110d0000, VTABLE=0x110e0000 };
+       NAMES=0x110b0000, PE=0x110c0000, FOG=0x110d0000, VTABLE=0x110e0000, INSTANCES=0x110f0000 };
 static const WWHDGuestModuleV1* module;
 static uint32_t filter, hud, touch, step=1, revision=1;
 static int free_mode, enabled=1, paused, menu, touch_visible=1, claim_active, elements;
-static int eye_indices[2]={1,2}, name_lookups;
+static int eye_indices[2]={1,2}, name_lookups, diagnostics=1, log_count, phase_count;
+static char last_log[256];
+static void log_line(Cpu* c) {
+    const char* line=(const char*)ppc_ptr(c->r[3]);
+    assert(strlen(line)<sizeof last_log); strcpy(last_log,line); ++log_count;
+    if (!strncmp(line,"DL phase ",9)) ++phase_count;
+}
 
 static void execute(uint32_t fn, uint32_t a, uint32_t b) {
     Cpu c = {0}; c.r[1] = 0x1201fff0; c.r[3] = a; c.r[4] = b;
@@ -34,7 +40,7 @@ static const char* arg_string(Cpu* c) { return (const char*)ppc_ptr(c->r[3]); }
 static void config_bool(Cpu* c) {
     const char* key=arg_string(c);
     c->r[3] = !strcmp(key,"free_transform") ? free_mode : !strcmp(key,"enabled") ? enabled :
-        !strcmp(key,"touch_button") ? touch_visible : c->r[4];
+        !strcmp(key,"touch_button") ? touch_visible : !strcmp(key,"diagnostics") ? diagnostics : c->r[4];
 }
 static void config_int(Cpu* c) { c->r[3]=c->r[4]; }
 static void config_revision(Cpu* c) { c->r[3]=0; c->r[4]=revision; }
@@ -48,6 +54,7 @@ static void emit(Cpu* c) { ++elements; c->r[3]=1; }
 static void copy(Cpu* c) { memcpy(ppc_ptr(c->r[3]),ppc_ptr(c->r[4]),c->r[5]); }
 static void clear(Cpu* c) { memset(ppc_ptr(c->r[3]),c->r[4],c->r[5]); }
 static PpcFunc service(const char* name) {
+    if (!strcmp(name,"wwhd_log")) return log_line;
     if (!strcmp(name,"wwhd_config_bool")) return config_bool;
     if (!strcmp(name,"wwhd_config_int")) return config_int;
     if (!strcmp(name,"wwhd_config_changed")) return config_revision;
@@ -67,10 +74,6 @@ static void dispatch(Cpu* c) {
         case 0x025200d4: c->r[3]=PLAY; return;
         case 0x025986bc: c->r[3]=menu; return;
         case 0x025af2a4: c->r[3]=paused; return;
-        /* Synthetic virtual getFogInfo; the real function is read from PE's vtable. */
-        case 0x02001000:
-            assert(c->r[3]>=PE && c->r[3]<PE+3*0x40);
-            c->r[3]=ld32(c->r[3]+4); return;
         case 0x027df9b0:
             assert(c->r[3]==RESOURCE+0x100); ++name_lookups;
             assert(c->r[4]==NAMES || c->r[4]==NAMES+32);
@@ -78,7 +81,7 @@ static void dispatch(Cpu* c) {
         default: fprintf(stderr,"Unexpected native call: %08x\n",c->pc); abort();
     }
 }
-static void tick(void) { ++step; hook(0x0240ebb0,2,LINK,0); }
+static void tick(void) { ++step; hook(0x0240ebb0,2,LINK,0); hook(0x0240ebb0,3,LINK,0); }
 static void buttons(uint32_t value) { st32(INPUT,value); execute(filter,INPUT,0); }
 static unsigned damage(unsigned power) {
     st8(HIT+8,power); hook(0x02518db0,3,HIT,0); return ld8(HIT+8);
@@ -90,30 +93,17 @@ static void hit(int lose_hp) {
     hook(0x025192a8,3,ENEMY,HIT);
 }
 static uint32_t color(int material, int index) { return MATERIALS+material*0x39c+0xa4+index*16; }
-static uint32_t fog(int material) { return FOG+material*0x40; }
-static uint8_t original_materials[3*0x39c], original_fog[3*0x40];
+static uint8_t original_materials[3*0x39c], original_instances[3*0x38];
 static void restored(void) {
     assert(!memcmp(ppc_ptr(MATERIALS),original_materials,sizeof original_materials));
-    assert(!memcmp(ppc_ptr(FOG),original_fog,sizeof original_fog));
+    assert(!memcmp(ppc_ptr(INSTANCES),original_instances,sizeof original_instances));
 }
 static void prepare(int active) {
-    hook(0x027f4f1c,2,MODEL,0);
-    if (active) {
-        for (int m=0;m<3;++m) {
-            assert(ld8(fog(m))==2);
-            assert((float)ldf32(fog(m)+4)==-10000.0f);
-            assert((float)ldf32(fog(m)+8)==-9999.0f);
-            assert(ld8(fog(m)+0x14)==(m ? 255 : 2));
-            assert(ld8(fog(m)+0x15)==(m ? 0 : 2));
-            assert(ld8(fog(m)+0x16)==(m ? 0 : 3));
-            assert(ld8(fog(m)+0x17)==255);
-            assert((float)ldf32(fog(m)+12)==1.0f && (float)ldf32(fog(m)+16)==100000.0f);
-        }
-        /* No lighting registers, override flags, texture/alpha data touched. */
-        assert(!memcmp(ppc_ptr(MATERIALS),original_materials,sizeof original_materials));
-    } else restored();
-    hook(0x027f4f1c,3,MODEL,0);
-    restored();
+    (void)active; /* This diagnostic version deliberately has no appearance writes. */
+    hook(0x025e2e5c,2,MODEL,0); restored();
+    hook(0x027f4f1c,2,MODEL,0); restored();
+    hook(0x027f4f1c,3,MODEL,0); restored();
+    hook(0x027f55fc,2,MODEL,0); restored();
 }
 int main(int argc, char** argv) {
     assert(argc==2);
@@ -130,7 +120,7 @@ int main(int argc, char** argv) {
     memcpy(ppc_ptr(module->mem_base),module->image,module->image_size);
     for (unsigned i=0; i<module->hook_count; ++i) {
         assert(module->hooks[i].kind!=WWHD_GUEST_REPLACE);
-        assert(module->hooks[i].target!=0x027f55fc && module->hooks[i].target!=0x027f583c);
+        assert(module->hooks[i].target!=0x027f5018 && module->hooks[i].target!=0x027f583c);
     }
     st32(PLAY+0x5b2c,LINK); st32(LINK+4,42); st32(0x101f84dc,SAVE);
     st16(SAVE+0x20,80); st16(SAVE+0x22,80); st8(ENEMY+0x2da,2);
@@ -161,53 +151,41 @@ int main(int argc, char** argv) {
         stf32(color(m,k),0.25f+k*0.01f); stf32(color(m,k)+4,0.5f);
         stf32(color(m,k)+8,0.75f); stf32(color(m,k)+12,0.4f+m*0.1f);
     }
-    /* Use nonzero override masks and sentinel bytes. The old code left 0x7ff
-     * set permanently; these assertions check the exact original material. */
-    st32(VTABLE+0x14,0x02001000);
+    st32(MODEL+0x138,3); st32(MODEL+0x13c,INSTANCES);
     for (int m=0;m<3;++m) {
-        st32(MATERIALS+m*0x39c+0x20,PE+m*0x40);
-        st32(PE+m*0x40,VTABLE); st32(PE+m*0x40+4,fog(m));
+        st32(MATERIALS+m*0x39c,RESOURCE+0x200+m*0x20);
+        st16(RESOURCE+0x200+m*0x20+0xc,m);
         st32(MATERIALS+m*0x39c+0xa0,0xa0000090u+m);
-        st32(fog(m),0x02aabbcc); /* includes padding, restored bit for bit */
-        stf32(fog(m)+4,500.0f); stf32(fog(m)+8,5000.0f);
-        stf32(fog(m)+12,1.0f); stf32(fog(m)+16,100000.0f);
-        st32(fog(m)+20,0xabcdef80);
+        for (int k=0;k<14;++k) st32(INSTANCES+m*0x38+k*4,0x12340000u+m*100+k);
     }
     memcpy(original_materials,ppc_ptr(MATERIALS),sizeof original_materials);
-    memcpy(original_fog,ppc_ptr(FOG),sizeof original_fog);
+    memcpy(original_instances,ppc_ptr(INSTANCES),sizeof original_instances);
     prepare(1); assert(name_lookups==2);
-    /* Nested entry/update returns restore the outer scope exactly once. */
-    hook(0x027f4f1c,2,MODEL,0);
-    hook(0x027f4fe4,2,MODEL,0); hook(0x027f4fe4,3,MODEL,0);
-    assert(ld8(FOG+0x14)==2 && ld8(fog(1)+0x14)==255);
-    hook(0x027f4f1c,3,MODEL,0); restored();
-    hook(0x027f4f1c,2,MODEL+0x400,0); restored();
-    hook(0x027f4f1c,3,MODEL+0x400,0); restored();
-    for (int i=0;i<20;++i) hook(0x027f4f1c,2,MODEL,0);
-    for (int i=0;i<20;++i) hook(0x027f4f1c,3,MODEL,0);
-    restored(); /* bounded scope overflow */
-    eye_indices[0]=-1; eye_indices[1]=3;
-    hook(0x027f4f1c,2,MODEL,0);
-    for (int m=0;m<3;++m) assert(ld8(fog(m)+0x14)==2);
-    hook(0x027f4f1c,3,MODEL,0); restored();
-    st32(LINK+0x604,EYE_ANIM); st32(MATERIALS+0x39c+0x24,EYE_ANIM);
-    hook(0x027f4f1c,2,MODEL,0); assert(ld8(fog(1)+0x14)==255); /* controller fallback */
-    hook(0x027f4f1c,3,MODEL,0);
-    st32(LINK+0x604,0); st32(MATERIALS+0x39c+0x24,0); restored();
-    eye_indices[0]=1; eye_indices[1]=2;
-    st8(LINK+0x3be,8); prepare(0); st8(LINK+0x3be,0); /* frozen */
-    st32(DATA+0x0c,97); prepare(0); st32(DATA+0x0c,3); /* count bound */
-    /* No fog info, no PE block, and unsupported fog modes fail closed. */
-    st32(PE+4,0); st32(MATERIALS+0x39c+0x20,0); st8(fog(2),4);
-    hook(0x027f4f1c,2,MODEL,0);
-    assert(ld32(FOG+20)==0xabcdef80 && ld32(fog(1)+20)==0xabcdef80 && ld8(fog(2))==4);
-    hook(0x027f4f1c,3,MODEL,0);
-    st32(PE+4,FOG); st32(MATERIALS+0x39c+0x20,PE+0x40); st8(fog(2),2); restored();
-    /* Multiple activations/cancellations: BOTH gameplay and next material pass
-     * must be normal after the second button edge (including free mode below). */
-    buttons(0); buttons(0x60000); tick(); assert(damage(3)==3); prepare(0);
+    assert(strstr(last_log,"DL instance [slot,i,14 words]"));
+    int logs=log_count;
+    for (int i=0;i<100;++i) prepare(1);
+    assert(log_count==logs); /* each model/path detailed only once per phase */
+    hook(0x027f55fc,2,MODEL+0x400,0); assert(log_count==logs); restored();
+    diagnostics=0; tick();
+    for (int i=0;i<100;++i) { prepare(1); tick(); }
+    assert(log_count==logs); /* no logs/reads while explicitly disabled */
+    diagnostics=1; tick(); prepare(1); assert(log_count>logs);
+    for (int i=0;i<60;++i) tick();
+    assert(strstr(last_log,"DL probe player matches"));
+    logs=log_count;
+    for (int i=0;i<100;++i) { prepare(1); tick(); }
+    assert(log_count==logs); /* bounded window closes; not a per-frame log */
+    /* Toggle enough times to exhaust the four-session cap. */
+    free_mode=1; ++revision; tick();
+    for (int i=0;i<8;++i) { buttons(0); buttons(0x60000); tick(); prepare(0); }
+    logs=log_count;
+    for (int i=0;i<4;++i) { buttons(0); buttons(0x60000); tick(); prepare(0); }
+    assert(log_count==logs);
+    /* Restore the timed-mode gameplay scenario for the remaining tests. */
+    enabled=0; ++revision; tick();
+    enabled=1; free_mode=0; ++revision; tick();
     buttons(0); for (int i=0;i<20;++i) hit(1);
-    buttons(0x60000); tick(); assert(damage(3)==6); prepare(1);
+    buttons(0x60000); tick(); assert(damage(3)==6);
 
     paused=1; buttons(0); assert(!claim_active); elements=0; execute(hud,1,0); assert(!elements);
     for (int i=0;i<900;++i) tick();
@@ -234,7 +212,7 @@ int main(int argc, char** argv) {
     st16(SAVE+0x22,80); tick(); buttons(0x60000); tick(); assert(damage(3)==6);
     hook(0x027f4f1c,2,MODEL,0);
     enabled=0; ++revision; tick(); assert(damage(3)==3);
-    /* Return must restore even when active/enabled changed inside the scope. */
+    /* Probe remains read-only even when enabled changes between entry/return. */
     hook(0x027f4f1c,3,MODEL,0); restored(); prepare(0);
     enabled=1; ++revision; tick(); buttons(0); buttons(0x60000); tick(); assert(damage(3)==6);
     hook(0x0240ee28,2,LINK,0); assert(damage(3)==3 && !claim_active); prepare(0);
