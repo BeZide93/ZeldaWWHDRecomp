@@ -13,7 +13,7 @@ enum { PLAY=0x11000000, LINK=0x11010000, SAVE=0x11020000, ENEMY=0x11030000,
        INSTANCES=0x110f0000, MATERIAL_COUNT=8 };
 static const WWHDGuestModuleV1* module;
 static uint32_t filter, hud, touch, step=1, revision=1;
-static int diagnostics=1;
+static int diagnostics=1,show_gauge=1;
 static char hud_text[2048];
 static FILE* hud_trace;
 static int free_mode, enabled=1, paused, menu, touch_visible=1, claim_active, elements;
@@ -47,7 +47,7 @@ static const char* arg_string(Cpu* c) { return (const char*)ppc_ptr(c->r[3]); }
 static void config_bool(Cpu* c) {
     const char* key=arg_string(c);
     c->r[3] = !strcmp(key,"free_transform") ? free_mode : !strcmp(key,"enabled") ? enabled :
-        !strcmp(key,"touch_button") ? touch_visible : !strcmp(key,"appearance_diagnostics") ? diagnostics : c->r[4];
+        !strcmp(key,"show_hud") ? show_gauge : !strcmp(key,"touch_button") ? touch_visible : !strcmp(key,"appearance_diagnostics") ? diagnostics : c->r[4];
 }
 static void config_int(Cpu* c) { c->r[3]=c->r[4]; }
 static void config_revision(Cpu* c) { c->r[3]=0; c->r[4]=revision; }
@@ -175,6 +175,7 @@ static void submit(uint32_t wrapper, int active) {
 static void prepare(int active) { submit(0x025e2e5c,active); }
 #include "test_textures.h"
 #include "test_magic.h"
+#include "test_shortcut.h"
 int main(int argc, char** argv) {
     assert(argc==3);
     hud_trace=fopen(argv[2],"wb");assert(hud_trace);
@@ -291,6 +292,7 @@ int main(int argc, char** argv) {
     }
     test_textures();
     test_magic();
+    test_shortcut();
     test_aura();
     /* Cancellation must leave the next preparation untouched. */
     buttons(0); buttons(0x60000); tick(); assert(damage(3)==3); prepare(0);

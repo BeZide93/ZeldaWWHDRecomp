@@ -250,6 +250,35 @@ WWHD_HOOK_RETURN(0x02675414, dl_magic_track, (void* magic)) {
     dl_magic_position[1]=360-y+(bv==1 ? h : bv==2 ? 0 : h/2)+8;
     dl_magic_position[2]=w; dl_magic_position[3]=h; dl_magic_position_valid=1;
 }
+/* Shared geometry/visibility check: the native shortcut reserves space only
+ * when the same gauge frame can actually be submitted by dl_magic_hud. */
+static int dl_magic_element(u32 v,u32 layer,wwhd_hud_element* out) {
+    if(!dl_magic_images[v][0] || !dl_magic_images[v][1]) return 0;
+    u32 anchor=WWHD_HUD_CENTER;
+    if(!dl_magic_position_valid) {
+        if(!dl_magic_authored_valid) return 0;
+        dl_magic_position[0]=640+dl_magic_authored[0]+dl_magic_base[v].x-dl_magic_base[v].w/2;
+        dl_magic_position[1]=360-dl_magic_authored[1]-dl_magic_base[v].y+dl_magic_base[v].h/2+8;
+        dl_magic_position[2]=dl_magic_base[v].w; dl_magic_position[3]=dl_magic_base[v].h;
+        anchor=WWHD_HUD_TOP_LEFT;
+    }
+    f32 scale=dl_magic_position[2]/dl_magic_base[v].w;
+    f32 scale_y=dl_magic_position[3]/dl_magic_base[v].h;
+    wwhd_game_pane* p=layer ? &dl_magic_fill[v]:&dl_magic_base[v];
+    f32 w=p->w*scale,h=p->h*scale_y;
+    f32 x=dl_magic_position[0]+(p->x-dl_magic_base[v].x)*scale+(dl_magic_position[2]-w)/2;
+    f32 y=dl_magic_position[1]-(p->y-dl_magic_base[v].y)*scale_y+(dl_magic_position[3]-h)/2;
+    f32 fraction=layer ? dl_gauge_fraction():1;
+    /* One rejected command invalidates the whole owner list, including
+     * DARK. Unsupported/malformed native geometry must stay local here. */
+    if(!(x>=-65536 && x<=65536 && y>=-65536 && y<=65536 &&
+         w>0 && w<=65536 && h>0 && h<=65536 && fraction>0 && fraction<=1)) return 0;
+    *out=(wwhd_hud_element){.kind=WWHD_HUD_IMAGE,.anchor=anchor,
+        .x=x,.y=y,.w=w*fraction,.h=h,.rgba=dl_magic_tint[v][layer],
+        .image=dl_magic_images[v][layer],.thickness=1,
+        .u0=0,.v0=0,.u1=fraction,.v1=1};
+    return 1;
+}
 static void dl_magic_hud(u32 list) {
     unsigned long long epoch=wwhd_hud_epoch();
     if(epoch!=dl_magic_epoch) {
@@ -261,30 +290,6 @@ static void dl_magic_hud(u32 list) {
     u32 save=WWHD_GAME_DATA(WWHD_ADDR_save_info_pointer,u32);
     u32 v=save && *((u8*)save+0x33)>16;
     if(!dl_magic_images[v][0] || !dl_magic_images[v][1]) return;
-    u32 anchor=WWHD_HUD_CENTER;
-    if(!dl_magic_position_valid) {
-        if(!dl_magic_authored_valid) return;
-        dl_magic_position[0]=640+dl_magic_authored[0]+dl_magic_base[v].x-dl_magic_base[v].w/2;
-        dl_magic_position[1]=360-dl_magic_authored[1]-dl_magic_base[v].y+dl_magic_base[v].h/2+8;
-        dl_magic_position[2]=dl_magic_base[v].w; dl_magic_position[3]=dl_magic_base[v].h;
-        anchor=WWHD_HUD_TOP_LEFT;
-    }
-    f32 scale=dl_magic_position[2]/dl_magic_base[v].w;
-    f32 scale_y=dl_magic_position[3]/dl_magic_base[v].h;
-    for(u32 layer=0;layer<2;++layer) {
-        wwhd_game_pane* p=layer ? &dl_magic_fill[v]:&dl_magic_base[v];
-        f32 w=p->w*scale,h=p->h*scale_y;
-        f32 x=dl_magic_position[0]+(p->x-dl_magic_base[v].x)*scale+(dl_magic_position[2]-w)/2;
-        f32 y=dl_magic_position[1]-(p->y-dl_magic_base[v].y)*scale_y+(dl_magic_position[3]-h)/2;
-        f32 fraction=layer ? dl_gauge_fraction():1;
-        /* One rejected command invalidates the whole owner list, including
-         * DARK. Unsupported/malformed native geometry must stay local here. */
-        if(!(x>=-65536 && x<=65536 && y>=-65536 && y<=65536 &&
-             w>0 && w<=65536 && h>0 && h<=65536 && fraction>0 && fraction<=1)) continue;
-        dl_element=(wwhd_hud_element){.kind=WWHD_HUD_IMAGE,.anchor=anchor,
-            .x=x,.y=y,.w=w*fraction,.h=h,.rgba=dl_magic_tint[v][layer],
-            .image=dl_magic_images[v][layer],.thickness=1,
-            .u0=0,.v0=0,.u1=fraction,.v1=1};
-        if(fraction>0) wwhd_hud_emit(list,&dl_element);
-    }
+    for(u32 layer=0;layer<2;++layer)
+        if(dl_magic_element(v,layer,&dl_element)) wwhd_hud_emit(list,&dl_element);
 }

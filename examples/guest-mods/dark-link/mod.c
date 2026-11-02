@@ -83,6 +83,7 @@ static void dl_text(u32 list, f32 x, f32 y, const char* text, u32 length, u32 co
     wwhd_hud_emit(list, &dl_element);
 }
 #include "magic_hud.h"
+#include "shortcut_hud.h"
 static void dl_hud(u32 list) {
     if (!dl_owner || !dl_allowed(dl_owner)) return;
     int ready = dl_ready(&dl_state, &dl_config);
