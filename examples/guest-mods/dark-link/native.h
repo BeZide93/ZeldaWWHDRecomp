@@ -50,7 +50,7 @@ static int dl_sword(const DLAttack* hit, const daPy_lk_c* link) {
 /* Exact current-player model identities. PlayerModelState begins at Link+0xd90;
  * +0xec scabbard, +0xf0 selected shield, +0x36b0 held item (sword only).
  * Evidence: setSwordModel, initModel, draw, setEquipItem models in main_01/04. */
-#define DL_MODEL_PARTS 7
+#define DL_MODEL_PARTS 8
 static int dl_model_part(const daPy_lk_c* link, u32 model) {
     if (!link || !model) return -1;
     if (model == link->mpCLModel) return 0;
@@ -60,5 +60,6 @@ static int dl_model_part(const daPy_lk_c* link, u32 model) {
     if (model == dl_word(link, 0xe80)) return 4;
     if (model == dl_word(link, 0xe7c)) return 5;
     if (link->mEquipItem == 0x103 && model == dl_word(link, 0x4440)) return 6;
+    if (model == dl_word(link, 0x5700)) return 7; /* native Magic Armor shell */
     return -1;
 }

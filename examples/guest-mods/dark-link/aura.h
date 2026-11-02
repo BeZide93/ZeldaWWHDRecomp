@@ -1,0 +1,122 @@
+/* Visual-only use of Link's native Ymgcs00 Magic Armor shell.
+ * Layout/calls: public d_a_player_main_04{,_aura,_item}, main_01 draw.
+ * No shield flag, Tingle timer, magic, rupees or damage state is written. */
+#pragma once
+WWHD_GAME_FUNC(0x027DF40C, void, dl_animation_notify, (u32*));
+typedef struct { u32 brk, animation, channel; f32 frame, control, value; } DLAuraFrame;
+static DLAuraFrame dl_aura_update_frames[2], dl_aura_draw_frames[2];
+static u32 dl_aura_update_owner, dl_aura_draw_owner;
+typedef struct { u32 model, material, resource, state, before[3], ours[3]; } DLAuraBlend;
+static DLAuraBlend dl_aura_blends[16];
+static u32 dl_aura_blend_count;
+static int dl_aura_active(daPy_lk_c* link) {
+    return dl_enabled && dl_state.active && link == dl_owner && link == dl_player() &&
+        dl_actor_id(link) == dl_owner_id && !(dl_word(link, 0x3bc) & 0x800);
+}
+static int dl_aura_frame(u32 brk, DLAuraFrame* save) {
+    u32 a = dl_word((void*)brk, 0x10), v = dl_word((void*)brk, 0x20);
+    if (!dl_game_span(a, 8) || !dl_game_span(v, 0x18)) return 0;
+    s16 end = *(s16*)(brk + 0xa);
+    if (end < 2 || end > 10000) return 0;
+    *save = (DLAuraFrame){brk, a, v, *(f32*)a, *(f32*)(brk+4), *(f32*)v};
+    return 1;
+}
+static void dl_aura_set(DLAuraFrame* f, f32 frame) {
+    *(f32*)(f->brk+4) = *(f32*)f->animation = frame;
+    u32 interpolate = dl_word((void*)f->channel, 0x10);
+    if (interpolate >= 0x02000000 && interpolate < 0x04000000) {
+        typedef f32 (*Interpolate)(u32, f32, f32, f32);
+        *(f32*)f->channel = ((Interpolate)interpolate)(dl_word((void*)f->channel,0x14), frame,
+            *(f32*)(f->channel+4), *(f32*)(f->channel+8));
+        dl_animation_notify((u32*)(f->brk+0x20));
+    }
+}
+static void dl_aura_frame_restore(DLAuraFrame* f) {
+    if (dl_word((void*)f->brk,0x10) != f->animation || dl_word((void*)f->brk,0x20) != f->channel) return;
+    *(f32*)f->animation = f->frame; *(f32*)(f->brk+4) = f->control;
+    *(f32*)f->channel = f->value;
+    dl_animation_notify((u32*)(f->brk+0x20));
+}
+/* Black additive light is invisible. Change this shell's material blend to
+ * source-alpha / inverse-source-alpha, preserving its authored alpha/depth.
+ * FMAT+20 relative render state: flags, polygon, depth, alpha, ref, color,
+ * target, blend, constant RGBA. BfresLibrary WiiU RenderState/BlendControl. */
+static void dl_aura_restore(void) {
+    for (u32 i=0;i<dl_aura_blend_count;++i) {
+        DLAuraBlend* b=&dl_aura_blends[i];
+        if (!dl_owner || dl_player()!=dl_owner || dl_actor_id(dl_owner)!=dl_owner_id ||
+            dl_word(dl_owner,0x5700)!=b->model || !dl_game_span(b->model,0xb0) ||
+            !dl_game_span(b->material,4) ||
+            *(u32*)b->material!=b->resource || dl_relative(b->resource+0x20)!=b->state) continue;
+        u32 array=dl_word((void*)b->model,0x34), count=*(u16*)(b->model+0x2a);
+        if (!count || count>16 || !dl_game_span(array,count*0x3c) ||
+            b->material<array || (b->material-array)%0x3c || (b->material-array)/0x3c>=count) continue;
+        const u32 offsets[3]={0,0x14,0x1c};
+        for (u32 k=0;k<3;++k) {
+            u32* word=(u32*)(b->state+offsets[k]);
+            const u32 masks[3]={0x33,0x100,0x1fff};
+            if ((*word&masks[k])==(b->ours[k]&masks[k]))
+                *word=(*word&~masks[k])|(b->before[k]&masks[k]);
+        }
+    }
+    dl_aura_blend_count=0;
+}
+static void dl_aura_blend(daPy_lk_c* link) {
+    dl_aura_restore();
+    u32 model=dl_word(link,0x5700);
+    if (!dl_game_span(model,0xb0)) return;
+    u32 count=*(u16*)(model+0x2a), materials=dl_word((void*)model,0x34);
+    if (!count || count>16 || !dl_game_span(materials,count*0x3c)) return;
+    for (u32 i=0;i<count;++i) {
+        u32 material=materials+i*0x3c, res=*(u32*)material;
+        if (!dl_game_span(res,0x24) || *(u32*)res!=0x464d4154) continue;
+        u32 state=dl_relative(res+0x20);
+        if (!dl_game_span(state,0x30)) continue;
+        DLAuraBlend* b=&dl_aura_blends[dl_aura_blend_count++];
+        *b=(DLAuraBlend){.model=model,.material=material,.resource=res,.state=state};
+        const u32 offsets[3]={0,0x14,0x1c};
+        for (u32 k=0;k<3;++k) b->before[k]=*(u32*)(state+offsets[k]);
+        b->ours[0]=(b->before[0]&~0x33u)|0x13u; /* translucent, color blending */
+        b->ours[1]=b->before[1]|0x100u;
+        b->ours[2]=(b->before[2]&~0x1fffu)|4u|(5u<<8);
+        for (u32 k=0;k<3;++k) *(u32*)(state+offsets[k])=b->ours[k];
+    }
+}
+WWHD_HOOK(0x0240B7F4, dl_aura_update_before, (daPy_lk_c* link)) {
+    dl_aura_update_owner=0;
+    if (!dl_aura_active(link)) return;
+    dl_aura_blend(link);
+    /* A real Magic Armor/Tingle effect keeps its own activation and fading. */
+    if ((dl_word(link,0x3bc)&1) || link->mTinkleShieldTimer) return;
+    if (!dl_aura_frame((u32)link+0x5614,&dl_aura_update_frames[0]) ||
+        !dl_aura_frame((u32)link+0x5704,&dl_aura_update_frames[1])) return;
+    dl_aura_update_owner=(u32)link;
+    for (u32 i=0;i<2;++i) {
+        DLAuraFrame* f=&dl_aura_update_frames[i];
+        /* Native inactive path subtracts one then updates all matrices/BTK.
+         * Only its animation input is borrowed, never a protection flag. */
+        *(f32*)f->animation=(f32)*(s16*)(f->brk+0xa)+0.999f;
+    }
+}
+WWHD_HOOK_RETURN(0x0240B7F4, dl_aura_update_after, (daPy_lk_c* link)) {
+    if (dl_aura_update_owner!=(u32)link) return;
+    dl_aura_update_owner=0;
+    for (u32 i=0;i<2;++i) {
+        DLAuraFrame* f=&dl_aura_update_frames[i];
+        f32 baseline=f->frame>1 ? f->frame-1 : 0;
+        dl_aura_set(f,baseline); /* leave native fade at its natural next frame */
+    }
+}
+WWHD_HOOK(WWHD_ADDR_daPy_Draw, dl_aura_draw_before, (daPy_lk_c* link)) {
+    dl_aura_draw_owner=0;
+    if (!dl_aura_active(link) || !dl_aura_frame((u32)link+0x5614,&dl_aura_draw_frames[0]) ||
+        !dl_aura_frame((u32)link+0x5704,&dl_aura_draw_frames[1])) return;
+    dl_aura_draw_owner=(u32)link;
+    for (u32 i=0;i<2;++i) dl_aura_set(&dl_aura_draw_frames[i],
+        (f32)*(s16*)(dl_aura_draw_frames[i].brk+0xa)-0.001f);
+}
+WWHD_HOOK_RETURN(WWHD_ADDR_daPy_Draw, dl_aura_draw_after, (daPy_lk_c* link)) {
+    if (dl_aura_draw_owner!=(u32)link) return;
+    dl_aura_draw_owner=0;
+    for (u32 i=0;i<2;++i) dl_aura_frame_restore(&dl_aura_draw_frames[i]);
+}

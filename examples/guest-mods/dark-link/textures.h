@@ -55,7 +55,7 @@ static void dl_texture_restore_model(u32 model) {
         dl_bindings[i] = dl_bindings[--dl_binding_count];
     }
 }
-static void dl_texture_restore_all(void) { dl_texture_restore_model(0); }
+static void dl_texture_restore_all(void) { dl_texture_restore_model(0); dl_aura_restore(); }
 
 static u32 dl_texture_view(u32 texture, int eye) {
     /* Never guess descriptor layouts or dereference an unrecognized mod view. */
@@ -248,9 +248,12 @@ static void dl_diag_hud(u32 list) {
 #define DL_S(s) n = dl_probe_append(line, n, s)
 #define DL_N(v) n = dl_probe_number(line, n, v)
     char* line = dl_probe_lines[0];
-    DL_S("DL 0.1.11 "); DL_S(dl_state.active ? "ON" : "OFF (last sample)");
+    DL_S("DL 0.1.12 "); DL_S(dl_state.active ? "ON" : "OFF (last sample)");
     DL_S("  Draw="); DL_N(dl_probe.draws); DL_S("  Refresh B/H/Hair/Gear=");
-    DL_N(dl_probe.refresh[0]); DL_S("/"); DL_N(dl_probe.refresh[1]); DL_S("/"); DL_N(dl_probe.refresh[2]); DL_S("/"); DL_N(dl_probe.refresh[3]); lengths[0] = n;
+    DL_N(dl_probe.refresh[0]); DL_S("/"); DL_N(dl_probe.refresh[1]); DL_S("/"); DL_N(dl_probe.refresh[2]); DL_S("/"); DL_N(dl_probe.refresh[3]);
+    DL_S(" Magic="); DL_N((dl_magic_images[0][0]!=0)+(dl_magic_images[0][1]!=0)+(dl_magic_images[1][0]!=0)+(dl_magic_images[1][1]!=0));
+    DL_S(" Pos="); DL_N(dl_magic_position_valid ? 1 : dl_magic_authored_valid ? 2 : 0);
+    DL_S(" Aura="); DL_N(dl_owner && dl_word(dl_owner,0x5700)!=0); lengths[0] = n;
     line = dl_probe_lines[1]; n = 0;
     DL_S("Body J/N="); DL_N(dl_probe.materials); DL_S("/"); DL_N(dl_probe.native_materials);
     DL_S("  Albedo="); DL_N(dl_probe.albedo); DL_S("  Views="); DL_N(dl_probe.views); DL_S("  Eyes found/bound="); DL_N(dl_probe.eye_materials); DL_S("/"); DL_N(dl_probe.eyes); lengths[1] = n;

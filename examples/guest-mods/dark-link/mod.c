@@ -14,11 +14,8 @@ static unsigned long long dl_revision[9];
 static wwhd_hud_element dl_element;
 #include "appearance_probe.h"
 static void dl_texture_restore_all(void);
+static void dl_aura_restore(void);
 static void dl_texture_resubmit(void* model);
-static const char dl_title[] = "DARK LINK 0.1.11";
-static const char dl_ready_text[] = "READY - L3 + R3 / DARK";
-static const char dl_charge_text[] = "Charge with sword hits";
-static const char dl_active_text[] = "ACTIVE - sword damage boosted";
 static const char dl_button_text[] = "DARK";
 
 static int dl_limit(int v, int low, int high) { return v < low ? low : v > high ? high : v; }
@@ -43,7 +40,7 @@ static void dl_options(void) {
     }
     dl_touch_x = dl_limit(wwhd_config_int("touch_x", 940), 0, 1184);
     dl_touch_y = dl_limit(wwhd_config_int("touch_y", 560), 0, 676);
-    int diagnostics = wwhd_config_bool("appearance_diagnostics", 1);
+    int diagnostics = wwhd_config_bool("appearance_diagnostics", 0);
     if (diagnostics != dl_diagnostics) dl_probe = (DLAppearanceProbe){.reason=DL_PROBE_NO_REFRESH};
     dl_diagnostics = diagnostics;
     if (!dl_enabled) { dl_texture_restore_all(); dl_reset(&dl_state); }
@@ -85,22 +82,11 @@ static void dl_text(u32 list, f32 x, f32 y, const char* text, u32 length, u32 co
         .x=x, .y=y, .size=size, .rgba=color, .text=text, .text_bytes=length, .thickness=1};
     wwhd_hud_emit(list, &dl_element);
 }
+#include "magic_hud.h"
 static void dl_hud(u32 list) {
     if (!dl_owner || !dl_allowed(dl_owner)) return;
     int ready = dl_ready(&dl_state, &dl_config);
-    if (dl_show_hud) {
-        f32 fraction = dl_state.active ? (dl_config.free_transform ? 1.0f : dl_state.remaining / dl_state.total)
-            : dl_config.free_transform ? 1.0f : dl_state.charge / dl_config.capacity;
-        if (fraction < 0) fraction = 0;
-        if (fraction > 1) fraction = 1;
-        dl_rect(list, 492, 640, 296, 70, 0x14101de8);
-        dl_text(list, 506, 647, dl_title, sizeof dl_title - 1, 0xe7ddebff, 16);
-        dl_rect(list, 506, 671, 268, 10, 0x463442ff);
-        dl_rect(list, 506, 671, 268 * fraction, 10, dl_state.active ? 0xef354bff : ready ? 0xdd9c56ff : 0xa353aaff);
-        const char* label = dl_state.active ? dl_active_text : ready ? dl_ready_text : dl_charge_text;
-        u32 length = dl_state.active ? sizeof dl_active_text - 1 : ready ? sizeof dl_ready_text - 1 : sizeof dl_charge_text - 1;
-        dl_text(list, 506, 688, label, length, 0xcfc2d3ff, 13);
-    }
+    if (dl_show_hud) dl_magic_hud(list);
     if (dl_diagnostics) dl_diag_hud(list);
     if (dl_touch_enabled) {
         dl_rect(list, dl_touch_x, dl_touch_y, 96, 44, dl_state.active ? 0xa52e43e8 : ready ? 0x764d33e8 : 0x302536d0);
@@ -181,3 +167,4 @@ WWHD_HOOK_RETURN(DL_CC_CHECK, dl_hit_after, (fopAc_ac_c* target, DLAttack* hit))
 
 #include "visuals.h"
 #include "textures.h"
+#include "aura.h"

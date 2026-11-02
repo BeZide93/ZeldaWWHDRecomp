@@ -1,4 +1,4 @@
-/* Bounded, on-screen observations for 0.1.11. No game writes or file logging. */
+/* Bounded, on-screen observations for 0.1.12. No game writes or file logging. */
 #pragma once
 enum {
     DL_PROBE_OK, DL_PROBE_NO_REFRESH, DL_PROBE_FROZEN, DL_PROBE_MODEL_DATA,
@@ -13,7 +13,7 @@ typedef struct {
     char body_samplers[48], eye_samplers[48];
 } DLAppearanceProbe;
 static DLAppearanceProbe dl_probe = {.reason=DL_PROBE_NO_REFRESH};
-static int dl_diagnostics = 1;
+static int dl_diagnostics = 0;
 static void dl_diag_hud(u32 list);
 static void dl_diag_submission(void* model);
 static void dl_probe_increment(u32* value) { if (*value < 999999u) ++*value; }

@@ -46,7 +46,8 @@ def main():
             host, str(ROOT / "runtime/include"), game_build=by_name(region))
         supported = {"wwhd_hud_register", "wwhd_touch_register", "wwhd_input_filter_register",
             "wwhd_config_changed", "wwhd_config_bool", "wwhd_config_int", "wwhd_logic_step",
-            "wwhd_touch_claim", "wwhd_logic_dt", "wwhd_hud_emit", "memcpy", "memset"}
+            "wwhd_touch_claim", "wwhd_logic_dt", "wwhd_hud_emit", "wwhd_hud_epoch",
+            "wwhd_hud_texture", "wwhd_hud_release", "wwhd_setting_get", "memcpy", "memset"}
         unexpected = set(translated.services) - supported
         if unexpected:
             raise RuntimeError(f"Unsupported imports (check hard-float ABI): {sorted(unexpected)}")

@@ -19,6 +19,13 @@ static int free_mode, enabled=1, paused, menu, touch_visible=1, claim_active, el
 static const char* eye_names[]={"eyeL","eyeR","eyeLdamA","eyeRdamA","eyeLdamB","eyeRdamB"};
 static int eye_indices[6]={1,2,3,4,5,6}, name_lookups, missing_color;
 static uint32_t missing_slots;
+static void magic_setting(Cpu*);
+static void magic_texture(Cpu*);
+static void magic_epoch(Cpu*);
+static void magic_release(Cpu*);
+static void magic_emit(uint32_t);
+static uint32_t magic_archive;
+static int aura_notifications;
 
 static void execute(uint32_t fn, uint32_t a, uint32_t b) {
     Cpu c = {0}; c.r[1] = 0x1201fff0; c.r[3] = a; c.r[4] = b;
@@ -52,6 +59,7 @@ static void emit(Cpu* c) {
     ++elements;
     /* Guest HUD ABI: text pointer at 64, byte count at 68 (72-byte element). */
     uint32_t e=c->r[4];
+    if (ld32(e)==2) magic_emit(e);
     if (ld32(e)==1) {
         uint32_t p=ld32(e+64), bytes=ld32(e+68);
         size_t used=strlen(hud_text);
@@ -78,12 +86,19 @@ static PpcFunc service(const char* name) {
     if (!strcmp(name,"wwhd_touch_register")) return reg_touch;
     if (!strcmp(name,"wwhd_touch_claim")) return claim;
     if (!strcmp(name,"wwhd_hud_emit")) return emit;
+    if (!strcmp(name,"wwhd_setting_get")) return magic_setting;
+    if (!strcmp(name,"wwhd_hud_texture")) return magic_texture;
+    if (!strcmp(name,"wwhd_hud_epoch")) return magic_epoch;
+    if (!strcmp(name,"wwhd_hud_release")) return magic_release;
     if (!strcmp(name,"memcpy")) return copy;
     if (!strcmp(name,"memset")) return clear;
     fprintf(stderr,"Unexpected service: %s\n",name); return 0;
 }
 static void dispatch(Cpu* c) {
     switch (c->pc) {
+        case 0x026fbb24: c->r[3]=magic_archive; return;
+        case 0x027df40c: ++aura_notifications; return;
+        case 0x02000004: return; /* synthetic frame interpolation: identity in f1 */
         case 0x025200d4: c->r[3]=PLAY; return;
         case 0x025986bc: c->r[3]=menu; return;
         case 0x025af2a4: c->r[3]=paused; return;
@@ -148,6 +163,7 @@ static void submit(uint32_t wrapper, int active) {
 }
 static void prepare(int active) { submit(0x025e2e5c,active); }
 #include "test_textures.h"
+#include "test_magic.h"
 int main(int argc, char** argv) {
     assert(argc==2);
     void* memory=mmap(PPC_MEM_BASE,0x100000000ull,PROT_READ|PROT_WRITE,
@@ -262,6 +278,8 @@ int main(int argc, char** argv) {
         hook(0x025e2e5c,3,model,0); restored(); st32(field,0); st16(LINK+0x69b0,0);
     }
     test_textures();
+    test_magic();
+    test_aura();
     /* Cancellation must leave the next preparation untouched. */
     buttons(0); buttons(0x60000); tick(); assert(damage(3)==3); prepare(0);
     buttons(0); for (int i=0;i<20;++i) hit(1);
