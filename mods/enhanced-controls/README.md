@@ -40,6 +40,10 @@ positions use 1280×720 layout units centred on the picture, positive Y upwards.
 The fixed gesture pad stays at (420, 120). Macro buttons take priority over this
 pad if moved onto it; the Edit launcher takes priority over macros.
 
+Version **0.2.1** fixes missing controls in 0.2.0: image and text commands now
+set the positive thickness required by the host validator. Existing saved editor
+layouts and options remain compatible.
+
 ## Macro editor
 
 1. Tap **Edit** (top centre by default). Choose **Jump**, **Slash**, **Spin** or
@@ -84,7 +88,7 @@ macro's release; the mod does not forcibly release the player's inputs.
 
 1. Download the `enhanced-controls` artifact from the successful **Enhanced
    Controls mod** Actions run. Extract the outer GitHub artifact ZIP to obtain
-   `enhanced-controls-0.2.0.wwhdmod`; do **not** extract that file.
+   `enhanced-controls-0.2.1.wwhdmod`; do **not** extract that file.
 2. Enable **Code mods** in the app's setup or **Settings → Mods → More →
    Code-mod support**. If newly enabled, let the app rebuild the game code.
 3. **Settings → Mods → More → Install from a file**: choose the `.wwhdmod`.
@@ -115,11 +119,15 @@ python3 mods/enhanced-controls/build.py
 python3 mods/enhanced-controls/tests/run_tests.py
 ```
 
-Output: `build/enhanced-controls/enhanced-controls-0.2.0.wwhdmod` and
-`SHA256SUMS.txt`. `WWHD_PPC_CLANG`, `WWHD_PPC_LLD` and `CC` can select compilers.
+Output: `build/enhanced-controls/enhanced-controls-0.2.1.wwhdmod` and
+`SHA256SUMS.txt`. `WWHD_PPC_CLANG`, `WWHD_PPC_LLD`, `CC` and `CXX` can select compilers.
 The build checks the real upstream package reader and PPC-to-C translator for
 both USA and EU. Tests exercise the pure policy and the translated module with
-synthetic guest memory/services, without game files. CI runs the same commands
+synthetic guest memory/services, without game files. Emitted HUD commands also
+pass through upstream's actual HUD store: geometry, texture handles and complete
+list publication are checked for normal controls, text fallback and the editor.
+This catches invalid commands that would otherwise hide the entire overlay.
+CI runs the same commands
 on pushes to `enhanced-mod` and relevant pull requests, then uploads the package.
 `workflow_dispatch` is also declared (GitHub exposes the manual button once the
 workflow exists on the default branch).

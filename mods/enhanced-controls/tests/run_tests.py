@@ -12,6 +12,7 @@ HERE=Path(__file__).resolve().parent
 REPO=HERE.parents[2]
 OUT=REPO/'build/enhanced-controls'
 CC=shlex.split(os.environ.get('CC','clang'))
+CXX=shlex.split(os.environ.get('CXX','clang++'))
 sys.path.insert(0,str(REPO/'tools/recomp'))
 from builds import by_name
 
@@ -35,6 +36,7 @@ def main():
     run([OUT/'core-test'])
     run(CC+['-std=c11','-Wall','-Wextra','-Werror','-Wno-unused-function',HERE/'editor_test.c','-o',OUT/'editor-test'])
     run([OUT/'editor-test'])
+    run(CXX+['-std=c++20','-O1','-I',REPO/'runtime/src','-c',HERE/'hud_bridge.cpp','-o',OUT/'hud-bridge.o'])
     for region in ('USA','EU'):
         b=by_name(region)
         defs={'PLAY':b.data(0x1046f0b0),'SAVE_PTR':b.data(0x101f84dc),
@@ -43,8 +45,12 @@ def main():
               'SPIN':b.code(0x023e6380),'EQUIPPING':b.code(0x023d794c),
               'GUARDING':b.code(0x02443728),'CURSE':b.data(0x101cef16)}
         (OUT/'fixture.h').write_text(''.join(f'#define {k} 0x{v:08X}u\n' for k,v in defs.items()))
-        run(CC+['-std=c11','-O1','-I',REPO/'runtime/include','-I',OUT,
-                OUT/f'translated-{region}.c',HERE/'module_test.c','-lm','-o',OUT/f'module-test-{region}'])
+        objects=[]
+        for source in (OUT/f'translated-{region}.c',HERE/'module_test.c'):
+            obj=OUT/f'{source.stem}.o'
+            run(CC+['-std=c11','-O1','-I',REPO/'runtime/include','-I',OUT,'-c',source,'-o',obj])
+            objects.append(obj)
+        run(CXX+objects+[OUT/'hud-bridge.o','-lm','-o',OUT/f'module-test-{region}'])
         run([OUT/f'module-test-{region}'])
         print(region,'passed',flush=True)
 

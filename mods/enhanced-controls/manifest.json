@@ -2,7 +2,7 @@
   "format_version": 1,
   "id": "enhanced-controls",
   "name": "Enhanced Controls",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "game_id": "wwhd",
   "minimum_manager_version": "1.6.0",
   "kind": "guest",

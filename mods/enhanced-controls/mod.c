@@ -225,10 +225,12 @@ static void sync_icons(void) {
         }
     }
 }
+/* The host validates positive thickness for every primitive, including text
+ * and images. Zero-initialized omitted fields invalidate the entire HUD list. */
 static void label(u32 list,float x,float y,const char* text,float font,u32 color) {
     unsigned n=0; while(text[n]) ++n;
     element=(wwhd_hud_element){.kind=WWHD_HUD_TEXT,.anchor=WWHD_HUD_CENTER,
-        .x=640+x,.y=360-y,.size=font,.rgba=color,.text=text,.text_bytes=n};
+        .x=640+x,.y=360-y,.size=font,.thickness=1,.rgba=color,.text=text,.text_bytes=n};
     wwhd_hud_emit(list,&element);
 }
 static void outline(u32 list,EcRect r,u32 color) {
@@ -256,7 +258,7 @@ static void macro_button(u32 list,int i) {
     if(icons[i] && p.icons) {
         element=(wwhd_hud_element){.kind=WWHD_HUD_IMAGE,.anchor=WWHD_HUD_CENTER,
             .x=640+r.x-side/2,.y=360-r.y-side/2,.w=side,.h=side,
-            .u1=1,.v1=1,.rgba=tint,.image=icons[i]};
+            .thickness=1,.u1=1,.v1=1,.rgba=tint,.image=icons[i]};
         wwhd_hud_emit(list,&element);
     } else label(list,r.x-r.w/2+8,r.y+9,names[i],18*p.size/100.f,tint);
     if(editor.open && editor.selected==i) outline(list,r,0xFFDB70FF);

@@ -24,6 +24,14 @@ static unsigned char files[2][512];
 static int file_size[2], writes, reads, fail_write;
 static FILE* capture;
 static int texture_index[512];
+static uint32_t texture_handle[512];
+extern void test_hud_reset(void);
+extern uint32_t test_hud_begin(uint64_t step,uint64_t epoch);
+extern uint32_t test_hud_texture(void);
+extern void test_hud_release(uint32_t image);
+extern int test_hud_emit(uint32_t list,uint32_t kind,uint32_t anchor,uint32_t blend,
+                        const float* f,uint32_t rgba,uint32_t image,const char* text,uint32_t bytes);
+extern void test_hud_end(uint32_t list,unsigned commands);
 static volatile int preempt_flags[3];
 static const uint32_t LINK=0x18000000, SAVE=0x18010000, CAMERA=0x18020000,
                       SCRATCH=0x30040000;
@@ -36,8 +44,14 @@ static int file_index(uint32_t name) {
 }
 
 static void call(uint32_t fn, uint32_t arg) {
-    cpu.r[1]=0x30020000; cpu.r[3]=arg; cpu.pc=fn;
-    for(uint32_t i=0;i<mod->func_count;++i) if(mod->funcs[i].addr==fn) { mod->funcs[i].fn(&cpu); return; }
+    uint32_t list=fn==hud_fn?test_hud_begin(step,epoch):0;
+    int before=hud_count;
+    cpu.r[1]=0x30020000; cpu.r[3]=list?list:arg; cpu.pc=fn;
+    for(uint32_t i=0;i<mod->func_count;++i) if(mod->funcs[i].addr==fn) {
+        mod->funcs[i].fn(&cpu);
+        if(list) test_hud_end(list,hud_count-before);
+        return;
+    }
     fprintf(stderr,"unknown callback %08x\n",fn); abort();
 }
 static void dispatch(Cpu* c) {
@@ -92,7 +106,12 @@ static void s_emit(Cpu* c) {
             ld32(a),ldf32(a+12),ldf32(a+16),ldf32(a+20),ldf32(a+24),ldf32(a+28),ld32(a+56),
             ld32(a)==2?texture_index[ld32(a+60)]:-1,ld32(a)==1?(int)ld32(a+68):0,ld32(a)==1?string(ld32(a+64)):"");
     }
-    c->r[3]=1;
+    float geometry[11];
+    for(unsigned i=0;i<11;++i) geometry[i]=ldf32(a+12+4*i);
+    int ok=test_hud_emit(c->r[3],ld32(a),ld32(a+4),ld32(a+8),geometry,ld32(a+56),
+        ld32(a)==2?texture_handle[ld32(a+60)]:0,
+        ld32(a)==1?string(ld32(a+64)):"",ld32(a)==1?ld32(a+68):0);
+    assert(ok); c->r[3]=ok;
 }
 static void u64(Cpu* c,uint64_t v) { c->r[3]=v>>32; c->r[4]=(uint32_t)v; }
 static void s_step(Cpu* c) { u64(c,step); }
@@ -118,9 +137,10 @@ static void s_texture(Cpu* c) {
     ++texture_calls; assert(texture_calls<512);
     const char* path=string(c->r[4]);
     texture_index[texture_calls]=strstr(path,"jump")?0:strstr(path,"vertical")?1:strstr(path,"spin")?2:3;
+    if(!fail_texture) texture_handle[texture_calls]=test_hud_texture();
     c->r[3]=fail_texture?0:texture_calls;
 }
-static void s_release(Cpu* c) { assert(c->r[3]); ++releases; }
+static void s_release(Cpu* c) { assert(c->r[3]); test_hud_release(texture_handle[c->r[3]]); ++releases; }
 static PpcFunc service(const char* name) {
     struct { const char* name; PpcFunc fn; } all[]={
         {"memcpy",s_copy},{"memmove",s_copy},{"wwhd_file_read",s_file_read},{"wwhd_file_write",s_file_write},{"wwhd_hud_texture",s_texture},{"wwhd_hud_release",s_release},{"memset",s_memset},{"wwhd_touch_register",s_touch},{"wwhd_input_filter_register",s_filter},
@@ -148,6 +168,7 @@ static void action(int id) { EcRect r=ee_action_rect(id); tap(r.x,r.y); }
 static void tab(int i) { EcRect r=ee_tab(i); tap(r.x,r.y); }
 static void open_editor(void) { tap(editor_x,editor_y); assert(claim[6][0]==-640 && claim[6][2]==640); }
 static void reload_module(void) {
+    test_hud_reset();
     memset(ppc_ptr(mod->mem_base),0,mod->mem_size);
     memcpy(ppc_ptr(mod->mem_base),mod->image,mod->image_size);
     hook(LINK_EXECUTE,LINK);
