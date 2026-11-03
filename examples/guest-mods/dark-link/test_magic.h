@@ -10,6 +10,8 @@ static void magic_release(Cpu* c) { c->r[3]=1; }
 static void magic_epoch(Cpu* c) { c->r[3]=(uint32_t)(magic_generation>>32); c->r[4]=(uint32_t)magic_generation; }
 static uint32_t magic_fill_handles[2],magic_border_handles[2];
 static int magic_window;
+static int magic_require_core_alpha;
+static int magic_native_hidden;
 static unsigned magic_border_alpha=255;
 static unsigned magic_frame_count=1;
 static int magic_writes,magic_base_fill,magic_animated,magic_bad_animation,magic_long,magic_bad_geometry;
@@ -22,6 +24,7 @@ static void magic_write(Cpu* c) {
     assert(png[24]==8 && png[25]==6 && png[48]==0);
     if(strstr(path,"fill")) { for(int i=0;i<4;++i) assert(png[49+i*4]==255 && png[50+i*4]==99 && png[51+i*4]==99);assert(png[52]==255); }
     if(magic_base_fill && strstr(path,"frame")) assert(png[49]==99&&png[50]==99&&png[51]==99);
+    if(magic_require_core_alpha && !strstr(path,"border")) assert(png[52]==255);
     if(strstr(path,"border")) {
         assert(png[19]==108 && png[23]==24);
         assert(png[49]<png[49+3*4] && png[52]==magic_border_alpha); /* contrast and pane coverage retained */
@@ -54,8 +57,8 @@ static void magic_setting(Cpu* c) {
     int fill=!strcmp(name,"P_Fill_00");
     if (!fill && strcmp(name,"P_MagicBase_00") && strcmp(name,"P_MagicBase_01")) { c->r[3]=0; return; }
     uint32_t p=c->r[5]; memset(ppc_ptr(p),0,64);
-    st32(p,1); st32(p+4,3); stf32(p+8,0); stf32(p+12,0);
-    stf32(p+16,fill ? (magic_animated?48:96):(magic_long&&!strcmp(name,"P_MagicBase_01")?200:100)); stf32(p+20,fill ? 12:16); st32(p+28,255);
+    st32(p,1); st32(p+4,magic_native_hidden?2:3); stf32(p+8,0); stf32(p+12,0);
+    stf32(p+16,fill ? (magic_animated?48:96):(magic_long&&!strcmp(name,"P_MagicBase_01")?200:100)); stf32(p+20,fill ? 12:16); st32(p+28,magic_native_hidden?0:255);
     if(fill && magic_bad_geometry) stf32(p+8,100000);
     strcpy((char*)ppc_ptr(p+32),fill ? "fill":"frame"); c->r[3]=64;
 }
@@ -189,8 +192,40 @@ static uint32_t fixture_style_animation(const char* tag,const char* group,const 
     return t;
 }
 static void magic_expect_draws(unsigned count) {
-    ++magic_generation;read_hud();hook(0x02675414,3,MAGIC_CTRL,0);
+    ++magic_generation;read_hud();if(!magic_authored) hook(0x02675414,3,MAGIC_CTRL,0);
     magic_draws=0;read_hud();assert((unsigned)magic_draws==count);
+}
+static void test_magic_hidden_native(void) {
+    /* Dark Link must remain visible with no native magic gauge. The PNG
+     * assertion checks actual alpha, not only submitted image handles. */
+    magic_window=0;magic_require_core_alpha=1;fixture_magic();
+    const unsigned pictures[3]={120,256,392};
+    for(unsigned i=0;i<3;++i) {
+        st8(MAGIC_FLYT+pictures[i]+8,0);st8(MAGIC_FLYT+pictures[i]+10,0);
+    }
+    st8(SAVE+0x33,0);magic_authored=magic_native_hidden=1;magic_expect_draws(2);assert(magic_width>0);
+    /* When base == fill, 0.1.22 submits handles but bakes alpha zero. */
+    magic_base_fill=1;st32(MAGIC_FLYT+20+20+32,0x20ff20ff);magic_expect_draws(2);
+    magic_base_fill=0;
+    /* Shared native fade parent, without an InAll resource to override it. */
+    fixture_magic();
+    uint32_t f=MAGIC_ARC+0x3000,parent=f+120;
+    memset(ppc_ptr(f),0,628);memcpy(ppc_ptr(f),ppc_ptr(MAGIC_FLYT),120);
+    st16(f+16,7);st32(parent,0x70616e31);st32(parent+4,84);
+    strcpy((char*)ppc_ptr(parent+12),"N_All_00");st32(parent+84,0x70617331);st32(parent+88,8);
+    memcpy(ppc_ptr(parent+92),ppc_ptr(MAGIC_FLYT+120),408);
+    st32(f+620,0x70616531);st32(f+624,8);
+    st32(MAGIC_ARC+0x28,0x2f00);st32(MAGIC_ARC+0x2c,0x2f00+628);st32(MAGIC_ARC+8,0x4000);
+    const unsigned capacities[3]={0,16,32};
+    for(unsigned i=0;i<3;++i) {
+        st8(SAVE+0x33,capacities[i]);magic_authored=magic_native_hidden=i==0;
+        magic_expect_draws(2);assert(magic_width>0);
+    }
+    int writes=magic_writes;read_hud();read_hud();assert(magic_writes==writes);
+    /* Optional hierarchy metadata must not veto independently valid images. */
+    st32(f+620,0x70617331);magic_expect_draws(2);
+    magic_authored=0;magic_require_core_alpha=0;st8(SAVE+0x33,0);fixture_magic();
+    puts("Dark Link hidden native HUD: visible cached pixels at 0/16/32 magic passed");
 }
 static void test_magic_style(void) {
     magic_frame_count=1;fixture_magic();fixture_window();
@@ -309,6 +344,7 @@ static void test_magic(void) {
     st32(MAGIC_ARC+0x3000+608+0x6c,0xfffffff0);++magic_generation;
     read_hud();hook(0x02675414,3,MAGIC_CTRL,0);magic_draws=0;read_hud();assert(magic_draws==2);
     test_magic_style();
+    test_magic_hidden_native();
     magic_window=0;fixture_magic();++magic_generation;read_hud();
     /* Return a full duration for the subsequent gameplay regression. */
     buttons(0); buttons(0x60000); tick(); buttons(0);

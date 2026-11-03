@@ -1,42 +1,36 @@
-# Dark Link (prototype 0.1.22)
+# Dark Link (prototype 0.1.23)
 
 Standalone code mod for ZeldaWWHDRecomp: sword hits charge a transformation with
 black body/equipment, red eyes and boosted sword damage. The user confirmed the
 complete body, mouth, eyes, sword and shield appearance in **0.1.11**. That
 texture-binding repair at **viewCalc return** is retained.
 
-## Changed in 0.1.22
+## Changed in 0.1.23
 
-The 0.1.21 device screenshot showed a white overlay and only a small visible
-part of the red fill. Two defects in the copy are now covered by regressions:
-window selection ignored visibility/alpha, and its outer-box test accepted
-thick frame slices that covered the gauge. The screenshot alone cannot identify
-which native resource produced the overlay.
+The 0.1.22 visibility change also gated the core Dark Link base/fill on native
+pane visibility and ancestor alpha. This could reject the fill or cache fully
+transparent PNGs. Those cached images stayed invisible even when the ordinary
+magic gauge became visible later. The user reported both native-hidden and
+native-visible cases.
 
-The copy now reconstructs the displayed, non-warning style from native BFLAN
-bindings: `InAll` at its end, `Flash` at zero, `ColorChange` at zero (ordinary
-Link), `ScaleChange` at zero, followed by the normal/doubled full-capacity curve.
-This follows `hd_screen_magic_bar.cpp` in decomp revision
-`b2811a3ce838d1f875bc8e68536c1950af5d7ffc`. Named style tags must match their
-binding group; only wholly validated animations are applied, in fixed order.
-Pane visibility and alpha tracks now affect the copy, including its ancestors.
-Window material colours and texture transforms use the same displayed state.
+Core base/fill selection and opacity are independent of those native visibility
+flags again. The mod's existing HUD/enable/gameplay checks own their visibility.
+Texture, material and vertex coverage is retained; the native pane/ancestor fade
+is no longer multiplied into the cached core images. Invalid optional hierarchy
+metadata can omit decoration but cannot veto otherwise valid base/fill artwork.
 
-Warning effects in `G_Flash_00` are excluded even when their animation is absent.
-A copied window's transparent inner opening must contain the selected gauge;
-matching only its outer size is insufficient. Partial pane alpha is baked into
-the generated pixels. No live HUD or magic/save values are changed.
+The displayed colour/UV state, texture detail and native frame-opening checks
+remain. Optional window decoration still respects its own visibility/alpha and
+excludes warning effects, so the prior white-overlay safeguards are retained.
+D-pad placement, body/eyes/aura and the shared editor are unchanged. No new hooks,
+logging or game artwork are added; Enhanced Controls 0.4.0 remains compatible.
 
-Texture detail, four vertex colours, red/green channel recolouring and the
-user-confirmed 0.1.20 D-pad correction remain. The temporary D-pad diagnostics
-and flat-red overwrite removed in 0.1.21 stay removed. No extra logging/hooks or
-game artwork are added. Enhanced Controls 0.4.0 remains compatible.
-
-Validation uses synthetic artwork, including invisible/transparent windows,
-thick frames, hidden parents, warning groups with missing animations, partial
-alpha and white authoring colours animated to the displayed green. The published
-0.1.21 module fails the invisible-frame regression; the corrected module passes.
-The precise final gauge appearance still needs an in-game check.
+Regression tests cover hidden core panes, a hidden shared parent without an
+InAll animation, coloured base-as-fill images, cached reuse, optional metadata
+failure, and hidden/visible native HUD queries at 0/16/32 magic capacity. They
+check actual generated pixel alpha as well as emitted HUD commands. Published
+0.1.22 fails the new hidden-core test; the corrected module passes. These are
+synthetic tests; the final appearance still needs an in-game check.
 
 ## Added in 0.1.17
 
@@ -126,10 +120,12 @@ Each decoded image is bounded to 131072 pixels and each cache write is below
 1 MiB. Unsupported or missing textures are skipped and retried, with no fake
 rectangle fallback. Picture vertex gradients are baked into the images. Window
 borders use their original frame textures/materials and displayed alpha. Their
-inner opening must enclose the selected gauge. Hidden/warning panes are excluded.
+inner opening must enclose the selected gauge. Hidden/warning window decorations are excluded; the core base/fill use mod-owned
+visibility and never inherit native pane/ancestor fade alpha.
 Arbitrary multi-texture shader effects are not reproduced.
 
-A bounded BFLAN reader first applies the displayed style described above, then
+A bounded BFLAN reader applies InAll at its end and Flash/ColorChange/ScaleChange
+at zero for the displayed ordinary-Link style, then
 selects a 16/32-frame animation explicitly bound to
 `G_Bar_00`, validates all tracks before applying any, and evaluates its full
 frame. It supports FLPA picture fields, FLMC material colours, FLVC corner
@@ -160,7 +156,7 @@ collision path charge the gauge. Boss-specific handlers may override damage.
 ## Diagnostics and validation
 
 Enable **Appearance diagnostics** only when needed. The first line reads
-`DL 0.1.22 ON/OFF`; `Magic` counts loaded frame/fill images (up to four),
+`DL 0.1.23 ON/OFF`; `Magic` counts loaded frame/fill images (up to four),
 `Pos` is 1 for native or 2 for authored placement, and `Aura` reports the shell
 model being present. Body material/albedo/eye counts, binding retention and late
 repair counters retain their existing meanings. `Fill` reports the actual

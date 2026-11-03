@@ -129,7 +129,11 @@ static int dl_magic_parse(u32 f,u32 size) {
         }
         at+=n;
     }
-    return dl_magic_picture_count!=0 && dl_magic_style_parse(f,size);
+    /* Visibility metadata selects optional decoration; failure must not
+     * suppress the independently owned base/fill. Picture bounds above still
+     * have to validate. */
+    if(!dl_magic_style_parse(f,size)) dl_magic_style_count=0;
+    return dl_magic_picture_count!=0;
 }
 #include "magic_animation.h"
 static int dl_magic_pane(const char* name,wwhd_game_pane* out) {
@@ -160,8 +164,10 @@ static u32 dl_magic_image(wwhd_game_pane* pane,u32 picture,u32 variant,u32 fill)
     dl_art_material(black,white,srgb);
     if(!dl_art_bake_uv(dl_magic_pictures[picture].uv,dl_magic_pictures[picture].tex_srt)) return 0;
     dl_art_vertices(dl_magic_pictures[picture].vertex,fill,!fill && dl_magic_pictures[picture].fill);
-    u32 alpha=dl_magic_style_alpha(dl_magic_pictures[picture].name);
-    for(u32 i=0;i<dl_art_width*dl_art_height;++i) dl_art_pixels[i*4+3]=dl_art_pixels[i*4+3]*alpha/255;
+    /* The mod owns base/fill visibility. Native pane/ancestor fades can be
+     * zero before magic is unlocked (or while the native HUD is hidden).
+     * Preserve artwork/material/vertex coverage, but never bake those native
+     * visibility gates into the cached Dark Link images. */
     u32 size=dl_art_encode();
     if(!size) return 0;
     static const char* const files[2][2]={{"magic-0-frame.png","magic-0-fill.png"},{"magic-1-frame.png","magic-1-fill.png"}};
@@ -195,7 +201,7 @@ static void dl_magic_load(void) {
         s32 frame=-1,fill=-1; f32 score=1e9f;
         for(u32 i=0;i<dl_magic_picture_count;++i) {
             if(dl_str_equal(dl_magic_pictures[i].name,base,24)) frame=(s32)i;
-            if(!dl_magic_pictures[i].fill || !dl_magic_style_alpha(dl_magic_pictures[i].name) || !dl_magic_pane(dl_magic_pictures[i].name,&dl_magic_query)) continue;
+            if(!dl_magic_pictures[i].fill || !dl_magic_pane(dl_magic_pictures[i].name,&dl_magic_query)) continue;
             /* Choose the authored green picture nearest the selected capacity's
              * base size/centre. Its native texture supplies the rounded ends. */
             f32 d=dl_abs(dl_magic_query.w-dl_magic_base[v].w)+
