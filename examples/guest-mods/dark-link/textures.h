@@ -248,7 +248,7 @@ static void dl_diag_hud(u32 list) {
 #define DL_S(s) n = dl_probe_append(line, n, s)
 #define DL_N(v) n = dl_probe_number(line, n, v)
     char* line = dl_probe_lines[0];
-    DL_S("DL 0.1.20 "); DL_S(dl_state.active ? "ON" : "OFF (last sample)");
+    DL_S("DL 0.1.21 "); DL_S(dl_state.active ? "ON" : "OFF (last sample)");
     DL_S("  Draw="); DL_N(dl_probe.draws); DL_S("  Refresh B/H/Hair/Gear=");
     DL_N(dl_probe.refresh[0]); DL_S("/"); DL_N(dl_probe.refresh[1]); DL_S("/"); DL_N(dl_probe.refresh[2]); DL_S("/"); DL_N(dl_probe.refresh[3]);
     DL_S(" Magic="); DL_N((dl_magic_images[0][0]!=0)+(dl_magic_images[0][1]!=0)+(dl_magic_images[1][0]!=0)+(dl_magic_images[1][1]!=0));
@@ -260,9 +260,7 @@ static void dl_diag_hud(u32 list) {
     line = dl_probe_lines[2]; n = 0;
     DL_S("Skip="); DL_S(reasons[dl_probe.reason]); DL_S("  Count="); DL_N(dl_probe.skipped);
     DL_S("  Kept="); DL_N(dl_probe.kept); DL_S("  Lost="); DL_N(dl_probe.lost); DL_S("  Rebound="); DL_N(dl_probe.rebound);
-    DL_S(" Shift="); DL_N(dl_shortcut_shift); DL_S(" Pane="); n=dl_probe_hex(line,n,dl_shortcut_candidate);
-    DL_S(" Why="); DL_S(dl_shortcut_reasons[dl_shortcut_reason]);
-    DL_S(" Root="); n=dl_probe_hex(line,n,dl_shortcut_root); lengths[2] = n;
+    lengths[2] = n;
     line = dl_probe_lines[3]; n = 0;
     DL_S("Samplers body: "); DL_S(dl_probe.body_samplers[0] ? dl_probe.body_samplers : "?");
     DL_S("  eyes: "); DL_S(dl_probe.eye_samplers[0] ? dl_probe.eye_samplers : "?");
@@ -273,9 +271,7 @@ static void dl_diag_hud(u32 list) {
     DL_S(" stale="); DL_N(dl_probe.late_stale); DL_S(" rejected="); DL_N(dl_probe.late_rejected);
     DL_S(" ptr="); n = dl_probe_hex(line, n, dl_probe.late_pointer);
     DL_S(" word="); n = dl_probe_hex(line, n, dl_probe.late_word);
-    DL_S(" Dpad="); DL_N(dl_shortcut_calcs); DL_S("/"); DL_N(dl_shortcut_applied);
-    DL_S("/"); DL_N(dl_shortcut_rejected);
-    DL_S(" Seen="); DL_N(dl_shortcut_seen); lengths[4] = n;
+    lengths[4] = n;
 #undef DL_S
 #undef DL_N
     dl_rect(list, 20, 110, 1240, 123, 0x101018ef);

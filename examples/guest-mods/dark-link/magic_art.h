@@ -96,17 +96,38 @@ static u8 dl_art_srgb(f32 value) {
     if(lo && value-dl_srgb_linear[lo-1]<dl_srgb_linear[lo]-value) --lo;
     return (u8)lo;
 }
-static void dl_art_material(u32 black,u32 white,int srgb,int red) {
-    /* Change endpoint colours BEFORE interpolation. Multiplying a green or
-     * luminance-mask texture by red loses the fill and its authored alpha. */
+static void dl_art_material(u32 black,u32 white,int srgb) {
+    /* Reproduce native black/white interpolation before vertex tinting and
+     * recolouring, including the coverage of luminance-mask textures. */
     f32 low[4],high[4];
     for(u32 k=0;k<4;++k) { low[k]=((black>>(24-8*k))&255)/255.0f;high[k]=((white>>(24-8*k))&255)/255.0f; }
-    if(red) { f32 t=low[0];low[0]=low[1];low[1]=t;t=high[0];high[0]=high[1];high[1]=t; }
     for(u32 i=0;i<dl_art_width*dl_art_height;++i) for(u32 k=0;k<4;++k) {
         u8* p=&dl_art_pixels[i*4+k];
         f32 t=srgb&&k<3?dl_srgb_linear[*p]:*p/255.0f;
         f32 v=low[k]+(high[k]-low[k])*t;
         *p=k<3?dl_art_srgb(v):(u8)(v*255+0.5f);
+    }
+}
+/* Vertex gradients are in pane space, after texture UV/SRT sampling. Bake
+ * all four corners and then swap final R/G, preserving texture contrast,
+ * neutral outlines, highlights and coverage instead of flattening to red. */
+static void dl_art_vertices(const u32 vertex[4],int red,int empty) {
+    for(u32 y=0;y<dl_art_height;++y) for(u32 x=0;x<dl_art_width;++x) {
+        f32 fx=((f32)x+0.5f)/dl_art_width,fy=((f32)y+0.5f)/dl_art_height;
+        u8* p=dl_art_pixels+(y*dl_art_width+x)*4;
+        for(u32 c=0;c<4;++c) {
+            u32 shift=24-8*c;
+            f32 a=(vertex[0]>>shift)&255,b=(vertex[1]>>shift)&255;
+            f32 d=(vertex[2]>>shift)&255,e=(vertex[3]>>shift)&255;
+            f32 top=a+(b-a)*fx,bottom=d+(e-d)*fx,v=(top+(bottom-top)*fy)/255;
+            p[c]=c<3?dl_art_srgb(dl_srgb_linear[p[c]]*v):(u8)(p[c]*v+0.5f);
+        }
+        if(red) { u8 r=p[0];p[0]=p[1];p[1]=r; }
+        else if(empty && p[1]>p[0] && p[1]>p[2]) {
+            /* Remove only the coloured fill from its empty copy. Neutral
+             * frame pixels remain intact, including when base == fill. */
+            p[0]=p[1]=p[2]=p[0]<p[2]?p[0]:p[2];
+        }
     }
 }
 static u32 dl_art_crc(const u8* p,u32 n) {

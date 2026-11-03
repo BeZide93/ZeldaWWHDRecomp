@@ -8,7 +8,9 @@ static int magic_images, magic_draws, magic_textures, magic_authored;
 static float magic_width, magic_x, magic_y;
 static void magic_release(Cpu* c) { c->r[3]=1; }
 static void magic_epoch(Cpu* c) { c->r[3]=(uint32_t)(magic_generation>>32); c->r[4]=(uint32_t)magic_generation; }
-static uint32_t magic_fill_handles[2];
+static uint32_t magic_fill_handles[2],magic_border_handles[2];
+static int magic_window;
+static unsigned magic_frame_count=1;
 static int magic_writes,magic_base_fill,magic_animated,magic_bad_animation,magic_long,magic_bad_geometry;
 static void magic_write(Cpu* c) {
     const char* path=(const char*)ppc_ptr(c->r[3]);
@@ -17,8 +19,13 @@ static void magic_write(Cpu* c) {
     /* First pixel of the uncompressed zlib stream: filter byte then RGBA.
      * Validate output pixels, not only a red tint in an emitted HUD command. */
     assert(png[24]==8 && png[25]==6 && png[48]==0);
-    if(strstr(path,"fill")) { for(int i=0;i<4;++i) assert(png[49+i*4]==255 && png[50+i*4]==32 && png[51+i*4]==32);assert(png[52]==255); }
-    if(magic_base_fill && strstr(path,"frame")) assert(png[49]==0&&png[50]==0&&png[51]==0);
+    if(strstr(path,"fill")) { for(int i=0;i<4;++i) assert(png[49+i*4]==255 && png[50+i*4]==99 && png[51+i*4]==99);assert(png[52]==255); }
+    if(magic_base_fill && strstr(path,"frame")) assert(png[49]==99&&png[50]==99&&png[51]==99);
+    if(strstr(path,"border")) {
+        assert(png[19]==108 && png[23]==24);
+        assert(png[49]<png[49+3*4] && png[52]==255); /* corner texture contrast retained */
+        assert(png[49+12*(108*4+1)+54*4+3]==0); /* frame never fills the centre */
+    }
     ++magic_writes;c->r[3]=c->r[5];
 }
 static void magic_texture(Cpu* c) {
@@ -27,6 +34,7 @@ static void magic_texture(Cpu* c) {
     const char* path=(const char*)ppc_ptr(c->r[4]);
     assert(!strncmp(path,"magic-",6));
     ++magic_textures; c->r[3]=++magic_images;
+    if(strstr(path,"border")) magic_border_handles[path[6]=='1']=c->r[3];
     if(strstr(path,"fill")) magic_fill_handles[path[6]=='1']=c->r[3];
 }
 static void magic_setting(Cpu* c) {
@@ -38,6 +46,10 @@ static void magic_setting(Cpu* c) {
     if (strncmp(key,"layout-pane:MagicBar_00/",24)) { c->r[3]=0; return; }
     assert(c->r[4]==6 && c->r[6]==64);
     const char* name=key+24;
+    if(magic_window && !strcmp(name,"W_Frame_00")) {
+        uint32_t p=c->r[5];memset(ppc_ptr(p),0,64);st32(p,1);st32(p+4,1);
+        stf32(p+16,108);stf32(p+20,24);st32(p+28,255);c->r[3]=64;return;
+    }
     int fill=!strcmp(name,"P_Fill_00");
     if (!fill && strcmp(name,"P_MagicBase_00") && strcmp(name,"P_MagicBase_01")) { c->r[3]=0; return; }
     uint32_t p=c->r[5]; memset(ppc_ptr(p),0,64);
@@ -49,6 +61,9 @@ static void magic_setting(Cpu* c) {
 static void magic_emit(uint32_t e) {
     ++magic_draws;
     assert(ld32(e+4)==(magic_authored ? 1u:0u)); /* follows native, already aspect-adjusted coordinates */
+    if(ld32(e+60)==magic_border_handles[0] || ld32(e+60)==magic_border_handles[1]) {
+        assert(ldf32(e+20)==108 && ldf32(e+24)==24);assert(ld32(e+56)==0xffffffff);return;
+    }
     if (ld32(e+60)==magic_fill_handles[0] || ld32(e+60)==magic_fill_handles[1]) {
         magic_width=ldf32(e+20); magic_x=ldf32(e+12); magic_y=ldf32(e+16);
         assert(ld32(e+56)==0xffffffff); /* red pixels must not be tinted a second time */
@@ -100,6 +115,32 @@ static void fixture_magic(void) {
     stf32(MAGIC_PANE+0x3c,100); stf32(MAGIC_PANE+0x40,16);
     stf32(MAGIC_PANE+0x48,1); stf32(MAGIC_PANE+0x5c,1);
     stf32(MAGIC_PANE+0x54,-530); stf32(MAGIC_PANE+0x64,280);
+}
+static void fixture_window(void) {
+    /* Separate archive location avoids overwriting either source texture. */
+    uint32_t f=MAGIC_ARC+0x3000,mat=f+20,txl=f+576,wnd=f+608;
+    memset(ppc_ptr(f),0,800);memcpy(ppc_ptr(f),ppc_ptr(MAGIC_FLYT),20);st16(f+16,6);
+    st32(mat,0x6d617431);st32(mat+4,148);st16(mat+8,3);
+    st32(mat+12,24);st32(mat+16,64);st32(mat+20,104);
+    memcpy(ppc_ptr(mat+24),ppc_ptr(MAGIC_FLYT+40),40);
+    memcpy(ppc_ptr(mat+64),ppc_ptr(MAGIC_FLYT+80),40);
+    strcpy((char*)ppc_ptr(mat+104),"Border");st32(mat+136,0xffffffff);st32(mat+140,1);
+    memcpy(ppc_ptr(f+168),ppc_ptr(MAGIC_FLYT+120),408);
+    st32(txl,0x74786c31);st32(txl+4,32);st16(txl+8,1);st32(txl+12,4);
+    strcpy((char*)ppc_ptr(txl+16),"frame.bflim");
+    st32(wnd,0x776e6431);st32(wnd+4,112+8*magic_frame_count);strcpy((char*)ppc_ptr(wnd+12),"W_Frame_00");
+    stf32(wnd+0x4c,108);stf32(wnd+0x50,24);
+    for(int i=0;i<4;++i) st16(wnd+0x5c+i*2,4);
+    st8(wnd+0x64,magic_frame_count);st8(wnd+0x65,0x11);st32(wnd+0x6c,112);
+    for(unsigned i=0;i<magic_frame_count;++i) {
+        unsigned e=112+4*magic_frame_count+4*i;st32(wnd+112+4*i,e);st16(wnd+e,2);
+        const unsigned flips[8]={0,1,2,4,0,1,0,2};st8(wnd+e+2,flips[i]);
+    }
+    for(unsigned y=0;y<4;++y) for(unsigned x=0;x<4;++x) {
+        uint32_t pixel=MAGIC_ARC+0x400+(y*64+x)*4;
+        st8(pixel,32+x*32);st8(pixel+1,32+y*32);st8(pixel+2,64);st8(pixel+3,255);
+    }
+    st32(MAGIC_ARC+0x28,0x2f00);st32(MAGIC_ARC+0x2c,0x2f00+608+112+8*magic_frame_count);st32(MAGIC_ARC+8,0x4000);
 }
 static void fixture_animation(unsigned frames) {
     /* Fourth SARC node, preserving existing names after the SFNT moves. */
@@ -187,6 +228,16 @@ static void test_magic(void) {
     magic_bad_geometry=1;++magic_generation;read_hud();hook(0x02675414,3,MAGIC_CTRL,0);
     magic_draws=0;read_hud();assert(magic_draws==1);expect_hud("Dark Link");
     magic_bad_geometry=0;++magic_generation;read_hud();hook(0x02675414,3,MAGIC_CTRL,0);read_hud();
+    magic_window=1;fixture_window();++magic_generation;read_hud();hook(0x02675414,3,MAGIC_CTRL,0);
+    magic_draws=0;read_hud();assert(magic_draws==3);
+    for(unsigned count=4;count<=8;count+=4) {
+        magic_frame_count=count;fixture_window();++magic_generation;read_hud();hook(0x02675414,3,MAGIC_CTRL,0);
+        magic_draws=0;read_hud();assert(magic_draws==3);
+    }
+    /* A malformed frame is omitted without invalidating the gauge/button. */
+    st32(MAGIC_ARC+0x3000+608+0x6c,0xfffffff0);++magic_generation;
+    read_hud();hook(0x02675414,3,MAGIC_CTRL,0);magic_draws=0;read_hud();assert(magic_draws==2);
+    magic_window=0;fixture_magic();++magic_generation;read_hud();
     /* Return a full duration for the subsequent gameplay regression. */
     buttons(0); buttons(0x60000); tick(); buttons(0);
     for(int i=0;i<20;++i) hit(1);

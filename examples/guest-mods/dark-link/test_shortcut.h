@@ -105,10 +105,8 @@ static void test_shortcut(void) {
         st32(p+4,i?p-0x100:SHORT_OTHER+0x14);
     }
     shortcut_frame(226); /* published 0.1.19 rejects this valid whole-HUD tree */
-    assert(shortcut_lookups>0);expect_hud("Why=OK");
+    assert(shortcut_lookups>0);
     shortcut_fixture(250,1);shortcut_frame(226);
-    read_hud(); const char* seen=strstr(hud_text,"Seen=");
-    assert(seen && strtoul(seen+5,0,10)>0); expect_hud("Shift=24");
     assert(ld8(SHORT_GROUP+0x44)&0x10); /* force native recomputation on removal */
     shortcut_fixture(220,1);shortcut_frame(196); /* second heart row */
     st8(SAVE+0x33,32);shortcut_frame(196);st8(SAVE+0x33,0);shortcut_frame(172);
@@ -124,22 +122,22 @@ static void test_shortcut(void) {
     st8(PLAY+0x514c,1);shortcut_frame(250);st8(PLAY+0x514c,0);
     st32(SHORT_MAIN+4,0x100EE5F8);shortcut_frame(250);st32(SHORT_MAIN+4,0x100F7A48);
     st32(SHORT_GROUP+0xc,SHORT_GROUP);shortcut_rejected();st32(SHORT_GROUP+0xc,SHORT_ROOT);
-    st32(SHORT_MAIN+0x44,3);shortcut_rejected();expect_hud("Why=LAYOUT");st32(SHORT_MAIN+0x44,SHORT_LAYOUT);
-    st32(SHORT_LAYOUT+4,0);shortcut_rejected();expect_hud("Why=ACCESSOR");st32(SHORT_LAYOUT+4,SHORT_ACCESSOR);
-    st32(SHORT_ACCESSOR+0xc,0);shortcut_rejected();expect_hud("Why=ROOT");st32(SHORT_ACCESSOR+0xc,SHORT_ROOT);
-    st32(SHORT_ROOT+8,0);shortcut_rejected();expect_hud("Why=VTABLE");st32(SHORT_ROOT+8,SHORT_TABLE);
+    st32(SHORT_MAIN+0x44,3);shortcut_rejected();st32(SHORT_MAIN+0x44,SHORT_LAYOUT);
+    st32(SHORT_LAYOUT+4,0);shortcut_rejected();st32(SHORT_LAYOUT+4,SHORT_ACCESSOR);
+    st32(SHORT_ACCESSOR+0xc,0);shortcut_rejected();st32(SHORT_ACCESSOR+0xc,SHORT_ROOT);
+    st32(SHORT_ROOT+8,0);shortcut_rejected();st32(SHORT_ROOT+8,SHORT_TABLE);
     const uint32_t bad_functions[]={0,0x01fffffc,0x0200000d,0x04000000,0x11500000};
     for(unsigned i=0;i<sizeof bad_functions/sizeof *bad_functions;++i) {
-        st32(SHORT_TABLE+0x5c,bad_functions[i]);shortcut_rejected();expect_hud("Why=FUNCTION");
+        st32(SHORT_TABLE+0x5c,bad_functions[i]);shortcut_rejected();
     }
     st32(SHORT_TABLE+0x5c,0x0200000c);
-    shortcut_lookup_result=0;shortcut_rejected();expect_hud("Why=NOT_FOUND");
-    shortcut_lookup_result=0xf5fffffc;shortcut_rejected();expect_hud("Why=RESULT");
+    shortcut_lookup_result=0;shortcut_rejected();
+    shortcut_lookup_result=0xf5fffffc;shortcut_rejected();
     shortcut_lookup_result=SHORT_GROUP;
     strcpy((char*)ppc_ptr(SHORT_GROUP+0x80),"Missing");shortcut_rejected();
     strcpy((char*)ppc_ptr(SHORT_GROUP+0x80),"L_Shortcut_00");
     st32(SHORT_GROUP+0x20,0x7fc00000);shortcut_rejected();stf32(SHORT_GROUP+0x20,250);
-    stf32(SHORT_ROOT+0x5c,0);shortcut_rejected();expect_hud("Why=BASIS");stf32(SHORT_ROOT+0x5c,1);
+    stf32(SHORT_ROOT+0x5c,0);shortcut_rejected();stf32(SHORT_ROOT+0x5c,1);
     ++magic_generation;shortcut_frame(250);
     magic_archive=0;read_hud();shortcut_frame(250);
     fixture_magic();++magic_generation;read_hud();hook(0x02675414,3,MAGIC_CTRL,0);shortcut_frame(226);
@@ -154,7 +152,7 @@ static void test_shortcut(void) {
     st32(m+0x44,l);st32(l+4,a);st32(a+0xc,r);st32(p+0xc,r);
     shortcut_lookup_root=r;shortcut_lookup_result=p;
     shortcut_hook(0x026f8cd0,2,m);assert(ldf32(p+0x20)==226);
-    shortcut_hook(0x026f8cd0,3,m);assert(ldf32(p+0x20)==250);expect_hud("Why=OK");
+    shortcut_hook(0x026f8cd0,3,m);assert(ldf32(p+0x20)==250);
     st8(SAVE+0x33,0);
-    puts("Dark Link native lookup ABI, large HUD, MEM1/MEM2, rejection diagnostics and placement tests passed");
+    puts("Dark Link native lookup ABI, large HUD, MEM1/MEM2, validation and placement tests passed");
 }

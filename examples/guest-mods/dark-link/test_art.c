@@ -19,7 +19,7 @@ int main(int argc,char** argv) {
     assert(dl_art_decode(texture,552,&srgb));
     const u8 expected[8]={255,0,218,182,145,109,72,36};
     for(u32 i=0;i<16;++i) { assert(dl_art_pixels[i*4]==255);assert(dl_art_pixels[i*4+3]==expected[i%8]); }
-    dl_art_material(0x00000000,0xff2020ff,srgb,0);
+    dl_art_material(0x00000000,0xff2020ff,srgb);
     for(u32 i=0;i<16;++i) { assert(dl_art_pixels[i*4]==255);assert(dl_art_pixels[i*4+1]<100);assert(dl_art_pixels[i*4+3]==expected[i%8]); }
     u32 n=dl_art_encode();assert(n>100);
     FILE* f=fopen(argv[1],"wb");assert(f);assert(fwrite(dl_art_png,1,n,f)==n);fclose(f);
@@ -56,5 +56,17 @@ int main(int argc,char** argv) {
     srt[2]=45;assert(!dl_art_bake_uv(uv,srt));
     srt[2]=0;srt[0]=1e30f;assert(!dl_art_bake_uv(uv,srt));
     u32 nanbits=0x7fc00000;memcpy(&srt[0],&nanbits,4);assert(!dl_art_bake_uv(uv,srt));
+    /* Recolouring retains contrast, neutral frame pixels and alpha. */
+    dl_art_width=4;dl_art_height=1;
+    const u8 coloured[16]={20,80,20,255,40,180,40,200,120,120,120,128,255,255,255,0};
+    const u32 white[4]={0xffffffff,0xffffffff,0xffffffff,0xffffffff};
+    memcpy(dl_art_pixels,coloured,16);dl_art_vertices(white,1,0);
+    const u8 red[16]={80,20,20,255,180,40,40,200,120,120,120,128,255,255,255,0};
+    assert(!memcmp(dl_art_pixels,red,16));
+    memcpy(dl_art_pixels,coloured,16);dl_art_vertices(white,0,1);
+    assert(dl_art_pixels[0]==20 && dl_art_pixels[1]==20 && dl_art_pixels[8]==120 && dl_art_pixels[11]==128);
+    const u32 gradient[4]={0xffffffff,0x40404040,0xffffffff,0x40404040};
+    memset(dl_art_pixels,255,16);dl_art_vertices(gradient,1,0);
+    assert(dl_art_pixels[0]>dl_art_pixels[12] && dl_art_pixels[3]>dl_art_pixels[15]);
     puts("Dark Link native artwork pixel tests passed");
 }

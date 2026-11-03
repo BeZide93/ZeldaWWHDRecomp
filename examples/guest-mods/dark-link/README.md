@@ -1,41 +1,37 @@
-# Dark Link (prototype 0.1.20)
+# Dark Link (prototype 0.1.21)
 
 Standalone code mod for ZeldaWWHDRecomp: sword hits charge a transformation with
 black body/equipment, red eyes and boosted sword damage. The user confirmed the
 complete body, mouth, eyes, sword and shield appearance in **0.1.11**. That
 texture-binding repair at **viewCalc return** is retained.
 
-## Changed in 0.1.20
+## Changed in 0.1.21
 
-The user's 0.1.19 screenshot showed `Dpad=893/0/876`, `Shift=0` and `Seen=0`.
-The Main calculation hook runs, but its validation rejects the operation. The
-old combined rejection count cannot identify the exact failing check on-device.
+The user confirmed the 0.1.20 D-pad placement in-game. Its native FindPane
+lookup and calculation-time offset are retained. The temporary D-pad observation
+hook, counters, rejection labels and pointer display are removed. The earlier
+manual traversals/draw-time patches were already removed in previous versions.
 
-The private whole-HUD traversal is removed. It rejected otherwise valid layouts
-when unrelated subtrees exceeded its 256-pane bound and assumed that ordinary
-child links described every layout lookup. Instead, this version calls the
-root pane's native virtual `FindPane("L_Shortcut_00", true)`, using the same
-vtable slot/ABI as `hdHudMain_c::init` (02676174, vtable slot +0x5c).
-Only the selected pane and its transform are validated; the mod no longer
-inspects or limits the size of unrelated HUD subtrees. UI pointer validation
-accepts both native MEM1 and MEM2 heaps, without changing texture/model guards.
+The gauge no longer overwrites every fill pixel with a constant red. It applies
+the native material and UV transform, bakes all four vertex colours/alpha, then
+swaps the resulting red/green channels. Texture shading, highlights, neutral
+pixels and coverage survive. Empty copies remove green chroma while retaining
+neutral borders. The redundant per-image tint and obsolete endpoint-colour
+swap path are removed.
 
-Main_00's calculation still receives the temporary local offset. The authored
-local input is restored afterwards; calculated output stays available for
-embedded/standalone rendering. Parent scale/rotation and gauge removal retain
-their existing handling. No draw-time matrix patches are reintroduced.
+Native `wnd1` frames were previously omitted. The mod now selects the enclosing
+frame for the current MagicBase capacity, reads its original materials/textures
+and frame dimensions, and bakes its corner/edge slices into a transparent-centre
+PNG. One-, four- and eight-material frames, authored flips, and horizontal frames
+are supported. The border is drawn at its original size/offset independently of
+the cropped fill; malformed or unsupported frame resources are omitted locally.
+No game artwork is added to the repository or package.
 
-Diagnostics now distinguish `Why=LAYOUT/ACCESSOR/ROOT/VTABLE/FUNCTION/NOT_FOUND/
-RESULT/PARENT/BASIS/POSITION`, or `OK` after applying the offset. `WAIT` means
-the visibility/resource gates did not request a lookup. `Root` and `Pane` show
-the lookup scope and returned candidate; `Seen` still observes actual pane draws.
-
-Tests cover the virtual-call ABI, a valid 300-pane unrelated subtree (rejected
-by the published 0.1.19 module), both native memory heaps, malformed lookup
-inputs/results, rejection reasons, repeated calculations, parent transforms,
-visibility and exact restoration. The native lookup is mocked and render
-geometry is synthetic: **these tests do not establish the final device output**.
-Only Dark Link needs updating; Enhanced Controls 0.4.0 remains compatible.
+Tests cover pixel contrast, neutral edges, four-corner gradients and alpha,
+native frame resource parsing/assembly, transparent centres, malformed resources,
+HUD command validation, the retained D-pad placement and both shared-editor load
+orders. These use synthetic artwork. The new gauge design still needs an in-game
+visual check; body/eyes/equipment/aura and D-pad behavior were user-confirmed.
 
 ## Added in 0.1.17
 
@@ -109,22 +105,23 @@ unrelated changes. Other actors and held non-sword items are excluded.
 Read the resident **MagicBar_00** SARC/BFLYT with bounded offsets. Find the native
 P_MagicBase_00/01 and the authored green fill. Query their original geometry and
 UVs. Decode the referenced BFLIM (RGBA8, BC1–5; linear, micro and macro tiling),
-apply the material's black/white colours in linear light, and replace fill RGB
-with (255, 32, 32). Preserve texture/material alpha. When the base itself is green,
-make its empty copy black and use the same full-size art for the red fill.
+apply the material's black/white colours in linear light, bake all four vertex
+colours, then swap the final red/green channels. Preserve
+texture/material alpha and contrast. When the base itself is green, remove its
+green chroma in the empty copy and retain its full-size art for the red fill.
 Bake the selected UV rectangle and texture scale/translation into the copied
 pixels with bilinear sampling and edge clamping. Partial fill then crops image
 width and normalized UVs; native out-of-range/reversed UVs never reach the HUD.
 
-Cache four small generated PNGs as `magic-{0,1}-{frame,fill}.png` in this mod's
+Cache generated PNGs as `magic-{0,1}-{frame,fill,border}.png` in this mod's
 Data folder and load them through the existing HUD image service. The source
 archive is read-only; these local derivatives are never included in the package
 or uploaded. Conversion only runs on load/retry, not on every drawing frame.
 Each decoded image is bounded to 131072 pixels and each cache write is below
 1 MiB. Unsupported or missing textures are skipped and retried, with no fake
-rectangle fallback. The frame retains its first authored vertex colour; the
-fill retains its alpha and uses neutral vertex RGB. Arbitrary multi-texture
-shader effects and per-corner alpha gradients are not reproduced.
+rectangle fallback. Picture vertex gradients are baked into the images. Window
+borders use their original frame textures/materials. Arbitrary multi-texture shader effects are
+not reproduced.
 
 A bounded BFLAN reader selects a 16/32-frame animation explicitly bound to
 `G_Bar_00`, validates all tracks before applying any, and evaluates its full
@@ -156,7 +153,7 @@ collision path charge the gauge. Boss-specific handlers may override damage.
 ## Diagnostics and validation
 
 Enable **Appearance diagnostics** only when needed. The first line reads
-`DL 0.1.18 ON/OFF`; `Magic` counts loaded frame/fill images (up to four),
+`DL 0.1.21 ON/OFF`; `Magic` counts loaded frame/fill images (up to four),
 `Pos` is 1 for native or 2 for authored placement, and `Aura` reports the shell
 model being present. Body material/albedo/eye counts, binding retention and late
 repair counters retain their existing meanings. `Fill` reports the actual

@@ -11,7 +11,7 @@ static struct { char name[24], material[29]; u32 fill, black, white, vertex[4]; 
 static u32 dl_magic_picture_count, dl_magic_loaded, dl_magic_retry;
 static unsigned long long dl_magic_epoch;
 static wwhd_game_pane dl_magic_query, dl_magic_base[2], dl_magic_fill[2];
-static u32 dl_magic_images[2][2], dl_magic_tint[2][2], dl_magic_archive;
+static u32 dl_magic_images[2][2], dl_magic_archive;
 static f32 dl_magic_position[4];
 static f32 dl_magic_authored[2];
 static u32 dl_magic_authored_valid;
@@ -144,9 +144,6 @@ static int dl_magic_pane(const char* name,wwhd_game_pane* out) {
     }
     return out->w>0 && out->h>0;
 }
-static u32 dl_magic_red(u32 colour) {
-    return (colour&0x0000ffffu)|((colour&0x00ff0000u)<<8)|((colour&0xff000000u)>>8);
-}
 static u32 dl_magic_image(wwhd_game_pane* pane,u32 picture,u32 variant,u32 fill) {
     /* The raw BC4 texture can be a luminance mask with fully opaque alpha.
      * Apply the actual material, including alpha, before making the red copy. */
@@ -157,26 +154,9 @@ static u32 dl_magic_image(wwhd_game_pane* pane,u32 picture,u32 variant,u32 fill)
     int srgb=0;
     if(!texture || !dl_art_decode((const u8*)texture,bytes,&srgb)) return 0;
     u32 black=dl_magic_pictures[picture].black,white=dl_magic_pictures[picture].white;
-    u32 vertex=dl_magic_pictures[picture].vertex[0];
-    int coloured=dl_green(black)||dl_green(white);
-    if(coloured) {
-        /* The base itself may contain the green fill. Draw an empty copy
-         * below the red copy, never leave a green base behind the timer. */
-        if(fill) { black=dl_magic_red(black);white=dl_magic_red(white); }
-        else { if(dl_green(black)) black&=255; if(dl_green(white)) white&=255; }
-    }
-    if(dl_green(vertex)) vertex=fill?dl_magic_red(vertex):(vertex&255);
-    dl_art_material(black,white,srgb,0);
-    /* Fill RGB is a requested replacement colour, not a multiplier for
-     * the source green/black gradient. Keep the original coverage alpha. */
-    if(fill) {
-        for(u32 i=0;i<dl_art_width*dl_art_height;++i) {
-            dl_art_pixels[i*4]=255;dl_art_pixels[i*4+1]=32;dl_art_pixels[i*4+2]=32;
-        }
-        vertex=0xffffff00u|(vertex&255);
-    }
+    dl_art_material(black,white,srgb);
     if(!dl_art_bake_uv(dl_magic_pictures[picture].uv,dl_magic_pictures[picture].tex_srt)) return 0;
-    dl_magic_tint[variant][fill]=vertex;
+    dl_art_vertices(dl_magic_pictures[picture].vertex,fill,!fill && dl_magic_pictures[picture].fill);
     u32 size=dl_art_encode();
     if(!size) return 0;
     static const char* const files[2][2]={{"magic-0-frame.png","magic-0-fill.png"},{"magic-1-frame.png","magic-1-fill.png"}};
@@ -184,6 +164,7 @@ static u32 dl_magic_image(wwhd_game_pane* pane,u32 picture,u32 variant,u32 fill)
     if(wwhd_file_write(filename,dl_art_png,size)!=(s32)size) return 0;
     return wwhd_hud_texture(WWHD_HUD_DATA,filename);
 }
+#include "magic_frame.h"
 static void dl_magic_load(void) {
     u32 mgr=WWHD_GAME_DATA(0x101F7274,u32);
     if (!mgr) return;
@@ -223,6 +204,7 @@ static void dl_magic_load(void) {
         if(frame<0 || fill<0) continue;
         dl_magic_images[v][0]=dl_magic_image(&dl_magic_base[v],(u32)frame,v,0);
         dl_magic_images[v][1]=dl_magic_image(&dl_magic_fill[v],(u32)fill,v,1);
+        dl_magic_load_border(f,size,v);
 
     }
     dl_magic_loaded=dl_magic_images[0][0] && dl_magic_images[0][1] &&
@@ -274,7 +256,7 @@ static int dl_magic_element(u32 v,u32 layer,wwhd_hud_element* out) {
     if(!(x>=-65536 && x<=65536 && y>=-65536 && y<=65536 &&
          w>0 && w<=65536 && h>0 && h<=65536 && fraction>0 && fraction<=1)) return 0;
     *out=(wwhd_hud_element){.kind=WWHD_HUD_IMAGE,.anchor=anchor,
-        .x=x,.y=y,.w=w*fraction,.h=h,.rgba=dl_magic_tint[v][layer],
+        .x=x,.y=y,.w=w*fraction,.h=h,.rgba=0xffffffff,
         .image=dl_magic_images[v][layer],.thickness=1,
         .u0=0,.v0=0,.u1=fraction,.v1=1};
     return 1;
@@ -284,6 +266,7 @@ static void dl_magic_hud(u32 list) {
     if(epoch!=dl_magic_epoch) {
         dl_magic_epoch=epoch; dl_magic_loaded=dl_magic_retry=0;
         dl_magic_position_valid=0; dl_magic_authored_valid=0; memset(dl_magic_images,0,sizeof dl_magic_images);
+        memset(dl_magic_border,0,sizeof dl_magic_border);
     }
     if(!dl_magic_loaded && !dl_magic_retry) { dl_magic_load(); dl_magic_retry=60; }
     if(dl_magic_retry) --dl_magic_retry;
@@ -292,4 +275,15 @@ static void dl_magic_hud(u32 list) {
     if(!dl_magic_images[v][0] || !dl_magic_images[v][1]) return;
     for(u32 layer=0;layer<2;++layer)
         if(dl_magic_element(v,layer,&dl_element)) wwhd_hud_emit(list,&dl_element);
+    if(dl_magic_border[v] && dl_magic_element(v,0,&dl_element)) {
+        wwhd_game_pane* p=&dl_magic_border_pane[v];
+        f32 sx=dl_magic_position[2]/dl_magic_base[v].w,sy=dl_magic_position[3]/dl_magic_base[v].h;
+        f32 w=p->w*sx,h=p->h*sy;
+        dl_element.x+=(p->x-dl_magic_base[v].x)*sx+(dl_element.w-w)/2;
+        dl_element.y-=(p->y-dl_magic_base[v].y)*sy-(dl_element.h-h)/2;
+        dl_element.w=w;dl_element.h=h;dl_element.image=dl_magic_border[v];
+        dl_element.rgba=0xffffffff; /* own gauge visibility; texture coverage is baked */
+        if(dl_element.x>=-65536 && dl_element.x<=65536 && dl_element.y>=-65536 && dl_element.y<=65536 &&
+           w>0 && w<=65536 && h>0 && h<=65536) wwhd_hud_emit(list,&dl_element);
+    }
 }
