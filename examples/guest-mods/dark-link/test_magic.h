@@ -569,10 +569,12 @@ static void test_magic(void) {
     assert(magic_width>95 && magic_width<=100 && magic_x==60);
     magic_base_fill=0;fixture_magic();++magic_generation;
     read_hud();hook(0x02675414,3,MAGIC_CTRL,0);read_hud();
-    /* The magic save values do not drive Dark Link's remaining duration. */
+    /* Maximum magic doubles duration; current magic never drains Dark Link. */
     st8(SAVE+0x33,32); st8(SAVE+0x34,0); read_hud(); assert(magic_width>90);
     for(int i=0;i<300;++i) tick();
-    read_hud(); assert(magic_width>40 && magic_width<49);
+    read_hud(); assert(magic_width>64 && magic_width<73);
+    float remaining_width=magic_width;st8(SAVE+0x34,32);read_hud();assert(magic_width==remaining_width);
+    st8(SAVE+0x34,0);
     st8(SAVE+0x33,0);
     ++magic_generation; magic_draws=0; read_hud(); assert(!magic_draws); /* fresh native position required */
     hook(0x02675414,3,MAGIC_CTRL,0); read_hud(); assert(magic_draws==2);

@@ -119,6 +119,10 @@ WWHD_HOOK(WWHD_ADDR_daPy_Execute, dl_execute, (daPy_lk_c* link)) {
     dl_gameplay = dl_allowed(link);
     int request = dl_request || (dl_auto && !dl_config.free_transform && !dl_state.active && dl_ready(&dl_state, &dl_config));
     dl_request = 0;
+    /* Same maximum-magic byte and threshold used by the native gauge. Do
+     * not use current magic, HUD scale, or charge capacity for this bonus. */
+    u32 save=WWHD_GAME_DATA(WWHD_ADDR_save_info_pointer,u32);
+    dl_sync_magic_capacity(&dl_state,*((u8*)save+0x33));
     int was_active = dl_state.active;
     dl_tick(&dl_state, &dl_config, (f32)wwhd_logic_dt(), request, dl_gameplay);
     if (!was_active && dl_state.active) dl_probe = (DLAppearanceProbe){.reason=DL_PROBE_NO_REFRESH};

@@ -6,10 +6,22 @@ typedef struct {
 } DLConfig;
 typedef struct {
     float charge, remaining, total;
-    int active;
+    int active, duration_scale;
 } DLState;
 
 static void dl_reset(DLState* s) { *s = (DLState){0}; }
+/* Match the HUD's short/long magic capacity variants. Charge requirements
+ * are independent. Preserve the remaining fraction if capacity changes while
+ * transformed; this must neither refill nor repeatedly multiply the timer. */
+static void dl_sync_magic_capacity(DLState* s, unsigned magic_capacity) {
+    int scale=magic_capacity>16?2:1;
+    int previous=s->duration_scale?s->duration_scale:1;
+    if(s->active && scale!=previous) {
+        float ratio=(float)scale/(float)previous;
+        s->remaining*=ratio;s->total*=ratio;
+    }
+    s->duration_scale=scale;
+}
 static void dl_hit(DLState* s, const DLConfig* c, int lost_health) {
     if (!lost_health || s->active || c->free_transform) return;
     s->charge += (float)c->gain;
@@ -25,7 +37,7 @@ static void dl_tick(DLState* s, const DLConfig* c, float dt, int request, int al
         if (s->active) { dl_reset(s); return; }
         if (dl_ready(s, c)) {
             s->active = 1;
-            s->remaining = (float)c->duration;
+            s->remaining = (float)c->duration * (s->duration_scale?s->duration_scale:1);
             s->total = s->remaining;
             s->charge = 0;
             return;

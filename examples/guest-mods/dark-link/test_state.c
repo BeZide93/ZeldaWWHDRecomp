@@ -2,7 +2,44 @@
 #include <stdio.h>
 #include "state.h"
 
+static void test_magic_duration(void) {
+    const unsigned capacities[]={0,16,32};
+    const int durations[]={7,20,300};
+    for(unsigned d=0;d<3;++d) for(unsigned m=0;m<3;++m) {
+        DLConfig c={100,5,durations[d],200,0};DLState s={0};
+        dl_sync_magic_capacity(&s,capacities[m]);
+        for(int i=0;i<19;++i)dl_hit(&s,&c,1);
+        dl_tick(&s,&c,0,1,1);assert(!s.active && s.charge==95);
+        dl_hit(&s,&c,1);dl_tick(&s,&c,0,1,1);
+        int seconds=durations[d]*(m==2?2:1);
+        assert(s.active && s.total==seconds && s.remaining==seconds && !s.charge);
+        for(int i=0;i<seconds*4-1;++i) {
+            dl_sync_magic_capacity(&s,capacities[m]);dl_tick(&s,&c,0.25f,0,1);
+        }
+        assert(s.active && s.remaining==0.25f);
+        dl_tick(&s,&c,0.25f,0,1);assert(!s.active && !s.charge);
+    }
+    DLConfig c={100,5,20,200,0};DLState s={.charge=50};
+    dl_sync_magic_capacity(&s,32);assert(s.charge==50); /* no extra hits */
+    dl_sync_magic_capacity(&s,16);s.charge=100;dl_tick(&s,&c,0,1,1);
+    for(int i=0;i<20;++i)dl_tick(&s,&c,0.25f,0,1);
+    assert(s.remaining==15 && s.total==20);
+    c.duration=7; /* base setting still applies only at next activation */
+    dl_sync_magic_capacity(&s,32);assert(s.remaining==30 && s.total==40);
+    for(int i=0;i<100;++i) {dl_sync_magic_capacity(&s,32);dl_tick(&s,&c,0.25f,0,0);}
+    assert(s.remaining==30 && s.total==40); /* no refill, no pause drain */
+    dl_sync_magic_capacity(&s,16);assert(s.remaining==15 && s.total==20);
+    dl_tick(&s,&c,0,1,1);assert(!s.active);
+    dl_sync_magic_capacity(&s,32);s.charge=100;dl_tick(&s,&c,0,1,1);
+    assert(s.remaining==14 && s.total==14);
+    c.free_transform=1;
+    for(int i=0;i<1000;++i)dl_tick(&s,&c,0.25f,0,1);
+    assert(s.active && s.remaining==14);
+    dl_tick(&s,&c,0,1,1);assert(!s.active);
+}
+
 int main(void) {
+    test_magic_duration();
     DLConfig c = {100, 5, 20, 200, 0};
     DLState s = {0};
     dl_hit(&s, &c, 0); assert(s.charge == 0);

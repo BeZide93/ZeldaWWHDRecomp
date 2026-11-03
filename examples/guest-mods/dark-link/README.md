@@ -1,9 +1,35 @@
-# Dark Link (prototype 0.1.34 — frame behind gauge layers)
+# Dark Link (prototype 0.1.35 — duration follows magic upgrade)
 
 Standalone code mod for ZeldaWWHDRecomp: sword hits charge a transformation with
 black body/equipment, red eyes and boosted sword damage. The user confirmed the
 complete body, mouth, eyes, sword and shield appearance in **0.1.11**. That
 texture-binding repair at **viewCalc return** is retained.
+
+## Changed in 0.1.35
+
+The native gauge appearance is confirmed working on device in 0.1.34.
+The magic-meter upgrade now also doubles Dark Link transformation duration:
+the short gauge uses the configured base duration, the long gauge uses twice
+that value (20/40 seconds by default). Maximum magic selects the same variant
+as the HUD: 0/16 uses the short gauge, values above 16 use the long gauge.
+Current magic, HUD visibility and screen scaling do not affect duration.
+
+Charge capacity and charge per damaging sword hit are unchanged: both gauges
+still require 20 hits with default settings. An upgrade during a transformation
+scales both remaining and total duration, preserving the remaining percentage
+rather than refilling the timer. Downgrading likewise preserves that percentage.
+Repeated updates do not compound the multiplier. Duration-setting changes
+continue to apply at the next transformation; pauses, cancellation and unlimited
+Free transformation keep their existing behaviour.
+
+Tests cover both duration multipliers, the unchanged hit count, custom base
+durations, upgrades/downgrades while active, paused updates, cancellation and
+Free mode. Translated guest tests check 20/40-second expiry with the HUD hidden
+and native magic empty, and verify that changing current magic does not change
+the remaining gauge fraction. Native gauge artwork/placement is unchanged.
+
+Install `dark-link-0.1.35.wwhdmod`, complete the mod build and restart.
+No app or Enhanced Controls rebuild is required.
 
 ## Changed in 0.1.34
 
@@ -275,7 +301,7 @@ No app rebuild is needed.
 2. Replace the installed Dark Link package in Mods, finish its code-mod build,
    and fully restart the game. The same package supports USA/EU and Android.
 3. Press **L3 + R3** together or tap **DARK** to transform; press/tap again to
-   cancel. Defaults: 100 charge, 5 per damaging sword hit, 20 seconds, 200% damage.
+   cancel. Defaults: 100 charge, 5 per damaging sword hit, 20 seconds (40 with the magic-meter upgrade), 200% damage.
 
 **Free transformation** permits immediate transformation with unlimited duration.
 Capacity, charge gain, duration, damage, automatic activation, gauge visibility,
@@ -368,7 +394,7 @@ collision path charge the gauge. Boss-specific handlers may override damage.
 ## Diagnostics and validation
 
 Enable **Appearance diagnostics** only when needed. The first line reads
-`DL 0.1.34 ON/OFF`; `Magic` counts loaded frame/fill images (up to four),
+`DL 0.1.35 ON/OFF`; `Magic` counts loaded frame/fill images (up to four),
 `Pos` is 1 for native or 2 for authored placement, and `Aura` reports the shell
 model being present. Body material/albedo/eye counts, binding retention and late
 repair counters retain their existing meanings. `Fill` reports the actual

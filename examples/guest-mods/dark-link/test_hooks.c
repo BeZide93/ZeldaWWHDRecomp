@@ -215,6 +215,24 @@ int main(int argc, char** argv) {
     st16(SAVE+0x20,80); st16(SAVE+0x22,80); st8(ENEMY+0x2da,2);
     st32(HIT,LINK+0x7b1c); st32(HIT+4,LINK); st8(HIT+10,1); st32(LINK+0x7b1c+0x10,2);
     tick(); assert(filter && hud && touch);
+    /* Duration follows maximum magic even with the gauge hidden; neither
+     * current magic nor the upgrade increases the twenty-hit requirement. */
+    show_gauge=0;
+    const unsigned magic_caps[]={0,16,32};
+    for(unsigned m=0;m<3;++m) {
+        enabled=0;++revision;tick();enabled=1;++revision;
+        st8(SAVE+0x33,magic_caps[m]);st8(SAVE+0x34,0);tick();buttons(0);
+        for(int i=0;i<19;++i)hit(1);
+        buttons(0x60000);tick();assert(damage(3)==3);buttons(0);
+        hit(1);buttons(0x60000);tick();assert(damage(3)==6);buttons(0);
+        int seconds=m==2?40:20;
+        for(int i=0;i<seconds*30-2;++i)tick();
+        assert(damage(3)==6);
+        for(int i=0;i<4;++i)tick();
+        assert(damage(3)==3);
+    }
+    st8(SAVE+0x33,0);show_gauge=1;++revision;tick();buttons(0);
+
     buttons(0); assert(claim_active);
     elements=0; read_hud(); assert(elements>=5); expect_hud("Skip=NO_REFRESH");
     for (int i=0; i<20; ++i) hit(0);
