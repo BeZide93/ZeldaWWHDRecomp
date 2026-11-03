@@ -1,58 +1,64 @@
-/* Reserve the Dark Link row in Main_00's calculation INPUT, before NW4F
- * computes the embedded Shortcut layout. Never patch/restore draw matrices.
- *
- * Native evidence (ZeldaWWHDDecomp/wwhd b2811a3):
- * - hd_screen_hud_main.cpp: Main applies HeartPos/MagicPos, then vCalcLayout.
- * - hd_ui_020021FC.cpp: drawLayoutScreenWithInfo (02002D20) skips an
- *   accessor whose root +0x0c is nonzero (an attached pane's parent).
- * Thus counting Shortcut::draw calls does NOT prove that screen draws itself.
- * - hd_parts_lyt.h / runtime/src/aspect.cpp: pane links, SRT and dirty bit.
- * Walk the real Main root; N_Default_00 is not assumed to be an ancestor.
+/* Reserve the Dark Link row in Main_00's calculation input. Resolve the
+ * placement through the game's virtual FindPane(name, recursive) operation,
+ * exactly as hdHudMain_c::init (02676174) resolves its own named panes.
+ * Source: ZeldaWWHDDecomp/wwhd b2811a3, hd_screen_hud_main.cpp and
+ * hd_parts_lyt.h (pane vtable +0x5c). No private whole-HUD traversal/limit.
+ * The calculated output remains available to embedded and standalone draws.
  */
 #pragma once
-#define DL_SHORTCUT_LIMIT 256
-static u32 dl_shortcut_nodes[DL_SHORTCUT_LIMIT];
-static u32 dl_shortcut_count,dl_shortcut_owner,dl_shortcut_depth,dl_shortcut_pane;
+static u32 dl_shortcut_owner,dl_shortcut_depth,dl_shortcut_pane;
 static u32 dl_shortcut_original[2],dl_shortcut_written[2];
 static u32 dl_shortcut_calcs,dl_shortcut_applied,dl_shortcut_rejected;
 static u32 dl_shortcut_seen,dl_shortcut_observed,dl_shortcut_shift;
+static u32 dl_shortcut_root,dl_shortcut_candidate;
 static unsigned long long dl_shortcut_epoch;
-static int dl_shortcut_add(u32 pane) {
-    if(!dl_game_span(pane,0xa4) || dl_shortcut_count==DL_SHORTCUT_LIMIT) return 0;
-    for(u32 i=0;i<dl_shortcut_count;++i) if(dl_shortcut_nodes[i]==pane) return 0;
-    dl_shortcut_nodes[dl_shortcut_count++]=pane;
-    return 1;
+enum { DL_SHORT_WAIT,DL_SHORT_LAYOUT,DL_SHORT_ACCESSOR,DL_SHORT_ROOT,
+    DL_SHORT_VTABLE,DL_SHORT_FUNCTION,DL_SHORT_MISSING,DL_SHORT_RESULT,
+    DL_SHORT_PARENT,DL_SHORT_BASIS,DL_SHORT_POSITION,DL_SHORT_OK };
+static u32 dl_shortcut_reason;
+static const char* const dl_shortcut_reasons[]={"WAIT","LAYOUT","ACCESSOR","ROOT",
+    "VTABLE","FUNCTION","NOT_FOUND","RESULT","PARENT","BASIS","POSITION","OK"};
+/* UI allocations may use either native heap. Keep this local to UI: it does
+ * not relax the existing model/texture guards. runtime/src/runtime.h defines
+ * MEM1 [f4000000,f6000000), MEM2 [10000000,50000000). */
+static int dl_shortcut_span(u32 p,u32 size) {
+    if(p&3u) return 0;
+    return (p>=0x10000000u && p<0x50000000u && size<=0x50000000u-p) ||
+           (p>=0xf4000000u && p<0xf6000000u && size<=0xf6000000u-p);
+}
+static int dl_shortcut_fail(u32 reason) {
+    dl_shortcut_reason=reason;
+    dl_probe_increment(&dl_shortcut_rejected);
+    return 0;
 }
 static int dl_shortcut_find(void* parts,u32* result) {
     u32 layout=dl_word(parts,0x44);
-    if(!dl_game_span(layout,8)) return 0;
+    if(!dl_shortcut_span(layout,8)) return dl_shortcut_fail(DL_SHORT_LAYOUT);
     u32 accessor=dl_word((void*)layout,4);
-    if(!dl_game_span(accessor,0x10)) return 0;
-    dl_shortcut_count=0;*result=0;
-    if(!dl_shortcut_add(dl_word((void*)accessor,0xc))) return 0;
-    for(u32 i=0;i<dl_shortcut_count;++i) {
-        u32 p=dl_shortcut_nodes[i];
-        if(dl_str_equal((const char*)(p+0x80),"L_Shortcut_00",24)) {
-            if(*result) return 0; /* ambiguous placement: do not move either */
-            *result=p;
-        }
-        /* Only Main's own pane tree. Nested parts resources are not needed to
-         * identify the placement, and unrelated hearts/counters stay untouched. */
-        u32 head=p+0x14,node=dl_word((void*)head,0),steps=0;
-        while(node!=head) {
-            if(++steps>DL_SHORTCUT_LIMIT || !dl_shortcut_add(node) ||
-               dl_word((void*)node,0xc)!=p) return 0;
-            node=dl_word((void*)node,0);
-        }
-    }
-    return *result!=0;
+    if(!dl_shortcut_span(accessor,0x10)) return dl_shortcut_fail(DL_SHORT_ACCESSOR);
+    u32 root=dl_word((void*)accessor,0xc);dl_shortcut_root=root;
+    if(!dl_shortcut_span(root,0xa4)) return dl_shortcut_fail(DL_SHORT_ROOT);
+    u32 table=dl_word((void*)root,8);
+    if(!dl_shortcut_span(table,0x60)) return dl_shortcut_fail(DL_SHORT_VTABLE);
+    u32 find=dl_word((void*)table,0x5c);
+    if((find&3u) || find<0x02000000u || find>=0x04000000u)
+        return dl_shortcut_fail(DL_SHORT_FUNCTION);
+    typedef u32 (*FindPane)(u32,const char*,u32);
+    u32 pane=((FindPane)find)(root,"L_Shortcut_00",1);
+    dl_shortcut_candidate=pane;
+    if(!pane) return dl_shortcut_fail(DL_SHORT_MISSING);
+    if(!dl_shortcut_span(pane,0xa4) ||
+       !dl_str_equal((const char*)(pane+0x80),"L_Shortcut_00",24))
+        return dl_shortcut_fail(DL_SHORT_RESULT);
+    *result=pane;return 1;
 }
 WWHD_HOOK(0x026F8CD0,dl_shortcut_calc_enter,(void* parts)) {
     if(dl_shortcut_owner) { ++dl_shortcut_depth; return; }
-    if(!dl_game_span((u32)parts,0x50) ||
+    if(!dl_shortcut_span((u32)parts,0x50) ||
        dl_word(parts,4)!=(u32)&WWHD_GAME_DATA(0x100F7A48,u8)) return;
     dl_probe_increment(&dl_shortcut_calcs);
     dl_shortcut_observed=dl_shortcut_shift=0;
+    dl_shortcut_root=dl_shortcut_candidate=0;dl_shortcut_reason=DL_SHORT_WAIT;
     if(!dl_show_hud || !dl_owner || !dl_allowed(dl_owner) ||
        wwhd_hud_epoch()!=dl_magic_epoch) return;
     u32 save=WWHD_GAME_DATA(WWHD_ADDR_save_info_pointer,u32);
@@ -62,9 +68,9 @@ WWHD_HOOK(0x026F8CD0,dl_shortcut_calc_enter,(void* parts)) {
     f32 row=(gauge.h+8)*(capacity?1:2);
     if(!(row>8 && row<320)) return;
     u32 p;
-    if(!dl_shortcut_find(parts,&p)) { dl_probe_increment(&dl_shortcut_rejected); return; }
+    if(!dl_shortcut_find(parts,&p)) return;
     u32 parent=dl_word((void*)p,0xc);
-    if(!dl_game_span(parent,0xa4)) { dl_probe_increment(&dl_shortcut_rejected); return; }
+    if(parent==p || !dl_shortcut_span(parent,0xa4)) { dl_shortcut_fail(DL_SHORT_PARENT);return; }
     /* Convert a downward layout-space vector through the parent's inverse 2D
      * basis. Scaling/rotation must not alter the reserved screen-space height. */
     f32 a=*(f32*)(parent+0x48),b=*(f32*)(parent+0x4c);
@@ -72,11 +78,11 @@ WWHD_HOOK(0x026F8CD0,dl_shortcut_calc_enter,(void* parts)) {
     f32 x=*(f32*)(p+0x1c),y=*(f32*)(p+0x20);
     if(!(dl_abs(det)>0.0001f && dl_abs(det)<10000 &&
          x>-10000 && x<10000 && y>-10000 && y<10000)) {
-        dl_probe_increment(&dl_shortcut_rejected);return;
+        dl_shortcut_fail(DL_SHORT_BASIS);return;
     }
     f32 nx=x+b*row/det,ny=y-a*row/det;
     if(!(nx>-10000 && nx<10000 && ny>-10000 && ny<10000)) {
-        dl_probe_increment(&dl_shortcut_rejected);return;
+        dl_shortcut_fail(DL_SHORT_POSITION);return;
     }
     dl_shortcut_owner=(u32)parts;dl_shortcut_depth=1;dl_shortcut_pane=p;
     union {f32 value;u32 bits;} encoded[2]={{.value=nx},{.value=ny}};
@@ -87,6 +93,7 @@ WWHD_HOOK(0x026F8CD0,dl_shortcut_calc_enter,(void* parts)) {
     }
     *((u8*)p+0x44)|=0x10; /* native calculation must consume the new input */
     dl_shortcut_observed=p;dl_shortcut_epoch=dl_magic_epoch;dl_shortcut_shift=(u32)(row+0.5f);
+    dl_shortcut_reason=DL_SHORT_OK;
     dl_probe_increment(&dl_shortcut_applied);
 }
 WWHD_HOOK_RETURN(0x026F8CD0,dl_shortcut_calc_leave,(void* parts)) {
@@ -109,7 +116,7 @@ WWHD_HOOK(0x02877100,dl_shortcut_pane_draw,(void* object,void* info)) {
     if(!dl_diagnostics || !dl_shortcut_observed ||
        wwhd_hud_epoch()!=dl_shortcut_epoch) return;
     u32 p=(u32)object;
-    for(u32 n=0;n<32 && dl_game_span(p,0xa4);++n) {
+    for(u32 n=0;n<32 && dl_shortcut_span(p,0xa4);++n) {
         if(p==dl_shortcut_observed) { dl_probe_increment(&dl_shortcut_seen);return; }
         p=dl_word((void*)p,0xc);
     }

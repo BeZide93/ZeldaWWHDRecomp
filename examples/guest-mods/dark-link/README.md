@@ -1,41 +1,41 @@
-# Dark Link (prototype 0.1.19)
+# Dark Link (prototype 0.1.20)
 
 Standalone code mod for ZeldaWWHDRecomp: sword hits charge a transformation with
 black body/equipment, red eyes and boosted sword damage. The user confirmed the
 complete body, mouth, eyes, sword and shield appearance in **0.1.11**. That
 texture-binding repair at **viewCalc return** is retained.
 
-## Changed in 0.1.19
+## Changed in 0.1.20
 
-The user's 0.1.18 diagnostic screenshot showed `Dpad=4248/4194/0`: the
-Shortcut draw hook ran and wrote matrices, but the visible D-pad did not move.
-Those counters measured writes, not rendering. The previous claim that moving
-the scope to the child draw solved the issue was not supported by device output.
+The user's 0.1.19 screenshot showed `Dpad=893/0/876`, `Shift=0` and `Seen=0`.
+The Main calculation hook runs, but its validation rejects the operation. The
+old combined rejection count cannot identify the exact failing check on-device.
 
-Native `drawLayoutScreenWithInfo` (02002D20) checks the layout root's parent
-before drawing. An attached layout can therefore be rendered through Main_00
-while its later standalone draw is skipped. A test that only examines matrices
-inside the child draw misses that route.
+The private whole-HUD traversal is removed. It rejected otherwise valid layouts
+when unrelated subtrees exceeded its 256-pane bound and assumed that ordinary
+child links described every layout lookup. Instead, this version calls the
+root pane's native virtual `FindPane("L_Shortcut_00", true)`, using the same
+vtable slot/ABI as `hdHudMain_c::init` (02676174, vtable slot +0x5c).
+Only the selected pane and its transform are validated; the mod no longer
+inspects or limits the size of unrelated HUD subtrees. UI pointer validation
+accepts both native MEM1 and MEM2 heaps, without changing texture/model guards.
 
-This version removes the draw-time matrix writes. At Main_00's `calcLayout`
-(026F8CD0), identified by vtable 100F7A48, it finds `L_Shortcut_00` through the
-actual root's child tree, validates that tree and temporarily offsets the local
-position. It does not assume `N_Default_00` is an ancestor. The native calculation
-then propagates the placement into the embedded layout and any prepared render
-geometry. Only the local input is restored afterwards; calculated matrices remain
-available for drawing. A dirty bit ensures the next calculation also handles
-removing the gauge. The parent's inverse 2D basis accounts for scale/rotation.
+Main_00's calculation still receives the temporary local offset. The authored
+local input is restored afterwards; calculated output stays available for
+embedded/standalone rendering. Parent scale/rotation and gauge removal retain
+their existing handling. No draw-time matrix patches are reintroduced.
 
-The synthetic regression covers embedded and standalone draw routes, a retained
-geometry sample, exact local restoration, repeated frames, scaled/rotated parents,
-hidden gauges, menus, heart/magic states and malformed trees. It fails against
-the published 0.1.18 module. This is a native-memory model, **not execution of the
-game's renderer**; final D-pad placement still requires an in-game check.
+Diagnostics now distinguish `Why=LAYOUT/ACCESSOR/ROOT/VTABLE/FUNCTION/NOT_FOUND/
+RESULT/PARENT/BASIS/POSITION`, or `OK` after applying the offset. `WAIT` means
+the visibility/resource gates did not request a lookup. `Root` and `Pane` show
+the lookup scope and returned candidate; `Seen` still observes actual pane draws.
 
-Appearance diagnostics now show `Dpad=calculations/applied/rejected`, `Shift`
-(layout-space units), `Pane` (matched placement) and `Seen` (actual Pane::Draw
-calls within that placement's ancestry). The draw observation is read-only.
-Only Dark Link needs updating. Enhanced Controls 0.4.0 remains compatible.
+Tests cover the virtual-call ABI, a valid 300-pane unrelated subtree (rejected
+by the published 0.1.19 module), both native memory heaps, malformed lookup
+inputs/results, rejection reasons, repeated calculations, parent transforms,
+visibility and exact restoration. The native lookup is mocked and render
+geometry is synthetic: **these tests do not establish the final device output**.
+Only Dark Link needs updating; Enhanced Controls 0.4.0 remains compatible.
 
 ## Added in 0.1.17
 

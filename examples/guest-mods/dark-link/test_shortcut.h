@@ -6,7 +6,16 @@ enum { SHORT_MAIN=0x11500000,SHORT_ROOT=0x11501000,SHORT_GROUP=0x11502000,
        SHORT_CHILD=0x11503000,SHORT_OTHER=0x11504000,SHORT_LAYOUT=0x11505000,
        SHORT_ACCESSOR=0x11506000,SHORT_NESTED=0x11507000,SHORT_NROOT=0x11508000,
        SHORT_SCREEN=0x11509000,SHORT_LIST=0x1150a000,SHORT_UNREAD=0x1150b000,
-       SHORT_ULAYOUT=0x1150c000,SHORT_UACCESSOR=0x1150d000,SHORT_UPANE=0x1150e000 };
+       SHORT_ULAYOUT=0x1150c000,SHORT_UACCESSOR=0x1150d000,SHORT_UPANE=0x1150e000,
+       SHORT_TABLE=0x1150f000,SHORT_LARGE=0x11510000 };
+/* The game lookup is mocked: verify the exact virtual-call ABI and scope,
+ * independently of the mod. We do not claim to execute Nintendo code here. */
+static uint32_t shortcut_lookup_root,shortcut_lookup_result,shortcut_lookups;
+static void shortcut_lookup(Cpu* c) {
+    assert(c->r[3]==shortcut_lookup_root && c->r[5]==1);
+    assert(!strcmp((const char*)ppc_ptr(c->r[4]),"L_Shortcut_00"));
+    ++shortcut_lookups;c->r[3]=shortcut_lookup_result;
+}
 static void shortcut_hook(uint32_t address,uint32_t kind,uint32_t object) {
     for(uint32_t i=0;i<module->hook_count;++i) {
         const WWHDGuestHook* h=&module->hooks[i];
@@ -19,6 +28,7 @@ static void shortcut_pane(uint32_t p,const char* name,float y) {
     stf32(p+0x20,y);stf32(p+0x48,1);stf32(p+0x5c,1);stf32(p+0x64,y);
 }
 static void shortcut_fixture(float y,int embedded) {
+    shortcut_lookup_root=SHORT_ROOT;shortcut_lookup_result=SHORT_GROUP;
     memset(ppc_ptr(SHORT_MAIN),0,0x100);memset(ppc_ptr(SHORT_SCREEN),0,0x100);
     memset(ppc_ptr(SHORT_UNREAD),0,0x100);
     st32(SHORT_MAIN+4,0x100F7A48);st32(SHORT_MAIN+0x44,SHORT_LAYOUT);
@@ -26,13 +36,17 @@ static void shortcut_fixture(float y,int embedded) {
     shortcut_pane(SHORT_ROOT,"RootPane",0);shortcut_pane(SHORT_OTHER,"N_Default_00",123);
     shortcut_pane(SHORT_GROUP,"L_Shortcut_00",y);shortcut_pane(SHORT_NROOT,"RootPane",0);
     shortcut_pane(SHORT_CHILD,"P_Cross_00",-10);shortcut_pane(SHORT_UPANE,"P_Unread_00",-20);
+    st32(SHORT_ROOT+8,SHORT_TABLE);st32(SHORT_TABLE+0x5c,0x0200000c);
     st32(SHORT_MAIN+0x50,SHORT_OTHER); /* deliberately NOT Shortcut's ancestor */
     st32(SHORT_ROOT+0x14,SHORT_OTHER);st32(SHORT_OTHER,SHORT_GROUP);st32(SHORT_GROUP,SHORT_ROOT+0x14);
+    st32(SHORT_ROOT+0x18,SHORT_GROUP);st32(SHORT_OTHER+4,SHORT_ROOT+0x14);st32(SHORT_GROUP+4,SHORT_OTHER);
     st32(SHORT_OTHER+0xc,SHORT_ROOT);st32(SHORT_GROUP+0xc,SHORT_ROOT);
     st32(SHORT_GROUP+8,0x1010BBC0);st32(SHORT_GROUP+0xac,SHORT_NESTED);st32(SHORT_NESTED+0xc,SHORT_NROOT);
     st32(SHORT_NROOT+0xc,embedded?SHORT_GROUP:0);
-    if(embedded) { st32(SHORT_GROUP+0x14,SHORT_NROOT);st32(SHORT_NROOT,SHORT_GROUP+0x14); }
+    if(embedded) { st32(SHORT_GROUP+0x14,SHORT_NROOT);st32(SHORT_GROUP+0x18,SHORT_NROOT);
+        st32(SHORT_NROOT,SHORT_GROUP+0x14);st32(SHORT_NROOT+4,SHORT_GROUP+0x14); }
     st32(SHORT_NROOT+0x14,SHORT_CHILD);st32(SHORT_CHILD,SHORT_NROOT+0x14);st32(SHORT_CHILD+0xc,SHORT_NROOT);
+    st32(SHORT_NROOT+0x18,SHORT_CHILD);st32(SHORT_CHILD+4,SHORT_NROOT+0x14);
     st32(SHORT_SCREEN+4,0x10104B88);st32(SHORT_SCREEN+0x44,SHORT_SCREEN+0x80);
     st32(SHORT_SCREEN+0x84,SHORT_NESTED);
     st32(SHORT_SCREEN+0x48,1);st32(SHORT_SCREEN+0x4c,SHORT_LIST);st32(SHORT_LIST,SHORT_UNREAD);
@@ -82,6 +96,17 @@ static void test_shortcut(void) {
         shortcut_fixture(250,embedded);shortcut_frame(226);
         for(int i=0;i<100;++i) shortcut_frame(226); /* no drift or draw-time undo */
     }
+    /* A valid unrelated HUD subtree can exceed the old global 256-pane cap.
+     * Finding Shortcut must not require validating every heart/counter pane. */
+    st32(SHORT_OTHER+0x14,SHORT_LARGE);st32(SHORT_OTHER+0x18,SHORT_LARGE+299*0x100);
+    for(unsigned i=0;i<300;++i) {
+        uint32_t p=SHORT_LARGE+i*0x100;shortcut_pane(p,"OtherHUD",0);
+        st32(p+0xc,SHORT_OTHER);st32(p,i==299?SHORT_OTHER+0x14:p+0x100);
+        st32(p+4,i?p-0x100:SHORT_OTHER+0x14);
+    }
+    shortcut_frame(226); /* published 0.1.19 rejects this valid whole-HUD tree */
+    assert(shortcut_lookups>0);expect_hud("Why=OK");
+    shortcut_fixture(250,1);shortcut_frame(226);
     read_hud(); const char* seen=strstr(hud_text,"Seen=");
     assert(seen && strtoul(seen+5,0,10)>0); expect_hud("Shift=24");
     assert(ld8(SHORT_GROUP+0x44)&0x10); /* force native recomputation on removal */
@@ -98,20 +123,38 @@ static void test_shortcut(void) {
     st8(PLAY+0x5292,1);shortcut_frame(250);st8(PLAY+0x5292,0);
     st8(PLAY+0x514c,1);shortcut_frame(250);st8(PLAY+0x514c,0);
     st32(SHORT_MAIN+4,0x100EE5F8);shortcut_frame(250);st32(SHORT_MAIN+4,0x100F7A48);
-    st32(SHORT_OTHER,SHORT_OTHER);shortcut_rejected();st32(SHORT_OTHER,SHORT_GROUP);
     st32(SHORT_GROUP+0xc,SHORT_GROUP);shortcut_rejected();st32(SHORT_GROUP+0xc,SHORT_ROOT);
-    st32(SHORT_MAIN+0x44,3);shortcut_rejected();st32(SHORT_MAIN+0x44,SHORT_LAYOUT);
-    strcpy((char*)ppc_ptr(SHORT_OTHER+0x80),"L_Shortcut_00");shortcut_rejected();
-    strcpy((char*)ppc_ptr(SHORT_OTHER+0x80),"N_Default_00");
+    st32(SHORT_MAIN+0x44,3);shortcut_rejected();expect_hud("Why=LAYOUT");st32(SHORT_MAIN+0x44,SHORT_LAYOUT);
+    st32(SHORT_LAYOUT+4,0);shortcut_rejected();expect_hud("Why=ACCESSOR");st32(SHORT_LAYOUT+4,SHORT_ACCESSOR);
+    st32(SHORT_ACCESSOR+0xc,0);shortcut_rejected();expect_hud("Why=ROOT");st32(SHORT_ACCESSOR+0xc,SHORT_ROOT);
+    st32(SHORT_ROOT+8,0);shortcut_rejected();expect_hud("Why=VTABLE");st32(SHORT_ROOT+8,SHORT_TABLE);
+    const uint32_t bad_functions[]={0,0x01fffffc,0x0200000d,0x04000000,0x11500000};
+    for(unsigned i=0;i<sizeof bad_functions/sizeof *bad_functions;++i) {
+        st32(SHORT_TABLE+0x5c,bad_functions[i]);shortcut_rejected();expect_hud("Why=FUNCTION");
+    }
+    st32(SHORT_TABLE+0x5c,0x0200000c);
+    shortcut_lookup_result=0;shortcut_rejected();expect_hud("Why=NOT_FOUND");
+    shortcut_lookup_result=0xf5fffffc;shortcut_rejected();expect_hud("Why=RESULT");
+    shortcut_lookup_result=SHORT_GROUP;
     strcpy((char*)ppc_ptr(SHORT_GROUP+0x80),"Missing");shortcut_rejected();
     strcpy((char*)ppc_ptr(SHORT_GROUP+0x80),"L_Shortcut_00");
     st32(SHORT_GROUP+0x20,0x7fc00000);shortcut_rejected();stf32(SHORT_GROUP+0x20,250);
-    stf32(SHORT_ROOT+0x5c,0);shortcut_rejected();stf32(SHORT_ROOT+0x5c,1);
+    stf32(SHORT_ROOT+0x5c,0);shortcut_rejected();expect_hud("Why=BASIS");stf32(SHORT_ROOT+0x5c,1);
     ++magic_generation;shortcut_frame(250);
     magic_archive=0;read_hud();shortcut_frame(250);
     fixture_magic();++magic_generation;read_hud();hook(0x02675414,3,MAGIC_CTRL,0);shortcut_frame(226);
     shortcut_hook(0x026f8cd0,2,SHORT_MAIN);stf32(SHORT_GROUP+0x20,123);
     shortcut_hook(0x026f8cd0,3,SHORT_MAIN);assert(ldf32(SHORT_GROUP+0x20)==123); /* other writer */
+    /* UI structures from the native MEM1 heap must also be accepted. */
+    shortcut_fixture(250,1);
+    const uint32_t m=0xf4001000,l=0xf4002000,a=0xf4003000,r=0xf4004000,p=0xf4005000;
+    memcpy(ppc_ptr(m),ppc_ptr(SHORT_MAIN),0x100);memcpy(ppc_ptr(l),ppc_ptr(SHORT_LAYOUT),0x100);
+    memcpy(ppc_ptr(a),ppc_ptr(SHORT_ACCESSOR),0x100);memcpy(ppc_ptr(r),ppc_ptr(SHORT_ROOT),0x100);
+    memcpy(ppc_ptr(p),ppc_ptr(SHORT_GROUP),0x100);
+    st32(m+0x44,l);st32(l+4,a);st32(a+0xc,r);st32(p+0xc,r);
+    shortcut_lookup_root=r;shortcut_lookup_result=p;
+    shortcut_hook(0x026f8cd0,2,m);assert(ldf32(p+0x20)==226);
+    shortcut_hook(0x026f8cd0,3,m);assert(ldf32(p+0x20)==250);expect_hud("Why=OK");
     st8(SAVE+0x33,0);
-    puts("Dark Link calculation-input, embedded/standalone draw, parent transform and restoration tests passed");
+    puts("Dark Link native lookup ABI, large HUD, MEM1/MEM2, rejection diagnostics and placement tests passed");
 }
