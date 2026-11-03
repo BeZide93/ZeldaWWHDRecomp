@@ -1,9 +1,37 @@
-# Dark Link (prototype 0.1.17)
+# Dark Link (prototype 0.1.18)
 
 Standalone code mod for ZeldaWWHDRecomp: sword hits charge a transformation with
 black body/equipment, red eyes and boosted sword damage. The user confirmed the
 complete body, mouth, eyes, sword and shield appearance in **0.1.11**. That
 texture-binding repair at **viewCalc return** is retained.
+
+## Fixed in 0.1.18
+
+The D-pad is drawn by a separate `hdScreenItemShortcut_c` child screen. Native
+`hdParts_c::draw` calls `vDrawLayout` and only then `vDrawChildren`; the 0.1.17
+Main_00 drawLayout hook restored its matrices before the visible Shortcut drew.
+That explains why its synthetic parent-layout test passed without moving the
+D-pad in the game.
+
+The patch now wraps the Shortcut screen's own complete `draw` (026F8B54),
+identified by its relocated class vtable (10104B88). It visits that screen's own
+layout and owned child layouts, including the unread marker, and translates
+their final matrices for the entire draw. Main_00's placement pane and other HUD
+layouts are not modified. Native local positions remain intact, matrices are
+restored bit-for-bit afterwards, and repeated TV/GamePad draws cannot accumulate
+an offset. Malformed graphs or missing gauge resources abort before any writes.
+The obsolete Main_00 drawLayout hook is removed.
+
+The replacement regression executes the actual parent-layout / child-screen
+order. It fails against the published 0.1.17 translated module at the visible
+Shortcut matrix assertion, and also covers child draws, alternate heart/magic
+states, hidden gauges, menus, repeated draws, shared layout references, ownership
+cycles and restoration. Tests use synthetic native memory; in-game verification
+of the final placement is still required.
+
+The existing optional appearance diagnostics now include `Dpad=draws/applied/rejected`;
+no log file is needed to distinguish an uncalled hook from rejected geometry.
+Only Dark Link needs updating. Enhanced Controls 0.4.0 remains compatible.
 
 ## Added in 0.1.17
 
@@ -11,10 +39,6 @@ texture-binding repair at **viewCalc return** is retained.
 - The same touch editor as Enhanced Controls, with a standalone saved profile.
 - One shared editor for all five mod buttons when Enhanced Controls 0.4.0 is
   installed; update both packages to enable this.
-- Replace 0.1.16's ineffective D-pad calculation hook with draw-time spacing from
-  Main_00's actual layout root, including the Shortcut's nested parts layout.
-  Final global matrices are restored immediately after drawing. The shift is
-  one gauge row plus its gap (two rows before native magic is unlocked).
 
 See the 0.1.17 section below for editor ownership, compatibility and validation.
 
@@ -128,7 +152,7 @@ collision path charge the gauge. Boss-specific handlers may override damage.
 ## Diagnostics and validation
 
 Enable **Appearance diagnostics** only when needed. The first line reads
-`DL 0.1.17 ON/OFF`; `Magic` counts loaded frame/fill images (up to four),
+`DL 0.1.18 ON/OFF`; `Magic` counts loaded frame/fill images (up to four),
 `Pos` is 1 for native or 2 for authored placement, and `Aura` reports the shell
 model being present. Body material/albedo/eye counts, binding retention and late
 repair counters retain their existing meanings. `Fill` reports the actual
@@ -196,13 +220,7 @@ controller overlay's separate editor is not part of this mod-button editor.
 Legacy Dark Link X/Y options seed a fresh standalone layout; subsequent changes
 are made through Edit. Enhanced Controls' four-button v1 layouts migrate to v2.
 
-Shortcut spacing now runs around native Main_00 `drawLayout` (026F8D08), finds
-`L_Shortcut_00` from the actual layout root, and includes its nested parts layout.
-It shifts final global Y matrices for the draw and restores their exact original
-bits afterward. It does not assume `N_Default_00` is the Shortcut's parent or
-that the base Pane CalculateMtx is called for every derived parts pane. No gauge,
-menu/cutscene or missing native resources means no shift. Traversal is bounded,
-checks links/cycles, and validates the complete target before making any writes.
+The 0.1.17 Main_00 drawLayout spacing attempt is superseded by 0.1.18 below.
 
 The SDK currently has no mod exports. The shared editor uses a versioned,
 synchronous value-only rendezvous at the verified read-only native getter
