@@ -43,19 +43,36 @@ int main(int argc,char** argv) {
     dl_art_width=4;dl_art_height=1;
     const f32 uv[4]={0,0,1,1};f32 srt[5]={0,0,0,1,1};
     for(u32 i=0;i<4;++i) for(u32 c=0;c<4;++c) dl_art_pixels[i*4+c]=i*80;
-    assert(dl_art_bake_uv(uv,srt));
+    assert(dl_art_bake_sampler(uv,srt,0,0,dl_art_width,dl_art_height));
     for(u32 i=0;i<4;++i) assert(dl_art_pixels[i*4+3]==i*80);
-    srt[3]=-1;assert(dl_art_bake_uv(uv,srt));
+    srt[3]=-1;assert(dl_art_bake_sampler(uv,srt,0,0,dl_art_width,dl_art_height));
     for(u32 i=0;i<4;++i) assert(dl_art_pixels[i*4+3]==(3-i)*80);
-    srt[3]=-1;assert(dl_art_bake_uv(uv,srt)); /* restore ramp */
-    srt[3]=2;assert(dl_art_bake_uv(uv,srt));
+    srt[3]=-1;assert(dl_art_bake_sampler(uv,srt,0,0,dl_art_width,dl_art_height)); /* restore ramp */
+    srt[3]=2;assert(dl_art_bake_sampler(uv,srt,0,0,dl_art_width,dl_art_height));
     const u8 stretched[4]={0,40,200,240};
     for(u32 i=0;i<4;++i) assert(dl_art_pixels[i*4+3]==stretched[i]);
-    srt[0]=4;assert(dl_art_bake_uv(uv,srt));
+    srt[0]=4;assert(dl_art_bake_sampler(uv,srt,0,0,dl_art_width,dl_art_height));
     for(u32 i=0;i<4;++i) assert(dl_art_pixels[i*4+3]==240);
-    srt[2]=45;assert(!dl_art_bake_uv(uv,srt));
-    srt[2]=0;srt[0]=1e30f;assert(!dl_art_bake_uv(uv,srt));
-    u32 nanbits=0x7fc00000;memcpy(&srt[0],&nanbits,4);assert(!dl_art_bake_uv(uv,srt));
+    srt[2]=45;assert(!dl_art_bake_sampler(uv,srt,0,0,dl_art_width,dl_art_height));
+    srt[2]=0;srt[0]=1e30f;assert(!dl_art_bake_sampler(uv,srt,0,0,dl_art_width,dl_art_height));
+    u32 nanbits=0x7fc00000;memcpy(&srt[0],&nanbits,4);assert(!dl_art_bake_sampler(uv,srt,0,0,dl_art_width,dl_art_height));
+    /* A four-texel native repeat becomes two visible segments, not a flat
+     * edge colour or an aliased four-pixel output. Negative UVs wrap as well. */
+    const f32 repeat_uv[4]={-1,0,1,1},mirror_uv[4]={0,0,2,1},identity[5]={0,0,0,1,1};
+    for(u32 mode=1;mode<=2;++mode) {
+        dl_art_width=4;dl_art_height=1;
+        for(u32 i=0;i<4;++i) for(u32 c=0;c<4;++c) dl_art_pixels[i*4+c]=20+i*60;
+        assert(dl_art_bake_sampler(mode==1?repeat_uv:mirror_uv,identity,mode,0,8,1));
+        for(u32 i=0;i<8;++i) {
+            u32 index=mode==1?i%4:i<4?i:7-i;
+            assert(dl_art_pixels[i*4]==20+index*60 && dl_art_pixels[i*4+3]==20+index*60);
+        }
+    }
+    dl_art_width=4;dl_art_height=1;
+    for(u32 i=0;i<4;++i) for(u32 c=0;c<4;++c) dl_art_pixels[i*4+c]=i*80;
+    const f32 seam_uv[4]={0,0,0,1};
+    assert(dl_art_bake_sampler(seam_uv,identity,1,0,1,1));assert(dl_art_pixels[0]==120);
+    assert(!dl_art_bake_sampler(uv,identity,3,0,4,1));
     /* Recolouring retains contrast, neutral frame pixels and alpha. */
     dl_art_width=4;dl_art_height=1;
     const u8 coloured[16]={20,80,20,255,40,180,40,200,120,120,120,128,255,255,255,0};

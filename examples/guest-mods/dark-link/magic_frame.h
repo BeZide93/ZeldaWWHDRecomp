@@ -31,7 +31,7 @@ static int dl_frame_texture(u32 mat,u32 mb,u32 txl,u32 tb,u32 index) {
     }
     dl_magic_material_target=&style;dl_magic_apply_animations();dl_magic_material_target=0;
     dl_art_material(style.black,style.white,srgb);
-    return dl_art_bake_uv(uv,style.tex_srt);
+    return dl_art_bake_sampler(uv,style.tex_srt,*((u8*)m+42)&3,*((u8*)m+43)&3,dl_art_width,dl_art_height);
 }
 /* Stretch the native edge pixels, retaining the authored corner dimensions.
  * One-/four-frame windows derive edges from corners; eight-frame windows

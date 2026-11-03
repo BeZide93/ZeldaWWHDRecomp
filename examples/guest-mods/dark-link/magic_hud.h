@@ -7,7 +7,7 @@ WWHD_GAME_FUNC(0x026FBB24, u32, dl_layout_archive, (u32, const u32*));
 static int dl_game_span(u32, u32);
 #include "magic_art.h"
 #define DL_MAGIC_PICTURES 32
-typedef struct { char name[24], material[29]; u32 fill, black, white, vertex[4]; f32 uv[4], tex_srt[5], pane[10], original[10]; } dl_magic_picture;
+typedef struct { char name[24], material[29]; u32 fill, progress, wrap[2], black, white, vertex[4]; f32 uv[4], tex_srt[5], pane[10], original[10]; } dl_magic_picture;
 static dl_magic_picture dl_magic_pictures[DL_MAGIC_PICTURES];
 static dl_magic_picture* dl_magic_material_target;
 static u32 dl_magic_picture_count, dl_magic_loaded, dl_magic_retry;
@@ -106,13 +106,19 @@ static int dl_magic_parse(u32 f,u32 size) {
                !dl_material_string(dl_magic_pictures[p].material,(char*)m)) return 0;
             u32 green=dl_green(dl_word((void*)m,28)) || dl_green(dl_word((void*)m,32));
             for(u32 v=0;v<4;++v) green|=dl_green(dl_word((void*)at,0x54+v*4));
-            dl_magic_pictures[p].fill=green;
+            dl_magic_pictures[p].fill=green;dl_magic_pictures[p].progress=0;
             dl_magic_pictures[p].black=dl_word((void*)m,28);
             dl_magic_pictures[p].white=dl_word((void*)m,32);
             for(u32 k=0;k<4;++k) dl_magic_pictures[p].vertex[k]=dl_word((void*)at,0x54+k*4);
             for(u32 k=0;k<10;++k) dl_magic_pictures[p].pane[k]=dl_magic_pictures[p].original[k]=*(f32*)(at+0x2c+k*4);
             for(u32 k=0;k<5;++k) dl_magic_pictures[p].tex_srt[k]=k>=3?1:0;
             u32 flags=dl_word((void*)m,36), maps=flags&3, srts=(flags>>2)&3;
+            dl_magic_pictures[p].wrap[0]=dl_magic_pictures[p].wrap[1]=0;
+            if(maps) {
+                if(!dl_blob_span(mat,mat_bytes,m+40,maps*4)) return 0;
+                dl_magic_pictures[p].wrap[0]=*((u8*)m+42)&3;
+                dl_magic_pictures[p].wrap[1]=*((u8*)m+43)&3;
+            }
             if(srts) {
                 u32 srt=m+40+maps*4;
                 if(!dl_blob_span(mat,mat_bytes,srt,20)) return 0;
@@ -151,7 +157,7 @@ static int dl_magic_pane(const char* name,wwhd_game_pane* out) {
     }
     return out->w>0 && out->h>0;
 }
-static u32 dl_magic_image(wwhd_game_pane* pane,u32 picture,u32 variant,u32 fill) {
+static int dl_magic_pixels(wwhd_game_pane* pane,u32 picture,u32 fill,u32 empty) {
     /* The raw BC4 texture can be a luminance mask with fully opaque alpha.
      * Apply the actual material, including alpha, before making the red copy. */
     u32 n=dl_append(dl_magic_path,0,sizeof dl_magic_path,"timg/");
@@ -162,12 +168,25 @@ static u32 dl_magic_image(wwhd_game_pane* pane,u32 picture,u32 variant,u32 fill)
     if(!texture || !dl_art_decode((const u8*)texture,bytes,&srgb)) return 0;
     u32 black=dl_magic_pictures[picture].black,white=dl_magic_pictures[picture].white;
     dl_art_material(black,white,srgb);
-    if(!dl_art_bake_uv(dl_magic_pictures[picture].uv,dl_magic_pictures[picture].tex_srt)) return 0;
-    dl_art_vertices(dl_magic_pictures[picture].vertex,fill,!fill && dl_magic_pictures[picture].fill);
+    dl_magic_picture* pic=&dl_magic_pictures[picture];
+    u32 width=dl_art_width,height=dl_art_height;
+    /* Repeated detail needs a canvas at pane resolution; baking many repeats
+     * back into a tiny source mask aliases all segments to the same sample. */
+    if(pic->wrap[0] || pic->wrap[1]) {
+        if(!(pane->w>0 && pane->w<=1024 && pane->h>0 && pane->h<=256)) return 0;
+        if(pane->w>width) width=(u32)(pane->w+0.5f);
+        if(pane->h>height) height=(u32)(pane->h+0.5f);
+    }
+    if(!dl_art_bake_sampler(pic->uv,pic->tex_srt,pic->wrap[0],pic->wrap[1],width,height)) return 0;
+    dl_art_vertices(pic->vertex,fill,empty);
     /* The mod owns base/fill visibility. Native pane/ancestor fades can be
      * zero before magic is unlocked (or while the native HUD is hidden).
      * Preserve artwork/material/vertex coverage, but never bake those native
      * visibility gates into the cached Dark Link images. */
+    return 1;
+}
+static u32 dl_magic_image(wwhd_game_pane* pane,u32 picture,u32 variant,u32 fill) {
+    if(!dl_magic_pixels(pane,picture,fill,!fill && dl_magic_pictures[picture].fill)) return 0;
     u32 size=dl_art_encode();
     if(!size) return 0;
     static const char* const files[2][2]={{"magic-0-frame.png","magic-0-fill.png"},{"magic-1-frame.png","magic-1-fill.png"}};
@@ -176,6 +195,7 @@ static u32 dl_magic_image(wwhd_game_pane* pane,u32 picture,u32 variant,u32 fill)
     return wwhd_hud_texture(WWHD_HUD_DATA,filename);
 }
 #include "magic_frame.h"
+#include "magic_layers.h"
 static void dl_magic_load(void) {
     u32 mgr=WWHD_GAME_DATA(0x101F7274,u32);
     if (!mgr) return;
@@ -198,7 +218,7 @@ static void dl_magic_load(void) {
         }
         const char* base=v ? "P_MagicBase_01":"P_MagicBase_00";
         if(!dl_magic_pane(base,&dl_magic_base[v])) continue;
-        s32 frame=-1,fill=-1; f32 score=1e9f;
+        s32 frame=-1,fill=-1; f32 score=1e9f;u32 animated=0;
         for(u32 i=0;i<dl_magic_picture_count;++i) {
             if(dl_str_equal(dl_magic_pictures[i].name,base,24)) frame=(s32)i;
             if(!dl_magic_pictures[i].fill || !dl_magic_pane(dl_magic_pictures[i].name,&dl_magic_query)) continue;
@@ -206,16 +226,20 @@ static void dl_magic_load(void) {
              * base size/centre. Its native texture supplies the rounded ends. */
             f32 d=dl_abs(dl_magic_query.w-dl_magic_base[v].w)+
                 2*dl_abs(dl_magic_query.x-dl_magic_base[v].x)+2*dl_abs(dl_magic_query.y-dl_magic_base[v].y);
-            if(d<score) { score=d; fill=(s32)i; dl_magic_fill[v]=dl_magic_query; }
+            if((dl_magic_pictures[i].progress && !animated) ||
+               (dl_magic_pictures[i].progress==animated && d<score)) {
+                score=d;fill=(s32)i;animated=dl_magic_pictures[i].progress;dl_magic_fill[v]=dl_magic_query;
+            }
         }
-        /* Some layouts put the entire coloured gauge in MagicBase itself.
-         * In that case its geometry is the full-capacity fill, not a smaller
-         * green highlight found elsewhere in the layout. */
-        if(frame>=0 && dl_magic_pictures[frame].fill) { fill=frame;dl_magic_fill[v]=dl_magic_base[v]; }
+        /* Without a distinct progress-animated fill, some layouts put the
+         * entire coloured gauge in MagicBase. Retain that fallback rather
+         * than selecting a smaller static green highlight. */
+        if(frame>=0 && dl_magic_pictures[frame].fill && !animated) { fill=frame;dl_magic_fill[v]=dl_magic_base[v]; }
         if(frame<0 || fill<0) continue;
         dl_magic_images[v][0]=dl_magic_image(&dl_magic_base[v],(u32)frame,v,0);
         dl_magic_images[v][1]=dl_magic_image(&dl_magic_fill[v],(u32)fill,v,1);
         dl_magic_load_border(f,size,v);
+        dl_magic_load_details(v,(u32)frame,(u32)fill);
 
     }
     dl_magic_loaded=dl_magic_images[0][0] && dl_magic_images[0][1] &&
@@ -278,6 +302,7 @@ static void dl_magic_hud(u32 list) {
         dl_magic_epoch=epoch; dl_magic_loaded=dl_magic_retry=0;
         dl_magic_position_valid=0; dl_magic_authored_valid=0; memset(dl_magic_images,0,sizeof dl_magic_images);
         memset(dl_magic_border,0,sizeof dl_magic_border);
+        memset(dl_magic_detail_count,0,sizeof dl_magic_detail_count);
     }
     if(!dl_magic_loaded && !dl_magic_retry) { dl_magic_load(); dl_magic_retry=60; }
     if(dl_magic_retry) --dl_magic_retry;
@@ -286,6 +311,22 @@ static void dl_magic_hud(u32 list) {
     if(!dl_magic_images[v][0] || !dl_magic_images[v][1]) return;
     for(u32 layer=0;layer<2;++layer)
         if(dl_magic_element(v,layer,&dl_element)) wwhd_hud_emit(list,&dl_element);
+    for(u32 i=0;i<dl_magic_detail_count[v];++i) if(dl_magic_element(v,0,&dl_element)) {
+        wwhd_game_pane* p=&dl_magic_details[v][i].pane;
+        f32 sx=dl_magic_position[2]/dl_magic_base[v].w,sy=dl_magic_position[3]/dl_magic_base[v].h;
+        f32 fraction=1;
+        if(dl_magic_details[v][i].progress) {
+            f32 right=dl_magic_fill[v].x-dl_magic_fill[v].w/2+dl_magic_fill[v].w*dl_gauge_fraction();
+            fraction=(right-(p->x-p->w/2))/p->w;
+            if(!(fraction>0)) continue;if(fraction>1)fraction=1;
+        }
+        dl_element.x+=(p->x-dl_magic_base[v].x)*sx+(dl_element.w-p->w*sx)/2;
+        dl_element.y-=(p->y-dl_magic_base[v].y)*sy-(dl_element.h-p->h*sy)/2;
+        dl_element.w=p->w*sx*fraction;dl_element.h=p->h*sy;
+        dl_element.image=dl_magic_details[v][i].image;dl_element.u1=fraction;
+        if(dl_element.x>=-65536 && dl_element.x<=65536 && dl_element.y>=-65536 && dl_element.y<=65536 &&
+           dl_element.w>0 && dl_element.w<=65536 && dl_element.h>0 && dl_element.h<=65536) wwhd_hud_emit(list,&dl_element);
+    }
     if(dl_magic_border[v] && dl_magic_element(v,0,&dl_element)) {
         wwhd_game_pane* p=&dl_magic_border_pane[v];
         f32 sx=dl_magic_position[2]/dl_magic_base[v].w,sy=dl_magic_position[3]/dl_magic_base[v].h;

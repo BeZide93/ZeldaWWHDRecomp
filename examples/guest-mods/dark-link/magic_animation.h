@@ -68,6 +68,12 @@ static int dl_magic_tracks(u32 f,u32 bytes,u32 pai,f32 frame,int apply) {
                     dl_magic_picture* pic=dl_magic_material_target?dl_magic_material_target:&dl_magic_pictures[p];
                     const char* name=kind==1?pic->material:pic->name;
                     if(!dl_str_equal(name,(const char*)c,28)) continue;
+                    if(!dl_magic_material_target && pai==dl_magic_animations[4].pai &&
+                       ((kind==0 && type==0x464c5041 && (target==6 || target==8)) ||
+                        (kind==1 && type==0x464c5453 && index==0 && (target==0 || target==3)))) {
+                        f32 initial;
+                        if(dl_magic_key_value(f,bytes,e,0,&initial) && dl_abs(initial-value)>0.0001f) pic->progress=1;
+                    }
                     if(kind==1 && type==0x464c4d43 && target<8) { /* FLMC */
                         u32* colour=target<4?&pic->black:&pic->white;
                         *colour=dl_magic_colour_byte(*colour,target&3,value);

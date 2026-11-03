@@ -12,6 +12,8 @@ static uint32_t magic_fill_handles[2],magic_border_handles[2];
 static int magic_window;
 static int magic_require_core_alpha;
 static int magic_native_hidden;
+static int magic_picture_layers,magic_distinct_fill;
+static uint32_t magic_detail_handle;
 static unsigned magic_border_alpha=255;
 static unsigned magic_frame_count=1;
 static int magic_writes,magic_base_fill,magic_animated,magic_bad_animation,magic_long,magic_bad_geometry;
@@ -30,6 +32,10 @@ static void magic_write(Cpu* c) {
         assert(png[49]<png[49+3*4] && png[52]==magic_border_alpha); /* contrast and pane coverage retained */
         assert(png[49+12*(108*4+1)+54*4+3]==0); /* frame never fills the centre */
     }
+    if(strstr(path,"detail")) {
+        assert(png[49]==png[50] && png[50]==png[51] && png[52]==255);
+        assert(png[49+1*17+1*4+3]==0); /* native picture's open centre survives */
+    }
     ++magic_writes;c->r[3]=c->r[5];
 }
 static void magic_texture(Cpu* c) {
@@ -40,6 +46,7 @@ static void magic_texture(Cpu* c) {
     ++magic_textures; c->r[3]=++magic_images;
     if(strstr(path,"border")) magic_border_handles[path[6]=='1']=c->r[3];
     if(strstr(path,"fill")) magic_fill_handles[path[6]=='1']=c->r[3];
+    if(strstr(path,"detail")) magic_detail_handle=c->r[3];
 }
 static void magic_setting(Cpu* c) {
     const char* key=(const char*)ppc_ptr(c->r[3]);
@@ -50,6 +57,11 @@ static void magic_setting(Cpu* c) {
     if (strncmp(key,"layout-pane:MagicBar_00/",24)) { c->r[3]=0; return; }
     assert(c->r[4]==6 && c->r[6]==64);
     const char* name=key+24;
+    if(magic_picture_layers && (!strcmp(name,"P_Outline_00") || !strcmp(name,"P_White_00"))) {
+        uint32_t p=c->r[5];memset(ppc_ptr(p),0,64);st32(p,1);st32(p+4,3);
+        stf32(p+16,108);stf32(p+20,24);st32(p+28,255);
+        strcpy((char*)ppc_ptr(p+32),!strcmp(name,"P_White_00")?"fill":"frame");c->r[3]=64;return;
+    }
     if(magic_window && !strcmp(name,"W_Frame_00")) {
         uint32_t p=c->r[5];memset(ppc_ptr(p),0,64);st32(p,1);st32(p+4,1);
         stf32(p+16,108);stf32(p+20,24);st32(p+28,255);c->r[3]=64;return;
@@ -71,7 +83,7 @@ static void magic_emit(uint32_t e) {
     if (ld32(e+60)==magic_fill_handles[0] || ld32(e+60)==magic_fill_handles[1]) {
         magic_width=ldf32(e+20); magic_x=ldf32(e+12); magic_y=ldf32(e+16);
         assert(ld32(e+56)==0xffffffff); /* red pixels must not be tinted a second time */
-        float end=magic_width/(magic_base_fill?100.0f:magic_animated&&magic_bad_animation?48.0f:magic_long?196.0f:96.0f);
+        float end=magic_width/(magic_base_fill&&!magic_distinct_fill?100.0f:magic_animated&&magic_bad_animation?48.0f:magic_long?196.0f:96.0f);
         assert(ldf32(e+40)==0 && ldf32(e+44)==0 && ldf32(e+52)==1);
         float delta=(float)ldf32(e+48)-end; assert(delta>-0.00001f && delta<0.00001f);
     } else assert(ld32(e+56)==0xffffffff);
@@ -227,6 +239,29 @@ static void test_magic_hidden_native(void) {
     magic_authored=0;magic_require_core_alpha=0;st8(SAVE+0x33,0);fixture_magic();
     puts("Dark Link hidden native HUD: visible cached pixels at 0/16/32 magic passed");
 }
+static void test_magic_picture_layers(void) {
+    magic_window=0;magic_picture_layers=1;magic_frame_count=1;
+    fixture_magic();fixture_window();
+    uint32_t f=MAGIC_ARC+0x3000,pic=f+728;
+    fixture_picture(pic,"P_Outline_00",2);fixture_picture(pic+136,"P_White_00",2);
+    for(unsigned i=0;i<2;++i) { stf32(pic+i*136+0x4c,108);stf32(pic+i*136+0x50,24); }
+    st16(f+16,8);st32(MAGIC_ARC+0x2c,0x2f00+1000);
+    for(unsigned y=0;y<4;++y) for(unsigned x=0;x<4;++x) {
+        uint32_t pixel=MAGIC_ARC+0x400+(y*64+x)*4;
+        st8(pixel,128);st8(pixel+1,128);st8(pixel+2,128);
+        st8(pixel+3,(x==0 || x==3 || y==0 || y==3)?255:0);
+    }
+    /* Copy a real pic1 outline; reject the similarly sized opaque white pane. */
+    magic_detail_handle=0;magic_expect_draws(3);assert(magic_detail_handle);
+    int writes=magic_writes;read_hud();assert(magic_writes==writes);
+    magic_picture_layers=0;fixture_magic();
+    /* A green background must not override the separate animated fill. */
+    magic_animated=magic_base_fill=magic_distinct_fill=1;free_mode=1;++revision;tick();
+    fixture_magic();fixture_animation(16);st32(MAGIC_FLYT+20+20+32,0x20ff20ff);
+    magic_expect_draws(2);assert(magic_width==96 && magic_x==62);
+    magic_animated=magic_base_fill=magic_distinct_fill=0;free_mode=0;++revision;tick();fixture_magic();
+    puts("Dark Link separate animated fill and native picture outline tests passed");
+}
 static void test_magic_style(void) {
     magic_frame_count=1;fixture_magic();fixture_window();
     uint32_t f=MAGIC_ARC+0x3000,wnd=f+608;
@@ -345,6 +380,7 @@ static void test_magic(void) {
     read_hud();hook(0x02675414,3,MAGIC_CTRL,0);magic_draws=0;read_hud();assert(magic_draws==2);
     test_magic_style();
     test_magic_hidden_native();
+    test_magic_picture_layers();
     magic_window=0;fixture_magic();++magic_generation;read_hud();
     /* Return a full duration for the subsequent gameplay regression. */
     buttons(0); buttons(0x60000); tick(); buttons(0);

@@ -140,30 +140,43 @@ static u32 dl_art_chunk(u32 at,u32 tag,u32 n) {
     dl_art_put(dl_art_png+at+8+n,dl_art_crc(dl_art_png+at+4,n+4));return at+n+12;
 }
 /* Bake native UV/SRT into an owned image. HUD rectangles require ordered UVs
- * in [0,1]; native clamp samplers also allow outside/reversed coordinates.
+ * in [0,1]; native samplers also allow outside/reversed coordinates.
  * Reuse the PNG buffer as scratch before encoding, without another allocation.
  * Rotation remains unsupported: omit that gauge image, never emit bad UVs. */
-static int dl_art_bake_uv(const f32 uv[4],const f32 srt[5]) {
+/* BFLYT sampler low two bits: clamp=0, repeat=1, mirror=2. Reference:
+ * Switch-Toolbox Layout/CAFE/Materials/TextureRef.cs and Layout/Common.cs.
+ * Resolve EACH bilinear tap so repeat seams blend opposite texture edges. */
+static u32 dl_art_tap(int i,u32 size,u32 wrap) {
+    if(!wrap) return i<0?0:(u32)i>=size?size-1:(u32)i;
+    int period=(int)(wrap==2?size*2:size),v=i%period;if(v<0)v+=period;
+    return wrap==2 && v>=(int)size?2*size-1-(u32)v:(u32)v;
+}
+static int dl_art_bake_sampler(const f32 uv[4],const f32 srt[5],u32 ws,u32 wt,u32 width,u32 height) {
     for(u32 i=0;i<4;++i) if(!(uv[i]>=-1000000 && uv[i]<=1000000)) return 0;
     for(u32 i=0;i<5;++i) if(!(srt[i]>=-1000000 && srt[i]<=1000000)) return 0;
-    if(srt[2]!=0 || !dl_art_width || !dl_art_height) return 0;
-    for(u32 y=0;y<dl_art_height;++y) for(u32 x=0;x<dl_art_width;++x) {
-        f32 u=uv[0]+(uv[2]-uv[0])*((f32)x+0.5f)/dl_art_width;
-        f32 v=uv[1]+(uv[3]-uv[1])*((f32)y+0.5f)/dl_art_height;
+    if(srt[2]!=0 || !dl_art_width || !dl_art_height || ws>2 || wt>2 ||
+       !width || !height || width>2048 || height>2048 || width*height>DL_ART_PIXELS) return 0;
+    for(u32 y=0;y<height;++y) for(u32 x=0;x<width;++x) {
+        f32 u=uv[0]+(uv[2]-uv[0])*((f32)x+0.5f)/width;
+        f32 v=uv[1]+(uv[3]-uv[1])*((f32)y+0.5f)/height;
         f32 sx=((u-0.5f)*srt[3]+0.5f+srt[0])*dl_art_width-0.5f;
         f32 sy=((v-0.5f)*srt[4]+0.5f+srt[1])*dl_art_height-0.5f;
-        sx=sx<0?0:sx>dl_art_width-1?dl_art_width-1:sx;
-        sy=sy<0?0:sy>dl_art_height-1?dl_art_height-1:sy;
-        u32 x0=(u32)sx,y0=(u32)sy,x1=x0+1<dl_art_width?x0+1:x0,y1=y0+1<dl_art_height?y0+1:y0;
-        f32 fx=sx-x0,fy=sy-y0;
+        if(!(sx>=-100000000 && sx<=100000000 && sy>=-100000000 && sy<=100000000)) return 0;
+        if(!ws) sx=sx<0?0:sx>dl_art_width-1?dl_art_width-1:sx;
+        if(!wt) sy=sy<0?0:sy>dl_art_height-1?dl_art_height-1:sy;
+        int ix=(int)sx,iy=(int)sy;if(sx<ix)--ix;if(sy<iy)--iy;
+        u32 x0=dl_art_tap(ix,dl_art_width,ws),x1=dl_art_tap(ix+1,dl_art_width,ws);
+        u32 y0=dl_art_tap(iy,dl_art_height,wt),y1=dl_art_tap(iy+1,dl_art_height,wt);
+        f32 fx=sx-ix,fy=sy-iy;
         for(u32 c=0;c<4;++c) {
             f32 a=dl_art_pixels[(y0*dl_art_width+x0)*4+c],b=dl_art_pixels[(y0*dl_art_width+x1)*4+c];
             f32 d=dl_art_pixels[(y1*dl_art_width+x0)*4+c],e=dl_art_pixels[(y1*dl_art_width+x1)*4+c];
             f32 top=a+(b-a)*fx,bottom=d+(e-d)*fx;
-            dl_art_png[(y*dl_art_width+x)*4+c]=(u8)(top+(bottom-top)*fy+0.5f);
+            dl_art_png[(y*width+x)*4+c]=(u8)(top+(bottom-top)*fy+0.5f);
         }
     }
-    memcpy(dl_art_pixels,dl_art_png,dl_art_width*dl_art_height*4);
+    dl_art_width=width;dl_art_height=height;
+    memcpy(dl_art_pixels,dl_art_png,width*height*4);
     return 1;
 }
 static u32 dl_art_encode(void) {

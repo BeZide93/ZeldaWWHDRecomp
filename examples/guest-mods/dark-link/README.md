@@ -1,36 +1,38 @@
-# Dark Link (prototype 0.1.23)
+# Dark Link (prototype 0.1.24)
 
 Standalone code mod for ZeldaWWHDRecomp: sword hits charge a transformation with
 black body/equipment, red eyes and boosted sword damage. The user confirmed the
 complete body, mouth, eyes, sword and shield appearance in **0.1.11**. That
 texture-binding repair at **viewCalc return** is retained.
 
-## Changed in 0.1.23
+## Changed in 0.1.24
 
-The 0.1.22 visibility change also gated the core Dark Link base/fill on native
-pane visibility and ancestor alpha. This could reject the fill or cache fully
-transparent PNGs. Those cached images stayed invisible even when the ordinary
-magic gauge became visible later. The user reported both native-hidden and
-native-visible cases.
+The user confirmed that 0.1.23 restored visibility, but the copy still appeared
+as a flat dark-red bar beside the native framed, segmented magic gauge.
+Three omissions in the copying path are addressed:
 
-Core base/fill selection and opacity are independent of those native visibility
-flags again. The mod's existing HUD/enable/gameplay checks own their visibility.
-Texture, material and vertex coverage is retained; the native pane/ancestor fade
-is no longer multiplied into the cached core images. Invalid optional hierarchy
-metadata can omit decoration but cannot veto otherwise valid base/fill artwork.
+- Prefer the green picture driven by the native progress animation over a green
+  background. Use the coloured-base fallback only without an animated fill.
+- Copy separate native picture outlines and progress detail as additional image
+  layers. Static outlines must enclose the selected capacity and have a clear
+  inner area; opaque panels and warning effects are excluded. Progress details
+  crop with the Dark Link fill; static outlines remain complete.
+- Honor each texture's clamp, repeat or mirrored-repeat sampler. Bake repeated
+  detail at least at pane resolution so a small source texture can retain its
+  repeated segments. Bilinear taps wrap independently at texture seams.
 
-The displayed colour/UV state, texture detail and native frame-opening checks
-remain. Optional window decoration still respects its own visibility/alpha and
-excludes warning effects, so the prior white-overlay safeguards are retained.
+The 0.1.23 core visibility correction remains: native pane/ancestor fades cannot
+make the cached base/fill transparent. Extra picture layers ignore the shared
+native fade container, while retaining their separate branch visibility/alpha.
 D-pad placement, body/eyes/aura and the shared editor are unchanged. No new hooks,
 logging or game artwork are added; Enhanced Controls 0.4.0 remains compatible.
 
-Regression tests cover hidden core panes, a hidden shared parent without an
-InAll animation, coloured base-as-fill images, cached reuse, optional metadata
-failure, and hidden/visible native HUD queries at 0/16/32 magic capacity. They
-check actual generated pixel alpha as well as emitted HUD commands. Published
-0.1.22 fails the new hidden-core test; the corrected module passes. These are
-synthetic tests; the final appearance still needs an in-game check.
+Synthetic tests cover distinct green background/animated fill, a separate native
+picture outline, opaque-panel exclusion, generated pixel transparency, texture
+repetition/mirroring/seams, and cached reuse. Published 0.1.23 passes the previous
+visibility tests but fails the new separate-outline draw test. The corrected
+module passes these tests and runtime HUD validation. Actual game resources are
+unavailable here: these checks do not establish the final on-device design.
 
 ## Added in 0.1.17
 
@@ -107,12 +109,15 @@ UVs. Decode the referenced BFLIM (RGBA8, BC1–5; linear, micro and macro tiling
 apply the material's black/white colours in linear light, bake all four vertex
 colours, then swap the final red/green channels. Preserve
 texture/material alpha and contrast. When the base itself is green, remove its
-green chroma in the empty copy and retain its full-size art for the red fill.
+green chroma in the empty copy. Prefer a distinct progress-animated fill; only
+without one use the base itself as the full-size fill.
 Bake the selected UV rectangle and texture scale/translation into the copied
-pixels with bilinear sampling and edge clamping. Partial fill then crops image
+pixels with bilinear sampling and the native clamp/repeat/mirror sampler.
+Repeated textures use at least pane resolution to retain their detail. Partial fill then crops image
 width and normalized UVs; native out-of-range/reversed UVs never reach the HUD.
 
-Cache generated PNGs as `magic-{0,1}-{frame,fill,border}.png` in this mod's
+Cache generated PNGs as `magic-{0,1}-{frame,fill,border}.png` and
+`magic-{0,1}-detail-{00..07}.png` in this mod's
 Data folder and load them through the existing HUD image service. The source
 archive is read-only; these local derivatives are never included in the package
 or uploaded. Conversion only runs on load/retry, not on every drawing frame.
@@ -122,7 +127,11 @@ rectangle fallback. Picture vertex gradients are baked into the images. Window
 borders use their original frame textures/materials and displayed alpha. Their
 inner opening must enclose the selected gauge. Hidden/warning window decorations are excluded; the core base/fill use mod-owned
 visibility and never inherit native pane/ancestor fade alpha.
-Arbitrary multi-texture shader effects are not reproduced.
+Up to eight additional picture layers per capacity preserve native outlines
+and progress artwork. Static outlines require a transparent inner area; progress
+layers must fit inside the gauge. Their native geometry and texture detail are
+retained, with green artwork recoloured red. Arbitrary multi-texture shader
+effects are not reproduced.
 
 A bounded BFLAN reader applies InAll at its end and Flash/ColorChange/ScaleChange
 at zero for the displayed ordinary-Link style, then
@@ -156,7 +165,7 @@ collision path charge the gauge. Boss-specific handlers may override damage.
 ## Diagnostics and validation
 
 Enable **Appearance diagnostics** only when needed. The first line reads
-`DL 0.1.23 ON/OFF`; `Magic` counts loaded frame/fill images (up to four),
+`DL 0.1.24 ON/OFF`; `Magic` counts loaded frame/fill images (up to four),
 `Pos` is 1 for native or 2 for authored placement, and `Aura` reports the shell
 model being present. Body material/albedo/eye counts, binding retention and late
 repair counters retain their existing meanings. `Fill` reports the actual
