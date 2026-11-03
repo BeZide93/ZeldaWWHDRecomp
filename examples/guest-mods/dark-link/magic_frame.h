@@ -90,7 +90,7 @@ static u32 dl_frame_image(u32 wnd,u32 wb,u32 mat,u32 mb,u32 txl,u32 tb,wwhd_game
         dl_frame_blit(rects[i][0],rects[i][1],rects[i][2],rects[i][3],flip,mx,my,edge);
     }
     dl_art_width=W;dl_art_height=H;memcpy(dl_art_pixels,dl_frame_pixels,W*H*4);
-    u32 alpha=dl_magic_style_alpha((char*)(wnd+12));
+    u32 alpha=dl_magic_frame_alpha((char*)(wnd+12),variant);
     for(u32 i=0;i<W*H;++i) dl_art_pixels[i*4+3]=dl_art_pixels[i*4+3]*alpha/255;
     u32 bytes=dl_art_encode();if(!bytes) return 0;
     const char* path=variant?"magic-1-border.png":"magic-0-border.png";
@@ -111,13 +111,16 @@ static void dl_magic_load_border(u32 f,u32 size,u32 v) {
         if(type==0x776e6431 && n>=0x70) {
             char name[24];
             if(!dl_copy_string(name,sizeof name,(char*)(at+12),24)) return;
-            u32 probe=dl_gauge_row(name,"wnd-pane-query"),alpha=dl_magic_style_alpha(name);
+            u32 probe=dl_gauge_row(name,"wnd-pane-query"),alpha=dl_magic_frame_alpha(name,v);
             if(probe<DL_GAUGE_ROWS)dl_gauge_reports[v].rows[probe].alpha=alpha;
+            if(dl_str_equal(name,v?"W_MagicBase_00":"W_MagicBase_01",24)) {
+                dl_gauge_reason(probe,"wnd-other-capacity");at+=n;continue;
+            }
             if(!alpha) { dl_gauge_reason(probe,"wnd-hidden/flash");at+=n;continue; }
             u32 k=dl_append(dl_magic_key,0,sizeof dl_magic_key,"layout-pane:MagicBar_00/");
             dl_append(dl_magic_key,k,sizeof dl_magic_key,name);
             if(wwhd_game_pane_get(dl_magic_key,&dl_magic_query) && dl_magic_query.version==1) {
-                wwhd_game_pane* p=&dl_magic_query;wwhd_game_pane* base=&dl_magic_base[v];
+                wwhd_game_pane* p=&dl_magic_query;wwhd_game_pane* base=&dl_magic_fill[v];
                 if(probe<DL_GAUGE_ROWS) {
                     dl_gauge_reports[v].rows[probe].width=dl_gauge_dimension(p->w);
                     dl_gauge_reports[v].rows[probe].height=dl_gauge_dimension(p->h);

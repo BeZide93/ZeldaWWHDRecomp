@@ -23,7 +23,8 @@ static void dl_magic_load_details(u32 v,u32 base,u32 fill) {
     for(u32 i=0;i<dl_magic_picture_count && dl_magic_detail_count[v]<DL_MAGIC_DETAILS;++i) {
         dl_magic_picture* pic=&dl_magic_pictures[i];
         if(i==base || i==fill || dl_str_equal(pic->name,"P_MagicBase_00",24) ||
-           dl_str_equal(pic->name,"P_MagicBase_01",24)) continue;
+           dl_str_equal(pic->name,"P_MagicBase_01",24) ||
+           dl_str_equal(pic->name,"P_Magic_00",24) || dl_str_equal(pic->name,"P_Magic_01",24)) continue;
         u32 alpha=dl_magic_detail_alpha(pic->name,dl_magic_pictures[base].name);
         dl_gauge_picture_report(pic,alpha,0);
         if(!alpha) {dl_gauge_reason(pic->probe,"hidden/flash");continue;}

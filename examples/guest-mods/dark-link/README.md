@@ -1,9 +1,38 @@
-# Dark Link (prototype 0.1.28 — diagnostic HUD recovery)
+# Dark Link (prototype 0.1.29 — native gauge pane selection)
 
 Standalone code mod for ZeldaWWHDRecomp: sword hits charge a transformation with
 black body/equipment, red eyes and boosted sword damage. The user confirmed the
 complete body, mouth, eyes, sword and shield appearance in **0.1.11**. That
 texture-binding repair at **viewCalc return** is retained.
+
+## Changed in 0.1.29
+
+The 0.1.28 screenshot identifies the selection error: `P_MagicBase_00` was
+selected as `BASE+FILL`, while the actual `P_Magic_00` (190x12, two texture
+maps) was discarded as `outline-bounds`. The 386x18 / 380x12 long variant
+uses the corresponding `_01` names. These exact native fill names now take
+precedence over the old green-colour/first-stage-progress heuristic, including
+when the native pane is hidden. Only Dark Link's charge/time crops the result.
+
+The separate MagicBase artwork retains its authored colours; removing green
+from that background also removed the native frame shading. Neutralisation
+is now limited to layouts where the same picture really is both base and fill.
+Named `W_MagicBase_00/01` frames can ignore native visibility for the matching
+capacity, but flash-group membership and geometric opening checks still apply.
+A frame must leave the actual inner fill unobstructed, rather than enclose the
+larger background as well. The report panel now fits its row count.
+
+Tests reproduce the reported names, dimensions, texture-map counts and hidden
+panes at 0/16/32 magic capacity; they assert fill geometry, background pixels,
+transparent frame centres, flash rejection and no source-resource mutation.
+This fixes selection and frame handling, not a complete material interpreter:
+the picture baker still samples the first texture map. The screenshot does not
+expose the second map's combiner, so no guessed two-texture blend is introduced.
+**Final appearance still needs on-device checking.**
+
+Install `dark-link-0.1.29.wwhdmod`, complete the code-mod build and restart.
+No app or Enhanced Controls rebuild is required. The 0.1.26 startup guard and
+0.1.28 diagnostic text-buffer ownership fix remain in place.
 
 ## Changed in 0.1.28
 
@@ -20,10 +49,8 @@ before the existing geometry/UTF-8/limit validation. This catches the published
 0.1.27 module before the fix; the previous tests copied arbitrary guest memory
 and therefore missed the service-level rejection.
 
-Install `dark-link-0.1.28.wwhdmod`, complete its code-mod build and restart. Enable
-**Appearance diagnostics** and capture the Gauge report. The crash recovery is
-retained; the gauge's visual design still needs the resource-selection evidence.
-No app or Enhanced Controls rebuild is required.
+The user's 0.1.28 screenshot confirmed that the report works and supplied the
+native pane names used by the 0.1.29 selection fix above.
 
 ## Gauge diagnostics added in 0.1.27
 
@@ -33,7 +60,7 @@ looks flat. This version adds read-only observations to **Appearance diagnostics
 The second native HUD loader from 0.1.25 remains removed, and the startup-recovery
 package checks remain active.
 
-Use the corrected 0.1.28 package described above.
+Use the current package described above.
 Enable **Appearance diagnostics** in the mod settings and capture one screenshot
 with the gauge visible. Below the appearance panel, the report shows the active
 capacity, picture/window counts, rejected UVs, animation mask, selected fill
@@ -65,7 +92,8 @@ dereference happens inside the native call, before post-load checks. Mocked init
 calls did not exercise the real resource loader. Version 0.1.26 restored the
 0.1.24 gauge and removed native copy construction/drawing/teardown; an actual
 on-device restart has now been confirmed. Do not use 0.1.25 for play or load its
-full-state snapshots. The eventual native-design rewrite is still pending.
+full-state snapshots. The resource-only gauge path is retained; full multi-texture material support
+is still pending.
 
 ## Added in 0.1.17
 
@@ -198,7 +226,7 @@ collision path charge the gauge. Boss-specific handlers may override damage.
 ## Diagnostics and validation
 
 Enable **Appearance diagnostics** only when needed. The first line reads
-`DL 0.1.28 ON/OFF`; `Magic` counts loaded frame/fill images (up to four),
+`DL 0.1.29 ON/OFF`; `Magic` counts loaded frame/fill images (up to four),
 `Pos` is 1 for native or 2 for authored placement, and `Aura` reports the shell
 model being present. Body material/albedo/eye counts, binding retention and late
 repair counters retain their existing meanings. `Fill` reports the actual

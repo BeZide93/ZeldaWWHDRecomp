@@ -64,3 +64,16 @@ static u32 dl_magic_style_alpha(const char* name) {
     }
     return alpha;
 }
+/* Only an explicitly named permanent MagicBase window may ignore native
+ * visibility, just like our base/fill. Flash-group ancestors always veto it. */
+static u32 dl_magic_frame_alpha(const char* name,u32 variant) {
+    const char* wanted=variant?"W_MagicBase_01":"W_MagicBase_00";
+    if(!dl_str_equal(name,wanted,24)) return dl_magic_style_alpha(name);
+    s32 p=dl_magic_style_find(name);
+    if(p<0) return 0;
+    for(u32 n=0;n<DL_MAGIC_STYLES && (u32)p<dl_magic_style_count;++n) {
+        if(dl_magic_styles[p].flash) return 0;
+        p=(s32)dl_magic_styles[p].parent;
+    }
+    return 255;
+}

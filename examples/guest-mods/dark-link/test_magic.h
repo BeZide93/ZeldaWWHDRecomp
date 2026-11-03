@@ -13,6 +13,7 @@ static int magic_window;
 static int magic_require_core_alpha;
 static int magic_native_hidden;
 static int magic_picture_layers,magic_distinct_fill;
+static int magic_named_layout;
 static uint32_t magic_detail_handle;
 static unsigned magic_border_alpha=255;
 static unsigned magic_frame_count=1;
@@ -25,12 +26,20 @@ static void magic_write(Cpu* c) {
      * Validate output pixels, not only a red tint in an emitted HUD command. */
     assert(png[24]==8 && png[25]==6 && png[48]==0);
     if(strstr(path,"fill")) { for(int i=0;i<4;++i) assert(png[49+i*4]==255 && png[50+i*4]==99 && png[51+i*4]==99);assert(png[52]==255); }
-    if(magic_base_fill && strstr(path,"frame")) assert(png[49]==99&&png[50]==99&&png[51]==99);
+    if(magic_base_fill && !magic_distinct_fill && strstr(path,"frame")) assert(png[49]==99&&png[50]==99&&png[51]==99);
+    if(magic_named_layout && strstr(path,"frame")) assert(png[50]>png[49]); /* retain native green frame shading */
     if(magic_require_core_alpha && !strstr(path,"border")) assert(png[52]==255);
     if(strstr(path,"border")) {
-        assert(png[19]==108 && png[23]==24);
-        assert(png[49]<png[49+3*4] && png[52]==magic_border_alpha); /* contrast and pane coverage retained */
-        assert(png[49+12*(108*4+1)+54*4+3]==0); /* frame never fills the centre */
+        if(magic_named_layout) {
+            unsigned w=path[6]=='1'?386:196;
+            assert(((unsigned)png[18]*256+png[19])==w && png[23]==18);
+            assert(png[52]==255);
+            assert(png[49+9*(w*4+1)+(w/2)*4+3]==0);
+        } else {
+            assert(png[19]==108 && png[23]==24);
+            assert(png[49]<png[49+3*4] && png[52]==magic_border_alpha); /* contrast and pane coverage retained */
+            assert(png[49+12*(108*4+1)+54*4+3]==0); /* frame never fills the centre */
+        }
     }
     if(strstr(path,"detail")) {
         assert(png[49]==png[50] && png[50]==png[51] && png[52]==255);
@@ -57,6 +66,16 @@ static void magic_setting(Cpu* c) {
     if (strncmp(key,"layout-pane:MagicBar_00/",24)) { c->r[3]=0; return; }
     assert(c->r[4]==6 && c->r[6]==64);
     const char* name=key+24;
+    if(magic_named_layout) {
+        int base=!strcmp(name,"P_MagicBase_00") || !strcmp(name,"P_MagicBase_01");
+        int fill=!strcmp(name,"P_Magic_00") || !strcmp(name,"P_Magic_01");
+        int wnd=!strcmp(name,"W_MagicBase_00") || !strcmp(name,"W_MagicBase_01");
+        if(!base && !fill && !wnd) {c->r[3]=0;return;}
+        unsigned v=name[strlen(name)-1]=='1';uint32_t p=c->r[5];memset(ppc_ptr(p),0,64);
+        st32(p,1);st32(p+4,wnd?0:2); /* hidden native panes still have valid artwork */
+        stf32(p+16,(v?386:196)-(fill?6:0));stf32(p+20,fill?12:18);
+        strcpy((char*)ppc_ptr(p+32),fill?"fill":"frame");c->r[3]=64;return;
+    }
     if(magic_picture_layers && (!strcmp(name,"P_Outline_00") || !strcmp(name,"P_White_00"))) {
         uint32_t p=c->r[5];memset(ppc_ptr(p),0,64);st32(p,1);st32(p+4,3);
         stf32(p+16,108);stf32(p+20,24);st32(p+28,255);
@@ -77,6 +96,15 @@ static void magic_setting(Cpu* c) {
 static void magic_emit(uint32_t e) {
     ++magic_draws;
     assert(ld32(e+4)==(magic_authored ? 1u:0u)); /* follows native, already aspect-adjusted coordinates */
+    if(magic_named_layout) {
+        unsigned v=ld8(SAVE+0x33)>16;
+        if(ld32(e+60)==magic_fill_handles[v]) {
+            magic_width=ldf32(e+20);magic_x=ldf32(e+12);magic_y=ldf32(e+16);
+            assert(ldf32(e+24)==12 && magic_x==13 && magic_y==40);
+            assert(magic_width==(v?380:190)*ldf32(e+48));
+        }
+        return;
+    }
     if(ld32(e+60)==magic_border_handles[0] || ld32(e+60)==magic_border_handles[1]) {
         assert(ldf32(e+20)==108 && ldf32(e+24)==24);assert(ld32(e+56)==0xffffffff);return;
     }
@@ -303,6 +331,57 @@ static void test_magic_style(void) {
     fixture_magic();fixture_window();
     puts("Dark Link displayed style, flash exclusion, frame opening and alpha tests passed");
 }
+static void test_magic_named_layout(void) {
+    /* Shape captured in the user's 0.1.28 report: green 196/386x18 bases,
+     * separate 190/380x12 two-map fills with no first-stage progress track,
+     * and hidden named windows. Synthetic textures, never game assets. */
+    fixture_magic();magic_named_layout=1;free_mode=1;++revision;tick();
+    uint32_t f=MAGIC_ARC+0x3000,mat=f+20,txl=f+724,wnd=f+768;
+    memset(ppc_ptr(f),0,1100);memcpy(ppc_ptr(f),ppc_ptr(MAGIC_FLYT),20);st16(f+16,8);
+    st32(mat,0x6d617431);st32(mat+4,160);st16(mat+8,3);
+    st32(mat+12,24);st32(mat+16,68);st32(mat+20,116);
+    const unsigned offsets[]={24,68,116};
+    for(unsigned i=0;i<3;++i) {
+        uint32_t m=mat+offsets[i];strcpy((char*)ppc_ptr(m),i==1?"Fill":i==2?"Border":"Base");
+        st32(m+32,i==0?0x001103ff:i==1?0x20ff20ff:0xffffffff);
+        st32(m+36,i==1?2:1);st16(m+40,i==1?1:0);
+    }
+    for(unsigned v=0;v<2;++v) {
+        uint32_t b=f+180+v*272,p=b+136,w=wnd+v*120;
+        fixture_picture(b,v?"P_MagicBase_01":"P_MagicBase_00",0);
+        fixture_picture(p,v?"P_Magic_01":"P_Magic_00",1);
+        stf32(b+0x4c,v?386:196);stf32(b+0x50,18);st8(b+10,0);
+        stf32(p+0x4c,v?380:190);st8(p+10,v?0:255);
+        st32(w,0x776e6431);st32(w+4,120);strcpy((char*)ppc_ptr(w+12),v?"W_MagicBase_01":"W_MagicBase_00");
+        stf32(w+0x4c,v?386:196);stf32(w+0x50,18); /* hidden, alpha zero */
+        for(unsigned k=0;k<4;++k)st16(w+0x5c+2*k,3);
+        st8(w+0x64,1);st8(w+0x65,0x11);st32(w+0x6c,112);st32(w+112,116);st16(w+116,2);
+    }
+    st32(txl,0x74786c31);st32(txl+4,44);st16(txl+8,2);st32(txl+12,8);st32(txl+16,20);
+    strcpy((char*)ppc_ptr(txl+20),"frame.bflim");strcpy((char*)ppc_ptr(txl+32),"fill.bflim");
+    st32(MAGIC_ARC+0x28,0x2f00);st32(MAGIC_ARC+0x2c,0x2f00+1008);st32(MAGIC_ARC+8,0x4000);
+    uint8_t original[1100];memcpy(original,ppc_ptr(f),sizeof original);
+    const unsigned capacities[]={0,16,32,16};
+    for(unsigned i=0;i<4;++i) {
+        unsigned v=capacities[i]>16;st8(SAVE+0x33,capacities[i]);st8(SAVE+0x34,0);
+        stf32(MAGIC_PANE+0x3c,v?386:196);stf32(MAGIC_PANE+0x40,18);
+        stf32(MAGIC_PANE+0x54,-640+10+(v?193:98));stf32(MAGIC_PANE+0x64,340);
+        magic_expect_draws(3);assert(magic_width==(v?380:190));
+        expect_hud(v?"P_Magic_01 380x12 2/0/0 FILL":"P_Magic_00 190x12 2/0/255 FILL");
+        assert(!strstr(hud_text,"BASE+FILL"));expect_hud("BORDER");expect_hud("Dark Link");
+    }
+    assert(!memcmp(original,ppc_ptr(f),sizeof original));
+    /* The named-window exemption must not override the native flash group. */
+    uint32_t group=f+1008;st32(group,0x67727031);st32(group+4,60);
+    strcpy((char*)ppc_ptr(group+8),"G_Flash_00");st16(group+32,1);
+    strcpy((char*)ppc_ptr(group+36),"W_MagicBase_00");st16(f+16,9);st32(MAGIC_ARC+0x2c,0x2f00+1068);
+    magic_expect_draws(2);expect_hud("wnd-hidden/flash");
+    memcpy(ppc_ptr(f),original,sizeof original);st32(MAGIC_ARC+0x2c,0x2f00+1008);
+    /* A known name is not permission to cover the fill with thick slices. */
+    st16(wnd+0x5c,90);st16(wnd+0x5e,90);magic_expect_draws(2);
+    magic_named_layout=0;free_mode=0;++revision;tick();fixture_magic();st8(SAVE+0x33,0);
+    puts("Dark Link real pane names: independent capacity, preserved base colour, hidden frame, flash and opening checks passed");
+}
 static void test_magic(void) {
     fixture_magic();
     /* Invalid resource is rejected with no texture handles or fake rectangle. */
@@ -390,6 +469,7 @@ static void test_magic(void) {
     test_magic_style();
     test_magic_hidden_native();
     test_magic_picture_layers();
+    test_magic_named_layout();
     magic_window=0;fixture_magic();++magic_generation;read_hud();
     /* Return a full duration for the subsequent gameplay regression. */
     buttons(0); buttons(0x60000); tick(); buttons(0);

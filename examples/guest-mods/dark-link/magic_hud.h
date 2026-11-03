@@ -192,8 +192,8 @@ static int dl_magic_pixels(wwhd_game_pane* pane,u32 picture,u32 fill,u32 empty) 
      * visibility gates into the cached Dark Link images. */
     return 1;
 }
-static u32 dl_magic_image(wwhd_game_pane* pane,u32 picture,u32 variant,u32 fill) {
-    if(!dl_magic_pixels(pane,picture,fill,!fill && dl_magic_pictures[picture].fill)) return 0;
+static u32 dl_magic_image(wwhd_game_pane* pane,u32 picture,u32 variant,u32 fill,u32 empty) {
+    if(!dl_magic_pixels(pane,picture,fill,empty)) return 0;
     u32 size=dl_art_encode();
     if(!size) return 0;
     static const char* const files[2][2]={{"magic-0-frame.png","magic-0-fill.png"},{"magic-1-frame.png","magic-1-fill.png"}};
@@ -228,10 +228,12 @@ static void dl_magic_load(void) {
             wwhd_hud_release(dl_magic_images[v][k]); dl_magic_images[v][k]=0;
         }
         const char* base=v ? "P_MagicBase_01":"P_MagicBase_00";
+        const char* native_fill=v ? "P_Magic_01":"P_Magic_00";
         if(!dl_magic_pane(base,&dl_magic_base[v])) {report->stage="base-geometry";continue;}
-        s32 frame=-1,fill=-1; f32 score=1e9f;u32 animated=0;
+        s32 frame=-1,fill=-1,authored_fill=-1; f32 score=1e9f;u32 animated=0;
         for(u32 i=0;i<dl_magic_picture_count;++i) {
             if(dl_str_equal(dl_magic_pictures[i].name,base,24)) frame=(s32)i;
+            if(dl_str_equal(dl_magic_pictures[i].name,native_fill,24)) authored_fill=(s32)i;
             if(!dl_magic_pictures[i].fill || !dl_magic_pane(dl_magic_pictures[i].name,&dl_magic_query)) continue;
             /* Choose the authored green picture nearest the selected capacity's
              * base size/centre. Its native texture supplies the rounded ends. */
@@ -246,10 +248,20 @@ static void dl_magic_load(void) {
          * entire coloured gauge in MagicBase. Retain that fallback rather
          * than selecting a smaller static green highlight. */
         if(frame>=0 && dl_magic_pictures[frame].fill && !animated) { fill=frame;dl_magic_fill[v]=dl_magic_base[v]; }
+        /* The real MagicBar layout names its two capacity fills explicitly.
+         * Their progress can live in another texture stage, so a missing FLPA
+         * width/first-SRT track must not select the green background instead.
+         * Native visibility also does not select our independent capacity. */
+        if(authored_fill>=0) {
+            if(!dl_magic_pane(native_fill,&dl_magic_fill[v])) {report->stage="fill-geometry";continue;}
+            fill=authored_fill;
+        }
         if(frame<0 || fill<0) {report->stage="base/fill-missing";continue;}
         report->black=dl_magic_pictures[fill].black;report->white=dl_magic_pictures[fill].white;
-        dl_magic_images[v][0]=dl_magic_image(&dl_magic_base[v],(u32)frame,v,0);
-        dl_magic_images[v][1]=dl_magic_image(&dl_magic_fill[v],(u32)fill,v,1);
+        /* A separate MagicBase is the native background/frame artwork. Its
+         * green shading is intentional; neutralise only a shared base+fill. */
+        dl_magic_images[v][0]=dl_magic_image(&dl_magic_base[v],(u32)frame,v,0,frame==fill && dl_magic_pictures[frame].fill);
+        dl_magic_images[v][1]=dl_magic_image(&dl_magic_fill[v],(u32)fill,v,1,0);
         dl_magic_load_border(f,size,v);
         dl_magic_load_details(v,(u32)frame,(u32)fill);
         dl_gauge_reason(dl_magic_pictures[frame].probe,dl_magic_images[v][0]?"BASE":"base-image-failed");

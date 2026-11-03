@@ -41,7 +41,8 @@ static void dl_gauge_probe_hud(u32 list) {
     const DLGaugeReport* r=&dl_gauge_reports[v];u32 n=0;
 #define GP_S(s) n=dl_probe_append(line,n,s)
 #define GP_N(x) n=dl_probe_number(line,n,x)
-    dl_rect(list,20,240,1240,410,0x101018ef);
+    u32 lines=r->count>24?24:r->count;
+    dl_rect(list,20,240,1240,58+15*lines,0x101018ef);
     GP_S("Gauge ");GP_N(v);GP_S(" stage=");GP_S(r->stage?r->stage:"not loaded");
     GP_S(" pic/wnd=");GP_N(r->pictures);GP_S("/");GP_N(r->windows);
     GP_S(" UVskip=");GP_N(r->uv_skips);GP_S(" overflow=");GP_N(r->overflow);
