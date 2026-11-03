@@ -15,6 +15,7 @@ static int magic_native_hidden;
 static int magic_picture_layers,magic_distinct_fill;
 static int magic_named_layout;
 static int magic_named_outer;
+static int magic_solid_frame;
 static float magic_test_sx=1,magic_test_sy=1;
 static uint32_t magic_detail_handle;
 static unsigned magic_border_alpha=255;
@@ -37,6 +38,13 @@ static void magic_write(Cpu* c) {
             assert(((unsigned)png[18]*256+png[19])==w && png[23]==h);
             assert(png[52]==255);
             assert(png[49+(h/2)*(w*4+1)+(w/2)*4+3]==0);
+            if(magic_solid_frame) {
+                /* Native linear white colour 10/28/10 becomes sRGB 71/110/71.
+                 * Test actual frame pixels, not just a submitted rectangle. */
+                assert(png[49]==71 && png[50]==110 && png[51]==71);
+                unsigned edge=49+(h/2)*(w*4+1)+5*4;
+                assert(png[edge]==71 && png[edge+1]==110 && png[edge+3]==255);
+            }
         } else {
             assert(png[19]==108 && png[23]==24);
             assert(png[49]<png[49+3*4] && png[52]==magic_border_alpha); /* contrast and pane coverage retained */
@@ -109,6 +117,12 @@ static void magic_emit(uint32_t e) {
             assert(magic_width==(v?380:190)*magic_test_sx*ldf32(e+48));
         }
         if(magic_named_outer && ld32(e+60)==magic_base_handles[v]) {
+            /* Background must stay at its INNER size; 0.1.30 enlarged this
+             * green rectangle instead of supplying the missing frame. */
+            assert(ldf32(e+12)==10 && ldf32(e+16)==28+21*magic_test_sy);
+            assert(ldf32(e+20)==(v?386:196)*magic_test_sx && ldf32(e+24)==18*magic_test_sy);
+        }
+        if(magic_named_outer && ld32(e+60)==magic_border_handles[v]) {
             assert(ldf32(e+12)==10-7*magic_test_sx);
             assert(ldf32(e+16)==28+15*magic_test_sy);
             assert(ldf32(e+20)==(v?400:210)*magic_test_sx && ldf32(e+24)==30*magic_test_sy);
@@ -388,6 +402,8 @@ static void test_magic_named_layout(void) {
     magic_named_outer=1;
     for(unsigned v=0;v<2;++v) {
         stf32(wnd+v*120+0x4c,v?400:210);stf32(wnd+v*120+0x50,30);
+        st16(wnd+v*120+0x5c,10);st16(wnd+v*120+0x5e,10);
+        st16(wnd+v*120+0x60,9);st16(wnd+v*120+0x62,9);
     }
     for(unsigned i=0;i<4;++i) {
         unsigned v=i&1;st8(SAVE+0x33,v?32:16);
@@ -398,15 +414,23 @@ static void test_magic_named_layout(void) {
         magic_expect_draws(3);
         int writes=magic_writes;for(unsigned n=0;n<5;++n)read_hud();assert(magic_writes==writes);
     }
+    /* Zero-map frame materials need no TXL resource. Native window content
+     * is deliberately unreadable: only the frame slices may be accessed. */
+    magic_solid_frame=1;st32(mat+116+36,0);st32(mat+116+32,0x102810ff);
+    st32(txl,0x70616431); /* remove the texture-list section */
+    for(unsigned v=0;v<2;++v) {st8(wnd+v*120+0x65,1);st32(wnd+v*120+0x68,0xfffffff0);}
+    magic_expect_draws(3);expect_hud("BORDER");
+    magic_solid_frame=0;
     magic_named_outer=0;magic_test_sx=magic_test_sy=1;
     memcpy(ppc_ptr(f),original,sizeof original);st8(SAVE+0x33,16);
     stf32(MAGIC_PANE+0x48,1);stf32(MAGIC_PANE+0x5c,1);stf32(MAGIC_PANE+0x3c,196);
     stf32(MAGIC_PANE+0x54,-640+10+98);
-    /* The named-window exemption must not override the native flash group. */
+    /* Flash animation membership does not discard the selected frame's
+     * static slices. Unrelated flash panes remain excluded in test_magic_style. */
     uint32_t group=f+1008;st32(group,0x67727031);st32(group+4,60);
     strcpy((char*)ppc_ptr(group+8),"G_Flash_00");st16(group+32,1);
     strcpy((char*)ppc_ptr(group+36),"W_MagicBase_00");st16(f+16,9);st32(MAGIC_ARC+0x2c,0x2f00+1068);
-    magic_expect_draws(2);expect_hud("wnd-hidden/flash");
+    magic_expect_draws(3);expect_hud("BORDER");
     memcpy(ppc_ptr(f),original,sizeof original);st32(MAGIC_ARC+0x2c,0x2f00+1008);
     /* A known name is not permission to cover the fill with thick slices. */
     st16(wnd+0x5c,90);st16(wnd+0x5e,90);magic_expect_draws(2);

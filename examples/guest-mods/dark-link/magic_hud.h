@@ -344,7 +344,7 @@ static int dl_magic_place(u32 v,const wwhd_game_pane* p,f32 fraction,u32 image,w
     return 1;
 }
 static int dl_magic_element(u32 v,u32 layer,wwhd_hud_element* out) {
-    return dl_magic_place(v,layer?&dl_magic_fill[v]:&dl_magic_outer[v],
+    return dl_magic_place(v,layer?&dl_magic_fill[v]:&dl_magic_base[v],
         layer?dl_gauge_fraction():1,dl_magic_images[v][layer],out);
 }
 static void dl_magic_hud(u32 list) {

@@ -9,28 +9,41 @@ static u32 dl_frame_w,dl_frame_h;
 static int dl_frame_texture(u32 mat,u32 mb,u32 txl,u32 tb,u32 index) {
     if(mb<12 || index>=*(u16*)(mat+8) || !dl_blob_span(mat,mb,mat+12+index*4,4)) return 0;
     u32 m=mat+dl_word((void*)mat,12+index*4);
-    if(!dl_blob_span(mat,mb,m,44) || (dl_word((void*)m,36)&3)!=1 || tb<12) return 0;
-    u32 ti=*(u16*)(m+40),nt=*(u16*)(txl+8);
-    if(ti>=nt || !dl_blob_span(txl,tb,txl+12+ti*4,4)) return 0;
-    u32 name=txl+12+dl_word((void*)txl,12+ti*4),n=0;
-    if(!dl_blob_span(txl,tb,name,1)) return 0;
-    while(n<64 && dl_blob_span(txl,tb,name+n,1) && *((u8*)name+n)) ++n;
-    if(n==64 || !dl_blob_span(txl,tb,name+n,1)) return 0;
-    dl_copy_string(dl_magic_path,sizeof dl_magic_path,"timg/",6);
-    dl_append(dl_magic_path,5,sizeof dl_magic_path,(char*)name);
-    u32 bytes=0,t=dl_magic_file(dl_magic_archive,dl_magic_path,&bytes);int srgb;
-    if(!t || !dl_art_decode((u8*)t,bytes,&srgb)) return 0;
+    if(!dl_blob_span(mat,mb,m,40)) return 0;
+    u32 flags=dl_word((void*)m,36),maps=flags&3;int srgb=0;
+    if(maps>1) return 0;
+    if(!maps) {
+        /* Native untextured frame materials use their white colour. A missing
+         * texture map is not missing artwork. Keep this separate from wnd1
+         * content, which this frame-only renderer never draws. */
+        dl_art_width=dl_art_height=1;
+        for(u32 i=0;i<4;++i) dl_art_pixels[i]=255;
+    } else {
+        if(!dl_blob_span(mat,mb,m+40,4) || tb<12) return 0;
+        u32 ti=*(u16*)(m+40),nt=*(u16*)(txl+8);
+        if(ti>=nt || !dl_blob_span(txl,tb,txl+12+ti*4,4)) return 0;
+        u32 name=txl+12+dl_word((void*)txl,12+ti*4),n=0;
+        if(!dl_blob_span(txl,tb,name,1)) return 0;
+        while(n<64 && dl_blob_span(txl,tb,name+n,1) && *((u8*)name+n)) ++n;
+        if(n==64 || !dl_blob_span(txl,tb,name+n,1)) return 0;
+        dl_copy_string(dl_magic_path,sizeof dl_magic_path,"timg/",6);
+        dl_append(dl_magic_path,5,sizeof dl_magic_path,(char*)name);
+        u32 bytes=0,t=dl_magic_file(dl_magic_archive,dl_magic_path,&bytes);
+        if(!t || !dl_art_decode((u8*)t,bytes,&srgb)) return 0;
+    }
     dl_magic_picture style={0};
     if(!dl_material_string(style.material,(char*)m)) return 0;
     style.black=dl_word((void*)m,28);style.white=dl_word((void*)m,32);
     style.tex_srt[3]=style.tex_srt[4]=1;
     f32 uv[4]={0,0,1,1};
-    if((dl_word((void*)m,36)>>2)&3) {
-        if(!dl_blob_span(mat,mb,m+44,20)) return 0;
-        for(u32 i=0;i<5;++i) style.tex_srt[i]=*(f32*)(m+44+4*i);
+    if((flags>>2)&3) {
+        u32 srt=m+40+maps*4;
+        if(!dl_blob_span(mat,mb,srt,20)) return 0;
+        for(u32 i=0;i<5;++i) style.tex_srt[i]=*(f32*)(srt+4*i);
     }
     dl_magic_material_target=&style;dl_magic_apply_animations();dl_magic_material_target=0;
     dl_art_material(style.black,style.white,srgb);
+    if(!maps) return 1;
     return dl_art_bake_sampler(uv,style.tex_srt,*((u8*)m+42)&3,*((u8*)m+43)&3,dl_art_width,dl_art_height);
 }
 /* Stretch the native edge pixels, retaining the authored corner dimensions.
@@ -149,7 +162,7 @@ static void dl_magic_load_border(u32 f,u32 size,u32 v) {
         }
         at+=n;
     }
-    if(best && mat && txl) {
+    if(best && mat) {
         dl_magic_border[v]=dl_frame_image(best,best_bytes,mat,mb,txl,tb,&chosen,v);
         dl_magic_border_pane[v]=chosen;
         dl_gauge_reason(best_probe,dl_magic_border[v]?"BORDER":"wnd-image-failed");

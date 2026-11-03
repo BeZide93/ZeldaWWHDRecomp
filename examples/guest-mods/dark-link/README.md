@@ -1,11 +1,39 @@
-# Dark Link (prototype 0.1.30 — native outer frame bounds)
+# Dark Link (prototype 0.1.31 — separate native frame artwork)
 
 Standalone code mod for ZeldaWWHDRecomp: sword hits charge a transformation with
 black body/equipment, red eyes and boosted sword damage. The user confirmed the
 complete body, mouth, eyes, sword and shield appearance in **0.1.11**. That
 texture-binding repair at **viewCalc return** is retained.
 
-## Changed in 0.1.30
+## Changed in 0.1.31
+
+The 0.1.30 screenshot confirms that enlarging the green background did not
+restore the missing native frame. That background enlargement is removed:
+`P_MagicBase` is drawn at its own inner bounds again. The outer rectangle is
+reserved for the separate `W_MagicBase` frame image and row/D-pad spacing.
+
+The frame loader now supports untextured native materials, using their authored
+white colour in linear space. Previously it required exactly one texture map,
+so a valid solid-colour frame failed to load. Textured frame slices still use
+the existing decoder/sampler. A wholly untextured frame does not require TXL.
+
+The exact capacity-matched `W_MagicBase_00/01` frame remains independently
+visible even if it belongs to the native Flash animation group. Membership
+alone must not classify the normal frame as disposable warning artwork.
+Only its border slices are copied, never window content. Other hidden/flash
+panes and frames whose inner opening would cover the fill remain excluded.
+
+Tests now distinguish the inner background draw from the outer border draw,
+check solid frame pixels and transparent centres, and exercise zero-map
+materials without a texture list or readable window content. Textured frames,
+capacity selection, scaling, spacing and unrelated flash rejection remain
+covered. The screenshots do not expose the frame material itself, so the
+on-device result is still needed to confirm which rejection affected it.
+
+Install `dark-link-0.1.31.wwhdmod`, complete the mod build and restart.
+No app or Enhanced Controls rebuild is required.
+
+## Changed in 0.1.30 (superseded background sizing)
 
 The user confirmed the 0.1.29 gauge is now close, but its frame is too thin.
 The background was still drawn at the inner `P_MagicBase` size. Its outer
@@ -246,7 +274,7 @@ collision path charge the gauge. Boss-specific handlers may override damage.
 ## Diagnostics and validation
 
 Enable **Appearance diagnostics** only when needed. The first line reads
-`DL 0.1.30 ON/OFF`; `Magic` counts loaded frame/fill images (up to four),
+`DL 0.1.31 ON/OFF`; `Magic` counts loaded frame/fill images (up to four),
 `Pos` is 1 for native or 2 for authored placement, and `Aura` reports the shell
 model being present. Body material/albedo/eye counts, binding retention and late
 repair counters retain their existing meanings. `Fill` reports the actual

@@ -45,7 +45,8 @@ WWHD_HOOK(0x026F8CD0,dl_shortcut_calc_enter,(void* parts)) {
     u32 save=WWHD_GAME_DATA(WWHD_ADDR_save_info_pointer,u32);
     u32 capacity=save?*((u8*)save+0x33):0;
     wwhd_hud_element gauge;
-    if(!dl_magic_element(capacity>16,0,&gauge) || !(gauge.rgba&255)) return;
+    u32 v=capacity>16;
+    if(!dl_magic_place(v,&dl_magic_outer[v],1,dl_magic_images[v][0],&gauge) || !(gauge.rgba&255)) return;
     f32 row=(gauge.h+8)*(capacity?1:2);
     if(!(row>8 && row<320)) return;
     u32 p;
