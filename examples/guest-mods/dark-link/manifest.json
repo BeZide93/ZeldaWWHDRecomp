@@ -2,12 +2,12 @@
   "format_version": 1,
   "id": "dark-link",
   "name": "Dark Link",
-  "version": "0.1.25",
+  "version": "0.1.26",
   "game_id": "wwhd",
   "minimum_manager_version": "1.5.0",
   "kind": "guest",
   "guest": {"api_version": 1, "elf": "mod.elf"},
-  "description": "Dark Link with black body/equipment, red eyes, a black native Magic Armor aura and a native MagicBar rendering test: a second green, full gauge below normal magic.",
+  "description": "Dark Link with black body/equipment, red eyes, a black native Magic Armor aura and a red MagicBar gauge below the normal magic gauge.",
   "options": [
     {"id":"appearance_diagnostics","type":"bool","name":"Appearance diagnostics","default":false,"menu":true,"live":true,"section":"Appearance","description":"Show five diagnostic lines for the black-body/red-eye effect. Resets when enabled or transforming; no log file needed."},
     {"id":"enabled","type":"bool","name":"Dark Link","default":true,"menu":true,"live":true,"section":"Dark Link"},
@@ -17,7 +17,7 @@
     {"id":"damage_percent","type":"number","name":"Sword damage (%)","default":200,"min":100,"max":500,"step":25,"menu":true,"live":true,"section":"Transformation","description":"100% is normal damage; 200% doubles native sword damage. Native signed damage is capped at 127."},
     {"id":"free_transform","type":"bool","name":"Free transformation","default":false,"menu":true,"live":true,"section":"Transformation","description":"Transform without charging and stay transformed until toggled off. Useful for testing the appearance."},
     {"id":"auto_transform","type":"bool","name":"Transform automatically when full","default":false,"menu":true,"live":true,"section":"Transformation","description":"Inactive in Free transformation mode."},
-    {"id":"show_hud","type":"bool","name":"Show native gauge test","description":"Visual comparison: a second native green gauge, always full. This test does not display Dark Link charge or duration.","default":true,"menu":true,"live":true,"section":"HUD and touch"},
+    {"id":"show_hud","type":"bool","name":"Show gauge","default":true,"menu":true,"live":true,"section":"HUD and touch"},
     {"id":"touch_button","type":"bool","name":"Show Dark Link touch controls","default":true,"menu":true,"live":true,"section":"HUD and touch"},
     {"id":"touch_x","type":"number","name":"Touch button X","default":940,"min":0,"max":1184,"step":1,"menu":false,"live":true,"section":"HUD and touch","description":"Legacy starting position, imported only before a touch layout has been saved. Use the in-game Edit button."},
     {"id":"touch_y","type":"number","name":"Touch button Y","default":560,"min":0,"max":676,"step":1,"menu":false,"live":true,"section":"HUD and touch","description":"Legacy starting position, imported only before a touch layout has been saved. Use the in-game Edit button."}

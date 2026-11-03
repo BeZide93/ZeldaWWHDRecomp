@@ -1,6 +1,5 @@
 // Replay actual emitted guest HUD records with the renderer's transaction rules.
-// Native gauge draws bypass this overlay; the driver uses the text-button fallback.
-// No game assets or GPU are needed.
+// Synthetic images stand in for handles; no game assets or GPU are needed.
 #include "../../../runtime/src/mods/guest_hud.h"
 #include <cassert>
 #include <cstdio>
@@ -40,6 +39,6 @@ int main(int argc,char** argv) {
         ++count;++commands;
     }
     assert(!list && !std::ferror(f));std::fclose(f);
-    assert(frames>20 && pictures==0 && dark_frames>20);
+    assert(frames>20 && pictures>20 && dark_frames>20);
     std::printf("Dark Link runtime HUD validation passed: %u frames, %u commands, %u images, %u DARK frames\n",frames,commands,pictures,dark_frames);
 }

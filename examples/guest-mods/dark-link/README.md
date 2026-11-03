@@ -1,73 +1,85 @@
-# Dark Link (prototype 0.1.25 — native gauge comparison)
+# Dark Link (prototype 0.1.26 — startup recovery)
 
 Standalone code mod for ZeldaWWHDRecomp: sword hits charge a transformation with
-black body/equipment, red eyes, a black native Magic Armor aura and boosted sword
-damage. Includes the original Dark Link medallion and shared touch editor.
+black body/equipment, red eyes and boosted sword damage. The user confirmed the
+complete body, mouth, eyes, sword and shield appearance in **0.1.11**. That
+texture-binding repair at **viewCalc return** is retained.
 
-## Changed in 0.1.25
+## Changed in 0.1.26
 
-This is the first native gauge rendering proof requested after 0.1.24 still
-showed a flat bar. It deliberately draws a **second GREEN, FULL magic gauge**
-below the ordinary one. The test gauge does **not** show Dark Link charge or
-remaining duration yet. Those gameplay values and transformation controls still
-work; red recolouring and fill integration follow after the native design is
-confirmed in-game. Start with a save where the normal magic gauge is visible.
+Startup recovery for the native gauge experiment in 0.1.25. The reported crash
+enters the game's layout loader (0287F640) through our second MagicBar init call.
+That call removed the embedded parts descriptor and entered a standalone loading
+path whose resources had not been established. The null dereference happens
+inside the native call, before our post-load checks. Mocked successful init calls
+in the previous tests did not exercise the actual resource loader.
 
-The old texture reconstruction is removed: no BFLIM decoding, picture/frame
-selection, material approximation, PNG generation or overlay gauge commands.
-The game constructs a fresh MagicBar_00 layout, binds its native animations and
-draws all of its panes/materials itself. No game assets are uploaded or packaged.
+This hotfix removes that independent native construction/draw/lifetime path and
+restores the 0.1.24 gauge implementation. It does not allocate or initialize a
+second native HUD. The red gauge again follows Dark Link charge/duration, but
+its previously reported flat appearance is **not fixed** by this recovery.
+The native-design rewrite remains pending; 0.1.25 must not be used for play.
 
-## Install and compare
+The translated USA/EU package is checked for the absence of the removed native
+HUD lifecycle hooks and layout-loading/allocation imports. Existing gameplay,
+appearance, aura, D-pad, pixel and runtime HUD tests remain in the build.
+These tests do not run the game loader or Android GPU; an on-device restart is
+still required to confirm recovery.
 
-1. Replace the installed Dark Link mod with `dark-link-0.1.25.wwhdmod`, finish its
-   code-mod build, then fully restart the game. The native init hook must see the
-   HUD being created; loading this test into an already-created HUD is unsupported.
-2. Enable **Show native gauge test**. On a save with normal magic, compare the
-   second green bar's frame, highlights, segments and width with the original.
-   The copy is always full, including when Dark Link is inactive or out of charge.
-3. Check normal and doubled magic, different heart-row layouts, menus, a stage
-   change, toggle off/on and a full-state save/reload made with this version.
-   No app rebuild or Enhanced Controls update is needed.
+Replace the installed mod with `dark-link-0.1.26.wwhdmod`, finish its code-mod
+build and fully restart the game. Load a normal save for this check rather than
+a full state from 0.1.25, which may contain experimental native allocations.
+No app rebuild or Enhanced Controls update is required. The icon, shared touch
+editor, black appearance/aura and confirmed D-pad placement are retained.
 
-Use **L3 + R3** or the Dark Link touch button to transform/cancel. Defaults:
-100 charge, 5 per damaging sword hit, 20 seconds, 200% sword damage. **Free
-transformation** allows immediate transformation with unlimited duration.
-Menus/cutscenes pause the timer. Death, stage/player changes and disabling clear
-the transformation. No normal-save magic/rupee values are written.
+## Added in 0.1.17
 
-## Native gauge implementation
+- Original Dark Link medallion icon in the Enhanced Controls style.
+- The same touch editor as Enhanced Controls, with a standalone saved profile.
+- One shared editor for all five mod buttons when Enhanced Controls 0.4.0 is
+  installed; update both packages to enable this.
 
-The source is the public CC0 `ZeldaWWHDDecomp/wwhd` at
-`b2811a3ce838d1f875bc8e68536c1950af5d7ffc`, particularly
-`hd_screen_magic_bar.cpp`, `hd_parts.cpp`, `hd_parts_layout.cpp`,
-`hd_ui_020021FC.cpp` and `hd_ui_02004A3C.cpp`.
+See the 0.1.17 section below for editor ownership, compatibility and validation.
 
-- After native MagicBar init (02675294), construct a separate 0x8C controller on
-  the UI heap and initialize it with a null parts descriptor. The new layout must
-  have a distinct root, distinct layout object and no parent; aliases are rejected.
-  This is a native construction, not a shallow copy of intrusive UI structures.
-- The native loader binds style animations. For missing progress slots 0/1, a
-  bounded SARC/BFLAN metadata reader resolves the native G_Bar_00 tag with the
-  authored 16/32-frame duration and binds it through 02004E04. It reads no texture
-  pixels or animation curves. InAll is set to its authored end; Flash, ordinary
-  Link ColorChange and ScaleChange are set to zero. Native animation evaluation
-  and rendering handle the complete artwork. Ambiguous tags are rejected.
-- After Main_00 layout calculation, set the copy to full 16/32 capacity and use
-  the original root's calculated axis-aligned transform, offset down by the bar
-  height plus eight layout units. Calculate the copy through native 026F8CD0.
-  Invalid or unsupported transforms suppress only the additional bar.
-- After the original MagicBar drawLayout call (026F8D08), draw the prepared copy
-  with that owner's same DrawInfo. This also covers an embedded original layout
-  whose own drawLayout skips submission because its parent already drew it.
-  No native GPU work runs from the mod overlay callback; that remains for buttons
-  and optional diagnostics. Up to four independent native HUD owners are tracked.
-- Do not execute the copied controller's ordinary state machine: it would read
-  global magic, warning and visibility state. The source object remains untouched.
-  Finalize and destroy each copy before its source owner's resources are released;
-  constructor recursion, duplicate teardown and stale/recycled identities are
-  guarded. Full states restore native allocations and mod records together, so a
-  host HUD-image epoch change must not discard the native copies.
+## Fixed in 0.1.15
+
+- Bake native texture coordinates and animated scale/translation into the
+  copied gauge pixels. Version 0.1.14 sent these coordinates directly to the
+  HUD: out-of-range or reversed UVs cause the renderer to discard the entire
+  mod list, including the DARK button. The emitted UVs now stay within [0,1].
+- Resample with bilinear filtering and edge clamping; preserve coverage alpha
+  and crop the baked full-capacity red fill by the Dark Link timer.
+- Reject unsupported rotated textures and invalid gauge geometry locally so
+  they cannot discard the button or diagnostic overlay.
+- Replay actual translated-hook HUD output through the runtime's real Store
+  validator, including reversed/out-of-range scales and malformed resources.
+- Retain 0.1.14's black aura blend equation/full-capacity animation handling
+  and the user-confirmed 0.1.11 body/face/eye/equipment binding path.
+
+USA/EU compilation, translated-hook regressions and synthetic pixel/PNG tests
+pass. **The new appearance still needs checking in-game**: no game executable
+or actual game artwork is available in this development environment. These
+checks do not establish GPU output or support for every authored material.
+The package contains original code only, with no game artwork/models/binaries.
+No app rebuild is needed.
+
+## Install and play
+
+1. Download `dark-link.wwhdmod` from the **Dark Link mod** workflow artifact
+   `dark-link-wwhdmod`, or use the supplied versioned package.
+2. Replace the installed Dark Link package in Mods, finish its code-mod build,
+   and fully restart the game. The same package supports USA/EU and Android.
+3. Press **L3 + R3** together or tap **DARK** to transform; press/tap again to
+   cancel. Defaults: 100 charge, 5 per damaging sword hit, 20 seconds, 200% damage.
+
+**Free transformation** permits immediate transformation with unlimited duration.
+Capacity, charge gain, duration, damage, automatic activation, gauge visibility,
+and DARK button visibility/position remain configurable. The touch button keeps
+its existing behaviour. Menus and cutscenes pause the transformation timer and
+hide mod HUD. Death, stage changes, player deletion and disabling clear the
+transformation. No normal-save values or global cheat options are written.
+
+## Implementation
 
 ### Native aura
 
@@ -87,6 +99,54 @@ equation, preserve that original equation in separate-alpha fields. Restoration 
 material array and resource identities and restores owned bits while preserving
 unrelated changes. Other actors and held non-sword items are excluded.
 
+### Magic gauge artwork
+
+Read the resident **MagicBar_00** SARC/BFLYT with bounded offsets. Find the native
+P_MagicBase_00/01 and the authored green fill. Query their original geometry and
+UVs. Decode the referenced BFLIM (RGBA8, BC1–5; linear, micro and macro tiling),
+apply the material's black/white colours in linear light, bake all four vertex
+colours, then swap the final red/green channels. Preserve
+texture/material alpha and contrast. When the base itself is green, remove its
+green chroma in the empty copy. Prefer a distinct progress-animated fill; only
+without one use the base itself as the full-size fill.
+Bake the selected UV rectangle and texture scale/translation into the copied
+pixels with bilinear sampling and the native clamp/repeat/mirror sampler.
+Repeated textures use at least pane resolution to retain their detail. Partial fill then crops image
+width and normalized UVs; native out-of-range/reversed UVs never reach the HUD.
+
+Cache generated PNGs as `magic-{0,1}-{frame,fill,border}.png` and
+`magic-{0,1}-detail-{00..07}.png` in this mod's
+Data folder and load them through the existing HUD image service. The source
+archive is read-only; these local derivatives are never included in the package
+or uploaded. Conversion only runs on load/retry, not on every drawing frame.
+Each decoded image is bounded to 131072 pixels and each cache write is below
+1 MiB. Unsupported or missing textures are skipped and retried, with no fake
+rectangle fallback. Picture vertex gradients are baked into the images. Window
+borders use their original frame textures/materials and displayed alpha. Their
+inner opening must enclose the selected gauge. Hidden/warning window decorations are excluded; the core base/fill use mod-owned
+visibility and never inherit native pane/ancestor fade alpha.
+Up to eight additional picture layers per capacity preserve native outlines
+and progress artwork. Static outlines require a transparent inner area; progress
+layers must fit inside the gauge. Their native geometry and texture detail are
+retained, with green artwork recoloured red. Arbitrary multi-texture shader
+effects are not reproduced.
+
+A bounded BFLAN reader applies InAll at its end and Flash/ColorChange/ScaleChange
+at zero for the displayed ordinary-Link style, then
+selects a 16/32-frame animation explicitly bound to
+`G_Bar_00`, validates all tracks before applying any, and evaluates its full
+frame. It supports FLPA picture fields, FLMC material colours, FLVC corner
+colours and the first FLTS texture transform. Animated ancestor-pane transforms,
+texture-pattern swaps and rotated UVs are not supported. If no matching valid
+animation exists, the static authored state is retained. Only mod-owned copies
+change; the native HUD, animation controllers and magic amount stay untouched.
+
+The native HD magic controller (02675414) supplies live base position, size and
+origin. Place the copy eight layout units below it; before magic is unlocked,
+use Main_00's authored placement. Normal and doubled capacities are supported.
+The gauge shows charge, remaining duration, or full capacity in Free mode,
+independently of normal magic. Full-state load renews image handles and position.
+
 ### Existing appearance and gameplay
 
 Body, hands, hair, sword grip/blade, scabbard and shield keep 0.1.11's immutable
@@ -102,37 +162,53 @@ collision path charge the gauge. Boss-specific handlers may override damage.
 
 ## Diagnostics and validation
 
-Optional **Appearance diagnostics** shows `DL 0.1.25`, `Magic` (successful native
-constructions), `Pos` (prepared geometry), and `Native green/full Draw` (submitted
-native copy calls). `Fill` still reports gameplay charge/time, not this test's
-constant-full bar. `State` identifies the most recent construction failure:
-0 none, 1 owner capacity, 2 UI heap, 3 allocation, 4 independent layout/root,
-5 animation metadata, 6 native animation bindings. No new file logging is added.
+Enable **Appearance diagnostics** only when needed. The first line reads
+`DL 0.1.26 ON/OFF`; `Magic` counts loaded frame/fill images (up to four),
+`Pos` is 1 for native or 2 for authored placement, and `Aura` reports the shell
+model being present. Body material/albedo/eye counts, binding retention and late
+repair counters retain their existing meanings. `Fill` reports the actual
+Dark Link percentage (100% in Free mode); `Full` reports whether matching full
+animations were applied for normal/doubled capacity. Diagnostics do not prove GPU
+output. No Share log or game-file upload is required.
 
-Automated tests cover native allocation/init arguments, independent owners,
-progress binding names, original-object/save-byte preservation, native draw
-context, recursion, pause/menu/toggle gates, cleanup ordering, allocation/load
-failure, rejected shared roots and malformed metadata, host-image epoch changes,
-and invalid matrices. Existing body/eyes/equipment, aura, gameplay and D-pad
-regressions remain. Runtime HUD validation checks the surviving controls with no
-overlay gauge image. The shared-editor test exercises both mod load orders,
-separate image ownership and save/reload/cancel.
+Automated checks cover gameplay/timing, body/eye/equipment texture restoration,
+nested native refresh, animated face replacements, malformed layout bounds,
+material-derived red pixels and alpha, PNG checksums/zlib decoding, full-width
+coloured bases, UV cropping, native placement, handle reuse/state-load invalidation,
+zero-length playback controllers with valid resource lengths, visual-only aura
+frames, genuine armor coexistence, RGB suppression and preserved alpha blending.
+Regression fixtures cover half-width authored fills becoming full-width at both
+16/32 frames, texture SRT, malformed animation rejection, full Free-mode coverage
+and neutral vertex tint. These are synthetic resource fixtures, not a game run.
 
-These tests use synthetic memory and mocked native calls. USA/EU translation and
-compilation verify the mod ABI, **not** Nintendo's layout loader, GPU rendering
-or final on-device appearance. Actual game resources/executable are unavailable
-in this environment. This package is an explicit in-game rendering comparison.
+In-game acceptance: activate Dark Link, check the black aura in motion and the
+red bar below normal magic, drain/charge the bar, then toggle off and verify
+normal Link/armor appearance. Check a save before and after acquiring magic,
+doubled magic, menus, a stage change and full-state reload.
 
 ## Build
+
+```sh
+python examples/guest-mods/dark-link/build.py
+```
+
+With Zig's bundled clang:
 
 ```sh
 python examples/guest-mods/dark-link/build.py --cc "python -m ziglang cc" --host-cc "python -m ziglang cc"
 ```
 
-Output: `build/dark-link/dark-link.wwhdmod`. The package contains the manifest,
-compiled mod, README and already-approved original Dark Link icon/notice.
-Generated packages are not committed. Mod-only edits run package CI; platform
-app-build filters remain in place.
+Output: `build/dark-link/dark-link.wwhdmod`. Only manifest, compiled mod and this
+README are packaged. Builds are not committed. Mod-only edits run package CI;
+the app platform build filters are retained.
+
+Layout references: public CC0 `ZeldaWWHDDecomp/wwhd`, especially
+`d/actor/d_a_player_main_04.cpp`, its aura/item headers, `d_a_player_main_01.cpp`,
+`d/hd_screen_magic_bar.cpp`, and `d/hd_parts_progress_bar.cpp`.
+Texture/art references: this repository's `story_prop_textures.cpp`,
+`game_layouts.cpp`, `aspect.cpp`, `tools/story_mods/lyt`, Cemu GX2 registers,
+[BfresLibrary RenderState](https://github.com/KillzXGaming/BfresLibrary/blob/master/BfresLibrary/Shared/Models/Material/RenderState.cs)
+and [NW4F render-state bit layout](https://github.com/nw4f/G3d/blob/nsmbu/include/nw/g3d/res/g3d_ResMaterial.h).
 
 ### 0.1.17 — shared touch editor and Shortcut spacing
 
@@ -155,8 +231,7 @@ controller overlay's separate editor is not part of this mod-button editor.
 Legacy Dark Link X/Y options seed a fresh standalone layout; subsequent changes
 are made through Edit. Enhanced Controls' four-button v1 layouts migrate to v2.
 
-The confirmed calculation-time Main_00 shortcut spacing is retained. It now
-uses the prepared native gauge geometry, without emitting an overlay bar.
+The 0.1.17 Main_00 drawLayout spacing attempt is superseded by 0.1.18 below.
 
 The SDK currently has no mod exports. The shared editor uses a versioned,
 synchronous value-only rendezvous at the verified read-only native getter

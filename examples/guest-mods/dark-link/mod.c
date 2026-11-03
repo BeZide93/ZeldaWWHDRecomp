@@ -76,10 +76,11 @@ static void dl_text(u32 list, f32 x, f32 y, const char* text, u32 length, u32 co
         .x=x, .y=y, .size=size, .rgba=color, .text=text, .text_bytes=length, .thickness=1};
     wwhd_hud_emit(list, &dl_element);
 }
-#include "magic_native.h"
+#include "magic_hud.h"
 #include "shortcut_hud.h"
 static void dl_hud(u32 list) {
     if (!dl_owner || !dl_allowed(dl_owner)) return;
+    if (dl_show_hud) dl_magic_hud(list);
     if (dl_diagnostics) dl_diag_hud(list);
     dl_editor_hud(list);
 }

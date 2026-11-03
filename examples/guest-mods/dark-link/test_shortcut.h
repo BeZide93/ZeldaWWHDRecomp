@@ -91,7 +91,7 @@ static void shortcut_rejected(void) {
     shortcut_hook(0x026f8cd0,3,SHORT_MAIN);
 }
 static void test_shortcut(void) {
-    st8(SAVE+0x33,16);native_calculate();
+    st8(SAVE+0x33,16);read_hud();hook(0x02675414,3,MAGIC_CTRL,0);
     for(int embedded=0;embedded<2;++embedded) {
         shortcut_fixture(250,embedded);shortcut_frame(226);
         for(int i=0;i<100;++i) shortcut_frame(226); /* no drift or draw-time undo */
@@ -139,8 +139,8 @@ static void test_shortcut(void) {
     st32(SHORT_GROUP+0x20,0x7fc00000);shortcut_rejected();stf32(SHORT_GROUP+0x20,250);
     stf32(SHORT_ROOT+0x5c,0);shortcut_rejected();stf32(SHORT_ROOT+0x5c,1);
     ++magic_generation;shortcut_frame(250);
-    hook(0x026f8b00,2,MAGIC_CTRL,0);shortcut_frame(250);
-    fixture_magic();native_calculate();shortcut_frame(226);
+    magic_archive=0;read_hud();shortcut_frame(250);
+    fixture_magic();++magic_generation;read_hud();hook(0x02675414,3,MAGIC_CTRL,0);shortcut_frame(226);
     shortcut_hook(0x026f8cd0,2,SHORT_MAIN);stf32(SHORT_GROUP+0x20,123);
     shortcut_hook(0x026f8cd0,3,SHORT_MAIN);assert(ldf32(SHORT_GROUP+0x20)==123); /* other writer */
     /* UI structures from the native MEM1 heap must also be accepted. */

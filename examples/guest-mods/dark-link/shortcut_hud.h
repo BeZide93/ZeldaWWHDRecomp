@@ -75,7 +75,7 @@ WWHD_HOOK(0x026F8CD0,dl_shortcut_calc_enter,(void* parts)) {
     *((u8*)p+0x44)|=0x10; /* native calculation must consume the new input */
 }
 WWHD_HOOK_RETURN(0x026F8CD0,dl_shortcut_calc_leave,(void* parts)) {
-    if(!dl_shortcut_owner) { dl_native_calculate((u32)parts);return; }
+    if(!dl_shortcut_owner) return;
     if(dl_shortcut_depth>1) { --dl_shortcut_depth;return; }
     if((u32)parts!=dl_shortcut_owner) return;
     u32 p=dl_shortcut_pane;
@@ -85,5 +85,4 @@ WWHD_HOOK_RETURN(0x026F8CD0,dl_shortcut_calc_leave,(void* parts)) {
      * gauge recomputes native geometry even when there is no animation. */
     *((u8*)p+0x44)|=0x10;
     dl_shortcut_owner=dl_shortcut_depth=dl_shortcut_pane=0;
-    dl_native_calculate((u32)parts);
 }

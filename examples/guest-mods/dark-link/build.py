@@ -9,9 +9,25 @@ import subprocess
 import sys
 import zipfile
 import struct
+import zlib
+import binascii
 
 SOURCE = Path(__file__).resolve().parent
 ROOT = SOURCE.parents[2]
+
+
+def check_startup_recovery(translated):
+    """0.1.26 must not re-enter the unverified standalone native HUD loader."""
+    lifecycle = {0x02675294, 0x026F8B00, 0x02674D84, 0x026F8D08}
+    loading = lifecycle | {0x0273B050, 0x0267516C, 0x026754F0,
+                           0x026FAE6C, 0x026FAFC0, 0x0287F640}
+    hooks = {translated.game_address("game", a) for a in lifecycle}
+    calls = {translated.game_address("game", a) for a in loading}
+    if any(target in hooks for _, target, _, _ in translated.hooks):
+        raise RuntimeError("Startup recovery: unsafe native HUD lifecycle hook present")
+    if any(kind in ("game", "orig") and value in calls
+           for kind, value in translated.imports.values()):
+        raise RuntimeError("Startup recovery: standalone native HUD loading import present")
 
 
 def main():
@@ -43,12 +59,29 @@ def main():
     test = out / "test-state"
     subprocess.run(host + ["-std=c11", "-O2", "-UNDEBUG", "-Wall", "-Wextra", "-Werror", str(SOURCE / "test_state.c"), "-o", str(test)], check=True)
     subprocess.run([str(test)], check=True)
+    art_test, art_png = out / "test-art", out / "synthetic-art.png"
+    subprocess.run(host + ["-std=c11", "-O2", "-UNDEBUG", "-Wall", "-Wextra", "-Werror",
+        str(SOURCE / "test_art.c"), "-o", str(art_test)], check=True)
+    subprocess.run([str(art_test), str(art_png)], check=True)
+    # An independent standard-library PNG reader checks chunk CRCs and zlib.
+    png, at, compressed = art_png.read_bytes(), 8, b""
+    while at < len(png):
+        size = struct.unpack_from(">I", png, at)[0]
+        kind, data = png[at+4:at+8], png[at+8:at+8+size]
+        assert binascii.crc32(kind+data) == struct.unpack_from(">I", png, at+8+size)[0]
+        if kind == b"IDAT": compressed += data
+        at += size + 12
+    pixels = zlib.decompress(compressed)
+    assert len(pixels) == 4 * 17 and pixels[0] == 0
+    assert pixels[1:5] == bytes([255, 99, 99, 255])
+    assert pixels[5:9] == bytes([255, 99, 99, 0])
     sys.path.insert(0, str(ROOT / "tools/guestmod"))
     import build_guest_mod as builder
     from builds import by_name
     for region in ("USA", "EU"):
         translated = builder.translator_for((package / "mod.elf").read_bytes(), 0x7F000000, by_name(region))
         translated.emit("dark-link")
+        check_startup_recovery(translated)
         # Exercise the actual install-time translator AND host compilation.
         result = builder.build(str(package), str(out / "cache"), 0x7F000000,
             host, str(ROOT / "runtime/include"), game_build=by_name(region))

@@ -30,7 +30,6 @@ static void magic_release(Cpu*);
 static void magic_emit(uint32_t);
 static uint32_t magic_archive;
 static int aura_notifications;
-static int magic_dispatch(Cpu*);
 
 static void execute(uint32_t fn, uint32_t a, uint32_t b) {
     Cpu c = {0}; c.r[1] = 0x1201fff0; c.r[3] = a; c.r[4] = b;
@@ -110,7 +109,6 @@ static PpcFunc service(const char* name) {
     fprintf(stderr,"Unexpected service: %s\n",name); return 0;
 }
 static void dispatch(Cpu* c) {
-    if(magic_dispatch(c)) return;
     switch (c->pc) {
         case 0x0200000c: shortcut_lookup(c); return; /* synthetic pane vtable slot */
         case 0x0267598c: c->r[3]=ld32(c->r[3]); return;
@@ -183,7 +181,6 @@ static void submit(uint32_t wrapper, int active) {
 static void prepare(int active) { submit(0x025e2e5c,active); }
 #include "test_textures.h"
 #include "test_magic.h"
-#include "test_aura.h"
 #include "test_shortcut.h"
 int main(int argc, char** argv) {
     assert(argc==3);
