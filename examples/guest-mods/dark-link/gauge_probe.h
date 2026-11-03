@@ -34,7 +34,11 @@ static void dl_gauge_picture_report(dl_magic_picture* pic,u32 alpha,const wwhd_g
 }
 static void dl_gauge_probe_hud(u32 list) {
     u32 save=WWHD_GAME_DATA(WWHD_ADDR_save_info_pointer,u32),v=save && *((u8*)save+0x33)>16;
-    const DLGaugeReport* r=&dl_gauge_reports[v];char line[192];u32 n=0;
+    /* HUD text must belong to the mod region. svc_hud_record rejects guest
+     * stack buffers and drops the ENTIRE list (including gauge and buttons).
+     * The service copies each string synchronously, so one static line suffices. */
+    static char line[192];
+    const DLGaugeReport* r=&dl_gauge_reports[v];u32 n=0;
 #define GP_S(s) n=dl_probe_append(line,n,s)
 #define GP_N(x) n=dl_probe_number(line,n,x)
     dl_rect(list,20,240,1240,410,0x101018ef);

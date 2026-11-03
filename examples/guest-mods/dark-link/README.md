@@ -1,11 +1,31 @@
-# Dark Link (prototype 0.1.27 — gauge resource diagnostics)
+# Dark Link (prototype 0.1.28 — diagnostic HUD recovery)
 
 Standalone code mod for ZeldaWWHDRecomp: sword hits charge a transformation with
 black body/equipment, red eyes and boosted sword damage. The user confirmed the
 complete body, mouth, eyes, sword and shield appearance in **0.1.11**. That
 texture-binding repair at **viewCalc return** is retained.
 
-## Changed in 0.1.27
+## Changed in 0.1.28
+
+Fixes the entire Dark Link overlay disappearing when **Appearance diagnostics**
+is enabled. The new gauge report in 0.1.27 passed a guest-stack string to
+`wwhd_hud_emit`. The runtime's `svc_hud_record` accepts buffers only inside the
+calling mod's assigned memory region; it therefore rejected the string and
+invalidated the whole list, including the gauge and touch controls.
+
+The report now uses a static buffer in the mod's BSS. The service copies the
+string synchronously, allowing the same buffer to be reused for each line.
+The translated callback tests now check element and text pointer ownership
+before the existing geometry/UTF-8/limit validation. This catches the published
+0.1.27 module before the fix; the previous tests copied arbitrary guest memory
+and therefore missed the service-level rejection.
+
+Install `dark-link-0.1.28.wwhdmod`, complete its code-mod build and restart. Enable
+**Appearance diagnostics** and capture the Gauge report. The crash recovery is
+retained; the gauge's visual design still needs the resource-selection evidence.
+No app or Enhanced Controls rebuild is required.
+
+## Gauge diagnostics added in 0.1.27
 
 The user confirmed that 0.1.26 removed the startup crash. The red gauge still
 looks flat. This version adds read-only observations to **Appearance diagnostics**
@@ -13,7 +33,7 @@ looks flat. This version adds read-only observations to **Appearance diagnostics
 The second native HUD loader from 0.1.25 remains removed, and the startup-recovery
 package checks remain active.
 
-Install `dark-link-0.1.27.wwhdmod`, complete its code-mod build and restart.
+Use the corrected 0.1.28 package described above.
 Enable **Appearance diagnostics** in the mod settings and capture one screenshot
 with the gauge visible. Below the appearance panel, the report shows the active
 capacity, picture/window counts, rejected UVs, animation mask, selected fill
@@ -178,7 +198,7 @@ collision path charge the gauge. Boss-specific handlers may override damage.
 ## Diagnostics and validation
 
 Enable **Appearance diagnostics** only when needed. The first line reads
-`DL 0.1.27 ON/OFF`; `Magic` counts loaded frame/fill images (up to four),
+`DL 0.1.28 ON/OFF`; `Magic` counts loaded frame/fill images (up to four),
 `Pos` is 1 for native or 2 for authored placement, and `Aura` reports the shell
 model being present. Body material/albedo/eye counts, binding retention and late
 repair counters retain their existing meanings. `Fill` reports the actual

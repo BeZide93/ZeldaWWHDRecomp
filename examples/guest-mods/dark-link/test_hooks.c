@@ -63,6 +63,17 @@ static void emit(Cpu* c) {
     ++elements;
     /* Guest HUD ABI: text pointer at 64, byte count at 68 (72-byte element). */
     uint32_t e=c->r[4];
+    /* svc_hud_record validates ownership BEFORE copying text into Store.
+     * Geometry-only replay cannot catch a guest-stack text pointer. All this
+     * mod's HUD buffers are static, so they must fit its code/data/BSS span. */
+    assert(e>=module->mem_base && (uint64_t)e+72<= (uint64_t)module->mem_base+module->mem_size);
+    if(ld32(e)==1) {
+        uint32_t text=ld32(e+64),bytes=ld32(e+68);
+        if(text<module->mem_base || (uint64_t)text+bytes>(uint64_t)module->mem_base+module->mem_size) {
+            fprintf(stderr,"HUD text buffer outside mod memory: %08x (%u bytes)\n",text,bytes);
+            abort();
+        }
+    }
     assert(fputc('C',hud_trace)!=EOF);
     assert(fwrite(ppc_ptr(e),1,72,hud_trace)==72);
     if(ld32(e)==1) assert(fwrite(ppc_ptr(ld32(e+64)),1,ld32(e+68),hud_trace)==ld32(e+68));
