@@ -47,14 +47,15 @@ static int dl_frame_texture(u32 mat,u32 mb,u32 txl,u32 tb,u32 index) {
     return dl_art_bake_sampler(uv,style.tex_srt,*((u8*)m+42)&3,*((u8*)m+43)&3,dl_art_width,dl_art_height);
 }
 /* Stretch the native edge pixels, retaining the authored corner dimensions.
- * One-/four-frame windows derive edges from corners; eight-frame windows
- * provide explicit edge materials. Flips are baked, never invalid HUD UVs. */
-static void dl_frame_blit(u32 x0,u32 y0,u32 x1,u32 y1,u32 flip,u32 mx,u32 my,u32 edge) {
+ * Four-frame strips retain anchored UVs; eight-frame windows supply explicit
+ * edge materials. Flips are baked, never invalid HUD UVs. */
+static void dl_frame_blit(u32 x0,u32 y0,u32 x1,u32 y1,u32 flip,u32 mx,u32 my,u32 edge,f32 u0,f32 v0,f32 u1,f32 v1) {
     if(x1<=x0 || y1<=y0) return;
     for(u32 y=y0;y<y1;++y) for(u32 x=x0;x<x1;++x) {
         f32 u=((f32)(x-x0)+0.5f)/(x1-x0),v=((f32)(y-y0)+0.5f)/(y1-y0);
         if(edge==1) v=1-0.5f/dl_art_height;
         if(edge==2) u=1-0.5f/dl_art_width;
+        u=u0+(u1-u0)*u;v=v0+(v1-v0)*v;
         if(mx) u=1-u;if(my) v=1-v;
         f32 a=u,b=v;
         if(flip==1) u=1-a;else if(flip==2) v=1-b;
@@ -66,12 +67,18 @@ static void dl_frame_blit(u32 x0,u32 y0,u32 x1,u32 y1,u32 flip,u32 mx,u32 my,u32
         sy=sy<0?0:sy>dl_art_height-1?dl_art_height-1:sy;
         u32 ix=(u32)sx,iy=(u32)sy,jx=ix+1<dl_art_width?ix+1:ix,jy=iy+1<dl_art_height?iy+1:iy;
         f32 fx=sx-ix,fy=sy-iy;
+        u8 pixel[4];
         for(u32 c=0;c<4;++c) {
             f32 tl=dl_art_pixels[(iy*dl_art_width+ix)*4+c],tr=dl_art_pixels[(iy*dl_art_width+jx)*4+c];
             f32 bl=dl_art_pixels[(jy*dl_art_width+ix)*4+c],br=dl_art_pixels[(jy*dl_art_width+jx)*4+c];
             f32 top=tl+(tr-tl)*fx,bottom=bl+(br-bl)*fx;
-            dl_frame_pixels[(y*dl_frame_w+x)*4+c]=(u8)(top+(bottom-top)*fy+0.5f);
+            pixel[c]=(u8)(top+(bottom-top)*fy+0.5f);
         }
+        /* Transparent padding must not erase an earlier frame strip. */
+        u8* dst=dl_frame_pixels+(y*dl_frame_w+x)*4;
+        u32 alpha=pixel[3],back=dst[3]*(255-alpha),total=alpha*255+back;
+        if(total) for(u32 c=0;c<3;++c) dst[c]=(pixel[c]*alpha*255+dst[c]*back+total/2)/total;
+        dst[3]=(total+127)/255;
     }
 }
 static u32 dl_frame_image(u32 wnd,u32 wb,u32 mat,u32 mb,u32 txl,u32 tb,wwhd_game_pane* p,u32 variant) {
@@ -80,19 +87,29 @@ static u32 dl_frame_image(u32 wnd,u32 wb,u32 mat,u32 mb,u32 txl,u32 tb,wwhd_game
     if((count!=1 && count!=4 && count!=8) || (kind!=0 && kind!=2) || !dl_blob_span(wnd,wb,table,count*4)) return 0;
     f32 w=*(f32*)(wnd+0x4c),h=*(f32*)(wnd+0x50);
     if(!(w>0 && w<1000000 && h>0 && h<1000000) ||
-       (u32)*(u16*)(wnd+0x5c)+*(u16*)(wnd+0x5e)>w ||
-       (kind==0 && (u32)*(u16*)(wnd+0x60)+*(u16*)(wnd+0x62)>h)) return 0;
+       *(u16*)(wnd+0x5c)>w || *(u16*)(wnd+0x5e)>w ||
+       *(u16*)(wnd+0x60)>h || *(u16*)(wnd+0x62)>h) return 0;
     dl_frame_w=(u32)(p->w+0.5f);dl_frame_h=(u32)(p->h+0.5f);
     if(!dl_frame_w || !dl_frame_h || dl_frame_w*dl_frame_h>DL_ART_PIXELS) return 0;
     u32 l=(u32)(*(u16*)(wnd+0x5c)*dl_frame_w/w+0.5f),r=(u32)(*(u16*)(wnd+0x5e)*dl_frame_w/w+0.5f);
     u32 t=(u32)(*(u16*)(wnd+0x60)*dl_frame_h/h+0.5f),b=(u32)(*(u16*)(wnd+0x62)*dl_frame_h/h+0.5f);
-    if(l+r>dl_frame_w || (kind==0 && t+b>dl_frame_h)) return 0;
+    if(l>dl_frame_w || r>dl_frame_w || (kind==0 && (t>dl_frame_h || b>dl_frame_h))) return 0;
+    if(count!=4 && (l+r>dl_frame_w || (kind==0 && t+b>dl_frame_h))) return 0;
     memset(dl_frame_pixels,0,dl_frame_w*dl_frame_h*4);
     const u32 W=dl_frame_w,H=dl_frame_h;
     u32 rects[8][4]={{0,0,l,t},{W-r,0,W,t},{0,H-b,l,H},{W-r,H-b,W,H},
                     {0,t,l,H-b},{W-r,t,W,H-b},{l,0,W-r,t},{l,H-b,W-r,H}};
     if(kind==2) { rects[0][3]=H;rects[1][3]=H; }
-    for(u32 i=0;i<(kind==2?2u:8u);++i) {
+    /* Four-frame wnd1 uses four perimeter strips with anchored texture
+     * coordinates, not eight independently stretched corner/edge quads.
+     * Transparent texels within a slice are part of the opening. */
+    int strips=count==4 && kind==0;
+    if(strips) {
+        if(!l || !r || !t || !b) return 0;
+        u32 four[4][4]={{0,0,W-r,t},{W-r,0,W,H-b},{0,t,l,H},{l,H-b,W,H}};
+        memcpy(rects,four,sizeof four);
+    }
+    for(u32 i=0;i<(kind==2?2u:strips?4u:8u);++i) {
         u32 material=count==1?0:count==8?i:i<4?i:i==5?1:i==7?2:0;
         u32 entry=wnd+dl_word((void*)table,material*4);
         if(!dl_blob_span(wnd,wb,entry,4)) return 0;
@@ -100,7 +117,27 @@ static u32 dl_frame_image(u32 wnd,u32 wb,u32 mat,u32 mb,u32 txl,u32 tb,wwhd_game
         if(flip>5 || !dl_frame_texture(mat,mb,txl,tb,*(u16*)entry)) return 0;
         u32 mx=count==1 && (i==1 || i==3 || i==5),my=count==1 && (i==2 || i==3 || i==7);
         u32 edge=(i>=4 && count!=8)?(i<6?1:2):0;
-        dl_frame_blit(rects[i][0],rects[i][1],rects[i][2],rects[i][3],flip,mx,my,edge);
+        f32 u0=0,v0=0,u1=1,v1=1;
+        if(strips) {
+            if(i==0) u1=(f32)(W-r)/l;
+            if(i==1) v1=(f32)(H-b)/t;
+            if(i==2) v0=1-(f32)(H-t)/b;
+            if(i==3) u0=1-(f32)(W-l)/r;
+        }
+        dl_frame_blit(rects[i][0],rects[i][1],rects[i][2],rects[i][3],flip,mx,my,edge,u0,v0,u1,v1);
+    }
+    /* For the named MagicBase, validate the rendered opening instead of
+     * treating nominal slice dimensions as opaque border thickness. Never
+     * upload a frame whose artwork covers the red gauge. */
+    if(dl_str_equal((char*)(wnd+12),variant?"W_MagicBase_01":"W_MagicBase_00",24)) {
+        wwhd_game_pane* fill=&dl_magic_fill[variant];
+        for(u32 y=0;y<H;++y) for(u32 x=0;x<W;++x) {
+            f32 px=p->x-p->w/2+(x+0.5f)*p->w/W;
+            f32 py=p->y+p->h/2-(y+0.5f)*p->h/H;
+            if(px>fill->x-fill->w/2+0.5f && px<fill->x+fill->w/2-0.5f &&
+               py>fill->y-fill->h/2+0.5f && py<fill->y+fill->h/2-0.5f &&
+               dl_frame_pixels[(y*W+x)*4+3]>8) return 0;
+        }
     }
     dl_art_width=W;dl_art_height=H;memcpy(dl_art_pixels,dl_frame_pixels,W*H*4);
     u32 alpha=dl_magic_frame_alpha((char*)(wnd+12),variant);
@@ -153,7 +190,10 @@ static void dl_magic_load_border(u32 f,u32 size,u32 v) {
                     p->x+p->w/2-r>=base->x+base->w/2-0.5f &&
                     p->y+p->h/2-t>=base->y+base->h/2-0.5f &&
                     p->y-p->h/2+b<=base->y-base->h/2+0.5f;
-                if(encloses && p->rotation==0 && dw>=0 && dw<=128 && dh>=0 && dh<=64 && dx<=dw/2+1 && dy<=dh/2+1) {
+                int named=dl_str_equal(name,v?"W_MagicBase_01":"W_MagicBase_00",24);
+                /* Known frame: inspect decoded alpha in dl_frame_image.
+                 * Unrelated candidate windows retain the conservative gate. */
+                if((named || encloses) && p->rotation==0 && dw>=0 && dw<=128 && dh>=0 && dh<=64 && dx<=dw/2+1 && dy<=dh/2+1) {
                     f32 d=dw+dh+2*dx+2*dy;
                     if(d<score) { if(best_probe<DL_GAUGE_ROWS)dl_gauge_reason(best_probe,"wnd-other-candidate");
                         score=d;best=at;best_bytes=n;chosen=*p;best_probe=probe;dl_gauge_reason(probe,"wnd-candidate"); }

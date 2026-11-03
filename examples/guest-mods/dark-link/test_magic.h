@@ -34,10 +34,22 @@ static void magic_write(Cpu* c) {
     if(magic_require_core_alpha && !strstr(path,"border")) assert(png[52]==255);
     if(strstr(path,"border")) {
         if(magic_named_layout) {
-            unsigned w=(path[6]=='1'?386:196)+(magic_named_outer?14:0),h=magic_named_outer?30:18;
+            unsigned w=(path[6]=='1'?386:196)+(magic_named_outer?14:0),h=magic_named_outer==2?33:magic_named_outer?30:18;
             assert(((unsigned)png[18]*256+png[19])==w && png[23]==h);
             assert(png[52]==255);
             assert(png[49+(h/2)*(w*4+1)+(w/2)*4+3]==0);
+            if(magic_named_outer==2) {
+                /* Four padded 16x16 corner textures form a 210/400x33 frame.
+                 * Nominal opening is only W-32 by 1, but actual transparent
+                 * opening is W-16 by 17. All four edges must survive. */
+                const unsigned points[4][2]={{w/2,1},{w-2,h/2},{1,h/2},{w/2,h-2}};
+                for(unsigned k=0;k<4;++k) {
+                    unsigned at=49+points[k][1]*(w*4+1)+points[k][0]*4;
+                    assert(png[at]==71 && png[at+1]==110 && png[at+2]==71 && png[at+3]==255);
+                }
+                for(unsigned y=11;y<22;++y)for(unsigned x=11;x<w-11;++x)
+                    assert(png[49+y*(w*4+1)+x*4+3]==0);
+            }
             if(magic_solid_frame) {
                 /* Native linear white colour 10/28/10 becomes sRGB 71/110/71.
                  * Test actual frame pixels, not just a submitted rectangle. */
@@ -85,7 +97,7 @@ static void magic_setting(Cpu* c) {
         unsigned v=name[strlen(name)-1]=='1';uint32_t p=c->r[5];memset(ppc_ptr(p),0,64);
         st32(p,1);st32(p+4,wnd?0:2); /* hidden native panes still have valid artwork */
         stf32(p+16,(v?386:196)-(fill?6:0)+(wnd && magic_named_outer?14:0));
-        stf32(p+20,fill?12:wnd && magic_named_outer?30:18);
+        stf32(p+20,fill?12:wnd && magic_named_outer?(magic_named_outer==2?33:30):18);
         strcpy((char*)ppc_ptr(p+32),fill?"fill":"frame");c->r[3]=64;return;
     }
     if(magic_picture_layers && (!strcmp(name,"P_Outline_00") || !strcmp(name,"P_White_00"))) {
@@ -113,21 +125,21 @@ static void magic_emit(uint32_t e) {
         if(ld32(e+60)==magic_fill_handles[v]) {
             magic_width=ldf32(e+20);magic_x=ldf32(e+12);magic_y=ldf32(e+16);
             assert(ldf32(e+24)==12*magic_test_sy && magic_x==10+3*magic_test_sx);
-            assert(magic_y==28+(magic_named_outer?24:12)*magic_test_sy);
+            assert(magic_y==28+(magic_named_outer==2?27:magic_named_outer?24:12)*magic_test_sy);
             assert(magic_width==(v?380:190)*magic_test_sx*ldf32(e+48));
         }
         if(magic_named_outer && ld32(e+60)==magic_base_handles[v]) {
             /* Background must stay at its INNER size; 0.1.30 enlarged this
              * green rectangle instead of supplying the missing frame. */
-            assert(ldf32(e+12)==10 && ldf32(e+16)==28+21*magic_test_sy);
+            assert(ldf32(e+12)==10 && ldf32(e+16)==28+(magic_named_outer==2?24:21)*magic_test_sy);
             assert(ldf32(e+20)==(v?386:196)*magic_test_sx && ldf32(e+24)==18*magic_test_sy);
         }
         if(magic_named_outer && ld32(e+60)==magic_border_handles[v]) {
             assert(ldf32(e+12)==10-7*magic_test_sx);
-            assert(ldf32(e+16)==28+15*magic_test_sy);
-            assert(ldf32(e+20)==(v?400:210)*magic_test_sx && ldf32(e+24)==30*magic_test_sy);
+            assert(ldf32(e+16)==28+(magic_named_outer==2?16.5f:15)*magic_test_sy);
+            assert(ldf32(e+20)==(v?400:210)*magic_test_sx && ldf32(e+24)==(magic_named_outer==2?33:30)*magic_test_sy);
             /* Native outer bottom is 20 + 15*sy: retain an eight-unit gap. */
-            assert(ldf32(e+16)-(20+15*magic_test_sy)==8);
+            assert(ldf32(e+16)-(20+(magic_named_outer==2?16.5f:15)*magic_test_sy)==8);
         }
         return;
     }
@@ -421,6 +433,42 @@ static void test_magic_named_layout(void) {
     for(unsigned v=0;v<2;++v) {st8(wnd+v*120+0x65,1);st32(wnd+v*120+0x68,0xfffffff0);}
     magic_expect_draws(3);expect_hud("BORDER");
     magic_solid_frame=0;
+    /* Reproduce the 0.1.31 device report: four frames, 210x33 outer bounds.
+     * Padded slices are synthetic; their nominal bounds overlap the fill,
+     * while their alpha does not. The old opening gate rejects this frame. */
+    memcpy(ppc_ptr(f),original,sizeof original);magic_named_outer=2;
+    const unsigned flips[4]={0,1,2,4};
+    uint8_t old_windows[240];memcpy(old_windows,ppc_ptr(wnd),sizeof old_windows);
+    for(unsigned v=0;v<2;++v) {
+        uint32_t w=wnd+v*144;memcpy(ppc_ptr(w),old_windows+v*120,112);
+        st32(w+4,144);stf32(w+0x4c,v?400:210);stf32(w+0x50,33);
+        for(unsigned k=0;k<4;++k) {
+            st16(w+0x5c+2*k,16);st32(w+112+4*k,128+4*k);
+            st16(w+128+4*k,2);st8(w+130+4*k,flips[k]);
+        }
+        st8(w+0x64,4);st8(w+10,255);
+    }
+    st32(MAGIC_ARC+0x2c,0x2f00+1056);st32(MAGIC_ARC+8,0x8000);
+    uint32_t tex=MAGIC_ARC+0x6000,trailer=tex+4096;
+    st32(MAGIC_ARC+0x38,0x5f00);st32(MAGIC_ARC+0x3c,0x6f28);
+    memset(ppc_ptr(tex),0,4096+40);
+    for(unsigned y=0;y<16;++y)for(unsigned x=0;x<16;++x) {
+        uint32_t pixel=tex+(y*64+x)*4;
+        st8(pixel,16);st8(pixel+1,40);st8(pixel+2,16);st8(pixel+3,x<8 || y<8?255:0);
+    }
+    st32(trailer,0x464c494d);st32(trailer+20,0x696d6167);
+    st16(trailer+28,16);st16(trailer+30,16);st8(trailer+34,9);st8(trailer+35,1);st32(trailer+36,4096);
+    for(unsigned i=0;i<4;++i) {
+        unsigned v=i&1;st8(SAVE+0x33,v?32:0);st8(SAVE+0x34,0);
+        magic_test_sx=i<2?1:0.75f;magic_test_sy=i<2?1:1.25f;
+        stf32(MAGIC_PANE+0x3c,v?386:196);stf32(MAGIC_PANE+0x48,magic_test_sx);stf32(MAGIC_PANE+0x5c,magic_test_sy);
+        stf32(MAGIC_PANE+0x54,-640+10+(v?193:98)*magic_test_sx);
+        magic_expect_draws(3);expect_hud("4/0/255 BORDER");
+    }
+    /* Same slice dimensions with opaque pixels must still be rejected. */
+    for(unsigned y=0;y<16;++y)for(unsigned x=0;x<16;++x)st8(tex+(y*64+x)*4+3,255);
+    magic_expect_draws(2);expect_hud("wnd-image-failed");
+    st32(MAGIC_ARC+0x38,0x300);st32(MAGIC_ARC+0x3c,0x728);
     magic_named_outer=0;magic_test_sx=magic_test_sy=1;
     memcpy(ppc_ptr(f),original,sizeof original);st8(SAVE+0x33,16);
     stf32(MAGIC_PANE+0x48,1);stf32(MAGIC_PANE+0x5c,1);stf32(MAGIC_PANE+0x3c,196);

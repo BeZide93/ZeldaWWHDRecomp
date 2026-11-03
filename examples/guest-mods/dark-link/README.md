@@ -1,9 +1,42 @@
-# Dark Link (prototype 0.1.31 — separate native frame artwork)
+# Dark Link (prototype 0.1.32 — padded native frame slices)
 
 Standalone code mod for ZeldaWWHDRecomp: sword hits charge a transformation with
 black body/equipment, red eyes and boosted sword damage. The user confirmed the
 complete body, mouth, eyes, sword and shield appearance in **0.1.11**. That
 texture-binding repair at **viewCalc return** is retained.
+
+## Changed in 0.1.32
+
+The 0.1.31 device report identifies the actual rejection: the matching
+`W_MagicBase_00` is 210x33 with four frames and alpha 255, but is discarded
+as `wnd-opening/bounds` before any frame material is decoded. The old check
+mistook nominal slice sizes for opaque border thickness.
+
+For the exact capacity-matched MagicBase window, validate the rendered alpha
+over the fill instead. Transparent padding in a frame texture is allowed;
+artwork that actually obscures the red fill is still rejected. Outer bounds,
+resource spans, image dimensions and unrelated-window checks stay bounded.
+The inner green background remains at its original size.
+
+Four-frame windows now use four perimeter strips with corner-anchored UVs.
+This matches the four-frame geometry in the BFLYT renderer, rather than
+stretching eight independent corner/edge quads. Transparent overlap is alpha
+composited. Frame materials and colours still come from resident game assets;
+window content is never drawn and no native HUD constructors are called.
+
+Regression coverage uses a synthetic 210/400x33 four-frame window with padded
+16x16 corner textures. Its nominal opening is too small, but its actual alpha
+leaves the full red gauge clear. Tests check pixels on all four edges and
+throughout the fill, both capacities, no native magic, nonuniform scaling,
+and reject an otherwise identical opaque frame. No game artwork is bundled.
+
+Reference for four-strip geometry:
+[Switch-Toolbox BxlytToGL.DrawWindowPane, four-frame case](https://github.com/KillzXGaming/Switch-Toolbox/blob/3a3279140ca0fa54ce804a8d56d4653a491de613/File_Format_Library/FileFormats/Layout/BxlytToGL.cs).
+The source images and slice sizes on the user's device are not available here;
+the synthetic regression verifies the fix but does not replace an in-game check.
+
+Install `dark-link-0.1.32.wwhdmod`, complete the mod build and restart.
+No app or Enhanced Controls rebuild is required.
 
 ## Changed in 0.1.31
 
@@ -274,7 +307,7 @@ collision path charge the gauge. Boss-specific handlers may override damage.
 ## Diagnostics and validation
 
 Enable **Appearance diagnostics** only when needed. The first line reads
-`DL 0.1.31 ON/OFF`; `Magic` counts loaded frame/fill images (up to four),
+`DL 0.1.32 ON/OFF`; `Magic` counts loaded frame/fill images (up to four),
 `Pos` is 1 for native or 2 for authored placement, and `Aura` reports the shell
 model being present. Body material/albedo/eye counts, binding retention and late
 repair counters retain their existing meanings. `Fill` reports the actual
