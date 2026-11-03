@@ -1,9 +1,29 @@
-# Dark Link (prototype 0.1.29 — native gauge pane selection)
+# Dark Link (prototype 0.1.30 — native outer frame bounds)
 
 Standalone code mod for ZeldaWWHDRecomp: sword hits charge a transformation with
 black body/equipment, red eyes and boosted sword damage. The user confirmed the
 complete body, mouth, eyes, sword and shield appearance in **0.1.11**. That
 texture-binding repair at **viewCalc return** is retained.
+
+## Changed in 0.1.30
+
+The user confirmed the 0.1.29 gauge is now close, but its frame is too thin.
+The background was still drawn at the inner `P_MagicBase` size. Its outer
+bounds now come from the matching `W_MagicBase_00/01` rectangle, even when
+that window's warning artwork is hidden. Only enclosing, unrotated, bounded
+geometry is accepted; unavailable or invalid bounds retain the previous size.
+This uses the existing native background art and does not enable flash content.
+The red inner fill retains its dimensions and independent charge/time crop.
+
+Placement includes both outer margins so the larger frame does not overlap
+the normal magic bar. Details and borders use the same placement calculation;
+the existing D-pad reservation measures the resulting outer row height.
+Synthetic tests cover short/long capacity, unequal X/Y scale, unchanged fill
+size, an eight-unit gap between outer frames, and repeated cached draws.
+Final frame thickness still needs checking on the device with its native assets.
+
+Install `dark-link-0.1.30.wwhdmod`, complete the mod build and restart.
+No app or Enhanced Controls rebuild is required.
 
 ## Changed in 0.1.29
 
@@ -226,7 +246,7 @@ collision path charge the gauge. Boss-specific handlers may override damage.
 ## Diagnostics and validation
 
 Enable **Appearance diagnostics** only when needed. The first line reads
-`DL 0.1.29 ON/OFF`; `Magic` counts loaded frame/fill images (up to four),
+`DL 0.1.30 ON/OFF`; `Magic` counts loaded frame/fill images (up to four),
 `Pos` is 1 for native or 2 for authored placement, and `Aura` reports the shell
 model being present. Body material/albedo/eye counts, binding retention and late
 repair counters retain their existing meanings. `Fill` reports the actual

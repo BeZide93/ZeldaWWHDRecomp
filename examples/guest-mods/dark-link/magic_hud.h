@@ -12,7 +12,7 @@ static dl_magic_picture dl_magic_pictures[DL_MAGIC_PICTURES];
 static dl_magic_picture* dl_magic_material_target;
 static u32 dl_magic_picture_count, dl_magic_loaded, dl_magic_retry;
 static unsigned long long dl_magic_epoch;
-static wwhd_game_pane dl_magic_query, dl_magic_base[2], dl_magic_fill[2];
+static wwhd_game_pane dl_magic_query, dl_magic_base[2], dl_magic_fill[2], dl_magic_outer[2];
 static u32 dl_magic_images[2][2], dl_magic_archive;
 static f32 dl_magic_position[4];
 static f32 dl_magic_authored[2];
@@ -164,6 +164,22 @@ static int dl_magic_pane(const char* name,wwhd_game_pane* out) {
     }
     return out->w>0 && out->h>0;
 }
+/* MagicBase is the inner background, not the outer frame rectangle. Read the
+ * matching native window's authored bounds even when its flash artwork is
+ * hidden. This only supplies geometry; it never enables warning content. */
+static void dl_magic_outer_bounds(u32 v,int separate_fill) {
+    dl_magic_outer[v]=dl_magic_base[v];
+    if(!separate_fill) return;
+    const char* name=v?"W_MagicBase_01":"W_MagicBase_00";
+    u32 k=dl_append(dl_magic_key,0,sizeof dl_magic_key,"layout-pane:MagicBar_00/");
+    dl_append(dl_magic_key,k,sizeof dl_magic_key,name);
+    if(!wwhd_game_pane_get(dl_magic_key,&dl_magic_query) || dl_magic_query.version!=1) return;
+    const wwhd_game_pane *p=&dl_magic_query,*b=&dl_magic_base[v];
+    f32 dw=p->w-b->w,dh=p->h-b->h;
+    if(p->rotation==0 && dw>=0 && dw<=64 && dh>=0 && dh<=64 &&
+       dl_abs(p->x-b->x)<=dw/2 && dl_abs(p->y-b->y)<=dh/2)
+        dl_magic_outer[v]=*p;
+}
 static int dl_magic_pixels(wwhd_game_pane* pane,u32 picture,u32 fill,u32 empty) {
     /* The raw BC4 texture can be a luminance mask with fully opaque alpha.
      * Apply the actual material, including alpha, before making the red copy. */
@@ -257,6 +273,7 @@ static void dl_magic_load(void) {
             fill=authored_fill;
         }
         if(frame<0 || fill<0) {report->stage="base/fill-missing";continue;}
+        dl_magic_outer_bounds(v,frame!=fill);
         report->black=dl_magic_pictures[fill].black;report->white=dl_magic_pictures[fill].white;
         /* A separate MagicBase is the native background/frame artwork. Its
          * green shading is intentional; neutralise only a shared base+fill. */
@@ -296,7 +313,7 @@ WWHD_HOOK_RETURN(0x02675414, dl_magic_track, (void* magic)) {
 }
 /* Shared geometry/visibility check: the native shortcut reserves space only
  * when the same gauge frame can actually be submitted by dl_magic_hud. */
-static int dl_magic_element(u32 v,u32 layer,wwhd_hud_element* out) {
+static int dl_magic_place(u32 v,const wwhd_game_pane* p,f32 fraction,u32 image,wwhd_hud_element* out) {
     if(!dl_magic_images[v][0] || !dl_magic_images[v][1]) return 0;
     u32 anchor=WWHD_HUD_CENTER;
     if(!dl_magic_position_valid) {
@@ -308,20 +325,27 @@ static int dl_magic_element(u32 v,u32 layer,wwhd_hud_element* out) {
     }
     f32 scale=dl_magic_position[2]/dl_magic_base[v].w;
     f32 scale_y=dl_magic_position[3]/dl_magic_base[v].h;
-    wwhd_game_pane* p=layer ? &dl_magic_fill[v]:&dl_magic_base[v];
     f32 w=p->w*scale,h=p->h*scale_y;
     f32 x=dl_magic_position[0]+(p->x-dl_magic_base[v].x)*scale+(dl_magic_position[2]-w)/2;
     f32 y=dl_magic_position[1]-(p->y-dl_magic_base[v].y)*scale_y+(dl_magic_position[3]-h)/2;
-    f32 fraction=layer ? dl_gauge_fraction():1;
+    /* position[1] follows the native inner background. Reserve the outer
+     * bottom margin of the native bar plus the top margin of our new row.
+     * Their sum is the outer/inner height difference, also for off-centre
+     * windows. Do not mutate position: repeated HUD reads must not drift. */
+    y+=(dl_magic_outer[v].h-dl_magic_base[v].h)*scale_y;
     /* One rejected command invalidates the whole owner list, including
      * DARK. Unsupported/malformed native geometry must stay local here. */
     if(!(x>=-65536 && x<=65536 && y>=-65536 && y<=65536 &&
          w>0 && w<=65536 && h>0 && h<=65536 && fraction>0 && fraction<=1)) return 0;
     *out=(wwhd_hud_element){.kind=WWHD_HUD_IMAGE,.anchor=anchor,
         .x=x,.y=y,.w=w*fraction,.h=h,.rgba=0xffffffff,
-        .image=dl_magic_images[v][layer],.thickness=1,
+        .image=image,.thickness=1,
         .u0=0,.v0=0,.u1=fraction,.v1=1};
     return 1;
+}
+static int dl_magic_element(u32 v,u32 layer,wwhd_hud_element* out) {
+    return dl_magic_place(v,layer?&dl_magic_fill[v]:&dl_magic_outer[v],
+        layer?dl_gauge_fraction():1,dl_magic_images[v][layer],out);
 }
 static void dl_magic_hud(u32 list) {
     unsigned long long epoch=wwhd_hud_epoch();
@@ -339,31 +363,17 @@ static void dl_magic_hud(u32 list) {
     if(!dl_magic_images[v][0] || !dl_magic_images[v][1]) return;
     for(u32 layer=0;layer<2;++layer)
         if(dl_magic_element(v,layer,&dl_element)) wwhd_hud_emit(list,&dl_element);
-    for(u32 i=0;i<dl_magic_detail_count[v];++i) if(dl_magic_element(v,0,&dl_element)) {
+    for(u32 i=0;i<dl_magic_detail_count[v];++i) {
         wwhd_game_pane* p=&dl_magic_details[v][i].pane;
-        f32 sx=dl_magic_position[2]/dl_magic_base[v].w,sy=dl_magic_position[3]/dl_magic_base[v].h;
         f32 fraction=1;
         if(dl_magic_details[v][i].progress) {
             f32 right=dl_magic_fill[v].x-dl_magic_fill[v].w/2+dl_magic_fill[v].w*dl_gauge_fraction();
             fraction=(right-(p->x-p->w/2))/p->w;
             if(!(fraction>0)) continue;if(fraction>1)fraction=1;
         }
-        dl_element.x+=(p->x-dl_magic_base[v].x)*sx+(dl_element.w-p->w*sx)/2;
-        dl_element.y-=(p->y-dl_magic_base[v].y)*sy-(dl_element.h-p->h*sy)/2;
-        dl_element.w=p->w*sx*fraction;dl_element.h=p->h*sy;
-        dl_element.image=dl_magic_details[v][i].image;dl_element.u1=fraction;
-        if(dl_element.x>=-65536 && dl_element.x<=65536 && dl_element.y>=-65536 && dl_element.y<=65536 &&
-           dl_element.w>0 && dl_element.w<=65536 && dl_element.h>0 && dl_element.h<=65536) wwhd_hud_emit(list,&dl_element);
+        if(dl_magic_place(v,p,fraction,dl_magic_details[v][i].image,&dl_element))
+            wwhd_hud_emit(list,&dl_element);
     }
-    if(dl_magic_border[v] && dl_magic_element(v,0,&dl_element)) {
-        wwhd_game_pane* p=&dl_magic_border_pane[v];
-        f32 sx=dl_magic_position[2]/dl_magic_base[v].w,sy=dl_magic_position[3]/dl_magic_base[v].h;
-        f32 w=p->w*sx,h=p->h*sy;
-        dl_element.x+=(p->x-dl_magic_base[v].x)*sx+(dl_element.w-w)/2;
-        dl_element.y-=(p->y-dl_magic_base[v].y)*sy-(dl_element.h-h)/2;
-        dl_element.w=w;dl_element.h=h;dl_element.image=dl_magic_border[v];
-        dl_element.rgba=0xffffffff; /* own gauge visibility; texture coverage is baked */
-        if(dl_element.x>=-65536 && dl_element.x<=65536 && dl_element.y>=-65536 && dl_element.y<=65536 &&
-           w>0 && w<=65536 && h>0 && h<=65536) wwhd_hud_emit(list,&dl_element);
-    }
+    if(dl_magic_border[v] && dl_magic_place(v,&dl_magic_border_pane[v],1,dl_magic_border[v],&dl_element))
+        wwhd_hud_emit(list,&dl_element);
 }

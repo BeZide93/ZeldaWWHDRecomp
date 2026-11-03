@@ -8,12 +8,14 @@ static int magic_images, magic_draws, magic_textures, magic_authored;
 static float magic_width, magic_x, magic_y;
 static void magic_release(Cpu* c) { c->r[3]=1; }
 static void magic_epoch(Cpu* c) { c->r[3]=(uint32_t)(magic_generation>>32); c->r[4]=(uint32_t)magic_generation; }
-static uint32_t magic_fill_handles[2],magic_border_handles[2];
+static uint32_t magic_fill_handles[2],magic_border_handles[2],magic_base_handles[2];
 static int magic_window;
 static int magic_require_core_alpha;
 static int magic_native_hidden;
 static int magic_picture_layers,magic_distinct_fill;
 static int magic_named_layout;
+static int magic_named_outer;
+static float magic_test_sx=1,magic_test_sy=1;
 static uint32_t magic_detail_handle;
 static unsigned magic_border_alpha=255;
 static unsigned magic_frame_count=1;
@@ -31,10 +33,10 @@ static void magic_write(Cpu* c) {
     if(magic_require_core_alpha && !strstr(path,"border")) assert(png[52]==255);
     if(strstr(path,"border")) {
         if(magic_named_layout) {
-            unsigned w=path[6]=='1'?386:196;
-            assert(((unsigned)png[18]*256+png[19])==w && png[23]==18);
+            unsigned w=(path[6]=='1'?386:196)+(magic_named_outer?14:0),h=magic_named_outer?30:18;
+            assert(((unsigned)png[18]*256+png[19])==w && png[23]==h);
             assert(png[52]==255);
-            assert(png[49+9*(w*4+1)+(w/2)*4+3]==0);
+            assert(png[49+(h/2)*(w*4+1)+(w/2)*4+3]==0);
         } else {
             assert(png[19]==108 && png[23]==24);
             assert(png[49]<png[49+3*4] && png[52]==magic_border_alpha); /* contrast and pane coverage retained */
@@ -55,6 +57,7 @@ static void magic_texture(Cpu* c) {
     ++magic_textures; c->r[3]=++magic_images;
     if(strstr(path,"border")) magic_border_handles[path[6]=='1']=c->r[3];
     if(strstr(path,"fill")) magic_fill_handles[path[6]=='1']=c->r[3];
+    if(strstr(path,"frame")) magic_base_handles[path[6]=='1']=c->r[3];
     if(strstr(path,"detail")) magic_detail_handle=c->r[3];
 }
 static void magic_setting(Cpu* c) {
@@ -73,7 +76,8 @@ static void magic_setting(Cpu* c) {
         if(!base && !fill && !wnd) {c->r[3]=0;return;}
         unsigned v=name[strlen(name)-1]=='1';uint32_t p=c->r[5];memset(ppc_ptr(p),0,64);
         st32(p,1);st32(p+4,wnd?0:2); /* hidden native panes still have valid artwork */
-        stf32(p+16,(v?386:196)-(fill?6:0));stf32(p+20,fill?12:18);
+        stf32(p+16,(v?386:196)-(fill?6:0)+(wnd && magic_named_outer?14:0));
+        stf32(p+20,fill?12:wnd && magic_named_outer?30:18);
         strcpy((char*)ppc_ptr(p+32),fill?"fill":"frame");c->r[3]=64;return;
     }
     if(magic_picture_layers && (!strcmp(name,"P_Outline_00") || !strcmp(name,"P_White_00"))) {
@@ -100,8 +104,16 @@ static void magic_emit(uint32_t e) {
         unsigned v=ld8(SAVE+0x33)>16;
         if(ld32(e+60)==magic_fill_handles[v]) {
             magic_width=ldf32(e+20);magic_x=ldf32(e+12);magic_y=ldf32(e+16);
-            assert(ldf32(e+24)==12 && magic_x==13 && magic_y==40);
-            assert(magic_width==(v?380:190)*ldf32(e+48));
+            assert(ldf32(e+24)==12*magic_test_sy && magic_x==10+3*magic_test_sx);
+            assert(magic_y==28+(magic_named_outer?24:12)*magic_test_sy);
+            assert(magic_width==(v?380:190)*magic_test_sx*ldf32(e+48));
+        }
+        if(magic_named_outer && ld32(e+60)==magic_base_handles[v]) {
+            assert(ldf32(e+12)==10-7*magic_test_sx);
+            assert(ldf32(e+16)==28+15*magic_test_sy);
+            assert(ldf32(e+20)==(v?400:210)*magic_test_sx && ldf32(e+24)==30*magic_test_sy);
+            /* Native outer bottom is 20 + 15*sy: retain an eight-unit gap. */
+            assert(ldf32(e+16)-(20+15*magic_test_sy)==8);
         }
         return;
     }
@@ -371,6 +383,25 @@ static void test_magic_named_layout(void) {
         assert(!strstr(hud_text,"BASE+FILL"));expect_hud("BORDER");expect_hud("Dark Link");
     }
     assert(!memcmp(original,ppc_ptr(f),sizeof original));
+    /* A wider native outer rectangle must not resize the red fill. Verify
+     * both capacities, nonuniform UI scaling, row spacing and cache stability. */
+    magic_named_outer=1;
+    for(unsigned v=0;v<2;++v) {
+        stf32(wnd+v*120+0x4c,v?400:210);stf32(wnd+v*120+0x50,30);
+    }
+    for(unsigned i=0;i<4;++i) {
+        unsigned v=i&1;st8(SAVE+0x33,v?32:16);
+        magic_test_sx=i<2?1:0.75f;magic_test_sy=i<2?1:1.25f;
+        stf32(MAGIC_PANE+0x3c,v?386:196);stf32(MAGIC_PANE+0x40,18);
+        stf32(MAGIC_PANE+0x48,magic_test_sx);stf32(MAGIC_PANE+0x5c,magic_test_sy);
+        stf32(MAGIC_PANE+0x54,-640+10+(v?193:98)*magic_test_sx);
+        magic_expect_draws(3);
+        int writes=magic_writes;for(unsigned n=0;n<5;++n)read_hud();assert(magic_writes==writes);
+    }
+    magic_named_outer=0;magic_test_sx=magic_test_sy=1;
+    memcpy(ppc_ptr(f),original,sizeof original);st8(SAVE+0x33,16);
+    stf32(MAGIC_PANE+0x48,1);stf32(MAGIC_PANE+0x5c,1);stf32(MAGIC_PANE+0x3c,196);
+    stf32(MAGIC_PANE+0x54,-640+10+98);
     /* The named-window exemption must not override the native flash group. */
     uint32_t group=f+1008;st32(group,0x67727031);st32(group+4,60);
     strcpy((char*)ppc_ptr(group+8),"G_Flash_00");st16(group+32,1);
