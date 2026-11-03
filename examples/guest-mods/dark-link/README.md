@@ -1,36 +1,51 @@
-# Dark Link (prototype 0.1.26 — startup recovery)
+# Dark Link (prototype 0.1.27 — gauge resource diagnostics)
 
 Standalone code mod for ZeldaWWHDRecomp: sword hits charge a transformation with
 black body/equipment, red eyes and boosted sword damage. The user confirmed the
 complete body, mouth, eyes, sword and shield appearance in **0.1.11**. That
 texture-binding repair at **viewCalc return** is retained.
 
-## Changed in 0.1.26
+## Changed in 0.1.27
 
-Startup recovery for the native gauge experiment in 0.1.25. The reported crash
-enters the game's layout loader (0287F640) through our second MagicBar init call.
-That call removed the embedded parts descriptor and entered a standalone loading
-path whose resources had not been established. The null dereference happens
-inside the native call, before our post-load checks. Mocked successful init calls
-in the previous tests did not exercise the actual resource loader.
+The user confirmed that 0.1.26 removed the startup crash. The red gauge still
+looks flat. This version adds read-only observations to **Appearance diagnostics**
+(default off); it does **not** claim to fix the design or change gauge selection.
+The second native HUD loader from 0.1.25 remains removed, and the startup-recovery
+package checks remain active.
 
-This hotfix removes that independent native construction/draw/lifetime path and
-restores the 0.1.24 gauge implementation. It does not allocate or initialize a
-second native HUD. The red gauge again follows Dark Link charge/duration, but
-its previously reported flat appearance is **not fixed** by this recovery.
-The native-design rewrite remains pending; 0.1.25 must not be used for play.
+Install `dark-link-0.1.27.wwhdmod`, complete its code-mod build and restart.
+Enable **Appearance diagnostics** in the mod settings and capture one screenshot
+with the gauge visible. Below the appearance panel, the report shows the active
+capacity, picture/window counts, rejected UVs, animation mask, selected fill
+material colours, and each parsed pane's selection/rejection reason. For picture
+rows the numeric triplet is texture count / progress flag / effective alpha;
+window rows use frame count in place of texture count. At most 48 rows are shown;
+truncation is explicitly counted. No diagnostic file or game artwork is exported.
 
-The translated USA/EU package is checked for the absence of the removed native
-HUD lifecycle hooks and layout-loading/allocation imports. Existing gameplay,
-appearance, aura, D-pad, pixel and runtime HUD tests remain in the build.
-These tests do not run the game loader or Android GPU; an on-device restart is
-still required to confirm recovery.
+`BASE`, `FILL`, `BASE+FILL`, `DETAIL` and `BORDER` identify submitted artwork.
+`hidden/flash`, `outline-bounds`, `opaque-centre`, `wnd-opening/bounds`,
+`wnd-image-failed`, `pixels-failed` and `pane-query` distinguish the existing
+filters and loading failures. The animation mask bits are InAll, Flash,
+ColorChange, ScaleChange and progress, in that order. These observations identify
+which existing assumptions fail on the actual game resources, avoiding another
+unverified change to the loader or rendering rules.
 
-Replace the installed mod with `dark-link-0.1.26.wwhdmod`, finish its code-mod
-build and fully restart the game. Load a normal save for this check rather than
-a full state from 0.1.25, which may contain experimental native allocations.
-No app rebuild or Enhanced Controls update is required. The icon, shared touch
-editor, black appearance/aura and confirmed D-pad placement are retained.
+Gameplay, body/eyes/equipment, aura, D-pad spacing and the shared editor retain
+the 0.1.26 behavior. Diagnostics do not write game memory or invoke a new native
+function. They record metadata while the existing image cache loads; disabling
+them emits no report commands. Existing generated gauge images remain local to
+the mod's Data folder. No app rebuild or Enhanced Controls update is needed.
+
+## Startup recovery retained from 0.1.26
+
+The reported 0.1.25 crash enters the game's layout loader (0287F640) through our
+second MagicBar init call. It removed the embedded parts descriptor and entered
+a standalone loading path whose resources had not been established. The null
+dereference happens inside the native call, before post-load checks. Mocked init
+calls did not exercise the real resource loader. Version 0.1.26 restored the
+0.1.24 gauge and removed native copy construction/drawing/teardown; an actual
+on-device restart has now been confirmed. Do not use 0.1.25 for play or load its
+full-state snapshots. The eventual native-design rewrite is still pending.
 
 ## Added in 0.1.17
 
@@ -163,7 +178,7 @@ collision path charge the gauge. Boss-specific handlers may override damage.
 ## Diagnostics and validation
 
 Enable **Appearance diagnostics** only when needed. The first line reads
-`DL 0.1.26 ON/OFF`; `Magic` counts loaded frame/fill images (up to four),
+`DL 0.1.27 ON/OFF`; `Magic` counts loaded frame/fill images (up to four),
 `Pos` is 1 for native or 2 for authored placement, and `Aura` reports the shell
 model being present. Body material/albedo/eye counts, binding retention and late
 repair counters retain their existing meanings. `Fill` reports the actual

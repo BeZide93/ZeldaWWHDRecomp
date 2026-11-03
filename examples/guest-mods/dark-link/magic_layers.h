@@ -25,21 +25,24 @@ static void dl_magic_load_details(u32 v,u32 base,u32 fill) {
         if(i==base || i==fill || dl_str_equal(pic->name,"P_MagicBase_00",24) ||
            dl_str_equal(pic->name,"P_MagicBase_01",24)) continue;
         u32 alpha=dl_magic_detail_alpha(pic->name,dl_magic_pictures[base].name);
-        if(!alpha || !dl_magic_pane(pic->name,&dl_magic_query)) continue;
+        dl_gauge_picture_report(pic,alpha,0);
+        if(!alpha) {dl_gauge_reason(pic->probe,"hidden/flash");continue;}
+        if(!dl_magic_pane(pic->name,&dl_magic_query)) {dl_gauge_reason(pic->probe,"pane-query");continue;}
+        dl_gauge_picture_report(pic,alpha,&dl_magic_query);
         wwhd_game_pane p=dl_magic_query,*b=&dl_magic_base[v];
         f32 dx=dl_abs(p.x-b->x),dy=dl_abs(p.y-b->y);
-        if(p.rotation!=0 || !(p.w>0 && p.h>0)) continue;
+        if(p.rotation!=0 || !(p.w>0 && p.h>0)) {dl_gauge_reason(pic->probe,"transform");continue;}
         int progress=pic->progress!=0;
         if(progress) {
             /* Only progress artwork inside this capacity's gauge. */
-            if(dx+p.w/2>b->w/2+1 || dy+p.h/2>b->h/2+1) continue;
+            if(dx+p.w/2>b->w/2+1 || dy+p.h/2>b->h/2+1) {dl_gauge_reason(pic->probe,"outside-fill");continue;}
         } else {
             /* Static outlines must enclose it, not belong to the short variant
              * sitting inside the doubled bar or an unrelated large overlay. */
             if(p.w<b->w || p.w>b->w+32 || p.h<b->h || p.h>b->h+32 ||
-               dx>(p.w-b->w)/2+0.5f || dy>(p.h-b->h)/2+0.5f) continue;
+               dx>(p.w-b->w)/2+0.5f || dy>(p.h-b->h)/2+0.5f) {dl_gauge_reason(pic->probe,"outline-bounds");continue;}
         }
-        if(!dl_magic_pixels(&p,i,pic->fill,0)) continue;
+        if(!dl_magic_pixels(&p,i,pic->fill,0)) {dl_gauge_reason(pic->probe,"pixels-failed");continue;}
         if(!progress) {
             /* The native texture itself must leave the gauge's inner area
              * clear. Pane alpha alone cannot turn a white panel into a frame. */
@@ -49,14 +52,15 @@ static void dl_magic_load_details(u32 v,u32 base,u32 fill) {
                 u32 py=(u32)((0.5f-(b->y-p.y+(y/4.0f-0.5f)*b->h)/p.h)*dl_art_height);
                 if(px>=dl_art_width || py>=dl_art_height || dl_art_pixels[(py*dl_art_width+px)*4+3]>8) clear=0;
             }
-            if(!clear) continue;
+            if(!clear) {dl_gauge_reason(pic->probe,"opaque-centre");continue;}
         }
         for(u32 k=0;k<dl_art_width*dl_art_height;++k) dl_art_pixels[k*4+3]=dl_art_pixels[k*4+3]*alpha/255;
-        u32 bytes=dl_art_encode();if(!bytes) continue;
+        u32 bytes=dl_art_encode();if(!bytes) {dl_gauge_reason(pic->probe,"PNG-failed");continue;}
         u32 n=dl_magic_detail_count[v];char path[]="magic-0-detail-00.png";
         path[6]='0'+v;path[14]='0'+n/10;path[15]='0'+n%10;
-        if(wwhd_file_write(path,dl_art_png,bytes)!=(s32)bytes) continue;
-        u32 image=wwhd_hud_texture(WWHD_HUD_DATA,path);if(!image) continue;
+        if(wwhd_file_write(path,dl_art_png,bytes)!=(s32)bytes) {dl_gauge_reason(pic->probe,"write-failed");continue;}
+        u32 image=wwhd_hud_texture(WWHD_HUD_DATA,path);if(!image) {dl_gauge_reason(pic->probe,"texture-failed");continue;}
+        dl_gauge_reason(pic->probe,"DETAIL");
         dl_magic_details[v][n].image=image;dl_magic_details[v][n].progress=progress;
         dl_magic_details[v][n].pane=p;++dl_magic_detail_count[v];
     }

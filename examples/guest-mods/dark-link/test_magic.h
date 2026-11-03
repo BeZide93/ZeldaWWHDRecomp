@@ -371,6 +371,14 @@ static void test_magic(void) {
     magic_bad_geometry=0;++magic_generation;read_hud();hook(0x02675414,3,MAGIC_CTRL,0);read_hud();
     magic_window=1;fixture_window();++magic_generation;read_hud();hook(0x02675414,3,MAGIC_CTRL,0);
     magic_draws=0;read_hud();assert(magic_draws==3);
+    expect_hud("pic/wnd=3/1");expect_hud("BORDER");
+    /* Diagnostic toggling does not rebuild images or modify source resources. */
+    uint8_t source_before[0x5000];memcpy(source_before,ppc_ptr(MAGIC_ARC),sizeof source_before);
+    int writes_before=magic_writes;diagnostics=0;++revision;tick();read_hud();
+    assert(!strstr(hud_text,"Gauge ") && magic_writes==writes_before);
+    diagnostics=1;++revision;tick();read_hud();
+    assert(strstr(hud_text,"Gauge ") && magic_writes==writes_before);
+    assert(!memcmp(source_before,ppc_ptr(MAGIC_ARC),sizeof source_before));
     for(unsigned count=4;count<=8;count+=4) {
         magic_frame_count=count;fixture_window();++magic_generation;read_hud();hook(0x02675414,3,MAGIC_CTRL,0);
         magic_draws=0;read_hud();assert(magic_draws==3);
@@ -378,6 +386,7 @@ static void test_magic(void) {
     /* A malformed frame is omitted without invalidating the gauge/button. */
     st32(MAGIC_ARC+0x3000+608+0x6c,0xfffffff0);++magic_generation;
     read_hud();hook(0x02675414,3,MAGIC_CTRL,0);magic_draws=0;read_hud();assert(magic_draws==2);
+    expect_hud("wnd-image-failed");
     test_magic_style();
     test_magic_hidden_native();
     test_magic_picture_layers();

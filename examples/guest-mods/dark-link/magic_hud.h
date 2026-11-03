@@ -7,7 +7,7 @@ WWHD_GAME_FUNC(0x026FBB24, u32, dl_layout_archive, (u32, const u32*));
 static int dl_game_span(u32, u32);
 #include "magic_art.h"
 #define DL_MAGIC_PICTURES 32
-typedef struct { char name[24], material[29]; u32 fill, progress, wrap[2], black, white, vertex[4]; f32 uv[4], tex_srt[5], pane[10], original[10]; } dl_magic_picture;
+typedef struct { char name[24], material[29]; u32 fill, progress, maps, probe, wrap[2], black, white, vertex[4]; f32 uv[4], tex_srt[5], pane[10], original[10]; } dl_magic_picture;
 static dl_magic_picture dl_magic_pictures[DL_MAGIC_PICTURES];
 static dl_magic_picture* dl_magic_material_target;
 static u32 dl_magic_picture_count, dl_magic_loaded, dl_magic_retry;
@@ -76,8 +76,11 @@ static u32 dl_magic_file(u32 arc,const char* wanted,u32* bytes) {
     }
     return 0;
 }
+#include "gauge_probe.h"
 #include "magic_style.h"
 static int dl_magic_parse(u32 f,u32 size) {
+    DLGaugeReport* report=&dl_gauge_reports[dl_gauge_variant];
+    memset(report,0,sizeof *report);report->stage="parse";
     if (size<20 || *(u32*)f!=0x464c5954 || *(u16*)(f+4)!=0xfeff) return 0;
     u32 at=f+*(u16*)(f+6), mat=0, mat_bytes=0, count=*(u16*)(f+16);
     if (count>1024) return 0;
@@ -96,6 +99,8 @@ static int dl_magic_parse(u32 f,u32 size) {
     at=f+*(u16*)(f+6);
     for(u32 i=0;i<count;++i) {
         u32 n=dl_word((void*)at,4);
+        if (*(u32*)at==0x70696331) ++report->pictures;
+        if (*(u32*)at==0x70696331 && dl_magic_picture_count==DL_MAGIC_PICTURES) ++report->overflow;
         if (*(u32*)at==0x70696331 && n>=0x80 && dl_magic_picture_count<DL_MAGIC_PICTURES) {
             u32 index=*(u16*)(at+0x5c+8); /* pan1 grows eight bytes in HD */
             if(index>=mats) return 0;
@@ -104,6 +109,7 @@ static int dl_magic_parse(u32 f,u32 size) {
             u32 p=dl_magic_picture_count;
             if(!dl_copy_string(dl_magic_pictures[p].name,24,(char*)(at+12),24) ||
                !dl_material_string(dl_magic_pictures[p].material,(char*)m)) return 0;
+            dl_magic_pictures[p].probe=dl_gauge_row(dl_magic_pictures[p].name,"not-selected");
             u32 green=dl_green(dl_word((void*)m,28)) || dl_green(dl_word((void*)m,32));
             for(u32 v=0;v<4;++v) green|=dl_green(dl_word((void*)at,0x54+v*4));
             dl_magic_pictures[p].fill=green;dl_magic_pictures[p].progress=0;
@@ -113,6 +119,7 @@ static int dl_magic_parse(u32 f,u32 size) {
             for(u32 k=0;k<10;++k) dl_magic_pictures[p].pane[k]=dl_magic_pictures[p].original[k]=*(f32*)(at+0x2c+k*4);
             for(u32 k=0;k<5;++k) dl_magic_pictures[p].tex_srt[k]=k>=3?1:0;
             u32 flags=dl_word((void*)m,36), maps=flags&3, srts=(flags>>2)&3;
+            dl_magic_pictures[p].maps=maps;
             dl_magic_pictures[p].wrap[0]=dl_magic_pictures[p].wrap[1]=0;
             if(maps) {
                 if(!dl_blob_span(mat,mat_bytes,m+40,maps*4)) return 0;
@@ -131,7 +138,7 @@ static int dl_magic_parse(u32 f,u32 size) {
                 dl_magic_pictures[p].uv[0]=uv[0]; dl_magic_pictures[p].uv[1]=uv[1];
                 dl_magic_pictures[p].uv[2]=uv[2]; dl_magic_pictures[p].uv[3]=uv[5];
                 ++dl_magic_picture_count;
-            }
+            } else { ++report->uv_skips;dl_gauge_reason(dl_magic_pictures[p].probe,"UV-shape"); }
         }
         at+=n;
     }
@@ -203,21 +210,25 @@ static void dl_magic_load(void) {
     dl_magic_string[1]=(u32)&WWHD_GAME_DATA(0x1010A3FC,u32);
     dl_magic_archive=dl_layout_archive(mgr,dl_magic_string);
     u32 size=0,f=dl_magic_file(dl_magic_archive,"blyt/MagicBar_00.bflyt",&size);
-    if(!f || !dl_magic_parse(f,size)) return;
+    if(!f) return; /* each uncached capacity parses below; retain cached reports */
     for(u32 v=0;v<2;++v) {
         if(dl_magic_images[v][0] && dl_magic_images[v][1]) continue;
+        dl_gauge_variant=v;
         if(!dl_magic_parse(f,size)) return;
+        DLGaugeReport* report=&dl_gauge_reports[v];report->stage="select";
         dl_magic_full_animation(v);
+        for(u32 a=0;a<5;++a)if(dl_magic_animations[a].file)report->animations|=1u<<a;
         for(u32 i=0;i<dl_magic_picture_count;++i) {
             u32 green=dl_green(dl_magic_pictures[i].black)||dl_green(dl_magic_pictures[i].white);
             for(u32 k=0;k<4;++k) green|=dl_green(dl_magic_pictures[i].vertex[k]);
             dl_magic_pictures[i].fill=green;
+            dl_gauge_picture_report(&dl_magic_pictures[i],dl_magic_style_alpha(dl_magic_pictures[i].name),0);
         }
         for(u32 k=0;k<2;++k) if(dl_magic_images[v][k]) {
             wwhd_hud_release(dl_magic_images[v][k]); dl_magic_images[v][k]=0;
         }
         const char* base=v ? "P_MagicBase_01":"P_MagicBase_00";
-        if(!dl_magic_pane(base,&dl_magic_base[v])) continue;
+        if(!dl_magic_pane(base,&dl_magic_base[v])) {report->stage="base-geometry";continue;}
         s32 frame=-1,fill=-1; f32 score=1e9f;u32 animated=0;
         for(u32 i=0;i<dl_magic_picture_count;++i) {
             if(dl_str_equal(dl_magic_pictures[i].name,base,24)) frame=(s32)i;
@@ -235,11 +246,15 @@ static void dl_magic_load(void) {
          * entire coloured gauge in MagicBase. Retain that fallback rather
          * than selecting a smaller static green highlight. */
         if(frame>=0 && dl_magic_pictures[frame].fill && !animated) { fill=frame;dl_magic_fill[v]=dl_magic_base[v]; }
-        if(frame<0 || fill<0) continue;
+        if(frame<0 || fill<0) {report->stage="base/fill-missing";continue;}
+        report->black=dl_magic_pictures[fill].black;report->white=dl_magic_pictures[fill].white;
         dl_magic_images[v][0]=dl_magic_image(&dl_magic_base[v],(u32)frame,v,0);
         dl_magic_images[v][1]=dl_magic_image(&dl_magic_fill[v],(u32)fill,v,1);
         dl_magic_load_border(f,size,v);
         dl_magic_load_details(v,(u32)frame,(u32)fill);
+        dl_gauge_reason(dl_magic_pictures[frame].probe,dl_magic_images[v][0]?"BASE":"base-image-failed");
+        dl_gauge_reason(dl_magic_pictures[fill].probe,dl_magic_images[v][1]?(frame==fill?"BASE+FILL":"FILL"):"fill-image-failed");
+        report->stage="cached";
 
     }
     dl_magic_loaded=dl_magic_images[0][0] && dl_magic_images[0][1] &&
@@ -299,6 +314,7 @@ static int dl_magic_element(u32 v,u32 layer,wwhd_hud_element* out) {
 static void dl_magic_hud(u32 list) {
     unsigned long long epoch=wwhd_hud_epoch();
     if(epoch!=dl_magic_epoch) {
+        memset(dl_gauge_reports,0,sizeof dl_gauge_reports);
         dl_magic_epoch=epoch; dl_magic_loaded=dl_magic_retry=0;
         dl_magic_position_valid=0; dl_magic_authored_valid=0; memset(dl_magic_images,0,sizeof dl_magic_images);
         memset(dl_magic_border,0,sizeof dl_magic_border);

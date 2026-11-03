@@ -100,21 +100,30 @@ static u32 dl_frame_image(u32 wnd,u32 wb,u32 mat,u32 mb,u32 txl,u32 tb,wwhd_game
 static void dl_magic_load_border(u32 f,u32 size,u32 v) {
     if(dl_magic_border[v]) { wwhd_hud_release(dl_magic_border[v]);dl_magic_border[v]=0; }
     u32 at=f+*(u16*)(f+6),count=*(u16*)(f+16),mat=0,mb=0,txl=0,tb=0,best=0,best_bytes=0;
-    f32 score=1e9f;wwhd_game_pane chosen;
+    f32 score=1e9f;wwhd_game_pane chosen;u32 best_probe=DL_GAUGE_ROWS;
     for(u32 i=0;i<count;++i) {
         if(!dl_blob_span(f,size,at,8)) return;
         u32 n=dl_word((void*)at,4);if(n<8 || !dl_blob_span(f,size,at,n)) return;
         u32 type=dl_word((void*)at,0);
         if(type==0x6d617431) { mat=at;mb=n; }
         if(type==0x74786c31) { txl=at;tb=n; }
+        if(type==0x776e6431)++dl_gauge_reports[v].windows;
         if(type==0x776e6431 && n>=0x70) {
             char name[24];
             if(!dl_copy_string(name,sizeof name,(char*)(at+12),24)) return;
-            if(!dl_magic_style_alpha(name)) { at+=n;continue; }
+            u32 probe=dl_gauge_row(name,"wnd-pane-query"),alpha=dl_magic_style_alpha(name);
+            if(probe<DL_GAUGE_ROWS)dl_gauge_reports[v].rows[probe].alpha=alpha;
+            if(!alpha) { dl_gauge_reason(probe,"wnd-hidden/flash");at+=n;continue; }
             u32 k=dl_append(dl_magic_key,0,sizeof dl_magic_key,"layout-pane:MagicBar_00/");
             dl_append(dl_magic_key,k,sizeof dl_magic_key,name);
             if(wwhd_game_pane_get(dl_magic_key,&dl_magic_query) && dl_magic_query.version==1) {
                 wwhd_game_pane* p=&dl_magic_query;wwhd_game_pane* base=&dl_magic_base[v];
+                if(probe<DL_GAUGE_ROWS) {
+                    dl_gauge_reports[v].rows[probe].width=dl_gauge_dimension(p->w);
+                    dl_gauge_reports[v].rows[probe].height=dl_gauge_dimension(p->h);
+                    dl_gauge_reports[v].rows[probe].maps=*((u8*)at+0x64); /* window frame count */
+                }
+                dl_gauge_reason(probe,"wnd-opening/bounds");
                 f32 dw=p->w-base->w,dh=p->h-base->h,dx=dl_abs(p->x-base->x),dy=dl_abs(p->y-base->y);
                 f32 raw_w=*(f32*)(at+0x4c),raw_h=*(f32*)(at+0x50);
                 if(!(raw_w>0 && raw_h>0)) { at+=n;continue; }
@@ -130,7 +139,8 @@ static void dl_magic_load_border(u32 f,u32 size,u32 v) {
                     p->y-p->h/2+b<=base->y-base->h/2+0.5f;
                 if(encloses && p->rotation==0 && dw>=0 && dw<=128 && dh>=0 && dh<=64 && dx<=dw/2+1 && dy<=dh/2+1) {
                     f32 d=dw+dh+2*dx+2*dy;
-                    if(d<score) { score=d;best=at;best_bytes=n;chosen=*p; }
+                    if(d<score) { if(best_probe<DL_GAUGE_ROWS)dl_gauge_reason(best_probe,"wnd-other-candidate");
+                        score=d;best=at;best_bytes=n;chosen=*p;best_probe=probe;dl_gauge_reason(probe,"wnd-candidate"); }
                 }
             }
         }
@@ -139,5 +149,6 @@ static void dl_magic_load_border(u32 f,u32 size,u32 v) {
     if(best && mat && txl) {
         dl_magic_border[v]=dl_frame_image(best,best_bytes,mat,mb,txl,tb,&chosen,v);
         dl_magic_border_pane[v]=chosen;
+        dl_gauge_reason(best_probe,dl_magic_border[v]?"BORDER":"wnd-image-failed");
     }
 }

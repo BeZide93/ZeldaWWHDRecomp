@@ -14,7 +14,7 @@ enum { PLAY=0x11000000, LINK=0x11010000, SAVE=0x11020000, ENEMY=0x11030000,
 static const WWHDGuestModuleV1* module;
 static uint32_t filter, hud, touch, step=1, revision=1;
 static int diagnostics=1,show_gauge=1;
-static char hud_text[2048];
+static char hud_text[8192];
 static FILE* hud_trace;
 static unsigned touch_claim_mask;
 static int free_mode, enabled=1, paused, menu, touch_visible=1, claim_active, elements;
