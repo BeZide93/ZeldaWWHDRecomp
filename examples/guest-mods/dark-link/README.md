@@ -1,37 +1,42 @@
-# Dark Link (prototype 0.1.21)
+# Dark Link (prototype 0.1.22)
 
 Standalone code mod for ZeldaWWHDRecomp: sword hits charge a transformation with
 black body/equipment, red eyes and boosted sword damage. The user confirmed the
 complete body, mouth, eyes, sword and shield appearance in **0.1.11**. That
 texture-binding repair at **viewCalc return** is retained.
 
-## Changed in 0.1.21
+## Changed in 0.1.22
 
-The user confirmed the 0.1.20 D-pad placement in-game. Its native FindPane
-lookup and calculation-time offset are retained. The temporary D-pad observation
-hook, counters, rejection labels and pointer display are removed. The earlier
-manual traversals/draw-time patches were already removed in previous versions.
+The 0.1.21 device screenshot showed a white overlay and only a small visible
+part of the red fill. Two defects in the copy are now covered by regressions:
+window selection ignored visibility/alpha, and its outer-box test accepted
+thick frame slices that covered the gauge. The screenshot alone cannot identify
+which native resource produced the overlay.
 
-The gauge no longer overwrites every fill pixel with a constant red. It applies
-the native material and UV transform, bakes all four vertex colours/alpha, then
-swaps the resulting red/green channels. Texture shading, highlights, neutral
-pixels and coverage survive. Empty copies remove green chroma while retaining
-neutral borders. The redundant per-image tint and obsolete endpoint-colour
-swap path are removed.
+The copy now reconstructs the displayed, non-warning style from native BFLAN
+bindings: `InAll` at its end, `Flash` at zero, `ColorChange` at zero (ordinary
+Link), `ScaleChange` at zero, followed by the normal/doubled full-capacity curve.
+This follows `hd_screen_magic_bar.cpp` in decomp revision
+`b2811a3ce838d1f875bc8e68536c1950af5d7ffc`. Named style tags must match their
+binding group; only wholly validated animations are applied, in fixed order.
+Pane visibility and alpha tracks now affect the copy, including its ancestors.
+Window material colours and texture transforms use the same displayed state.
 
-Native `wnd1` frames were previously omitted. The mod now selects the enclosing
-frame for the current MagicBase capacity, reads its original materials/textures
-and frame dimensions, and bakes its corner/edge slices into a transparent-centre
-PNG. One-, four- and eight-material frames, authored flips, and horizontal frames
-are supported. The border is drawn at its original size/offset independently of
-the cropped fill; malformed or unsupported frame resources are omitted locally.
-No game artwork is added to the repository or package.
+Warning effects in `G_Flash_00` are excluded even when their animation is absent.
+A copied window's transparent inner opening must contain the selected gauge;
+matching only its outer size is insufficient. Partial pane alpha is baked into
+the generated pixels. No live HUD or magic/save values are changed.
 
-Tests cover pixel contrast, neutral edges, four-corner gradients and alpha,
-native frame resource parsing/assembly, transparent centres, malformed resources,
-HUD command validation, the retained D-pad placement and both shared-editor load
-orders. These use synthetic artwork. The new gauge design still needs an in-game
-visual check; body/eyes/equipment/aura and D-pad behavior were user-confirmed.
+Texture detail, four vertex colours, red/green channel recolouring and the
+user-confirmed 0.1.20 D-pad correction remain. The temporary D-pad diagnostics
+and flat-red overwrite removed in 0.1.21 stay removed. No extra logging/hooks or
+game artwork are added. Enhanced Controls 0.4.0 remains compatible.
+
+Validation uses synthetic artwork, including invisible/transparent windows,
+thick frames, hidden parents, warning groups with missing animations, partial
+alpha and white authoring colours animated to the displayed green. The published
+0.1.21 module fails the invisible-frame regression; the corrected module passes.
+The precise final gauge appearance still needs an in-game check.
 
 ## Added in 0.1.17
 
@@ -120,10 +125,12 @@ or uploaded. Conversion only runs on load/retry, not on every drawing frame.
 Each decoded image is bounded to 131072 pixels and each cache write is below
 1 MiB. Unsupported or missing textures are skipped and retried, with no fake
 rectangle fallback. Picture vertex gradients are baked into the images. Window
-borders use their original frame textures/materials. Arbitrary multi-texture shader effects are
-not reproduced.
+borders use their original frame textures/materials and displayed alpha. Their
+inner opening must enclose the selected gauge. Hidden/warning panes are excluded.
+Arbitrary multi-texture shader effects are not reproduced.
 
-A bounded BFLAN reader selects a 16/32-frame animation explicitly bound to
+A bounded BFLAN reader first applies the displayed style described above, then
+selects a 16/32-frame animation explicitly bound to
 `G_Bar_00`, validates all tracks before applying any, and evaluates its full
 frame. It supports FLPA picture fields, FLMC material colours, FLVC corner
 colours and the first FLTS texture transform. Animated ancestor-pane transforms,
@@ -153,7 +160,7 @@ collision path charge the gauge. Boss-specific handlers may override damage.
 ## Diagnostics and validation
 
 Enable **Appearance diagnostics** only when needed. The first line reads
-`DL 0.1.21 ON/OFF`; `Magic` counts loaded frame/fill images (up to four),
+`DL 0.1.22 ON/OFF`; `Magic` counts loaded frame/fill images (up to four),
 `Pos` is 1 for native or 2 for authored placement, and `Aura` reports the shell
 model being present. Body material/albedo/eye counts, binding retention and late
 repair counters retain their existing meanings. `Fill` reports the actual

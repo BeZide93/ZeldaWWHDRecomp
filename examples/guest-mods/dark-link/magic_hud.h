@@ -7,7 +7,9 @@ WWHD_GAME_FUNC(0x026FBB24, u32, dl_layout_archive, (u32, const u32*));
 static int dl_game_span(u32, u32);
 #include "magic_art.h"
 #define DL_MAGIC_PICTURES 32
-static struct { char name[24], material[29]; u32 fill, black, white, vertex[4]; f32 uv[4], tex_srt[5], pane[10], original[10]; } dl_magic_pictures[DL_MAGIC_PICTURES];
+typedef struct { char name[24], material[29]; u32 fill, black, white, vertex[4]; f32 uv[4], tex_srt[5], pane[10], original[10]; } dl_magic_picture;
+static dl_magic_picture dl_magic_pictures[DL_MAGIC_PICTURES];
+static dl_magic_picture* dl_magic_material_target;
 static u32 dl_magic_picture_count, dl_magic_loaded, dl_magic_retry;
 static unsigned long long dl_magic_epoch;
 static wwhd_game_pane dl_magic_query, dl_magic_base[2], dl_magic_fill[2];
@@ -74,6 +76,7 @@ static u32 dl_magic_file(u32 arc,const char* wanted,u32* bytes) {
     }
     return 0;
 }
+#include "magic_style.h"
 static int dl_magic_parse(u32 f,u32 size) {
     if (size<20 || *(u32*)f!=0x464c5954 || *(u16*)(f+4)!=0xfeff) return 0;
     u32 at=f+*(u16*)(f+6), mat=0, mat_bytes=0, count=*(u16*)(f+16);
@@ -126,7 +129,7 @@ static int dl_magic_parse(u32 f,u32 size) {
         }
         at+=n;
     }
-    return dl_magic_picture_count!=0;
+    return dl_magic_picture_count!=0 && dl_magic_style_parse(f,size);
 }
 #include "magic_animation.h"
 static int dl_magic_pane(const char* name,wwhd_game_pane* out) {
@@ -157,6 +160,8 @@ static u32 dl_magic_image(wwhd_game_pane* pane,u32 picture,u32 variant,u32 fill)
     dl_art_material(black,white,srgb);
     if(!dl_art_bake_uv(dl_magic_pictures[picture].uv,dl_magic_pictures[picture].tex_srt)) return 0;
     dl_art_vertices(dl_magic_pictures[picture].vertex,fill,!fill && dl_magic_pictures[picture].fill);
+    u32 alpha=dl_magic_style_alpha(dl_magic_pictures[picture].name);
+    for(u32 i=0;i<dl_art_width*dl_art_height;++i) dl_art_pixels[i*4+3]=dl_art_pixels[i*4+3]*alpha/255;
     u32 size=dl_art_encode();
     if(!size) return 0;
     static const char* const files[2][2]={{"magic-0-frame.png","magic-0-fill.png"},{"magic-1-frame.png","magic-1-fill.png"}};
@@ -190,7 +195,7 @@ static void dl_magic_load(void) {
         s32 frame=-1,fill=-1; f32 score=1e9f;
         for(u32 i=0;i<dl_magic_picture_count;++i) {
             if(dl_str_equal(dl_magic_pictures[i].name,base,24)) frame=(s32)i;
-            if(!dl_magic_pictures[i].fill || !dl_magic_pane(dl_magic_pictures[i].name,&dl_magic_query)) continue;
+            if(!dl_magic_pictures[i].fill || !dl_magic_style_alpha(dl_magic_pictures[i].name) || !dl_magic_pane(dl_magic_pictures[i].name,&dl_magic_query)) continue;
             /* Choose the authored green picture nearest the selected capacity's
              * base size/centre. Its native texture supplies the rounded ends. */
             f32 d=dl_abs(dl_magic_query.w-dl_magic_base[v].w)+

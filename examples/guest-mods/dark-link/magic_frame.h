@@ -20,13 +20,18 @@ static int dl_frame_texture(u32 mat,u32 mb,u32 txl,u32 tb,u32 index) {
     dl_append(dl_magic_path,5,sizeof dl_magic_path,(char*)name);
     u32 bytes=0,t=dl_magic_file(dl_magic_archive,dl_magic_path,&bytes);int srgb;
     if(!t || !dl_art_decode((u8*)t,bytes,&srgb)) return 0;
-    dl_art_material(dl_word((void*)m,28),dl_word((void*)m,32),srgb);
-    f32 uv[4]={0,0,1,1},srt[5]={0,0,0,1,1};
+    dl_magic_picture style={0};
+    if(!dl_material_string(style.material,(char*)m)) return 0;
+    style.black=dl_word((void*)m,28);style.white=dl_word((void*)m,32);
+    style.tex_srt[3]=style.tex_srt[4]=1;
+    f32 uv[4]={0,0,1,1};
     if((dl_word((void*)m,36)>>2)&3) {
         if(!dl_blob_span(mat,mb,m+44,20)) return 0;
-        for(u32 i=0;i<5;++i) srt[i]=*(f32*)(m+44+4*i);
+        for(u32 i=0;i<5;++i) style.tex_srt[i]=*(f32*)(m+44+4*i);
     }
-    return dl_art_bake_uv(uv,srt);
+    dl_magic_material_target=&style;dl_magic_apply_animations();dl_magic_material_target=0;
+    dl_art_material(style.black,style.white,srgb);
+    return dl_art_bake_uv(uv,style.tex_srt);
 }
 /* Stretch the native edge pixels, retaining the authored corner dimensions.
  * One-/four-frame windows derive edges from corners; eight-frame windows
@@ -85,6 +90,8 @@ static u32 dl_frame_image(u32 wnd,u32 wb,u32 mat,u32 mb,u32 txl,u32 tb,wwhd_game
         dl_frame_blit(rects[i][0],rects[i][1],rects[i][2],rects[i][3],flip,mx,my,edge);
     }
     dl_art_width=W;dl_art_height=H;memcpy(dl_art_pixels,dl_frame_pixels,W*H*4);
+    u32 alpha=dl_magic_style_alpha((char*)(wnd+12));
+    for(u32 i=0;i<W*H;++i) dl_art_pixels[i*4+3]=dl_art_pixels[i*4+3]*alpha/255;
     u32 bytes=dl_art_encode();if(!bytes) return 0;
     const char* path=variant?"magic-1-border.png":"magic-0-border.png";
     if(wwhd_file_write(path,dl_art_png,bytes)!=(s32)bytes) return 0;
@@ -103,14 +110,25 @@ static void dl_magic_load_border(u32 f,u32 size,u32 v) {
         if(type==0x776e6431 && n>=0x70) {
             char name[24];
             if(!dl_copy_string(name,sizeof name,(char*)(at+12),24)) return;
+            if(!dl_magic_style_alpha(name)) { at+=n;continue; }
             u32 k=dl_append(dl_magic_key,0,sizeof dl_magic_key,"layout-pane:MagicBar_00/");
             dl_append(dl_magic_key,k,sizeof dl_magic_key,name);
             if(wwhd_game_pane_get(dl_magic_key,&dl_magic_query) && dl_magic_query.version==1) {
                 wwhd_game_pane* p=&dl_magic_query;wwhd_game_pane* base=&dl_magic_base[v];
                 f32 dw=p->w-base->w,dh=p->h-base->h,dx=dl_abs(p->x-base->x),dy=dl_abs(p->y-base->y);
-                /* A frame must enclose this capacity's base, not the other
-                 * variant or an unrelated flash pane. No fallback geometry. */
-                if(p->rotation==0 && dw>=0 && dw<=128 && dh>=0 && dh<=64 && dx<=dw/2+1 && dy<=dh/2+1) {
+                f32 raw_w=*(f32*)(at+0x4c),raw_h=*(f32*)(at+0x50);
+                if(!(raw_w>0 && raw_h>0)) { at+=n;continue; }
+                f32 l=*(u16*)(at+0x5c)*p->w/raw_w,r=*(u16*)(at+0x5e)*p->w/raw_w;
+                u32 kind=(*((u8*)at+0x65)>>2)&3;
+                f32 t=kind==2?0:*(u16*)(at+0x60)*p->h/raw_h,b=kind==2?0:*(u16*)(at+0x62)*p->h/raw_h;
+                /* Its transparent inner opening must contain the gauge, not
+                 * just its outer box. A white effect with thick slices used
+                 * to qualify even when it covered nearly the entire fill. */
+                int encloses=p->x-p->w/2+l<=base->x-base->w/2+0.5f &&
+                    p->x+p->w/2-r>=base->x+base->w/2-0.5f &&
+                    p->y+p->h/2-t>=base->y+base->h/2-0.5f &&
+                    p->y-p->h/2+b<=base->y-base->h/2+0.5f;
+                if(encloses && p->rotation==0 && dw>=0 && dw<=128 && dh>=0 && dh<=64 && dx<=dw/2+1 && dy<=dh/2+1) {
                     f32 d=dw+dh+2*dx+2*dy;
                     if(d<score) { score=d;best=at;best_bytes=n;chosen=*p; }
                 }

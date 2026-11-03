@@ -10,6 +10,7 @@ static void magic_release(Cpu* c) { c->r[3]=1; }
 static void magic_epoch(Cpu* c) { c->r[3]=(uint32_t)(magic_generation>>32); c->r[4]=(uint32_t)magic_generation; }
 static uint32_t magic_fill_handles[2],magic_border_handles[2];
 static int magic_window;
+static unsigned magic_border_alpha=255;
 static unsigned magic_frame_count=1;
 static int magic_writes,magic_base_fill,magic_animated,magic_bad_animation,magic_long,magic_bad_geometry;
 static void magic_write(Cpu* c) {
@@ -23,7 +24,7 @@ static void magic_write(Cpu* c) {
     if(magic_base_fill && strstr(path,"frame")) assert(png[49]==99&&png[50]==99&&png[51]==99);
     if(strstr(path,"border")) {
         assert(png[19]==108 && png[23]==24);
-        assert(png[49]<png[49+3*4] && png[52]==255); /* corner texture contrast retained */
+        assert(png[49]<png[49+3*4] && png[52]==magic_border_alpha); /* contrast and pane coverage retained */
         assert(png[49+12*(108*4+1)+54*4+3]==0); /* frame never fills the centre */
     }
     ++magic_writes;c->r[3]=c->r[5];
@@ -74,6 +75,7 @@ static void magic_emit(uint32_t e) {
 }
 static void fixture_picture(uint32_t p,const char* name,unsigned mat) {
     st32(p,0x70696331); st32(p+4,0x88); strcpy((char*)ppc_ptr(p+12),name);
+    st8(p+8,1);st8(p+10,255);
     st16(p+0x64,mat); st8(p+0x66,1);
     stf32(p+0x44,1);stf32(p+0x48,1);
     stf32(p+0x4c,mat?(magic_animated?48:96):100);stf32(p+0x50,mat?12:16);
@@ -129,6 +131,7 @@ static void fixture_window(void) {
     st32(txl,0x74786c31);st32(txl+4,32);st16(txl+8,1);st32(txl+12,4);
     strcpy((char*)ppc_ptr(txl+16),"frame.bflim");
     st32(wnd,0x776e6431);st32(wnd+4,112+8*magic_frame_count);strcpy((char*)ppc_ptr(wnd+12),"W_Frame_00");
+    st8(wnd+8,1);st8(wnd+10,255);
     stf32(wnd+0x4c,108);stf32(wnd+0x50,24);
     for(int i=0;i<4;++i) st16(wnd+0x5c+i*2,4);
     st8(wnd+0x64,magic_frame_count);st8(wnd+0x65,0x11);st32(wnd+0x6c,112);
@@ -161,6 +164,74 @@ static void fixture_animation(unsigned frames) {
         stf32(k,0);stf32(k+4,i?1:48);stf32(k+8,i?-0.5f/frames:((frames==32?196.0f:96.0f)-48)/frames);
         stf32(k+12,frames);stf32(k+16,i?0.5f:frames==32?196:96);stf32(k+20,i?-0.5f/frames:((frames==32?196.0f:96.0f)-48)/frames);
     }
+}
+static uint32_t fixture_style_animation(const char* tag,const char* group,const char* name,
+        unsigned kind,uint32_t type,unsigned target,unsigned channels,float first,float last) {
+    unsigned nodes=ld16(MAGIC_ARC+0x1a);assert(nodes<8);
+    uint32_t node=MAGIC_ARC+0x20+nodes*16;
+    memmove(ppc_ptr(node+16),ppc_ptr(node),0x48);memset(ppc_ptr(node),0,16);
+    st16(MAGIC_ARC+0x1a,nodes+1);
+    uint32_t f=MAGIC_ARC+0x5000+(nodes-3)*0x400,pat=f+20,pai=f+116,c=pai+24,t=c+36;
+    unsigned bytes=116+24+36+8+channels*40;
+    memset(ppc_ptr(f),0,bytes);st32(f,0x464c414e);st16(f+4,0xfeff);st16(f+6,20);st16(f+16,2);
+    st32(pat,0x70617431);st32(pat+4,96);st16(pat+10,1);st32(pat+12,28);st32(pat+16,64);
+    st16(pat+22,20);strcpy((char*)ppc_ptr(pat+28),tag);strcpy((char*)ppc_ptr(pat+64),group);
+    st32(pai,0x70616931);st32(pai+4,bytes-116);st16(pai+8,20);st16(pai+14,1);st32(pai+16,20);st32(pai+20,24);
+    strcpy((char*)ppc_ptr(c),name);st8(c+28,1);st8(c+29,kind);st32(c+32,36);
+    st32(t,type);st8(t+4,channels);
+    for(unsigned i=0;i<channels;++i) {
+        uint32_t e=t+8+channels*4+i*36,k=e+12;st32(t+8+i*4,e-t);
+        st8(e+1,target+i);st8(e+2,2);st16(e+4,2);st32(e+8,12);
+        stf32(k,0);stf32(k+4,first);stf32(k+8,(last-first)/20);
+        stf32(k+12,20);stf32(k+16,last);stf32(k+20,(last-first)/20);
+    }
+    st32(node+8,f-MAGIC_ARC-0x100);st32(node+12,f-MAGIC_ARC-0x100+bytes);st32(MAGIC_ARC+8,0x7000);
+    return t;
+}
+static void magic_expect_draws(unsigned count) {
+    ++magic_generation;read_hud();hook(0x02675414,3,MAGIC_CTRL,0);
+    magic_draws=0;read_hud();assert((unsigned)magic_draws==count);
+}
+static void test_magic_style(void) {
+    magic_frame_count=1;fixture_magic();fixture_window();
+    uint32_t f=MAGIC_ARC+0x3000,wnd=f+608;
+    /* Published 0.1.21 draws this invisible white window as an opaque frame. */
+    st8(wnd+10,0);magic_expect_draws(2);
+    st8(wnd+10,255);st8(wnd+8,0);magic_expect_draws(2);
+    st8(wnd+8,1);
+    /* Outer box alone matches, but thick slices would hide almost all fill. */
+    st16(wnd+0x5c,50);st16(wnd+0x5e,50);st16(wnd+0x60,11);st16(wnd+0x62,11);
+    magic_expect_draws(2);
+    fixture_window();st8(wnd+10,128);magic_border_alpha=128;magic_expect_draws(3);
+    magic_border_alpha=255;
+    /* InAll at end reveals it; Flash at zero hides it again. SARC order is
+     * deliberately reversed so the loader must use native animation order. */
+    fixture_magic();fixture_window();
+    fixture_style_animation("Flash","G_Flash_00","W_Frame_00",0,0x464c5643,16,1,0,255);
+    fixture_style_animation("InAll","G_All_00","W_Frame_00",0,0x464c5643,16,1,0,255);
+    magic_expect_draws(2);
+    /* Warning-group panes are excluded even if Flash resources are missing. */
+    fixture_magic();fixture_window();
+    uint32_t group=wnd+120;st32(group,0x67727031);st32(group+4,60);
+    strcpy((char*)ppc_ptr(group+8),"G_Flash_00");st16(group+32,1);
+    strcpy((char*)ppc_ptr(group+36),"W_Frame_00");st16(f+16,7);st32(MAGIC_ARC+0x2c,0x2f00+788);
+    magic_expect_draws(2);
+    /* Hidden parent propagates to its window child. */
+    fixture_magic();fixture_window();
+    memmove(ppc_ptr(wnd+92),ppc_ptr(wnd),120);memset(ppc_ptr(wnd),0,92);
+    st32(wnd,0x70616e31);st32(wnd+4,84);st8(wnd+8,3);st8(wnd+10,0);
+    strcpy((char*)ppc_ptr(wnd+12),"N_Flash");st32(wnd+84,0x70617331);st32(wnd+88,8);
+    st32(wnd+212,0x70616531);st32(wnd+216,8);st16(f+16,9);st32(MAGIC_ARC+0x2c,0x2f00+828);
+    magic_expect_draws(2);
+    /* Copy the displayed style, not the white authoring colour or an initial
+     * alpha of zero. ColorChange frame zero and InAll end both matter. */
+    fixture_magic();st32(MAGIC_FLYT+20+60+32,0xffffffff);st8(MAGIC_FLYT+392+10,0);
+    uint32_t tracks=fixture_style_animation("ColorChange","G_Change_00","Fill",1,0x464c4d43,4,3,32,255);
+    uint32_t green=tracks+8+12+36+12;stf32(green+4,255);stf32(green+8,0);
+    fixture_style_animation("InAll","G_All_00","P_Fill_00",0,0x464c5643,16,1,0,255);
+    magic_expect_draws(2);assert(magic_width>0);
+    fixture_magic();fixture_window();
+    puts("Dark Link displayed style, flash exclusion, frame opening and alpha tests passed");
 }
 static void test_magic(void) {
     fixture_magic();
@@ -237,6 +308,7 @@ static void test_magic(void) {
     /* A malformed frame is omitted without invalidating the gauge/button. */
     st32(MAGIC_ARC+0x3000+608+0x6c,0xfffffff0);++magic_generation;
     read_hud();hook(0x02675414,3,MAGIC_CTRL,0);magic_draws=0;read_hud();assert(magic_draws==2);
+    test_magic_style();
     magic_window=0;fixture_magic();++magic_generation;read_hud();
     /* Return a full duration for the subsequent gameplay regression. */
     buttons(0); buttons(0x60000); tick(); buttons(0);
