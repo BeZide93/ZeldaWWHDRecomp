@@ -1,0 +1,46 @@
+name: Dark Link mod
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'examples/guest-mods/dark-link/**'
+      - 'runtime/guest/include/**'
+      - 'tools/guestmod/**'
+      - 'tools/recomp/**'
+      - '.github/workflows/dark-link-mod.yml'
+  pull_request:
+    paths:
+      - 'examples/guest-mods/dark-link/**'
+      - 'runtime/guest/include/**'
+      - 'tools/guestmod/**'
+      - 'tools/recomp/**'
+      - '.github/workflows/dark-link-mod.yml'
+permissions:
+  contents: read
+jobs:
+  package:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+      - name: Install compiler
+        run: sudo apt-get update && sudo apt-get install -y clang lld
+      - name: Build, test and package (USA and EU)
+        run: python examples/guest-mods/dark-link/build.py --host-cc clang
+      - name: Check out the matching Enhanced Controls peer
+        uses: actions/checkout@v5
+        with:
+          ref: 0e64391e36295ead4c260b27fa0c621f423e8ede
+          path: build/enhanced-peer
+          persist-credentials: false
+      - name: Build peer and test both translated mods together
+        run: |
+          python build/enhanced-peer/mods/enhanced-controls/build.py
+          python examples/guest-mods/dark-link/test_shared.py --enhanced-root build/enhanced-peer
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dark-link-wwhdmod
+          path: build/dark-link/dark-link.wwhdmod
+          if-no-files-found: error
