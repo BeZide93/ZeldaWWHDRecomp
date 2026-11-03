@@ -1,36 +1,40 @@
-# Dark Link (prototype 0.1.18)
+# Dark Link (prototype 0.1.19)
 
 Standalone code mod for ZeldaWWHDRecomp: sword hits charge a transformation with
 black body/equipment, red eyes and boosted sword damage. The user confirmed the
 complete body, mouth, eyes, sword and shield appearance in **0.1.11**. That
 texture-binding repair at **viewCalc return** is retained.
 
-## Fixed in 0.1.18
+## Changed in 0.1.19
 
-The D-pad is drawn by a separate `hdScreenItemShortcut_c` child screen. Native
-`hdParts_c::draw` calls `vDrawLayout` and only then `vDrawChildren`; the 0.1.17
-Main_00 drawLayout hook restored its matrices before the visible Shortcut drew.
-That explains why its synthetic parent-layout test passed without moving the
-D-pad in the game.
+The user's 0.1.18 diagnostic screenshot showed `Dpad=4248/4194/0`: the
+Shortcut draw hook ran and wrote matrices, but the visible D-pad did not move.
+Those counters measured writes, not rendering. The previous claim that moving
+the scope to the child draw solved the issue was not supported by device output.
 
-The patch now wraps the Shortcut screen's own complete `draw` (026F8B54),
-identified by its relocated class vtable (10104B88). It visits that screen's own
-layout and owned child layouts, including the unread marker, and translates
-their final matrices for the entire draw. Main_00's placement pane and other HUD
-layouts are not modified. Native local positions remain intact, matrices are
-restored bit-for-bit afterwards, and repeated TV/GamePad draws cannot accumulate
-an offset. Malformed graphs or missing gauge resources abort before any writes.
-The obsolete Main_00 drawLayout hook is removed.
+Native `drawLayoutScreenWithInfo` (02002D20) checks the layout root's parent
+before drawing. An attached layout can therefore be rendered through Main_00
+while its later standalone draw is skipped. A test that only examines matrices
+inside the child draw misses that route.
 
-The replacement regression executes the actual parent-layout / child-screen
-order. It fails against the published 0.1.17 translated module at the visible
-Shortcut matrix assertion, and also covers child draws, alternate heart/magic
-states, hidden gauges, menus, repeated draws, shared layout references, ownership
-cycles and restoration. Tests use synthetic native memory; in-game verification
-of the final placement is still required.
+This version removes the draw-time matrix writes. At Main_00's `calcLayout`
+(026F8CD0), identified by vtable 100F7A48, it finds `L_Shortcut_00` through the
+actual root's child tree, validates that tree and temporarily offsets the local
+position. It does not assume `N_Default_00` is an ancestor. The native calculation
+then propagates the placement into the embedded layout and any prepared render
+geometry. Only the local input is restored afterwards; calculated matrices remain
+available for drawing. A dirty bit ensures the next calculation also handles
+removing the gauge. The parent's inverse 2D basis accounts for scale/rotation.
 
-The existing optional appearance diagnostics now include `Dpad=draws/applied/rejected`;
-no log file is needed to distinguish an uncalled hook from rejected geometry.
+The synthetic regression covers embedded and standalone draw routes, a retained
+geometry sample, exact local restoration, repeated frames, scaled/rotated parents,
+hidden gauges, menus, heart/magic states and malformed trees. It fails against
+the published 0.1.18 module. This is a native-memory model, **not execution of the
+game's renderer**; final D-pad placement still requires an in-game check.
+
+Appearance diagnostics now show `Dpad=calculations/applied/rejected`, `Shift`
+(layout-space units), `Pane` (matched placement) and `Seen` (actual Pane::Draw
+calls within that placement's ancestry). The draw observation is read-only.
 Only Dark Link needs updating. Enhanced Controls 0.4.0 remains compatible.
 
 ## Added in 0.1.17
