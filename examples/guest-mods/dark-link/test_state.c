@@ -38,8 +38,40 @@ static void test_magic_duration(void) {
     dl_tick(&s,&c,0,1,1);assert(!s.active);
 }
 
+static void test_cancel_charge(void) {
+    for(int scale=1;scale<=2;++scale) for(int quarter=0;quarter<=4;++quarter) {
+        DLConfig c={100,5,20,200,0};DLState s={.charge=100};
+        dl_sync_magic_capacity(&s,scale==2?32:16);dl_tick(&s,&c,0,1,1);
+        s.remaining=s.total*quarter/4;
+        c.duration=7; /* cancellation uses the active total, not this setting */
+        dl_tick(&s,&c,0.25f,1,1);
+        assert(!s.active && !s.remaining && !s.total && s.charge==quarter*25);
+        for(int i=0;i<100;++i)dl_tick(&s,&c,0.25f,0,1);
+        assert(s.charge==quarter*25); /* inactive charge does not drain */
+        dl_hit(&s,&c,0);assert(s.charge==quarter*25);
+        if(quarter<4) {dl_tick(&s,&c,0,1,1);assert(!s.active);}
+        for(int i=0;i<(4-quarter)*5;++i)dl_hit(&s,&c,1);
+        assert(s.charge==100);dl_tick(&s,&c,0,1,1);
+        assert(s.active && s.total==7*scale);
+    }
+    DLConfig c={250,10,20,200,0};DLState s={.active=1,.remaining=15,.total=20};
+    dl_tick(&s,&c,0,1,0);assert(s.active && !s.charge); /* paused request */
+    dl_tick(&s,&c,0,1,1);assert(s.charge==187.5f);
+    dl_sync_magic_capacity(&s,32);assert(s.charge==187.5f);
+    for(int i=0;i<7;++i)dl_hit(&s,&c,1);
+    assert(s.charge==250);dl_tick(&s,&c,0,1,1);assert(s.total==40);
+    dl_reset(&s);assert(!s.charge && !s.active);
+    s=(DLState){.active=1,.remaining=0.25f,.total=40};
+    dl_tick(&s,&c,0.25f,0,1);assert(!s.active && !s.charge); /* natural expiry */
+    s=(DLState){.active=1,.remaining=30,.total=20};
+    dl_tick(&s,&c,0,1,1);assert(s.charge==250); /* bounded fraction */
+    s=(DLState){.active=1,.remaining=10};
+    dl_tick(&s,&c,0,1,1);assert(!s.charge); /* no invalid division */
+}
+
 int main(void) {
     test_magic_duration();
+    test_cancel_charge();
     DLConfig c = {100, 5, 20, 200, 0};
     DLState s = {0};
     dl_hit(&s, &c, 0); assert(s.charge == 0);

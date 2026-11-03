@@ -34,7 +34,17 @@ static void dl_tick(DLState* s, const DLConfig* c, float dt, int request, int al
     if (s->charge > c->capacity) s->charge = (float)c->capacity;
     if (!allowed) return;
     if (request) {
-        if (s->active) { dl_reset(s); return; }
+        if (s->active) {
+            /* Manual cancellation returns the displayed remaining fraction
+             * to charge. Expiry/death/disable still use dl_reset. Keep the
+             * sampled total: settings may have changed during this run. */
+            float fraction=s->total>0?s->remaining/s->total:0;
+            if(!(fraction>0)) fraction=0;
+            if(fraction>1) fraction=1;
+            s->charge=fraction*(float)c->capacity;
+            s->active=0;s->remaining=0;s->total=0;
+            return;
+        }
         if (dl_ready(s, c)) {
             s->active = 1;
             s->remaining = (float)c->duration * (s->duration_scale?s->duration_scale:1);

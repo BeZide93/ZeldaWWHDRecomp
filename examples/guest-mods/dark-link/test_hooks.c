@@ -14,6 +14,7 @@ enum { PLAY=0x11000000, LINK=0x11010000, SAVE=0x11020000, ENEMY=0x11030000,
 static const WWHDGuestModuleV1* module;
 static uint32_t filter, hud, touch, step=1, revision=1;
 static int diagnostics=1,show_gauge=1;
+static double test_dt=1.0/30;
 static char hud_text[8192];
 static FILE* hud_trace;
 static unsigned touch_claim_mask;
@@ -54,7 +55,7 @@ static void config_bool(Cpu* c) {
 static void config_int(Cpu* c) { c->r[3]=c->r[4]; }
 static void config_revision(Cpu* c) { c->r[3]=0; c->r[4]=revision; }
 static void logic_step(Cpu* c) { c->r[3]=0; c->r[4]=step; }
-static void logic_dt(Cpu* c) { c->f[1].ps0=1.0/30; }
+static void logic_dt(Cpu* c) { c->f[1].ps0=test_dt; }
 static void reg_filter(Cpu* c) { filter=c->r[3]; c->r[3]=1; }
 static void reg_hud(Cpu* c) { hud=c->r[3]; c->r[3]=1; }
 static void reg_touch(Cpu* c) { touch=c->r[3]; c->r[3]=1; }
@@ -231,6 +232,22 @@ int main(int argc, char** argv) {
         for(int i=0;i<4;++i)tick();
         assert(damage(3)==3);
     }
+    /* Cancel at exactly half duration for both sizes, then refill with ten
+     * hits rather than twenty. Exercise the real input/execute/hit hooks. */
+    test_dt=0.25;
+    for(unsigned m=0;m<2;++m) {
+        enabled=0;++revision;tick();enabled=1;++revision;
+        st8(SAVE+0x33,m?32:16);tick();buttons(0);
+        for(int i=0;i<20;++i)hit(1);
+        buttons(0x60000);tick();assert(damage(3)==6);buttons(0);
+        for(int i=0;i<(m?80:40);++i)tick();
+        buttons(0x60000);tick();assert(damage(3)==3);buttons(0);
+        for(int i=0;i<40;++i)tick(); /* retained charge stays put */
+        for(int i=0;i<9;++i)hit(1);
+        buttons(0x60000);tick();assert(damage(3)==3);buttons(0);
+        hit(1);buttons(0x60000);tick();assert(damage(3)==6);buttons(0);
+    }
+    test_dt=1.0/30;enabled=0;++revision;tick();enabled=1;++revision;
     st8(SAVE+0x33,0);show_gauge=1;++revision;tick();buttons(0);
 
     buttons(0); assert(claim_active);

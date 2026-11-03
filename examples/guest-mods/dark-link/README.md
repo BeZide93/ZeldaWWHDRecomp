@@ -1,9 +1,29 @@
-# Dark Link (prototype 0.1.35 — duration follows magic upgrade)
+# Dark Link (prototype 0.1.36 — retain charge on manual cancellation)
 
 Standalone code mod for ZeldaWWHDRecomp: sword hits charge a transformation with
 black body/equipment, red eyes and boosted sword damage. The user confirmed the
 complete body, mouth, eyes, sword and shield appearance in **0.1.11**. That
 texture-binding repair at **viewCalc return** is retained.
+
+## Changed in 0.1.36
+
+Manually cancelling Dark Link retains the remaining gauge percentage as charge.
+For example, cancelling at 50% returns 50/100 charge; another ten damaging
+sword hits fill it with default settings. Inactive charge does not drain, and
+activation still requires a full gauge. This works for both 20-second short
+and 40-second long gauges and custom capacity/duration settings.
+
+Conversion uses remaining/total from the active transformation, not the current
+duration setting. Only manual cancellation changes: natural expiry, death,
+stage/owner reset and disabling the mod still clear the state. Appearance,
+frame composition and the shared editor remain unchanged.
+
+State tests cover 0/25/50/75/100% cancellation, custom capacity, settings changes,
+blocked hits, pause, refill, reactivation, invalid totals and natural expiry.
+Translated guest tests cancel both gauge sizes at half duration, wait while
+inactive, verify nine hits are insufficient and the tenth permits activation.
+
+Install `dark-link-0.1.36.wwhdmod`, complete the mod build and restart.
 
 ## Changed in 0.1.35
 
@@ -394,7 +414,7 @@ collision path charge the gauge. Boss-specific handlers may override damage.
 ## Diagnostics and validation
 
 Enable **Appearance diagnostics** only when needed. The first line reads
-`DL 0.1.35 ON/OFF`; `Magic` counts loaded frame/fill images (up to four),
+`DL 0.1.36 ON/OFF`; `Magic` counts loaded frame/fill images (up to four),
 `Pos` is 1 for native or 2 for authored placement, and `Aura` reports the shell
 model being present. Body material/albedo/eye counts, binding retention and late
 repair counters retain their existing meanings. `Fill` reports the actual
