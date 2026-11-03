@@ -15,7 +15,9 @@ static int magic_native_hidden;
 static int magic_picture_layers,magic_distinct_fill;
 static int magic_named_layout;
 static int magic_named_outer;
-static int magic_solid_frame;
+static int magic_solid_frame,magic_opaque_frame,magic_layer_check;
+static uint32_t magic_previous_layer;
+static float magic_check_fraction;
 static float magic_test_sx=1,magic_test_sy=1;
 static uint32_t magic_detail_handle;
 static unsigned magic_border_alpha=255;
@@ -37,7 +39,7 @@ static void magic_write(Cpu* c) {
             unsigned w=(path[6]=='1'?386:196)+(magic_named_outer?14:0),h=magic_named_outer==2?33:magic_named_outer?30:18;
             assert(((unsigned)png[18]*256+png[19])==w && png[23]==h);
             assert(png[52]==255);
-            assert(png[49+(h/2)*(w*4+1)+(w/2)*4+3]==0);
+            if(!magic_opaque_frame) assert(png[49+(h/2)*(w*4+1)+(w/2)*4+3]==0);
             if(magic_named_outer==2) {
                 /* Four padded 16x16 corner textures form a 210/400x33 frame.
                  * Nominal opening is only W-32 by 1, but actual transparent
@@ -47,8 +49,9 @@ static void magic_write(Cpu* c) {
                     unsigned at=49+points[k][1]*(w*4+1)+points[k][0]*4;
                     assert(png[at]==71 && png[at+1]==110 && png[at+2]==71 && png[at+3]==255);
                 }
-                for(unsigned y=11;y<22;++y)for(unsigned x=11;x<w-11;++x)
+                if(!magic_opaque_frame) for(unsigned y=11;y<22;++y)for(unsigned x=11;x<w-11;++x)
                     assert(png[49+y*(w*4+1)+x*4+3]==0);
+                if(magic_opaque_frame) assert(png[49+11*(w*4+1)+11*4+3]==255);
             }
             if(magic_solid_frame) {
                 /* Native linear white colour 10/28/10 becomes sRGB 71/110/71.
@@ -122,6 +125,15 @@ static void magic_emit(uint32_t e) {
     assert(ld32(e+4)==(magic_authored ? 1u:0u)); /* follows native, already aspect-adjusted coordinates */
     if(magic_named_layout) {
         unsigned v=ld8(SAVE+0x33)>16;
+        if(magic_layer_check) {
+            uint32_t image=ld32(e+60);
+            if(image==magic_base_handles[v]) assert(magic_previous_layer==magic_border_handles[v]);
+            if(image==magic_fill_handles[v]) {
+                assert(magic_previous_layer==magic_base_handles[v]);
+                assert(ldf32(e+48)==magic_check_fraction);
+            }
+            magic_previous_layer=image;
+        }
         if(ld32(e+60)==magic_fill_handles[v]) {
             magic_width=ldf32(e+20);magic_x=ldf32(e+12);magic_y=ldf32(e+16);
             assert(ldf32(e+24)==12*magic_test_sy && magic_x==10+3*magic_test_sx);
@@ -486,9 +498,41 @@ static void test_magic_named_layout(void) {
     strcpy((char*)ppc_ptr(txl+20),"frame.bflim");
     st32(mat+116+36,2);magic_expect_draws(2);expect_hud("wnd-material-maps");expect_hud("maps=2");
     st32(mat+116+36,1);
-    /* Same slice dimensions with opaque pixels must still be rejected. */
-    for(unsigned y=0;y<16;++y)for(unsigned x=0;x<16;++x)st8(tex+(y*64+x)*4+3,255);
-    magic_expect_draws(2);expect_hud("wnd-fill-occluded");
+    /* Reproduce the device's 0.1.33 report: 94x16 frame slices, outer
+     * 210x33, flags 3, with opaque pixels inside the gauge. These valid
+     * frame images must render behind the base/fill rather than be rejected.
+     * The synthetic texture is deliberately opaque throughout. */
+    magic_opaque_frame=magic_layer_check=1;magic_check_fraction=1;
+    trailer=tex+8192;memset(ppc_ptr(tex),0,8192+40);
+    for(unsigned y=0;y<16;++y)for(unsigned x=0;x<94;++x) {
+        uint32_t pixel=tex+(y*128+x)*4;
+        st8(pixel,16);st8(pixel+1,40);st8(pixel+2,16);st8(pixel+3,255);
+    }
+    st32(trailer,0x464c494d);st32(trailer+20,0x696d6167);
+    st16(trailer+28,94);st16(trailer+30,16);st8(trailer+34,9);st8(trailer+35,1);st32(trailer+36,8192);
+    st32(MAGIC_ARC+0x3c,0x7f28);st32(MAGIC_ARC+8,0x9000);
+    for(unsigned v=0;v<2;++v) {
+        uint32_t w=wnd+v*144;st8(w+0x65,3);
+        st16(w+0x5c,94);st16(w+0x5e,94);st16(w+0x60,16);st16(w+0x62,16);
+    }
+    for(unsigned i=0;i<4;++i) {
+        unsigned v=i&1;st8(SAVE+0x33,v?32:0);
+        magic_test_sx=i<2?1:0.75f;magic_test_sy=i<2?1:1.25f;
+        stf32(MAGIC_PANE+0x3c,v?386:196);stf32(MAGIC_PANE+0x48,magic_test_sx);stf32(MAGIC_PANE+0x5c,magic_test_sy);
+        stf32(MAGIC_PANE+0x54,-640+10+(v?193:98)*magic_test_sx);
+        magic_expect_draws(3);expect_hud("BORDER");expect_hud("94/94,94/94,16/16,16/16");
+        /* Empty, half and full charge retain frame/base. A cropped fill must
+         * always follow the base, including after a cached HUD redraw. */
+        free_mode=0;enabled=0;++revision;tick();enabled=1;++revision;tick();
+        magic_expect_draws(2);
+        for(unsigned k=0;k<10;++k)hit(1);
+        magic_check_fraction=0.5f;magic_expect_draws(3);
+        for(unsigned k=0;k<10;++k)hit(1);
+        magic_check_fraction=1;magic_expect_draws(3);
+        int writes=magic_writes;read_hud();read_hud();assert(magic_writes==writes);
+        free_mode=1;++revision;tick();
+    }
+    magic_opaque_frame=magic_layer_check=0;
     st32(MAGIC_ARC+0x38,0x300);st32(MAGIC_ARC+0x3c,0x728);
     magic_named_outer=0;magic_test_sx=magic_test_sy=1;
     memcpy(ppc_ptr(f),original,sizeof original);st8(SAVE+0x33,16);
@@ -501,10 +545,11 @@ static void test_magic_named_layout(void) {
     strcpy((char*)ppc_ptr(group+36),"W_MagicBase_00");st16(f+16,9);st32(MAGIC_ARC+0x2c,0x2f00+1068);
     magic_expect_draws(3);expect_hud("BORDER");
     memcpy(ppc_ptr(f),original,sizeof original);st32(MAGIC_ARC+0x2c,0x2f00+1008);
-    /* Texture extents override the fallback fields; solid materials still
-     * use them and cannot cover the red fill. */
+    /* Solid frame material may also extend inside: layering keeps the
+     * native background and red fill above it. */
     st16(wnd+0x5c,90);st16(wnd+0x5e,90);magic_expect_draws(3);
-    st32(mat+116+36,0);magic_expect_draws(2);expect_hud("wnd-fill-occluded");
+    magic_opaque_frame=1;st32(mat+116+36,0);magic_expect_draws(3);expect_hud("BORDER");
+    magic_opaque_frame=0;
     magic_named_layout=0;free_mode=0;++revision;tick();fixture_magic();st8(SAVE+0x33,0);
     puts("Dark Link real pane names: independent capacity, preserved base colour, hidden frame, flash and opening checks passed");
 }
@@ -597,8 +642,9 @@ static void test_magic(void) {
     test_magic_picture_layers();
     test_magic_named_layout();
     magic_window=0;fixture_magic();++magic_generation;read_hud();
-    /* Return a full duration for the subsequent gameplay regression. */
-    buttons(0); buttons(0x60000); tick(); buttons(0);
+    /* Reset the charge/state exercised above, then return a full duration
+     * for the subsequent gameplay regression. */
+    enabled=0;++revision;tick();enabled=1;++revision;tick();buttons(0);
     for(int i=0;i<20;++i) hit(1);
     buttons(0x60000); tick(); assert(damage(3)==6);
 }

@@ -361,6 +361,10 @@ static void dl_magic_hud(u32 list) {
     u32 save=WWHD_GAME_DATA(WWHD_ADDR_save_info_pointer,u32);
     u32 v=save && *((u8*)save+0x33)>16;
     if(!dl_magic_images[v][0] || !dl_magic_images[v][1]) return;
+    /* Native frame pixels can be opaque inside the gauge. Submit the outer
+     * frame first so the inner background and charge fill remain on top. */
+    if(dl_magic_border[v] && dl_magic_place(v,&dl_magic_border_pane[v],1,dl_magic_border[v],&dl_element))
+        wwhd_hud_emit(list,&dl_element);
     for(u32 layer=0;layer<2;++layer)
         if(dl_magic_element(v,layer,&dl_element)) wwhd_hud_emit(list,&dl_element);
     for(u32 i=0;i<dl_magic_detail_count[v];++i) {
@@ -374,6 +378,4 @@ static void dl_magic_hud(u32 list) {
         if(dl_magic_place(v,p,fraction,dl_magic_details[v][i].image,&dl_element))
             wwhd_hud_emit(list,&dl_element);
     }
-    if(dl_magic_border[v] && dl_magic_place(v,&dl_magic_border_pane[v],1,dl_magic_border[v],&dl_element))
-        wwhd_hud_emit(list,&dl_element);
 }

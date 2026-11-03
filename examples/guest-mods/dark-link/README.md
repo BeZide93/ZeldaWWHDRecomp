@@ -1,9 +1,35 @@
-# Dark Link (prototype 0.1.33 — texture-derived frame dimensions)
+# Dark Link (prototype 0.1.34 — frame behind gauge layers)
 
 Standalone code mod for ZeldaWWHDRecomp: sword hits charge a transformation with
 black body/equipment, red eyes and boosted sword damage. The user confirmed the
 complete body, mouth, eyes, sword and shield appearance in **0.1.11**. That
 texture-binding repair at **viewCalc return** is retained.
+
+## Changed in 0.1.34
+
+The 0.1.33 device report identifies the remaining rejection precisely:
+`W_MagicBase_00`, 210x33, four frames, flags 3, successfully loads a 94x16
+texture and is then discarded as `wnd-fill-occluded`. Authored and resolved
+slice dimensions agree: 94/94/16/16. This is not a missing texture or size failure.
+
+Remove the inner-alpha veto for the selected native frame. Frame artwork can
+extend into the inner gauge; it does not need to be transparent there when
+composited underneath the background and fill. Submit the outer frame first,
+then the original-size inner background, then the independently cropped red
+fill. Retain the actual frame pixels and colours rather than cutting out or
+replacing the artwork. Native window content is still never drawn; unrelated
+window selection, resource bounds and texture validation remain unchanged.
+
+The regression reproduces the reported 94x16 slice dimensions and flags with
+synthetic opaque artwork inside the gauge. It checks successful frame loading,
+edge pixels and submission order at empty, half and full charge, both short
+and long gauges, absent native magic, unequal scaling and cached redraws.
+Untextured frames with interior coverage also remain visible underneath the
+base. Tests explicitly reset their charge state before subsequent gameplay checks.
+
+Install `dark-link-0.1.34.wwhdmod`, complete the mod build and restart.
+The on-device rejection is addressed; exact visual matching with the game's
+textures still needs in-game confirmation. No app rebuild is required.
 
 ## Changed in 0.1.33
 
@@ -342,7 +368,7 @@ collision path charge the gauge. Boss-specific handlers may override damage.
 ## Diagnostics and validation
 
 Enable **Appearance diagnostics** only when needed. The first line reads
-`DL 0.1.33 ON/OFF`; `Magic` counts loaded frame/fill images (up to four),
+`DL 0.1.34 ON/OFF`; `Magic` counts loaded frame/fill images (up to four),
 `Pos` is 1 for native or 2 for authored placement, and `Aura` reports the shell
 model being present. Body material/albedo/eye counts, binding retention and late
 repair counters retain their existing meanings. `Fill` reports the actual

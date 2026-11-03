@@ -164,19 +164,10 @@ static u32 dl_frame_image(u32 wnd,u32 wb,u32 mat,u32 mb,u32 txl,u32 tb,wwhd_game
         }
         dl_frame_blit(rects[i][0],rects[i][1],rects[i][2],rects[i][3],flip,mx,my,edge,u0,v0,u1,v1);
     }
-    /* For the named MagicBase, validate the rendered opening instead of
-     * treating nominal slice dimensions as opaque border thickness. Never
-     * upload a frame whose artwork covers the red gauge. */
-    if(dl_str_equal((char*)(wnd+12),variant?"W_MagicBase_01":"W_MagicBase_00",24)) {
-        wwhd_game_pane* fill=&dl_magic_fill[variant];
-        for(u32 y=0;y<H;++y) for(u32 x=0;x<W;++x) {
-            f32 px=p->x-p->w/2+(x+0.5f)*p->w/W;
-            f32 py=p->y+p->h/2-(y+0.5f)*p->h/H;
-            if(px>fill->x-fill->w/2+0.5f && px<fill->x+fill->w/2-0.5f &&
-               py>fill->y-fill->h/2+0.5f && py<fill->y+fill->h/2-0.5f &&
-               dl_frame_pixels[(y*W+x)*4+3]>8) return dl_frame_fail("wnd-fill-occluded");
-        }
-    }
+    /* Frame artwork may extend into the inner gauge. Keep those native
+     * pixels: dl_magic_hud draws the frame UNDER the separate base and fill.
+     * Rejecting nonzero inner alpha discarded the valid 94x16 MagicBase
+     * slices reported on device. Window content is still never copied. */
     dl_art_width=W;dl_art_height=H;memcpy(dl_art_pixels,dl_frame_pixels,W*H*4);
     u32 alpha=dl_magic_frame_alpha((char*)(wnd+12),variant);
     for(u32 i=0;i<W*H;++i) dl_art_pixels[i*4+3]=dl_art_pixels[i*4+3]*alpha/255;
