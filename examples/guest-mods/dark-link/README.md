@@ -1,9 +1,44 @@
-# Dark Link (prototype 0.1.32 — padded native frame slices)
+# Dark Link (prototype 0.1.33 — texture-derived frame dimensions)
 
 Standalone code mod for ZeldaWWHDRecomp: sword hits charge a transformation with
 black body/equipment, red eyes and boosted sword damage. The user confirmed the
 complete body, mouth, eyes, sword and shield appearance in **0.1.11**. That
 texture-binding repair at **viewCalc return** is retained.
+
+## Changed in 0.1.33
+
+The device's 0.1.32 report now reaches `wnd-image-failed`: window selection
+succeeds, but the old report does not distinguish geometry, material, texture,
+coverage or output failures. It does not identify the precise failing branch.
+
+A renderer mismatch found during review is corrected: textured frame extents
+come from the decoded corner textures (top-left and bottom-right), with the
+wnd1 FrameElement dimensions used for untextured materials. Previously the
+fallback fields were always used, rejecting zero/oversized values before the
+textures could supply valid geometry. Reference: the frame-size selection in
+[Switch-Toolbox BxlytToGL.DrawWindowPane](https://github.com/KillzXGaming/Switch-Toolbox/blob/3a3279140ca0fa54ce804a8d56d4653a491de613/File_Format_Library/FileFormats/Layout/BxlytToGL.cs).
+Bounds are checked before converting scaled extents to integer coordinates.
+
+Appearance Diagnostics now records the exact failed stage, frame index,
+material/map count, texture name/dimensions, window flags, authored dimensions
+and used dimensions. Examples include `wnd-texture-missing`,
+`wnd-material-maps`, `wnd-slice-size`, `wnd-fill-occluded`, `wnd-file-write`
+and `wnd-hud-texture`. The report is cached at load and displayed only when
+diagnostics are enabled; it does not export resources or touch game state.
+
+Tests cover texture-derived frames with zero and oversized fallback fields,
+both capacities, nonuniform HUD scaling, pixel colours/coverage, untextured
+fallback, missing textures, unsupported map counts and malformed frame tables.
+Core gauge and touch controls remain valid when a border fails. The previous
+0.1.32 module fails the new zero-field rendering regression.
+
+This fixes the demonstrated renderer mismatch; the screenshot alone cannot
+prove it is the remaining failure on the device. Actual game artwork is not
+available locally. If the border is still absent, the expanded on-screen
+report identifies the next failure without a log-file transfer.
+
+Install `dark-link-0.1.33.wwhdmod`, complete the mod build and restart.
+No app or Enhanced Controls rebuild is required.
 
 ## Changed in 0.1.32
 
@@ -307,7 +342,7 @@ collision path charge the gauge. Boss-specific handlers may override damage.
 ## Diagnostics and validation
 
 Enable **Appearance diagnostics** only when needed. The first line reads
-`DL 0.1.32 ON/OFF`; `Magic` counts loaded frame/fill images (up to four),
+`DL 0.1.33 ON/OFF`; `Magic` counts loaded frame/fill images (up to four),
 `Pos` is 1 for native or 2 for authored placement, and `Aura` reports the shell
 model being present. Body material/albedo/eye counts, binding retention and late
 repair counters retain their existing meanings. `Fill` reports the actual

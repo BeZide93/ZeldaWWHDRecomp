@@ -5,13 +5,21 @@
 static u32 dl_magic_border[2];
 static wwhd_game_pane dl_magic_border_pane[2];
 static u8 dl_frame_pixels[DL_ART_PIXELS*4];
-static u32 dl_frame_w,dl_frame_h;
+static u32 dl_frame_w,dl_frame_h,dl_frame_maps;
+static const char* dl_frame_error;
+static int dl_frame_fail(const char* reason) { dl_frame_error=reason;return 0; }
 static int dl_frame_texture(u32 mat,u32 mb,u32 txl,u32 tb,u32 index) {
+    dl_frame_error="wnd-material-span";
+    DLGaugeReport* report=&dl_gauge_reports[dl_gauge_variant];
+    report->frame_maps=report->frame_tw=report->frame_th=0;
+    report->frame_material[0]=report->frame_texture[0]=0;
     if(mb<12 || index>=*(u16*)(mat+8) || !dl_blob_span(mat,mb,mat+12+index*4,4)) return 0;
     u32 m=mat+dl_word((void*)mat,12+index*4);
     if(!dl_blob_span(mat,mb,m,40)) return 0;
     u32 flags=dl_word((void*)m,36),maps=flags&3;int srgb=0;
-    if(maps>1) return 0;
+    dl_frame_maps=maps;report->frame_maps=maps;
+    dl_material_string(report->frame_material,(char*)m);
+    if(maps>1) return dl_frame_fail("wnd-material-maps");
     if(!maps) {
         /* Native untextured frame materials use their white colour. A missing
          * texture map is not missing artwork. Keep this separate from wnd1
@@ -19,18 +27,24 @@ static int dl_frame_texture(u32 mat,u32 mb,u32 txl,u32 tb,u32 index) {
         dl_art_width=dl_art_height=1;
         for(u32 i=0;i<4;++i) dl_art_pixels[i]=255;
     } else {
-        if(!dl_blob_span(mat,mb,m+40,4) || tb<12) return 0;
+        if(!dl_blob_span(mat,mb,m+40,4)) return 0;
+        dl_frame_error="wnd-texture-table";
+        if(tb<12) return 0;
         u32 ti=*(u16*)(m+40),nt=*(u16*)(txl+8);
         if(ti>=nt || !dl_blob_span(txl,tb,txl+12+ti*4,4)) return 0;
         u32 name=txl+12+dl_word((void*)txl,12+ti*4),n=0;
         if(!dl_blob_span(txl,tb,name,1)) return 0;
         while(n<64 && dl_blob_span(txl,tb,name+n,1) && *((u8*)name+n)) ++n;
         if(n==64 || !dl_blob_span(txl,tb,name+n,1)) return 0;
+        dl_copy_string(report->frame_texture,sizeof report->frame_texture,(char*)name,n+1);
         dl_copy_string(dl_magic_path,sizeof dl_magic_path,"timg/",6);
         dl_append(dl_magic_path,5,sizeof dl_magic_path,(char*)name);
         u32 bytes=0,t=dl_magic_file(dl_magic_archive,dl_magic_path,&bytes);
-        if(!t || !dl_art_decode((u8*)t,bytes,&srgb)) return 0;
+        if(!t) return dl_frame_fail("wnd-texture-missing");
+        if(!dl_art_decode((u8*)t,bytes,&srgb)) return dl_frame_fail("wnd-texture-format");
     }
+    report->frame_tw=dl_art_width;report->frame_th=dl_art_height;
+    dl_frame_error="wnd-material-style";
     dl_magic_picture style={0};
     if(!dl_material_string(style.material,(char*)m)) return 0;
     style.black=dl_word((void*)m,28);style.white=dl_word((void*)m,32);
@@ -44,6 +58,7 @@ static int dl_frame_texture(u32 mat,u32 mb,u32 txl,u32 tb,u32 index) {
     dl_magic_material_target=&style;dl_magic_apply_animations();dl_magic_material_target=0;
     dl_art_material(style.black,style.white,srgb);
     if(!maps) return 1;
+    dl_frame_error="wnd-texture-sampler";
     return dl_art_bake_sampler(uv,style.tex_srt,*((u8*)m+42)&3,*((u8*)m+43)&3,dl_art_width,dl_art_height);
 }
 /* Stretch the native edge pixels, retaining the authored corner dimensions.
@@ -82,19 +97,40 @@ static void dl_frame_blit(u32 x0,u32 y0,u32 x1,u32 y1,u32 flip,u32 mx,u32 my,u32
     }
 }
 static u32 dl_frame_image(u32 wnd,u32 wb,u32 mat,u32 mb,u32 txl,u32 tb,wwhd_game_pane* p,u32 variant) {
+    DLGaugeReport* report=&dl_gauge_reports[variant];
+    report->frame_attempt=1;dl_frame_error="wnd-pane-size";
     if(wb<0x70 || !(p->w>0 && p->w<1024 && p->h>0 && p->h<256)) return 0;
     u32 count=*((u8*)wnd+0x64),kind=(*((u8*)wnd+0x65)>>2)&3,table=wnd+dl_word((void*)wnd,0x6c);
+    report->frame_flags=*((u8*)wnd+0x65);
+    dl_frame_error="wnd-frame-table";
     if((count!=1 && count!=4 && count!=8) || (kind!=0 && kind!=2) || !dl_blob_span(wnd,wb,table,count*4)) return 0;
     f32 w=*(f32*)(wnd+0x4c),h=*(f32*)(wnd+0x50);
-    if(!(w>0 && w<1000000 && h>0 && h<1000000) ||
-       *(u16*)(wnd+0x5c)>w || *(u16*)(wnd+0x5e)>w ||
-       *(u16*)(wnd+0x60)>h || *(u16*)(wnd+0x62)>h) return 0;
+    if(!(w>0 && w<1000000 && h>0 && h<1000000)) return dl_frame_fail("wnd-source-size");
     dl_frame_w=(u32)(p->w+0.5f);dl_frame_h=(u32)(p->h+0.5f);
-    if(!dl_frame_w || !dl_frame_h || dl_frame_w*dl_frame_h>DL_ART_PIXELS) return 0;
-    u32 l=(u32)(*(u16*)(wnd+0x5c)*dl_frame_w/w+0.5f),r=(u32)(*(u16*)(wnd+0x5e)*dl_frame_w/w+0.5f);
-    u32 t=(u32)(*(u16*)(wnd+0x60)*dl_frame_h/h+0.5f),b=(u32)(*(u16*)(wnd+0x62)*dl_frame_h/h+0.5f);
-    if(l>dl_frame_w || r>dl_frame_w || (kind==0 && (t>dl_frame_h || b>dl_frame_h))) return 0;
-    if(count!=4 && (l+r>dl_frame_w || (kind==0 && t+b>dl_frame_h))) return 0;
+    if(!dl_frame_w || !dl_frame_h || dl_frame_w*dl_frame_h>DL_ART_PIXELS) return dl_frame_fail("wnd-image-size");
+    /* Texture dimensions define textured frame extents. FrameElement fields
+     * are the fallback for untextured materials, not a rejection threshold
+     * for textured corners (they can be zero or larger than the window).
+     * See BxlytToGL.DrawWindowPane, frameLeft/Right/Top/Bottom selection. */
+    f32 extents[4];
+    for(u32 k=0;k<4;++k) extents[k]=report->frame_authored[k]=*(u16*)(wnd+0x5c+2*k);
+    for(u32 side=0;side<2;++side) {
+        u32 part=count==1?0:side?3:0;
+        report->frame_part=part;
+        u32 entry=wnd+dl_word((void*)table,part*4);
+        if(!dl_blob_span(wnd,wb,entry,4)) return dl_frame_fail("wnd-frame-entry");
+        if(!dl_frame_texture(mat,mb,txl,tb,*(u16*)entry)) return 0;
+        if(dl_frame_maps) {extents[side]=dl_art_width;extents[side+2]=dl_art_height;}
+    }
+    /* Check before float-to-integer conversion; malformed sizes cannot wrap
+     * a rectangle or escape the fixed image buffer. */
+    if(extents[0]>w || extents[1]>w || extents[2]>h || extents[3]>h)
+        return dl_frame_fail("wnd-slice-size");
+    u32 l=(u32)(extents[0]*dl_frame_w/w+0.5f),r=(u32)(extents[1]*dl_frame_w/w+0.5f);
+    u32 t=(u32)(extents[2]*dl_frame_h/h+0.5f),b=(u32)(extents[3]*dl_frame_h/h+0.5f);
+    report->frame_used[0]=l;report->frame_used[1]=r;report->frame_used[2]=t;report->frame_used[3]=b;
+    if(l>dl_frame_w || r>dl_frame_w || (kind==0 && (t>dl_frame_h || b>dl_frame_h))) return dl_frame_fail("wnd-slice-size");
+    if(count!=4 && (l+r>dl_frame_w || (kind==0 && t+b>dl_frame_h))) return dl_frame_fail("wnd-slice-overlap");
     memset(dl_frame_pixels,0,dl_frame_w*dl_frame_h*4);
     const u32 W=dl_frame_w,H=dl_frame_h;
     u32 rects[8][4]={{0,0,l,t},{W-r,0,W,t},{0,H-b,l,H},{W-r,H-b,W,H},
@@ -105,16 +141,18 @@ static u32 dl_frame_image(u32 wnd,u32 wb,u32 mat,u32 mb,u32 txl,u32 tb,wwhd_game
      * Transparent texels within a slice are part of the opening. */
     int strips=count==4 && kind==0;
     if(strips) {
-        if(!l || !r || !t || !b) return 0;
+        if(!l || !r || !t || !b) return dl_frame_fail("wnd-zero-slice");
         u32 four[4][4]={{0,0,W-r,t},{W-r,0,W,H-b},{0,t,l,H},{l,H-b,W,H}};
         memcpy(rects,four,sizeof four);
     }
     for(u32 i=0;i<(kind==2?2u:strips?4u:8u);++i) {
         u32 material=count==1?0:count==8?i:i<4?i:i==5?1:i==7?2:0;
         u32 entry=wnd+dl_word((void*)table,material*4);
-        if(!dl_blob_span(wnd,wb,entry,4)) return 0;
+        report->frame_part=material;
+        if(!dl_blob_span(wnd,wb,entry,4)) return dl_frame_fail("wnd-frame-entry");
         u32 flip=*((u8*)entry+2);
-        if(flip>5 || !dl_frame_texture(mat,mb,txl,tb,*(u16*)entry)) return 0;
+        if(flip>5) return dl_frame_fail("wnd-frame-flip");
+        if(!dl_frame_texture(mat,mb,txl,tb,*(u16*)entry)) return 0;
         u32 mx=count==1 && (i==1 || i==3 || i==5),my=count==1 && (i==2 || i==3 || i==7);
         u32 edge=(i>=4 && count!=8)?(i<6?1:2):0;
         f32 u0=0,v0=0,u1=1,v1=1;
@@ -136,15 +174,16 @@ static u32 dl_frame_image(u32 wnd,u32 wb,u32 mat,u32 mb,u32 txl,u32 tb,wwhd_game
             f32 py=p->y+p->h/2-(y+0.5f)*p->h/H;
             if(px>fill->x-fill->w/2+0.5f && px<fill->x+fill->w/2-0.5f &&
                py>fill->y-fill->h/2+0.5f && py<fill->y+fill->h/2-0.5f &&
-               dl_frame_pixels[(y*W+x)*4+3]>8) return 0;
+               dl_frame_pixels[(y*W+x)*4+3]>8) return dl_frame_fail("wnd-fill-occluded");
         }
     }
     dl_art_width=W;dl_art_height=H;memcpy(dl_art_pixels,dl_frame_pixels,W*H*4);
     u32 alpha=dl_magic_frame_alpha((char*)(wnd+12),variant);
     for(u32 i=0;i<W*H;++i) dl_art_pixels[i*4+3]=dl_art_pixels[i*4+3]*alpha/255;
-    u32 bytes=dl_art_encode();if(!bytes) return 0;
+    u32 bytes=dl_art_encode();if(!bytes) return dl_frame_fail("wnd-png-encode");
     const char* path=variant?"magic-1-border.png":"magic-0-border.png";
-    if(wwhd_file_write(path,dl_art_png,bytes)!=(s32)bytes) return 0;
+    if(wwhd_file_write(path,dl_art_png,bytes)!=(s32)bytes) return dl_frame_fail("wnd-file-write");
+    dl_frame_error="wnd-hud-texture";
     return wwhd_hud_texture(WWHD_HUD_DATA,path);
 }
 static void dl_magic_load_border(u32 f,u32 size,u32 v) {
@@ -205,6 +244,6 @@ static void dl_magic_load_border(u32 f,u32 size,u32 v) {
     if(best && mat) {
         dl_magic_border[v]=dl_frame_image(best,best_bytes,mat,mb,txl,tb,&chosen,v);
         dl_magic_border_pane[v]=chosen;
-        dl_gauge_reason(best_probe,dl_magic_border[v]?"BORDER":"wnd-image-failed");
+        dl_gauge_reason(best_probe,dl_magic_border[v]?"BORDER":dl_frame_error);
     }
 }

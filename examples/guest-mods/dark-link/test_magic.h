@@ -374,6 +374,9 @@ static void test_magic_named_layout(void) {
      * separate 190/380x12 two-map fills with no first-stage progress track,
      * and hidden named windows. Synthetic textures, never game assets. */
     fixture_magic();magic_named_layout=1;free_mode=1;++revision;tick();
+    /* Textured frame extents come from the actual texture, not wnd1's
+     * fallback fields. Match this first fixture's three-unit frame. */
+    st16(MAGIC_ARC+0x400+1024+28,3);st16(MAGIC_ARC+0x400+1024+30,3);
     uint32_t f=MAGIC_ARC+0x3000,mat=f+20,txl=f+724,wnd=f+768;
     memset(ppc_ptr(f),0,1100);memcpy(ppc_ptr(f),ppc_ptr(MAGIC_FLYT),20);st16(f+16,8);
     st32(mat,0x6d617431);st32(mat+4,160);st16(mat+8,3);
@@ -465,9 +468,27 @@ static void test_magic_named_layout(void) {
         stf32(MAGIC_PANE+0x54,-640+10+(v?193:98)*magic_test_sx);
         magic_expect_draws(3);expect_hud("4/0/255 BORDER");
     }
+    /* Native textured frames use the texture dimensions even with zero or
+     * oversized fallback fields. Previously zero aborted at wnd-zero-slice
+     * and oversized fields aborted before decoding any texture. */
+    for(unsigned mode=0;mode<2;++mode) {
+        for(unsigned v=0;v<2;++v)for(unsigned k=0;k<4;++k)st16(wnd+v*144+0x5c+2*k,mode?65535:0);
+        for(unsigned v=0;v<2;++v) {
+            st8(SAVE+0x33,v?32:0);stf32(MAGIC_PANE+0x3c,v?386:196);
+            stf32(MAGIC_PANE+0x54,-640+10+(v?193:98)*magic_test_sx);
+            magic_expect_draws(3);expect_hud("BORDER");
+            expect_hud(mode?"65535/16,65535/16,65535/16,65535/16":"0/16,0/16,0/16,0/16");
+        }
+    }
+    /* Failures retain precise, opt-in diagnostics; the core gauge survives. */
+    strcpy((char*)ppc_ptr(txl+20),"lost.bflim");
+    magic_expect_draws(2);expect_hud("wnd-texture-missing");expect_hud("file=lost.bflim");
+    strcpy((char*)ppc_ptr(txl+20),"frame.bflim");
+    st32(mat+116+36,2);magic_expect_draws(2);expect_hud("wnd-material-maps");expect_hud("maps=2");
+    st32(mat+116+36,1);
     /* Same slice dimensions with opaque pixels must still be rejected. */
     for(unsigned y=0;y<16;++y)for(unsigned x=0;x<16;++x)st8(tex+(y*64+x)*4+3,255);
-    magic_expect_draws(2);expect_hud("wnd-image-failed");
+    magic_expect_draws(2);expect_hud("wnd-fill-occluded");
     st32(MAGIC_ARC+0x38,0x300);st32(MAGIC_ARC+0x3c,0x728);
     magic_named_outer=0;magic_test_sx=magic_test_sy=1;
     memcpy(ppc_ptr(f),original,sizeof original);st8(SAVE+0x33,16);
@@ -480,8 +501,10 @@ static void test_magic_named_layout(void) {
     strcpy((char*)ppc_ptr(group+36),"W_MagicBase_00");st16(f+16,9);st32(MAGIC_ARC+0x2c,0x2f00+1068);
     magic_expect_draws(3);expect_hud("BORDER");
     memcpy(ppc_ptr(f),original,sizeof original);st32(MAGIC_ARC+0x2c,0x2f00+1008);
-    /* A known name is not permission to cover the fill with thick slices. */
-    st16(wnd+0x5c,90);st16(wnd+0x5e,90);magic_expect_draws(2);
+    /* Texture extents override the fallback fields; solid materials still
+     * use them and cannot cover the red fill. */
+    st16(wnd+0x5c,90);st16(wnd+0x5e,90);magic_expect_draws(3);
+    st32(mat+116+36,0);magic_expect_draws(2);expect_hud("wnd-fill-occluded");
     magic_named_layout=0;free_mode=0;++revision;tick();fixture_magic();st8(SAVE+0x33,0);
     puts("Dark Link real pane names: independent capacity, preserved base colour, hidden frame, flash and opening checks passed");
 }
@@ -568,7 +591,7 @@ static void test_magic(void) {
     /* A malformed frame is omitted without invalidating the gauge/button. */
     st32(MAGIC_ARC+0x3000+608+0x6c,0xfffffff0);++magic_generation;
     read_hud();hook(0x02675414,3,MAGIC_CTRL,0);magic_draws=0;read_hud();assert(magic_draws==2);
-    expect_hud("wnd-image-failed");
+    expect_hud("wnd-frame-table");
     test_magic_style();
     test_magic_hidden_native();
     test_magic_picture_layers();
