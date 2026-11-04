@@ -81,7 +81,7 @@ static void dispatch(Cpu* c) {
         ++spawned; callbacks[i]=cb;
         if(failing) { c->r[3]=0; return; }
         emitters[i]=EMITTER+0x2000+i*0x400;
-        st32(emitters[i]+0x5c,18); st32(cb+12,emitters[i]); st8(cb+4,255); st8(cb+5,0); st16(cb+6,0);
+        st32(emitters[i]+0x5c,18); st32(emitters[i]+0x1e4,cb); st32(cb+12,emitters[i]); st8(cb+4,255); st8(cb+5,0); st16(cb+6,0);
         c->r[3]=emitters[i]; return;
     }
     case GAME_END:
@@ -156,6 +156,84 @@ static void setup(void) {
         stf32(SINCOS+i*8+4,cosf(i*2.0*3.141592653589793/8192));
     }
 }
+
+/* Model the native prepend order and cut-turn count-1 creation, including the
+ * automatic particle that originally joined successive arcs across the back.
+ * Storage is synthetic; native allocation/GPU calls are not simulated. */
+static unsigned particles_created;
+static void particle_pass(int i, unsigned limit) {
+    uint32_t e=emitters[i], cb=callbacks[i], count=ld32(e+0x1b4);
+    assert(ld32(e+0x254)&1); /* ordinary emission must stay disabled */
+    unsigned pending=ld16(cb+6);
+    if(pending) {
+        assert(pending==12 && count==0);
+        uint32_t points=ld32(cb+8), head=0;
+        unsigned n=0;
+        for(unsigned j=pending-1;j>0 && n<limit;--j) {
+            uint32_t p=0x19000000+i*0x10000+n*0x200;
+            memset(ppc_ptr(p),0,0x128);
+            st32(p,p); st32(p+0xc,head); st32(p+0xd4,e);
+            for(unsigned k=0;k<12;k+=4) stf32(p+0x10+k,ldf32(points+j*12+k));
+            stf32(p+0x78,-1); stf32(p+0x7c,2);
+            head=p; ++n; ++particles_created;
+        }
+        st32(e+0x1ac,head); st32(e+0x1b4,n); st16(cb+6,0);
+    }
+    hook(GAME_PARTICLES,2,e);
+    for(uint32_t p=ld32(e+0x1ac);p;p=ld32(p+0xc)) {
+        /* Native incFrame and physics precede the return hook. An unrenewed
+         * particle would expire, and uncorrected velocity would trail behind. */
+        float age=ldf32(p+0x78)+1;
+        assert(age<ldf32(p+0x7c)); stf32(p+0x78,age);
+        stf32(p+0x28,9999); stf32(p+0x2c,-10); stf32(p+0x30,-9999);
+    }
+    hook(GAME_PARTICLES,3,e);
+}
+static void assert_arc(int i, float center_z, unsigned expected) {
+    uint32_t e=emitters[i], node=ld32(e+0x1ac); unsigned n=0;
+    assert(ld32(e+0x1b4)==expected && ld16(callbacks[i]+6)==0);
+    float previous_x=-151, previous_z=0;
+    while(node) {
+        uint32_t p=ld32(node);
+        float x=ldf32(p+0x28), y=ldf32(p+0x2c), z=ldf32(p+0x30);
+        assert(x>=previous_x && near(y,60));
+        assert(z>=center_z-0.05 && z<=center_z+55.05);
+        assert(fabsf(x*x/(150*150)+(z-center_z)*(z-center_z)/(55*55)-1)<0.01);
+        if(expected==11 && n) assert(hypotf(x-previous_x,z-previous_z)<50);
+        if(!n) assert(near(x,-150) && near(z,center_z));
+        previous_x=x; previous_z=z; node=ld32(node+0xc); ++n;
+    }
+    assert(n==expected && near(previous_x,150) && near(previous_z,center_z));
+}
+static void test_open_arc(void) {
+    for(int hz=30;hz<=60;hz+=30) {
+        setup(); dt=1.0/hz; particles_created=0; begin(0x55,1,3);
+        for(int tick=0;tick<hz;++tick) {
+            if(tick) frame();
+            for(int i=0;i<3;++i) { particle_pass(i,11); assert_arc(i,tick*1200.0f/hz,11); }
+            assert(particles_created==33); /* never an old/new arc join */
+        }
+        paused=1; frame();
+        for(int i=0;i<3;++i) { particle_pass(i,11); assert_arc(i,(hz-1)*1200.0f/hz,11); }
+        paused=0; frame();
+        for(int i=0;i<3;++i) { particle_pass(i,11); assert_arc(i,1200,11); }
+        assert(particles_created==33);
+        enabled=0; frame(); assert(ended==3);
+        unsigned char before[0x128]; memcpy(before,ppc_ptr(0x19000000),sizeof(before));
+        hook(GAME_PARTICLES,2,emitters[0]); hook(GAME_PARTICLES,3,emitters[0]);
+        assert(!memcmp(before,ppc_ptr(0x19000000),sizeof(before))); /* normal expiry after stop */
+    }
+    setup(); particles_created=0; begin(0x55,1,3);
+    particle_pass(0,5); assert_arc(0,0,5); frame(); particle_pass(0,5); assert_arc(0,40,5);
+    assert(particles_created==5); /* partial native allocation is bounded */
+    /* Same native function on Link's regular spin does absolutely nothing. */
+    unsigned char before[0x400]; memset(ppc_ptr(EMITTER),0xa5,sizeof(before));
+    memcpy(before,ppc_ptr(EMITTER),sizeof(before));
+    hook(GAME_PARTICLES,2,EMITTER); hook(GAME_PARTICLES,3,EMITTER);
+    assert(!memcmp(before,ppc_ptr(EMITTER),sizeof(before)));
+    puts("Open stripe regression: stable ordered arc, no rear chords/history, 30/60 Hz, pause, partial allocation and isolation passed");
+}
+
 int main(int argc,char** argv) {
     assert(argc==2);
     assert(mmap(PPC_MEM_BASE,0x80000000ull,PROT_READ|PROT_WRITE,MAP_PRIVATE|MAP_ANONYMOUS|MAP_FIXED_NOREPLACE,-1,0)==PPC_MEM_BASE);
@@ -165,10 +243,10 @@ int main(int argc,char** argv) {
     WWHDGuestHostV1 host={.size=sizeof(host),.abi_version=WWHD_GUEST_ABI_VERSION,
         .dispatch=dispatch,.unimplemented=unimplemented,.trap=trap,.core_preempt=preempt,
         .call_original=original,.service=service};
-    mod=init(&host); assert(mod && mod->hook_count==7);
+    mod=init(&host); assert(mod && mod->hook_count==9);
     for(unsigned i=0;i<mod->hook_count;++i) assert(mod->hooks[i].kind!=1);
     setup(); begin(0x55,1,3); assert(spawned==3 && !collisions);
-    for(int i=0;i<3;++i) { assert(ld16(callbacks[i]+6)==11); own(ld32(callbacks[i]+8),11*12); assert(near(ldf32(emitters[i]+0x238),1.5)); assert(ld32(emitters[i]+0x5c)==0); }
+    for(int i=0;i<3;++i) { assert(ld16(callbacks[i]+6)==12); own(ld32(callbacks[i]+8),12*12); assert(near(ldf32(emitters[i]+0x238),1.5)); assert(ld32(emitters[i]+0x5c)==0); }
     unsigned char before[0x9000]; memcpy(before,ppc_ptr(LINK),sizeof(before));
     for(int i=0;i<5;++i) frame(); assert(!collisions);
     frame(); assert(collisions==1 && near(last_z,240));
@@ -218,6 +296,7 @@ int main(int argc,char** argv) {
     assert(ldf32(capsule+0x7c)>0 && ldf32(capsule+0x80)>0 && ldf32(capsule+0x84)>0);
     setup(); failing=1; begin(0x55,1,3); assert(spawned==3); frame(); enabled=0; frame(); assert(!ended);
     puts("30/60-Hz range, elevated lock-on and particle allocation failure passed");
+    test_open_arc();
     puts("Sword Wave translated integration: all checks passed");
     return 0;
 }

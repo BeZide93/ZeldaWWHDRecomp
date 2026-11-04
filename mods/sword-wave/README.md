@@ -10,6 +10,27 @@ sword colors and width scaling. It has its own attack-only sword capsule and
 particle storage; Link's attack, models, inventory and save bytes are unchanged.
 No textures, models, game bytes or host runtime changes are included.
 
+## Open arc correction (0.1.1)
+
+The native stripe renderer joins every particle in an emitter's list. Version
+0.1.0 appended a fresh curve every frame, plus an automatic anchor particle;
+those end-to-start links produced the triangular attachment behind the front.
+
+Each wave now seeds one open arc per resource, disables automatic emission and
+moves those same particles along the original front curve. The native cut-turn
+callback still creates the particles/materials. Owned-particle hooks bracket
+native particle calculation: renew their short lifetime before aging and anchor
+their positions after physics, before rendering. No old arcs or endpoint joins
+accumulate. The original front curve, colors, width, damage and motion remain.
+
+Native linked lists, allocation and deferred GPU teardown are untouched. The
+particles expire naturally after detachment; regular Link/other emitters pass
+through both observer hooks unchanged. Partial allocation remains bounded.
+Translated tests model native prepend/callback ordering and aging, check ordered
+open geometry over repeated 30/60-Hz steps, unchanged front coordinates, pause,
+partial allocation, constant particle count and unrelated-emitter isolation.
+Visual acceptance on the actual game is still required.
+
 ## Behavior
 
 Based on Dawnlight's **normal Great Spin projectile**, not Survivors' upgrades:
@@ -31,7 +52,7 @@ Based on Dawnlight's **normal Great Spin projectile**, not Survivors' upgrades:
 - Pauses with gameplay. Clears on death, events, stage/room/owner changes,
   save loading and the live Enable Sword Wave option being turned off.
 
-Install `sword-wave-0.1.0.wwhdmod` through **Settings → Mods**, enable it and restart.
+Install `sword-wave-0.1.1.wwhdmod` through **Settings → Mods**, enable it and restart.
 The game needs existing code-mod support, as with the other standalone mods.
 No rebuild of the app is needed. Source: `mods/sword-wave/`.
 
@@ -62,6 +83,7 @@ Reviewed `ZeldaWWHDDecomp/wwhd` at `a874e1a9243f573af44c2649a2f2107dbebb50be`
 | --- | --- |
 | `d_a_player_main_02.cpp`, `main_08.cpp` | Spin init `023E6380`, Hurricane init `02441A44`; proc `55/56`, item `103` |
 | `d_a_player_main_04.cpp`, `_04_collision.h` | Spin resources `25/26/28`, callbacks `6730/6740/6750`, attack cylinder `78BC`; sample its active flag/power/material |
+| `JPA_particle.cpp`, `JPADrawVisitor.cpp` | Particle calculation `0281FBD8`; native list/stripe order, position and lifetime fields; retained native deferred deletion |
 | `d_particle_callbacks.cpp`, `d_particle_water.cpp` | `025A847C` particle set; 16-byte cut-turn callback, native end `025A9D64` detaches it synchronously |
 | `d_cc_d.h`, `c_m3d_g_cps.h` | Capsule `138` bytes; geometry start `118`, end `124`, vtable `130`, radius `134`; status `3C` bytes |
 | `d_cc_s.cpp`, `c_cc_s.cpp` | `0200E240` native registration, attack-only mask, `AtNoConHit`, shield response bit at `54` |

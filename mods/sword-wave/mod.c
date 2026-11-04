@@ -16,14 +16,14 @@ static struct {
     s8 room;
     s16 heading;
     u8 stage[8];
-    cXyz pos, dir, right, points[POINTS];
+    cXyz pos, dir, right, points[POINTS+1];
     f32 distance, collision_start;
     Capsule capsule;
     Status status;
     LineCheck line;
     SpinCallback effects[3];
     u32 colors[3][2];
-    u32 colors_ready;
+    u32 colors_ready, seeded;
 } wave;
 static const u16 effect_ids[3] = {0x25, 0x26, 0x28};
 static daPy_lk_c* player(u8* play) { return play ? (daPy_lk_c*)word(play, WWHD_PLAY_PLAYER_OFFSET) : 0; }
@@ -48,7 +48,7 @@ static void stop(int discard) {
         wave.effects[i] = (SpinCallback){0};
     }
     put_word(&wave.capsule, 0, 0);
-    wave.active = 0;
+    wave.active = 0; wave.seeded = 0;
 }
 static void reset(int discard) {
     stop(discard);
@@ -113,18 +113,63 @@ static void direction(daPy_lk_c* link) {
         (cXyz){angle_cos(wave.heading),0,-angle_sin(wave.heading)};
 }
 static void effects(void) {
-    /* A compact horizontal crescent, emitted using the game's own three spin
-     * resources and native cut-turn callback (including its particle shader). */
+    /* Keep the confirmed front curve. Index zero is the native callback's
+     * emitter anchor; it emits indices count-1 through 1, not index zero. */
     for(int j=0;j<POINTS;++j) {
         s16 a=(s16)(-0x4000+j*0x8000/(POINTS-1));
         f32 side=WIDTH*angle_sin(a), forward=RADIUS*angle_cos(a);
-        wave.points[j]=(cXyz){wave.pos.x+wave.right.x*side+wave.dir.x*forward,
+        wave.points[j+1]=(cXyz){wave.pos.x+wave.right.x*side+wave.dir.x*forward,
             wave.pos.y+wave.dir.y*forward,wave.pos.z+wave.right.z*side+wave.dir.z*forward};
     }
+    wave.points[0]=wave.points[1];
     for(int i=0;i<3;++i) {
         wave.effects[i].points=wave.points;
-        wave.effects[i].count=wave.effects[i].emitter?POINTS:0;
+        wave.effects[i].count=wave.effects[i].emitter && !(wave.seeded&(1u<<i))?POINTS+1:0;
     }
+}
+/* The native stripe renderer connects the entire emitter particle list. Never
+ * append another arc (or an automatic anchor particle) to that list: it creates
+ * an end-to-start chord and a trail across the back. Seed once, then move those
+ * same particles. Native allocation, shader setup and deferred deletion remain
+ * in charge; no particle/list/GPU objects are copied, freed or relinked here. */
+static int owned_emitter(void* emitter) {
+    if(!wave.active || !emitter) return -1;
+    for(int i=0;i<3;++i) if(wave.effects[i].emitter==emitter &&
+        word(emitter,0x1e4)==(u32)&wave.effects[i]) return i;
+    return -1;
+}
+static void place_arc(void* emitter, int renew) {
+    u32 count=word(emitter,0x1b4);
+    if(count<2 || count>POINTS) return;
+    void* node=(void*)word(emitter,0x1ac);
+    for(u32 j=0;j<count && node;++j) {
+        void* particle=(void*)word(node,0);
+        if(!particle || word(particle,0xd4)!=(u32)emitter) return;
+        /* Do not revive particles already in native deferred teardown. */
+        if(!((u8*)particle)[0x10c] && !((u8*)particle)[0x120]) {
+            cXyz p=wave.points[1+j*(POINTS-1)/(count-1)];
+            *(cXyz*)((u8*)particle+0x10)=p;
+            *(cXyz*)((u8*)particle+0x1c)=(cXyz){0,0,0};
+            *(cXyz*)((u8*)particle+0x28)=p;
+            if(renew) {
+                put_real(particle,0x78,-1); /* native first-frame phase after aging */
+                put_real(particle,0x7c,3); /* expires normally after detach */
+            }
+        }
+        node=(void*)word(node,0xc);
+    }
+}
+/* This runs AFTER cutTurn::executeAfter has seeded the arc, but BEFORE native
+ * aging. Re-anchor after native physics as well, before the stripe is drawn. */
+WWHD_HOOK(0x0281FBD8, before_particles, (void* emitter)) {
+    int index=owned_emitter(emitter);
+    if(index<0) return;
+    wave.seeded|=1u<<index;
+    wave.effects[index].count=0;
+    place_arc(emitter,1);
+}
+WWHD_HOOK_RETURN(0x0281FBD8, after_particles, (void* emitter)) {
+    if(owned_emitter(emitter)>=0) place_arc(emitter,0);
 }
 static void launch(daPy_lk_c* link) {
     stop(0);
@@ -143,6 +188,9 @@ static void launch(daPy_lk_c* link) {
              * The native end callback later sets -1 and detaches ownership.
              * A normal spin resource must not expire while our callback lives. */
             put_word(emitter,0x5c,0);
+            /* Stop only automatic emission; native cut-turn manual creation
+             * still seeds the open arc with the real spin materials. */
+            put_word(emitter,0x254,word(emitter,0x254)|1);
             if(original->emitter) put_real(emitter,0x238,real(original->emitter,0x238));
         }
     }
