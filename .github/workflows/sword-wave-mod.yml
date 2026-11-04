@@ -1,7 +1,7 @@
 name: Sword Wave mod
 on:
   push:
-    branches: ['feat/sword-wave-mod', 'main']
+    branches: ['feat/sword-wave', 'main']
     paths: ['mods/sword-wave/**', 'runtime/guest/include/**', 'runtime/include/**', 'tools/guestmod/**', 'tools/recomp/**', '.github/workflows/sword-wave-mod.yml']
   pull_request:
     paths: ['mods/sword-wave/**', 'runtime/guest/include/**', 'runtime/include/**', 'tools/guestmod/**', 'tools/recomp/**', '.github/workflows/sword-wave-mod.yml']
