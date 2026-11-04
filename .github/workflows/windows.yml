@@ -16,6 +16,7 @@ on:
       - '.github/workflows/enemy-hp-bars.yml'
       - '.github/workflows/enhanced-mod.yml'
       - '.github/workflows/hyrule-survivors.yml'
+      - '.github/workflows/sword-wave-mod.yml'
   pull_request:
     paths-ignore:
       - 'mods/**'
@@ -25,6 +26,7 @@ on:
       - '.github/workflows/enemy-hp-bars.yml'
       - '.github/workflows/enhanced-mod.yml'
       - '.github/workflows/hyrule-survivors.yml'
+      - '.github/workflows/sword-wave-mod.yml'
 
 jobs:
   build:
