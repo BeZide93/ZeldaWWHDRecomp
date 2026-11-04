@@ -1,0 +1,28 @@
+name: Sword Wave mod
+on:
+  push:
+    branches: ['feat/sword-wave', 'main']
+    paths: ['mods/sword-wave/**', 'runtime/guest/include/**', 'runtime/include/**', 'tools/guestmod/**', 'tools/recomp/**', '.github/workflows/sword-wave-mod.yml']
+  pull_request:
+    paths: ['mods/sword-wave/**', 'runtime/guest/include/**', 'runtime/include/**', 'tools/guestmod/**', 'tools/recomp/**', '.github/workflows/sword-wave-mod.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  mod:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+      - name: Install PowerPC compiler
+        run: sudo apt-get update && sudo apt-get install -y clang lld
+      - name: Build and test translated USA and EU modules
+        run: python mods/sword-wave/build.py
+      - name: Upload installable Sword Wave mod
+        uses: actions/upload-artifact@v4
+        with:
+          name: sword-wave-wwhdmod
+          path: build/sword-wave/*.wwhdmod
+          if-no-files-found: error
